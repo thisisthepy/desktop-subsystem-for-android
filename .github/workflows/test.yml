@@ -1,0 +1,37 @@
+# The fast quality gate. Runs on every pull request, whatever its base.
+#
+# There is no code under dsa/ yet, so this runs the repository checks only: the
+# planning documents are present on develop, no em dashes, README files do not link
+# documents that main does not have, and the release sync script behaves.
+# Build and test jobs for each part join this workflow as that part lands.
+
+name: Test
+
+on:
+  # Every pull request, whatever its base. Work lands on develop through pull requests,
+  # and the release pull request into main is gated by the same run.
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  repository:
+    name: Check the repository rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The release sync test builds throwaway repositories; it needs git, not history.
+          fetch-depth: 1
+
+      - name: Run the repository checks
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "CI"
+          ./scripts/check.sh

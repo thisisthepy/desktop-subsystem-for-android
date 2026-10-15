@@ -1,0 +1,91 @@
+# Keeps the public branch in step with develop, through a pull request.
+#
+# `main` is protected, so nothing pushes to it directly. This workflow rebuilds the
+# `release` branch from develop with .github/scripts/release/sync-release.sh (which drops the internal
+# planning documents and the experiments/ folder) and opens a pull request from release into main. A human merges it.
+#
+# `main` is always an ancestor of `release`, so merging that pull request leaves main with
+# exactly the tree the script produced.
+name: Release sync
+
+on:
+  # develop on purpose, and the one workflow that should watch it. This is not a check on
+  # develop; it is the thing that turns develop into the published branch, so it has to
+  # run where the work lands.
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Rebuild the release branch and open the pull request
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The script reads history from both branches, so a shallow clone will not do.
+          fetch-depth: 0
+
+      - name: Rebuild the release branch from develop
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          ./.github/scripts/release/sync-release.sh --write
+
+      - name: Push the release branch
+        id: push
+        run: |
+          before="$(git rev-parse --quiet --verify origin/release || true)"
+          after="$(git rev-parse release)"
+          if [[ "$before" == "$after" ]]; then
+            echo "release is already up to date"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git push origin release
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open the pull request into main
+        if: steps.push.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # An existing pull request follows the branch on its own, so only open one when
+          # there is none.
+          if gh pr view release --json state --jq '.state' 2>/dev/null | grep -q OPEN; then
+            echo "pull request already open; it now includes the new commit"
+            exit 0
+          fi
+          # Creating a pull request needs write permission for workflows, which an
+          # organisation can disable. The branch is pushed either way, so say what to do
+          # rather than failing a publish that otherwise succeeded.
+          if [[ "${{ github.event.repository.owner.type }}" != "" ]] && ! gh auth status >/dev/null 2>&1; then
+            echo "::warning::cannot authenticate to open the pull request"
+          fi
+          set +e
+          gh pr create \
+            --base main \
+            --head release \
+            --title "Publish develop to main" \
+            --body "Rebuilt from \`develop\` by \`.github/scripts/release/sync-release.sh\`.
+
+          The internal planning documents (\`PROJECT.md\`, \`AGENTS.md\`, \`docs/INTENT.md\`, \`docs/SPEC.md\`) and the \`experiments/\` folder are excluded; the source, \`README.md\` and \`docs/locales/\` are not.
+
+          Merging this leaves \`main\` with exactly the tree the script produced."
+          status=$?
+          set -e
+          if (( status != 0 )); then
+            echo "::warning::could not open the pull request automatically."
+            echo "::warning::Open it with: gh pr create --base main --head release"
+            echo "::warning::If this is the organisation policy 'Allow GitHub Actions to create and approve pull requests', enable it for this repository or accept opening the pull request by hand."
+          fi
