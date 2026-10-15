@@ -1,0 +1,33 @@
+# Build outputs
+target/
+build/
+out/
+
+# Rust
+**/*.rs.bk
+*.pdb
+
+# Android and Gradle
+.gradle/
+.kotlin/
+local.properties
+*.apk
+*.aab
+
+# Images and kernel artifacts produced by local builds
+*.img
+*.vhdx
+bzImage
+
+# macOS
+.DS_Store
+
+# Agent worktrees (AGENTS.md, "Where files go")
+.claude/
+
+# Throwaway work, probes, downloads and fetched upstream trees (AGENTS.md, "Where files go")
+.scratch/
+
+# Machine local cargo settings. A target-dir here would make two checkouts share one build
+# directory and run each other's binaries.
+.cargo/config.toml
