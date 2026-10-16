@@ -36,3 +36,4 @@ windows-sys = { version = "0.61", features = [
 dsa-transport = { workspace = true, features = ["conformance"] }
 dsa-protocol.workspace = true
 dsa-host-core = { workspace = true, features = ["conformance"] }
+sha2 = "0.11"

@@ -47,3 +47,29 @@ Service Control Manager; the installer registers it, and it writes its messages 
   otherwise. Remote clients are always refused.
 - Stopping the service stops every user's VM first.
 
+### Updating the Android image
+
+With `images_dir`, `first_image` and `update` in the configuration, the service keeps
+the Android image up to date:
+
+```json
+"images_dir": "C:\\ProgramData\\DSA\\images",
+"first_image": {"version": "16.0.1", "android_major": 16, "build": 1},
+"update": {
+  "list_url": "https://.../images.json",
+  "trusted_keys": ["<public key from dsa-release keygen>"]
+}
+```
+
+- A minute after it starts and then every `check_interval_hours` (default 24), it reads
+  the release list and its signature (`images.json.sig`). A list not signed by one of
+  `trusted_keys` changes nothing.
+- It downloads the newest image the rules allow: a supported Android version, never a
+  lower major version, never one that failed here before. Every file is checked against
+  the list's SHA-256 before the image becomes current.
+- The next start of a user's Android boots the new image on trial. If it has not finished
+  booting within `boot_timeout_secs` (default 300), the service stops it, goes back to the
+  previous image and starts that.
+- Users see what happened in `dsa status`: an update waiting for the next start, an update
+  applied, or one undone and why.
+
