@@ -14,3 +14,4 @@ pub mod host_api;
 #[cfg(feature = "conformance")]
 pub mod host_api_conformance;
 pub mod session;
+pub mod update;
