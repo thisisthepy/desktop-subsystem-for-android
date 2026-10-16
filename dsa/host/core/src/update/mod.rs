@@ -13,10 +13,13 @@
 //! - [`trial`]: boots a newly staged image and, when it does not finish booting in time,
 //!   goes back to the previous image and starts that instead.
 //!
+//! - [`service`]: the periodic check and a user's Android that boots a new image on trial.
+//!
 //! Downloading is behind [`store::Fetch`]; the platform crates supply HTTPS.
 
 pub mod manifest;
 pub mod policy;
+pub mod service;
 pub mod store;
 pub mod trial;
 
