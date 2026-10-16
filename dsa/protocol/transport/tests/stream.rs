@@ -149,7 +149,8 @@ impl Write for ShutDownSocket {
 
 impl StreamSocket for ShutDownSocket {
     fn set_read_timeout(&mut self, _: Option<Duration>) -> io::Result<()> {
-        Err(io::Error::from_raw_os_error(22)) // EINVAL
+        // What EINVAL maps to on macOS.
+        Err(io::ErrorKind::InvalidInput.into())
     }
     fn shutdown(&mut self) {}
 }
