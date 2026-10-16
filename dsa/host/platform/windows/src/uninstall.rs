@@ -1,7 +1,7 @@
 //! What uninstalling needs from dsa-hostd: removing the Android images the service
 //! downloaded, which the installer did not put there and so does not know about.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Removes the update store at `dir` (the `images` folder of the service's data folder).
 ///
@@ -28,4 +28,12 @@ pub fn remove_downloaded_images(dir: &Path) -> Result<(), String> {
         }
     }
     std::fs::remove_dir_all(dir).map_err(|e| format!("removing {}: {e}", dir.display()))
+}
+
+/// The folder an installer passed on the command line. Windows Installer folder paths end
+/// in a backslash, and `"C:\...\images\"` on a command line turns the final `\"` into an
+/// escaped quote, so the argument arrives as `C:\...\images"`. The quote and any trailing
+/// separators are not part of the folder.
+pub fn installer_folder(argument: &str) -> PathBuf {
+    PathBuf::from(argument.trim_end_matches('"').trim_end_matches(['\\', '/']))
 }

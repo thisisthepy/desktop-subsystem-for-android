@@ -80,7 +80,8 @@ mod windows_host {
             [mode, path] if mode == "serve" => serve_in_foreground(read_config(path)?),
             [mode, path] if mode == "service" => run_service(path.clone()),
             [mode, path] if mode == "remove-images" => {
-                dsa_host_windows::uninstall::remove_downloaded_images(std::path::Path::new(path))
+                use dsa_host_windows::uninstall::{installer_folder, remove_downloaded_images};
+                remove_downloaded_images(&installer_folder(path))
             }
             [path] if path != "serve" && path != "service" => one_vm(read_config(path)?),
             _ => Err(USAGE.into()),
