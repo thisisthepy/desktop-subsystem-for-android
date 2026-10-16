@@ -77,10 +77,11 @@
                     <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;S-1-5-83-0)" />
                 </CreateFolder>
             </Component>
-            <Component Id="LogFolder" Directory="LOGFOLDER" Guid="*">
+            <!-- Folders alone cannot have a generated GUID, so these two have fixed ones. -->
+            <Component Id="LogFolder" Directory="LOGFOLDER" Guid="3f0b8a52-6d1e-4c7a-9b2f-5e8d1a4c7b60">
                 <CreateFolder />
             </Component>
-            <Component Id="ImageStore" Directory="IMAGESTORE" Guid="*">
+            <Component Id="ImageStore" Directory="IMAGESTORE" Guid="8c2e4d71-9a3b-4f5c-8e6d-1b7a2c9f0d43">
                 <CreateFolder />
             </Component>
         </ComponentGroup>
