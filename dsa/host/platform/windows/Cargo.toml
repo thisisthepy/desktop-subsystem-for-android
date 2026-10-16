@@ -25,3 +25,4 @@ windows-sys = { version = "0.61", features = [
 
 [dev-dependencies]
 dsa-transport = { workspace = true, features = ["conformance"] }
+dsa-host-core = { workspace = true, features = ["conformance"] }
