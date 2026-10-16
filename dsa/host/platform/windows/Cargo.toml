@@ -12,7 +12,11 @@ dsa-transport.workspace = true
 dsa-host-core.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinSock"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinHttp",
+    "Win32_Networking_WinSock",
+] }
 
 [dev-dependencies]
 dsa-transport = { workspace = true, features = ["conformance"] }
