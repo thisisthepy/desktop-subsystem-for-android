@@ -77,7 +77,7 @@ jobs:
           cargo test -p dsa-guest-transport --features vsock-loopback-tests
 
   unix-socket:
-    name: Test the local API over Unix sockets (macos-latest)
+    name: Test the local API and dsa over Unix sockets (macos-latest)
     runs-on: macos-latest
     defaults:
       run:
@@ -87,7 +87,7 @@ jobs:
 
       # Linux runs this in the job above; macOS reads the peer's user another way.
       - name: Run the tests
-        run: cargo test --no-fail-fast -p dsa-transport -p dsa-host-unix
+        run: cargo test --no-fail-fast -p dsa-transport -p dsa-host-unix -p dsa-cli
 
   protocol:
     name: Check the generated protocol code (ubuntu-latest)

@@ -167,6 +167,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dsa-cli"
+version = "0.1.0"
+dependencies = [
+ "dsa-host-core",
+ "dsa-host-unix",
+ "dsa-host-windows",
+ "dsa-transport",
+]
+
+[[package]]
 name = "dsa-guest-transport"
 version = "0.1.0"
 dependencies = [
