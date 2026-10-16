@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The text of setup.exe (English). -->
+<WixLocalization Culture="en-us" Language="1033" xmlns="http://wixtoolset.org/schemas/v4/wxl">
+    <String Id="Caption" Value="Desktop Subsystem for Android™ Setup" />
+    <String Id="Title" Value="Desktop Subsystem for Android™" />
+    <String Id="Subtitle" Value="Android apps in their own windows on your desktop" />
+    <String Id="HelpHeader" Value="Setup help" />
+    <String Id="HelpText" Value="/install | /repair | /uninstall | /layout [folder]&#xA;    installs, repairs, uninstalls or copies the setup files to a folder.&#xA;&#xA;/passive | /quiet&#xA;    shows only progress, or nothing at all.&#xA;&#xA;/norestart&#xA;    never restarts the computer.&#xA;&#xA;/log log.txt&#xA;    writes a log to the file." />
+    <String Id="InstallHeader" Value="Ready to install" />
+    <String Id="InstallText" Value="Setup installs the DSA service and the dsa command. It needs the Windows feature Virtual Machine Platform; if it is off, setup says how to turn it on." />
+    <String Id="InstallLicenseLinkText" Value="Desktop Subsystem for Android is free software under the &lt;a href=&quot;#&quot;&gt;Apache License 2.0&lt;/a&gt;. Android is a trademark of Google LLC." />
+    <String Id="InstallAcceptCheckbox" Value="I agree to the license terms" />
+    <String Id="InstallButton" Value="Install" />
+    <String Id="UpdateButton" Value="Update setup first" />
+    <String Id="OptionsButton" Value="Options" />
+    <String Id="OptionsHeader" Value="Options" />
+    <String Id="OptionsLocationLabel" Value="Install to:" />
+    <String Id="BrowseButton" Value="Browse..." />
+    <String Id="OkButton" Value="OK" />
+    <String Id="CancelButton" Value="Cancel" />
+    <String Id="CloseButton" Value="Close" />
+    <String Id="ProgressHeader" Value="Installing" />
+    <String Id="OverallProgressPackageText" Value="Preparing..." />
+    <String Id="ModifyHeader" Value="Desktop Subsystem for Android is installed" />
+    <String Id="ModifyText" Value="Repair puts back missing or damaged files. Uninstall removes the program and the downloaded Android images, and keeps each user's Android data." />
+    <String Id="RepairButton" Value="Repair" />
+    <String Id="UninstallButton" Value="Uninstall" />
+    <String Id="SuccessHeader" Value="Installed" />
+    <String Id="SuccessText" Value="The DSA service is running. Type dsa status in a terminal to see your Android." />
+    <String Id="SuccessUninstallHeader" Value="Uninstalled" />
+    <String Id="SuccessUninstallText" Value="Each user's Android data is kept in ProgramData\DSA\users until you delete it." />
+    <String Id="SuccessRepairHeader" Value="Repaired" />
+    <String Id="LaunchButton" Value="Open" />
+    <String Id="RestartText" Value="Restart the computer to finish." />
+    <String Id="RestartButton" Value="Restart" />
+    <String Id="FailureHeader" Value="Setup did not finish" />
+    <String Id="FailureUninstallHeader" Value="Uninstall did not finish" />
+    <String Id="FailureLogLinkText" Value="The &lt;a href=&quot;#&quot;&gt;log file&lt;/a&gt; says what went wrong." />
+    <String Id="ConfirmCancelMessage" Value="Stop setup?" />
+    <String Id="ExecuteUpgradeRelatedBundleMessage" Value="Previous version" />
+</WixLocalization>

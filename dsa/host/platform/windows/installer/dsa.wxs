@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The DSA package (MSI). build.ps1 builds it; see README.md.
+
+  It installs dsa-hostd as the DsaHost service (SYSTEM, started automatically), the dsa
+  command on the system PATH, the service's configuration, the guest kernel and, when the
+  build has one, the first Android image. Uninstalling removes all of that and the Android
+  images the service downloaded since, and keeps each user's Android data.
+
+  Build variables (-d): Version, SourceDir (the built binaries and dsa-hostd.json), and,
+  when an image is bundled, ImageDir and ImageVersion.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+    <Package Name="Desktop Subsystem for Android"
+             Manufacturer="thisisthepy"
+             Version="$(Version)"
+             UpgradeCode="6a1f4f0e-3b7c-4d5e-9a8b-2c6d7e8f9a01"
+             Scope="perMachine"
+             Compressed="yes">
+        <MajorUpgrade DowngradeErrorMessage="A newer Desktop Subsystem for Android is already installed." />
+        <MediaTemplate EmbedCab="yes" MaximumUncompressedMediaSize="2000" />
+
+        <!-- Virtual Machine Platform brings vmcompute.exe. Without it no VM can run, so setup
+             stops and says how to turn the feature on; it never turns it on by itself. -->
+        <Property Id="VMCOMPUTE">
+            <DirectorySearch Id="System64Search" Path="[System64Folder]" Depth="0">
+                <FileSearch Name="vmcompute.exe" />
+            </DirectorySearch>
+        </Property>
+        <Launch Condition="Installed OR VMCOMPUTE"
+                Message="Desktop Subsystem for Android needs the Windows feature Virtual Machine Platform. Turn it on in Settings, System, Optional features, More Windows features (or run: dism /online /enable-feature /featurename:VirtualMachinePlatform /all), restart, and run setup again." />
+
+        <StandardDirectory Id="ProgramFiles64Folder">
+            <Directory Id="INSTALLFOLDER" Name="DSA">
+                <Directory Id="VMFOLDER" Name="vm" />
+            </Directory>
+        </StandardDirectory>
+        <StandardDirectory Id="CommonAppDataFolder">
+            <Directory Id="DATAFOLDER" Name="DSA">
+                <Directory Id="IMAGESFOLDER" Name="images">
+                    <Directory Id="IMAGESTORE" Name="images">
+                        <?ifdef ImageVersion ?>
+                        <Directory Id="FIRSTIMAGEFOLDER" Name="$(ImageVersion)" />
+                        <?endif?>
+                    </Directory>
+                </Directory>
+                <Directory Id="LOGFOLDER" Name="logs" />
+            </Directory>
+        </StandardDirectory>
+
+        <ComponentGroup Id="Service" Directory="INSTALLFOLDER">
+            <Component Id="HostdExe" Guid="*">
+                <File Id="HostdExe" Source="$(SourceDir)\dsa-hostd.exe" KeyPath="yes" />
+                <ServiceInstall Id="DsaHost"
+                                Name="DsaHost"
+                                DisplayName="Desktop Subsystem for Android"
+                                Description="Runs each user's Android in its own virtual machine and answers the dsa command and the desktop apps."
+                                Type="ownProcess"
+                                Start="auto"
+                                ErrorControl="normal"
+                                Account="LocalSystem"
+                                Arguments="service &quot;[DATAFOLDER]dsa-hostd.json&quot;" />
+                <ServiceControl Id="DsaHost" Name="DsaHost" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+            </Component>
+            <Component Id="DsaExe" Guid="*">
+                <File Id="DsaExe" Source="$(SourceDir)\dsa.exe" KeyPath="yes" />
+                <Environment Id="Path" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="yes" Permanent="no" />
+            </Component>
+        </ComponentGroup>
+
+        <!-- The service's own folder: SYSTEM and Administrators only, and read access for
+             Hyper-V's virtual machines (S-1-5-83-0), which open the images from it. -->
+        <ComponentGroup Id="Data" Directory="DATAFOLDER">
+            <Component Id="Config" Guid="*" NeverOverwrite="yes">
+                <File Id="Config" Source="$(SourceDir)\dsa-hostd.json" KeyPath="yes" />
+                <CreateFolder>
+                    <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;S-1-5-83-0)" />
+                </CreateFolder>
+            </Component>
+            <Component Id="LogFolder" Directory="LOGFOLDER" Guid="*">
+                <CreateFolder />
+            </Component>
+            <Component Id="ImageStore" Directory="IMAGESTORE" Guid="*">
+                <CreateFolder />
+            </Component>
+        </ComponentGroup>
+
+        <!-- The kernel: readable by everyone and by the VMs. -->
+        <ComponentGroup Id="Kernel" Directory="VMFOLDER">
+            <Component Id="Kernel" Guid="*">
+                <File Id="Kernel" Source="$(SourceDir)\bzImage" KeyPath="yes" />
+                <CreateFolder>
+                    <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)(A;OICI;GRGX;;;S-1-5-83-0)" />
+                </CreateFolder>
+            </Component>
+        </ComponentGroup>
+
+        <?ifdef ImageVersion ?>
+        <ComponentGroup Id="FirstImage" Directory="FIRSTIMAGEFOLDER">
+            <Component Id="FirstImage" Guid="*">
+                <File Id="FirstImage" Source="$(ImageDir)\system.vhdx" KeyPath="yes" />
+            </Component>
+        </ComponentGroup>
+        <?endif?>
+
+        <!-- The images the service downloaded are not files of this package, so the service
+             removes them itself; each user's data under users\ stays. -->
+        <CustomAction Id="RemoveImages"
+                      FileRef="HostdExe"
+                      ExeCommand="remove-images &quot;[IMAGESFOLDER]&quot;"
+                      Execute="deferred"
+                      Impersonate="no"
+                      Return="ignore" />
+        <InstallExecuteSequence>
+            <Custom Action="RemoveImages" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+        </InstallExecuteSequence>
+
+        <Feature Id="Main" Title="Desktop Subsystem for Android" Level="1">
+            <ComponentGroupRef Id="Service" />
+            <ComponentGroupRef Id="Data" />
+            <ComponentGroupRef Id="Kernel" />
+            <?ifdef ImageVersion ?>
+            <ComponentGroupRef Id="FirstImage" />
+            <?endif?>
+        </Feature>
+    </Package>
+</Wix>

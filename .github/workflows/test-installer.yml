@@ -1,0 +1,93 @@
+# Builds the Windows installer and checks it on a real Windows machine: installs the
+# package, checks the service and the dsa command, shows setup.exe's first screen, and
+# uninstalls. The kernel and the Android image are built elsewhere, so the package here
+# carries a placeholder kernel and no image.
+
+name: Installer test
+
+on:
+  pull_request:
+    paths:
+      - "dsa/**"
+      - ".github/workflows/test-installer.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: test-installer-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    name: Build, install and uninstall the installer (windows-latest)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install WiX 5
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.Bal.wixext/5.0.2
+          wix --version
+
+      # The runner's account is not an interactive user, which the default pipe access
+      # would not admit, so the test build also admits authenticated users.
+      - name: Build the package and setup.exe
+        run: >
+          dsa/host/platform/windows/installer/build.ps1 -Version 0.1.0 -PlaceholderKernel
+          -PipeSddl "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)"
+
+      - name: Install the package
+        run: |
+          $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/i', 'dsa\target\installer\dsa-0.1.0.msi', '/qn', '/l*v', 'install.log'
+          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 80; throw "install failed ($($p.ExitCode))" }
+
+      - name: Check the service, the command and the access lists
+        run: |
+          $service = Get-Service DsaHost
+          if ($service.Status -ne 'Running') { throw "DsaHost is $($service.Status)" }
+          $out = & 'C:\Program Files\DSA\dsa.exe' status 2>&1
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0 -or -not ($out -match '^Android: Stopped')) { throw "dsa status: $out" }
+          $acl = (Get-Acl 'C:\ProgramData\DSA').Sddl
+          Write-Host $acl
+          if ($acl -notmatch 'S-1-5-83-0') { throw "the VMs cannot read the data folder" }
+          if ($acl -match ';;;BU\)') { throw "users can open the service's data folder" }
+          Get-Content 'C:\ProgramData\DSA\logs\dsa-hostd.log'
+
+      - name: Show the first screen of setup.exe
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $setup = Start-Process 'dsa\target\installer\setup-0.1.0.exe' -PassThru
+          Start-Sleep -Seconds 8
+          $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+          [System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+          $bitmap.Save("$PWD\setup-screen.png")
+          Stop-Process -Id $setup.Id -Force -ErrorAction SilentlyContinue
+
+      - name: Uninstall
+        run: |
+          $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/x', 'dsa\target\installer\dsa-0.1.0.msi', '/qn', '/l*v', 'uninstall.log'
+          if ($p.ExitCode -ne 0) { Get-Content uninstall.log -Tail 80; throw "uninstall failed ($($p.ExitCode))" }
+          if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
+          if (Test-Path 'C:\Program Files\DSA\dsa.exe') { throw "the program is still there" }
+          if (Test-Path 'C:\ProgramData\DSA\images') { throw "the downloaded images are still there" }
+          if (-not (Test-Path 'C:\ProgramData\DSA\users')) { throw "each user's data must stay" }
+
+      - name: Keep the installer, the logs and the screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: |
+            dsa/target/installer/*.msi
+            dsa/target/installer/*.exe
+            install.log
+            uninstall.log
+            setup-screen.png
