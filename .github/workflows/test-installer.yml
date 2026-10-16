@@ -32,7 +32,6 @@ jobs:
       - name: Install WiX 5
         run: |
           dotnet tool install --global wix --version 5.0.2
-          wix extension add -g WixToolset.Bal.wixext/5.0.2
           wix --version
 
       # The runner's account is not an interactive user, which the default pipe access

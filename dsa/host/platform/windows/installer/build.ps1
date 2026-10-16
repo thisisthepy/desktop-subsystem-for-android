@@ -2,7 +2,10 @@
 # dsa\target\installer. Needs Rust, and WiX 5:
 #
 #   dotnet tool install --global wix --version 5.0.2
-#   wix extension add -g WixToolset.Bal.wixext/5.0.2
+#
+# The bootstrapper extension is downloaded from NuGet into dsa\target\installer and passed
+# to WiX by path. (In 5.0.2 its DLL is named WixToolset.BootstrapperApplications.wixext.dll,
+# which WiX does not find under the package's name.)
 #
 # Without -ImageDir the package carries no Android image; the service then downloads the
 # newest supported image from -ListUrl after installation. -PlaceholderKernel puts an empty
@@ -66,6 +69,17 @@ if ($ListUrl) {
 }
 $config | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM (Join-Path $stage "dsa-hostd.json")
 
+$balVersion = "5.0.2"
+$balDir = Join-Path $out "ext\bal-$balVersion"
+$balDll = Join-Path $balDir "wixext5\WixToolset.BootstrapperApplications.wixext.dll"
+if (-not (Test-Path $balDll)) {
+    New-Item -ItemType Directory -Force $balDir | Out-Null
+    $nupkg = Join-Path $balDir "bal.zip"
+    Invoke-WebRequest -Uri "https://api.nuget.org/v3-flatcontainer/wixtoolset.bal.wixext/$balVersion/wixtoolset.bal.wixext.$balVersion.nupkg" -OutFile $nupkg
+    Expand-Archive -Path $nupkg -DestinationPath $balDir -Force
+    if (-not (Test-Path $balDll)) { throw "the bootstrapper extension has no $balDll" }
+}
+
 $msi = Join-Path $out "dsa-$Version.msi"
 $setup = Join-Path $out "setup-$Version.exe"
 $defines = @("-d", "Version=$Version", "-d", "SourceDir=$stage")
@@ -75,7 +89,7 @@ Push-Location $installer
 try {
     wix build -arch x64 @defines dsa.wxs -o $msi
     if ($LASTEXITCODE -ne 0) { throw "building the package failed" }
-    wix build -arch x64 -ext WixToolset.Bal.wixext -d "Version=$Version" -d "MsiPath=$msi" bundle.wxs -o $setup
+    wix build -arch x64 -ext $balDll -d "Version=$Version" -d "MsiPath=$msi" bundle.wxs -o $setup
     if ($LASTEXITCODE -ne 0) { throw "building setup.exe failed" }
 } finally { Pop-Location }
 Write-Host "built $msi and $setup"

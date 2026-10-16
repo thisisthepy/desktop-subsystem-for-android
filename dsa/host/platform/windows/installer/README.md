@@ -6,7 +6,6 @@ a build tool that is not shipped with DSA.
 
 ```
 dotnet tool install --global wix --version 5.0.2
-wix extension add -g WixToolset.Bal.wixext/5.0.2
 pwsh dsa/host/platform/windows/installer/build.ps1 -Version 0.1.0 -Kernel bzImage `
     -ListUrl https://.../images.json -TrustedKey <public key>
 ```
