@@ -61,3 +61,62 @@ fn fr2_the_example_configuration_is_valid() {
         .to_hcs_document()
         .expect("the example describes a valid VM");
 }
+
+const SERVICE: &str = r#"{
+  "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
+  "system_image": "C:\\Program Files\\DSA\\vm\\system.vhdx",
+  "data_dir": "C:\\ProgramData\\DSA\\users"
+}"#;
+
+#[test]
+fn pr5_each_user_gets_their_own_vm_data_disk_and_socket_access() {
+    let config = HostConfig::parse(SERVICE).unwrap();
+    let alice = config.user_vm("S-1-5-21-1-2-3-1001").unwrap();
+    let bob = config.user_vm("S-1-5-21-1-2-3-1002").unwrap();
+    assert_eq!(alice.vm_name, "dsa-android-S-1-5-21-1-2-3-1001");
+    assert_eq!(
+        alice.config.data_disk,
+        PathBuf::from(r"C:\ProgramData\DSA\users\S-1-5-21-1-2-3-1001\data.vhdx")
+    );
+    assert_eq!(alice.config.socket_sids, ["S-1-5-21-1-2-3-1001"]);
+    assert_ne!(alice.vm_name, bob.vm_name);
+    assert_ne!(alice.config.data_disk, bob.config.data_disk);
+    assert_eq!(bob.config.socket_sids, ["S-1-5-21-1-2-3-1002"]);
+    assert_eq!(alice.data_disk_size_gb, 64);
+    alice.config.to_hcs_document().expect("a valid VM");
+}
+
+#[test]
+fn pr5_a_caller_that_is_not_a_sid_gets_no_vm() {
+    let config = HostConfig::parse(SERVICE).unwrap();
+    for bad in ["", "..", r"S-1-5\..\x", "uid:1000"] {
+        assert!(config.user_vm(bad).is_err(), "{bad:?} must be refused");
+    }
+}
+
+#[test]
+fn pr5_serving_users_needs_a_data_folder() {
+    let config = HostConfig::parse(MINIMAL).unwrap();
+    let error = config
+        .user_vm("S-1-5-21-1-2-3-1001")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("data_dir"), "{error}");
+}
+
+#[test]
+fn fr2_a_configuration_without_any_data_disk_is_reported() {
+    let json = r#"{"kernel": "C:\\k", "system_image": "C:\\s.vhdx"}"#;
+    let error = HostConfig::parse(json).unwrap_err().to_string();
+    assert!(
+        error.contains("data_disk") && error.contains("data_dir"),
+        "{error}"
+    );
+}
+
+#[test]
+fn pr5_the_pipe_defaults_to_dsa_host() {
+    let config = HostConfig::parse(SERVICE).unwrap();
+    assert_eq!(config.pipe_name, "dsa-host");
+    assert_eq!(config.pipe_sddl, None);
+}
