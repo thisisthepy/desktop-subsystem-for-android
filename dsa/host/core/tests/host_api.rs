@@ -95,3 +95,36 @@ fn fr2_stopping_the_service_stops_every_users_android() {
     assert_eq!(alice.state(), SessionState::Stopped);
     assert_eq!(bob.state(), SessionState::Stopped);
 }
+
+/// An Android with news about an update.
+struct Notifying;
+
+impl UserAndroid for Notifying {
+    fn state(&self) -> SessionState {
+        SessionState::Stopped
+    }
+    fn last_reason(&self) -> Option<String> {
+        None
+    }
+    fn start(&self) {}
+    fn stop(&self) {}
+    fn update_notice(&self) -> Option<String> {
+        Some("Android 16.0.3 is downloaded and will be used at the next start".into())
+    }
+}
+
+#[test]
+fn fr14_the_user_is_told_about_an_update_through_the_local_api() {
+    let (listener, mut connector) = local::pair();
+    let androids = Arc::new(PerUser::new(|_: &str| {
+        Ok(Arc::new(Notifying) as Arc<dyn UserAndroid>)
+    }));
+    let _service = RunningService::start(Box::new(listener), androids);
+    let mut client = HostApiClient::connect(&mut connector, "test", WAIT).unwrap();
+    let status = client.status().unwrap();
+    assert_eq!(
+        status.update_notice.as_deref(),
+        Some("Android 16.0.3 is downloaded and will be used at the next start")
+    );
+    assert_eq!(status.last_reason, None);
+}

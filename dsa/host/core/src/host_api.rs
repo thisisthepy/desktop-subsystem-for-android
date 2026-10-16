@@ -30,6 +30,10 @@ pub trait UserAndroid: Send + Sync {
     fn last_reason(&self) -> Option<String>;
     fn start(&self);
     fn stop(&self);
+    /// News about the Android image for the user, if there is any.
+    fn update_notice(&self) -> Option<String> {
+        None
+    }
 }
 
 impl UserAndroid for Session {
@@ -245,6 +249,7 @@ impl HostApiService {
                     response::Body::Status(types::Status {
                         state: to_wire(android.state()) as i32,
                         last_reason: android.last_reason().unwrap_or_default(),
+                        update_notice: android.update_notice().unwrap_or_default(),
                     })
                 }
             },
@@ -268,6 +273,8 @@ fn error(code: ErrorCode, detail: String) -> response::Body {
 pub struct Status {
     pub state: SessionState,
     pub last_reason: Option<String>,
+    /// News about the Android image, such as an update waiting for the next start.
+    pub update_notice: Option<String>,
 }
 
 /// Why a local API call failed.
@@ -371,6 +378,7 @@ impl HostApiClient {
                     ClientError::Malformed(format!("unknown session state {}", status.state))
                 })?,
                 last_reason: Some(status.last_reason).filter(|reason| !reason.is_empty()),
+                update_notice: Some(status.update_notice).filter(|notice| !notice.is_empty()),
             }),
             Some(response::Body::Error(error)) => Err(ClientError::Service {
                 code: ErrorCode::try_from(error.code).unwrap_or(ErrorCode::Unspecified),
