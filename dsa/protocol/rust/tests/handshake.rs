@@ -61,10 +61,8 @@ fn pr2_a_peer_regenerated_from_a_changed_definition_is_refused() {
     let definition =
         std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../control.proto"))
             .unwrap();
-    let edited = definition.replace(
-        "  string build = 4;\n",
-        "  string build = 4;\n  uint32 extra = 5;\n",
-    );
+    // Independent of line endings, since a Windows checkout has CRLF.
+    let edited = definition.replace("string build = 4;", "string build = 4; uint32 extra = 5;");
     assert_ne!(edited, definition, "the edit must apply");
     let mut guest = local_hello(Role::Guest, "dsa-guestd edited");
     guest.schema_hash = schema_hash(&edited).to_vec();
