@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dsa_protocol::host_api::types::{
     self, envelope::Body, request, response, Envelope, ErrorCode, Request, Response, Role,
@@ -68,6 +68,35 @@ where
         PerUser {
             create,
             androids: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl<F> PerUser<F> {
+    /// Stops every user's Android and waits at most `timeout` for all of them. Returns the
+    /// users whose Android had not stopped by then, with its state.
+    pub fn stop_all(&self, timeout: Duration) -> Vec<(String, SessionState)> {
+        let androids: Vec<(String, Arc<dyn UserAndroid>)> = self
+            .androids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .map(|(user, android)| (user.clone(), Arc::clone(android)))
+            .collect();
+        for (_, android) in &androids {
+            android.stop();
+        }
+        let deadline = Instant::now() + timeout;
+        loop {
+            let running: Vec<(String, SessionState)> = androids
+                .iter()
+                .map(|(user, android)| (user.clone(), android.state()))
+                .filter(|(_, state)| *state != SessionState::Stopped)
+                .collect();
+            if running.is_empty() || Instant::now() >= deadline {
+                return running;
+            }
+            thread::sleep(Duration::from_millis(50));
         }
     }
 }
