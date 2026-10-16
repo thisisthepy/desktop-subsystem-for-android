@@ -14,7 +14,7 @@ cargo test --workspace
 | `protocol/` | definition + generator | The guest-host control messages, defined once, with codecs generated for Rust, Kotlin and C++ | planned; the definition format is not chosen yet |
 | `protocol/transport/` | Rust | The control channel's transport: framing, the connection traits, the in-memory fake and the conformance suite every transport passes | in progress |
 | `host/core/` | Rust | The platform-neutral host: sessions, the app registry, the lifecycle policy | in progress: the session start and stop |
-| `host/platform/windows/` | Rust, C++ | WSL launch, hvsocket, the Win32 and DirectComposition compositor, TSF, Start menu and notifications | planned |
+| `host/platform/windows/` | Rust, C++ | WSL launch, hvsocket, the Win32 and DirectComposition compositor, TSF, Start menu and notifications | in progress: WSL launch and hvsocket |
 | `host/platform/linux/`, `host/platform/macos/` | | Other hosts | planned, not started |
 | `graphics/` | C++ | Vulkan remoting on the host, starting from gfxstream | planned |
 | `guest/` | Kotlin, C++ | The agent (a system app), the hwcomposer, HAL clients, the image configuration | planned |

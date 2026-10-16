@@ -5,6 +5,7 @@ resolver = "2"
 members = [
     "protocol/transport",
     "host/core",
+    "host/platform/windows",
 ]
 
 [workspace.package]
