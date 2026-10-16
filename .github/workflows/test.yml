@@ -68,6 +68,19 @@ jobs:
           sudo modprobe vsock_loopback
           cargo test -p dsa-guest-transport --features vsock-loopback-tests
 
+  unix-socket:
+    name: Test the local API over Unix sockets (macos-latest)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: dsa
+    steps:
+      - uses: actions/checkout@v4
+
+      # Linux runs this in the job above; macOS reads the peer's user another way.
+      - name: Run the tests
+        run: cargo test --no-fail-fast -p dsa-transport -p dsa-host-unix
+
   protocol:
     name: Check the generated protocol code (ubuntu-latest)
     runs-on: ubuntu-latest
@@ -90,7 +103,7 @@ jobs:
           if [[ -n "$(git status --porcelain -- protocol)" ]]; then
             git status --short -- protocol
             git diff -- protocol | head -200
-            echo "::error::the generated protocol code does not match control.proto; run dsa-protocol-codegen and commit the result"
+            echo "::error::the generated protocol code does not match control.proto or host_api.proto; run dsa-protocol-codegen and commit the result"
             exit 1
           fi
 

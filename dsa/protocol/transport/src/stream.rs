@@ -112,7 +112,14 @@ impl<S: StreamSocket> Connection for FramedConnection<S> {
                 }
             };
             first_read = false;
-            self.socket.set_read_timeout(remaining)?;
+            match self.socket.set_read_timeout(remaining) {
+                Ok(()) => {}
+                // macOS refuses to set a timeout on a socket whose both directions are shut
+                // down, as after the peer has gone. Such a read cannot block, and it reports
+                // the end of stream after any data still buffered, so go on and read.
+                Err(error) if error.kind() == io::ErrorKind::InvalidInput => {}
+                Err(error) => return Err(error.into()),
+            }
             match self.socket.read(&mut chunk) {
                 Ok(0) => {
                     self.broken = true;
