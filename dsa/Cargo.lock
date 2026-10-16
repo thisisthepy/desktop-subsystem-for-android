@@ -96,6 +96,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dsa-host-unix"
+version = "0.1.0"
+dependencies = [
+ "dsa-transport",
+ "libc",
+]
+
+[[package]]
 name = "dsa-host-windows"
 version = "0.1.0"
 dependencies = [
