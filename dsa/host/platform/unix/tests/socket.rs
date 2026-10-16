@@ -2,7 +2,7 @@
 #![cfg(unix)]
 
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
@@ -10,16 +10,33 @@ use dsa_host_unix::socket::{current_uid, UnixLocalConnector, UnixLocalListener};
 use dsa_transport::local::{LocalListener, PeerIgnoringListener};
 use dsa_transport::{Connector, Listener};
 
+/// A fresh socket path under the build's temporary directory.
+///
+/// A socket path is limited to about 100 bytes, which a deep checkout (such as a CI
+/// runner's) exceeds, so the path is given relative to the test's working directory.
 fn socket_path() -> PathBuf {
     static NEXT: AtomicU32 = AtomicU32::new(0);
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("local-api");
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("l");
     std::fs::create_dir_all(&dir).unwrap();
-    // Socket paths are limited to about 100 bytes, so keep the name short.
-    dir.join(format!(
+    let name = format!(
         "{}-{}.sock",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
-    ))
+    );
+    relative_to_cwd(&dir).join(name)
+}
+
+fn relative_to_cwd(target: &Path) -> PathBuf {
+    let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
+    let target = target.canonicalize().unwrap();
+    let common = cwd
+        .components()
+        .zip(target.components())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut relative: PathBuf = cwd.components().skip(common).map(|_| "..").collect();
+    relative.extend(target.components().skip(common));
+    relative
 }
 
 fn unix_pair() -> (Box<dyn Listener>, Box<dyn Connector>) {
