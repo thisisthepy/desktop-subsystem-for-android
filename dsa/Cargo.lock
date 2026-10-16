@@ -91,6 +91,7 @@ dependencies = [
 name = "dsa-host-core"
 version = "0.1.0"
 dependencies = [
+ "dsa-protocol",
  "dsa-transport",
 ]
 

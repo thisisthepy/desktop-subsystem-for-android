@@ -4,4 +4,5 @@
 //! `dsa/host/platform/` supply the pieces that do (the guest launcher and the transport)
 //! through the traits defined here and in `dsa-transport`.
 
+pub mod handshake;
 pub mod session;

@@ -1,4 +1,5 @@
-//! The control protocol in Rust: the generated message types and the frame codec.
+//! The control protocol in Rust: the generated message types, the frame codec and the
+//! connection handshake.
 //!
 //! The message types come from `dsa/protocol/control.proto` through
 //! `dsa-protocol-codegen`; nothing in [`control`] is written by hand. Every frame on the
@@ -16,6 +17,8 @@ pub mod control {
 mod schema {
     include!("generated/schema.rs");
 }
+
+pub mod handshake;
 
 pub use schema::{SCHEMA_HASH, SCHEMA_HASH_HEX};
 
