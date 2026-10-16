@@ -14,7 +14,7 @@
     <Package Name="Desktop Subsystem for Android"
              Manufacturer="thisisthepy"
              Version="$(Version)"
-             UpgradeCode="6a1f4f0e-3b7c-4d5e-9a8b-2c6d7e8f9a01"
+             UpgradeCode="5c08f90f-6eaa-402b-992b-6069634c45e8"
              Scope="perMachine"
              Compressed="yes">
         <MajorUpgrade DowngradeErrorMessage="A newer Desktop Subsystem for Android is already installed." />
@@ -78,10 +78,10 @@
                 </CreateFolder>
             </Component>
             <!-- Folders alone cannot have a generated GUID, so these two have fixed ones. -->
-            <Component Id="LogFolder" Directory="LOGFOLDER" Guid="3f0b8a52-6d1e-4c7a-9b2f-5e8d1a4c7b60">
+            <Component Id="LogFolder" Directory="LOGFOLDER" Guid="3881831f-c7d6-4709-9747-1f68e230d7e4">
                 <CreateFolder />
             </Component>
-            <Component Id="ImageStore" Directory="IMAGESTORE" Guid="8c2e4d71-9a3b-4f5c-8e6d-1b7a2c9f0d43">
+            <Component Id="ImageStore" Directory="IMAGESTORE" Guid="bd8a3e82-b7f2-4af5-a110-fc9722072f5f">
                 <CreateFolder />
             </Component>
         </ComponentGroup>

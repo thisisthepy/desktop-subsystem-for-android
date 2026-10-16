@@ -9,7 +9,7 @@
     <Bundle Name="Desktop Subsystem for Android"
             Manufacturer="thisisthepy"
             Version="$(Version)"
-            UpgradeCode="0d9e2c4b-7f61-4a8e-b3c5-9e1f2a3b4c5d"
+            UpgradeCode="706723c3-776c-4ab2-8402-780943fda74c"
             IconSourceFile="theme\logo.ico">
         <BootstrapperApplication>
             <bal:WixStandardBootstrapperApplication
