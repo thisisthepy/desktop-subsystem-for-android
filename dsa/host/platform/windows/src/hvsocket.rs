@@ -15,9 +15,9 @@ use dsa_transport::stream::{accept_with_timeout, FramedConnection, StreamSocket}
 use dsa_transport::{Connection, Connector, Listener, TransportError};
 use windows_sys::Win32::Networking::WinSock::{
     accept, bind, closesocket, connect, ioctlsocket, listen, recv, send, setsockopt, shutdown,
-    socket, WSAGetLastError, WSAStartup, FIONBIO, INVALID_SOCKET, SD_BOTH, SOCKADDR, SOCKET,
-    SOCKET_ERROR, SOCK_STREAM, SOL_SOCKET, SOMAXCONN, SO_RCVTIMEO, WSADATA, WSAEAFNOSUPPORT,
-    WSAEPROTONOSUPPORT, WSAESOCKTNOSUPPORT,
+    socket, WSAGetLastError, WSAPoll, WSAStartup, FIONBIO, INVALID_SOCKET, POLLRDNORM, SD_BOTH,
+    SOCKADDR, SOCKET, SOCKET_ERROR, SOCK_STREAM, SOMAXCONN, WSADATA, WSAEAFNOSUPPORT,
+    WSAEPROTONOSUPPORT, WSAESOCKTNOSUPPORT, WSAPOLLFD,
 };
 
 use crate::guid::Guid;
@@ -87,7 +87,14 @@ fn creation_error(error: io::Error) -> TransportError {
 }
 
 /// An owned Hyper-V socket.
-struct HvSocket(SOCKET);
+///
+/// Read timeouts wait with `WSAPoll` before each `recv` instead of using `SO_RCVTIMEO`:
+/// when an `SO_RCVTIMEO` timeout expires on a Hyper-V socket the connection is aborted,
+/// and a timeout has to leave the connection usable.
+struct HvSocket {
+    raw: SOCKET,
+    read_timeout: Option<Duration>,
+}
 
 impl HvSocket {
     fn new() -> Result<HvSocket, TransportError> {
@@ -97,13 +104,38 @@ impl HvSocket {
         if raw == INVALID_SOCKET {
             return Err(creation_error(last_error()));
         }
-        Ok(HvSocket(raw))
+        Ok(HvSocket::from_raw(raw))
+    }
+
+    fn from_raw(raw: SOCKET) -> HvSocket {
+        HvSocket {
+            raw,
+            read_timeout: None,
+        }
+    }
+
+    /// Waits until the socket is readable, for at most `timeout`.
+    fn wait_readable(&self, timeout: Duration) -> io::Result<()> {
+        let millis = timeout.as_millis().clamp(1, i32::MAX as u128) as i32;
+        let mut poll = WSAPOLLFD {
+            fd: self.raw,
+            events: POLLRDNORM,
+            revents: 0,
+        };
+        // SAFETY: one valid WSAPOLLFD.
+        let ready = unsafe { WSAPoll(&mut poll, 1, millis) };
+        match ready {
+            SOCKET_ERROR => Err(last_error()),
+            0 => Err(io::Error::from(io::ErrorKind::TimedOut)),
+            // Readable, or closed or failed, which the recv that follows reports.
+            _ => Ok(()),
+        }
     }
 
     fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
         let mut mode: u32 = nonblocking.into();
         // SAFETY: FIONBIO takes a pointer to a u32 flag.
-        if unsafe { ioctlsocket(self.0, FIONBIO, &mut mode) } == SOCKET_ERROR {
+        if unsafe { ioctlsocket(self.raw, FIONBIO, &mut mode) } == SOCKET_ERROR {
             return Err(last_error());
         }
         Ok(())
@@ -112,7 +144,8 @@ impl HvSocket {
     fn set_option_u32(&self, level: i32, name: i32, value: u32) -> io::Result<()> {
         let bytes = value.to_ne_bytes();
         // SAFETY: the option value is a 4-byte buffer that outlives the call.
-        let result = unsafe { setsockopt(self.0, level, name, bytes.as_ptr(), bytes.len() as i32) };
+        let result =
+            unsafe { setsockopt(self.raw, level, name, bytes.as_ptr(), bytes.len() as i32) };
         if result == SOCKET_ERROR {
             return Err(last_error());
         }
@@ -123,15 +156,18 @@ impl HvSocket {
 impl Drop for HvSocket {
     fn drop(&mut self) {
         // SAFETY: the socket is owned and closed exactly once.
-        unsafe { closesocket(self.0) };
+        unsafe { closesocket(self.raw) };
     }
 }
 
 impl Read for HvSocket {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if let Some(timeout) = self.read_timeout {
+            self.wait_readable(timeout)?;
+        }
         let len = buf.len().min(i32::MAX as usize) as i32;
         // SAFETY: buf is valid for len bytes.
-        let read = unsafe { recv(self.0, buf.as_mut_ptr(), len, 0) };
+        let read = unsafe { recv(self.raw, buf.as_mut_ptr(), len, 0) };
         if read == SOCKET_ERROR {
             return Err(last_error());
         }
@@ -143,7 +179,7 @@ impl Write for HvSocket {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let len = buf.len().min(i32::MAX as usize) as i32;
         // SAFETY: buf is valid for len bytes.
-        let written = unsafe { send(self.0, buf.as_ptr(), len, 0) };
+        let written = unsafe { send(self.raw, buf.as_ptr(), len, 0) };
         if written == SOCKET_ERROR {
             return Err(last_error());
         }
@@ -157,17 +193,13 @@ impl Write for HvSocket {
 
 impl StreamSocket for HvSocket {
     fn set_read_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
-        // Zero means "no timeout" to WinSock; FramedConnection never passes a zero timeout.
-        let millis = match timeout {
-            None => 0,
-            Some(timeout) => timeout.as_millis().clamp(1, u32::MAX as u128) as u32,
-        };
-        self.set_option_u32(SOL_SOCKET, SO_RCVTIMEO, millis)
+        self.read_timeout = timeout;
+        Ok(())
     }
 
     fn shutdown(&mut self) {
         // SAFETY: shutting down an owned socket.
-        unsafe { shutdown(self.0, SD_BOTH) };
+        unsafe { shutdown(self.raw, SD_BOTH) };
     }
 }
 
@@ -184,7 +216,7 @@ impl HvSocketListener {
         // SAFETY: address is a valid SOCKADDR_HV of the size passed.
         let bound = unsafe {
             bind(
-                socket.0,
+                socket.raw,
                 &address as *const SockaddrHv as *const SOCKADDR,
                 size_of::<SockaddrHv>() as i32,
             )
@@ -193,7 +225,7 @@ impl HvSocketListener {
             return Err(last_error().into());
         }
         // SAFETY: listening on a bound socket.
-        if unsafe { listen(socket.0, SOMAXCONN as i32) } == SOCKET_ERROR {
+        if unsafe { listen(socket.raw, SOMAXCONN as i32) } == SOCKET_ERROR {
             return Err(last_error().into());
         }
         // Non-blocking so that accept can time out.
@@ -206,11 +238,12 @@ impl Listener for HvSocketListener {
     fn accept(&mut self, timeout: Duration) -> Result<Box<dyn Connection>, TransportError> {
         let accepted = accept_with_timeout(timeout, || {
             // SAFETY: the peer address is not requested.
-            let raw = unsafe { accept(self.socket.0, std::ptr::null_mut(), std::ptr::null_mut()) };
+            let raw =
+                unsafe { accept(self.socket.raw, std::ptr::null_mut(), std::ptr::null_mut()) };
             if raw == INVALID_SOCKET {
                 Err(last_error())
             } else {
-                Ok(HvSocket(raw))
+                Ok(HvSocket::from_raw(raw))
             }
         })?;
         // An accepted socket inherits non-blocking mode; reads use timeouts instead.
@@ -234,7 +267,7 @@ impl Connector for HvSocketConnector {
         // SAFETY: address is a valid SOCKADDR_HV of the size passed.
         let connected = unsafe {
             connect(
-                socket.0,
+                socket.raw,
                 &address as *const SockaddrHv as *const SOCKADDR,
                 size_of::<SockaddrHv>() as i32,
             )
