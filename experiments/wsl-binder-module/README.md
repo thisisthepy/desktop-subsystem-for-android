@@ -114,6 +114,14 @@ is set.
 | C | Our own kernel: the WSL tag with `ANDROID_BINDER_IPC` and `ANDROID_BINDERFS` built in, shipped by the installer through `.wslconfig` `kernel` and `kernelModules` | The kernel affects every distribution the user has; we follow every WSL kernel release ourselves; the user loses WSL's own kernel updates while it is set | Upstream binder as is; no private symbols; this is the stopgap the current decision already names |
 | D | Ask Microsoft to enable `ANDROID_BINDER_IPC` and `ANDROID_BINDERFS` in `config-wsl` | Time, and the answer is not ours | Removes the problem; the long-term goal in the current decision |
 
+**Decision (owner, 2026-10-16):** none of A to C becomes the default path. A and B depend on
+how the WSL kernel looks inside, which changes with every release (the missing symbols went
+from 11 to 14 between 6.6 and 6.18), and C changes every WSL distribution the user has.
+Android runs in a dedicated lightweight VM with its own kernel instead; see
+`experiments/android-utility-vm/`. D goes ahead in parallel: the issue text is drafted in
+`upstream-proposal.md` for the owner to submit. If the WSL kernel gains binder, a WSL
+container backend can be added next to the VM.
+
 D is worth starting whatever else is chosen. The current decision prefers an external
 module on the stock kernel; this experiment shows that this means A or B, not an unmodified
 driver.
