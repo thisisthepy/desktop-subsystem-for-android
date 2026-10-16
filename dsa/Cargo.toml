@@ -4,6 +4,7 @@
 resolver = "2"
 members = [
     "protocol/transport",
+    "host/core",
 ]
 
 [workspace.package]
@@ -14,3 +15,4 @@ publish = false
 
 [workspace.dependencies]
 dsa-transport = { path = "protocol/transport" }
+dsa-host-core = { path = "host/core" }
