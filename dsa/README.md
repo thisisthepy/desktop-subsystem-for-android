@@ -17,5 +17,6 @@ cargo test --workspace
 | `host/platform/windows/` | Rust, C++ | WSL launch, hvsocket, the Win32 and DirectComposition compositor, TSF, Start menu and notifications | in progress: WSL launch and hvsocket |
 | `host/platform/linux/`, `host/platform/macos/` | | Other hosts | planned, not started |
 | `graphics/` | C++ | Vulkan remoting on the host, starting from gfxstream | planned |
-| `guest/` | Kotlin, C++ | The agent (a system app), the hwcomposer, HAL clients, the image configuration | planned |
+| `guest/` | Kotlin, C++, Rust | The agent (a system app), the hwcomposer, HAL clients, the image configuration | planned |
+| `guest/transport/` | Rust | The guest side of the control channel, over vsock | in progress |
 | `kernel/` | config, shell | The WSL kernel module configuration and its build | planned |
