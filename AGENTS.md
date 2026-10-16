@@ -14,7 +14,9 @@ guest are platform neutral so Linux and macOS hosts can follow.
   - `dsa/host/core/`: the platform-neutral host (Rust): sessions, the app registry, the
     lifecycle policy.
   - `dsa/host/platform/windows/`: the Windows host: WSL launch, hvsocket, the Win32 and
-    DirectComposition compositor, TSF, shell integration. `linux/` and `macos/` are planned.
+    DirectComposition compositor, TSF, shell integration. `unix/` holds what the Linux
+    and macOS hosts share (the local API over Unix sockets); the rest of those hosts is
+    planned.
   - `dsa/graphics/`: the Vulkan remoting path (C++), starting from gfxstream.
   - `dsa/guest/`: the Android side: the agent (a system app), the hwcomposer, the HAL
     clients, and the image configuration.
