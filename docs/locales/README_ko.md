@@ -6,7 +6,7 @@
 
 **안드로이드 앱을 진짜 데스크톱 창으로, 오픈 소스로.**
 
-*안드로이드는 WSL2 VM 안의 컨테이너에서 돕니다. 앱마다 자기 창, 시작 메뉴 항목, 알림을 가집니다.*
+*안드로이드는 전용 경량 VM에서 돕니다. 앱마다 자기 창, 시작 메뉴 항목, 알림을 가집니다.*
 
 > DSA는 독립 오픈 소스 프로젝트입니다. Microsoft나 Google과 제휴하거나 그들의 보증, 후원을 받지 않습니다. Android는 Google LLC의 상표입니다. Windows는 Microsoft 그룹의 상표입니다.
 
@@ -24,8 +24,8 @@ Microsoft는 2025년 3월 5일에 Windows Subsystem for Android 지원을 종료
 
 | 부분 | 방식 | 상태 |
 |---|---|---|
-| 안드로이드 | 두 번째 VM 없이 WSL2 커널 위의 LXC 컨테이너로 돕니다 | 계획 |
-| 커널 | binder는 WSL 커널 모듈로 싣습니다. 사용자는 커널을 빌드하지 않습니다 | 계획 |
+| 안드로이드 | WSL과 같은 Windows API로 만든 전용 경량 VM에서 돌고, 바로 안드로이드로 부팅합니다. 사용자의 WSL 설정은 건드리지 않습니다 | 계획 |
+| 커널 | DSA가 binder를 내장한 VM 커널을 함께 배포합니다. 사용자는 커널을 빌드하지 않습니다 | 계획 |
 | Windows | 커스텀 hwcomposer가 안드로이드 태스크를 호스트 합성기에 넘기고, 합성기가 태스크마다 Win32 창을 만듭니다. WSLg와 RDP는 쓰지 않습니다 | 계획 |
 | 그래픽 | 모든 앱의 OpenGL ES는 ANGLE로 Vulkan 위에서 돌고, Vulkan은 원격 방식으로 호스트 GPU에서 실행합니다(gfxstream에서 출발) | 계획 |
 | 장치 | 동영상 코덱, 오디오, 전원은 HAL 서비스로 호스트에 옮깁니다. 안드로이드 프레임워크는 게스트에 남습니다 | 계획 |
@@ -34,7 +34,7 @@ Microsoft는 2025년 3월 5일에 Windows Subsystem for Android 지원을 종료
 | 위젯 | 안드로이드 위젯을 Windows 바탕화면에 띄웁니다 | 계획 |
 
 ```
-[WSL VM 안 컨테이너]                              [Windows 호스트: DSA 서비스]
+[안드로이드 VM]                                  [Windows 호스트: DSA 서비스]
  앱 → SurfaceFlinger
    → hwcomposer ─── 창 제어, 입력 ─────────────── 합성기: 태스크마다 Win32 창
    → ANGLE → Vulkan ─── Vulkan 원격 ────────────→ 호스트 Vulkan
