@@ -103,6 +103,10 @@ pub struct HostConfig {
     /// users. The service acts on each caller's own VM either way.
     #[serde(default)]
     pub pipe_sddl: Option<String>,
+    /// Where the service writes its log. A service has no console, so without this its
+    /// messages are lost.
+    #[serde(default)]
+    pub log_file: Option<PathBuf>,
     /// The user allowed to use the VM's Hyper-V sockets besides SYSTEM. When absent, the
     /// user running `dsa-hostd`.
     #[serde(default)]

@@ -1,15 +1,22 @@
-//! dsa-hostd: runs the Android VM and its control channel.
+//! dsa-hostd: runs the Android VMs and their control channels.
 //!
 //! ```text
-//! dsa-hostd <config.json>
+//! dsa-hostd <config.json>          one VM, driven from standard input
+//! dsa-hostd serve <config.json>    the local API in the foreground, one VM per user
+//! dsa-hostd service <config.json>  the same, as a Windows service
 //! ```
 //!
-//! It starts the VM, waits for the guest's channel daemon to connect and pass the protocol
-//! handshake, and prints every state change. Commands on standard input: `start`, `stop`,
-//! `status`, `quit`. End of input also quits; quitting stops the VM first.
+//! Without a mode it starts one VM, waits for the guest's channel daemon to connect and
+//! pass the protocol handshake, and prints every state change. Commands on standard input:
+//! `start`, `stop`, `status`, `quit`. End of input also quits; quitting stops the VM first.
 //!
-//! Creating a VM needs administrator rights, so run it from an elevated prompt. In the
-//! installed product the DSA service plays this part.
+//! `serve` and `service` answer the local API on a named pipe and run each caller's own
+//! VM. `serve` stops on Ctrl+C. `service` is what the installer registers; it writes its
+//! messages to `log_file`, since a service has no console. Both stop every VM before they
+//! exit.
+//!
+//! Creating a VM needs administrator rights, so run it from an elevated prompt or as the
+//! service (which runs as SYSTEM).
 
 #[cfg(not(windows))]
 fn main() -> std::process::ExitCode {
@@ -31,8 +38,17 @@ fn main() -> std::process::ExitCode {
 #[cfg(windows)]
 mod windows_host {
     use std::io::BufRead;
+    use std::os::windows::io::IntoRawHandle;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, OnceLock};
     use std::thread;
     use std::time::Duration;
+
+    use windows_sys::core::BOOL;
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::Console::{
+        SetConsoleCtrlHandler, SetStdHandle, STD_ERROR_HANDLE,
+    };
 
     use dsa_host_core::handshake::ControlHandshake;
     use dsa_host_core::session::{Session, SessionState};
@@ -42,15 +58,82 @@ mod windows_host {
     use dsa_host_windows::host_config::HostConfig;
     use dsa_host_windows::hvsocket::HvSocketListener;
     use dsa_host_windows::vm_listener::VmBoundListener;
+    use dsa_host_windows::{scm, service};
     use dsa_transport::Listener;
 
-    pub fn run() -> Result<(), String> {
-        let path = std::env::args()
-            .nth(1)
-            .ok_or("usage: dsa-hostd <config.json>")?;
-        let text = std::fs::read_to_string(&path).map_err(|e| format!("reading {path}: {e}"))?;
-        let config = HostConfig::parse(&text).map_err(|e| e.to_string())?;
+    const USAGE: &str = "usage: dsa-hostd [serve | service] <config.json>";
 
+    fn build() -> String {
+        format!("dsa-hostd {}", env!("CARGO_PKG_VERSION"))
+    }
+
+    fn read_config(path: &str) -> Result<HostConfig, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("reading {path}: {e}"))?;
+        HostConfig::parse(&text).map_err(|e| e.to_string())
+    }
+
+    pub fn run() -> Result<(), String> {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        match args.as_slice() {
+            [mode, path] if mode == "serve" => serve_in_foreground(read_config(path)?),
+            [mode, path] if mode == "service" => run_service(path.clone()),
+            [path] if path != "serve" && path != "service" => one_vm(read_config(path)?),
+            _ => Err(USAGE.into()),
+        }
+    }
+
+    static CONSOLE_STOP: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+
+    unsafe extern "system" fn on_console_control(_kind: u32) -> BOOL {
+        if let Some(stop) = CONSOLE_STOP.get() {
+            stop.store(true, Ordering::Relaxed);
+        }
+        1
+    }
+
+    fn serve_in_foreground(config: HostConfig) -> Result<(), String> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let _ = CONSOLE_STOP.set(Arc::clone(&stop));
+        // SAFETY: a handler with the right signature, installed once.
+        unsafe { SetConsoleCtrlHandler(Some(on_console_control), 1) };
+        service::serve(config, &build(), stop)
+    }
+
+    fn run_service(path: String) -> Result<(), String> {
+        scm::run_as_service(Box::new(move |stop| {
+            let config = read_config(&path)?;
+            if let Some(log) = &config.log_file {
+                redirect_stderr(log)?;
+            }
+            service::serve(config, &build(), stop)
+        }))
+    }
+
+    /// Sends everything written to standard error to the end of `path`.
+    fn redirect_stderr(path: &std::path::Path) -> Result<(), String> {
+        if let Some(folder) = path.parent() {
+            std::fs::create_dir_all(folder)
+                .map_err(|e| format!("creating {}: {e}", folder.display()))?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|e| format!("opening the log {}: {e}", path.display()))?;
+        // The handle stays open for the life of the process.
+        let handle = file.into_raw_handle();
+        // SAFETY: a valid file handle that is never closed.
+        if unsafe { SetStdHandle(STD_ERROR_HANDLE, handle as HANDLE) } == 0 {
+            return Err(format!(
+                "writing the log to {}: {}",
+                path.display(),
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(())
+    }
+
+    fn one_vm(config: HostConfig) -> Result<(), String> {
         let fallback_sid = if config.user_sid.is_none() {
             Some(current_user_sid()?)
         } else {
@@ -66,7 +149,7 @@ mod windows_host {
             }),
         );
         let session_config = config.session_config();
-        let build = format!("dsa-hostd {}", env!("CARGO_PKG_VERSION"));
+        let build = build();
         let handshake = ControlHandshake::new(&build, session_config.connect_timeout);
         let session = Session::new(launcher, Box::new(listener), handshake, session_config);
 
