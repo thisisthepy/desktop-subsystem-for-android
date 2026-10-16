@@ -1,0 +1,77 @@
+// The control channel between the DSA host and the guest.
+//
+// This file is the only definition of the channel's messages. The Rust, Java and C++
+// codecs are generated from it (see README.md); none is written by hand.
+//
+// Rules that keep the three languages byte-for-byte identical:
+// - no map fields, no google.protobuf.Any, no extensions;
+// - nothing relies on unknown fields surviving a round trip;
+// - every frame on the channel is exactly one Envelope.
+//
+// Rules that keep the handshake working across versions: Envelope fields 1 to 3, and every
+// field of Hello, HelloAccepted, HelloRejected and RejectReason, keep their numbers and types
+// forever. A peer must always be able to read a Hello and say why it refuses it.
+
+syntax = "proto3";
+
+package dsa.control.v1;
+
+option java_package = "io.github.thisisthepy.dsa.control.v1";
+option java_multiple_files = true;
+option optimize_for = LITE_RUNTIME;
+
+// The protocol version. CURRENT goes up when the meaning of existing messages changes.
+// Adding messages changes the schema hash, which is checked as well.
+enum ProtocolVersion {
+  PROTOCOL_VERSION_UNSPECIFIED = 0;
+  PROTOCOL_VERSION_CURRENT = 1;
+}
+
+// Which end of the channel a peer is.
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_HOST = 1;
+  ROLE_GUEST = 2;
+}
+
+// The first frame on a new connection, sent by the guest.
+message Hello {
+  // ProtocolVersion.PROTOCOL_VERSION_CURRENT of the sender's build.
+  uint32 protocol_version = 1;
+  // SHA-256 of the normalised definition the sender was generated from (32 bytes).
+  bytes schema_hash = 2;
+  Role role = 3;
+  // Free text naming the sender's build, for error reports only.
+  string build = 4;
+}
+
+// The host's answer when the guest's Hello matches.
+message HelloAccepted {
+  Hello host = 1;
+}
+
+// Why the host refused a connection.
+enum RejectReason {
+  REJECT_REASON_UNSPECIFIED = 0;
+  REJECT_REASON_PROTOCOL_VERSION_MISMATCH = 1;
+  REJECT_REASON_SCHEMA_HASH_MISMATCH = 2;
+  REJECT_REASON_UNEXPECTED_ROLE = 3;
+  REJECT_REASON_MALFORMED_HELLO = 4;
+}
+
+// The host's answer when it refuses the guest. The host closes the connection after it.
+message HelloRejected {
+  RejectReason reason = 1;
+  // A sentence a person can act on, naming both sides' values.
+  string detail = 2;
+  Hello host = 3;
+}
+
+// The one message type on the wire. Each frame carries exactly one.
+message Envelope {
+  oneof body {
+    Hello hello = 1;
+    HelloAccepted hello_accepted = 2;
+    HelloRejected hello_rejected = 3;
+  }
+}

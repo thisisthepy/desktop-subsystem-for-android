@@ -1,0 +1,152 @@
+// The checked-in protocol vectors, against the generated C++ (protobuf-lite) codec.
+//
+// The cases mirror dsa/protocol/rust/tests/vectors.rs exactly. Run with
+// dsa/protocol/cpp/test.sh, which passes the protocol folder as the only argument.
+
+#include <cstdio>
+#include <fstream>
+#include <map>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include "control.pb.h"
+#include "control_schema.h"
+
+namespace v1 = dsa::control::v1;
+
+namespace {
+
+std::vector<std::string> failures;
+
+void Check(bool ok, const std::string& what) {
+  if (!ok) failures.push_back(what);
+}
+
+std::string Bytes(int first, int count) {
+  std::string bytes;
+  for (int i = 0; i < count; ++i) bytes.push_back(static_cast<char>(first + i));
+  return bytes;
+}
+
+v1::Hello GuestHello() {
+  v1::Hello hello;
+  hello.set_protocol_version(1);
+  hello.set_schema_hash(Bytes(0x00, 32));
+  hello.set_role(v1::ROLE_GUEST);
+  hello.set_build("dsa-guestd 0.1.0");
+  return hello;
+}
+
+v1::Hello HostHello() {
+  v1::Hello hello;
+  hello.set_protocol_version(1);
+  hello.set_schema_hash(Bytes(0xa0, 32));
+  hello.set_role(v1::ROLE_HOST);
+  hello.set_build("dsa-host 0.1.0");
+  return hello;
+}
+
+std::map<std::string, v1::Envelope> Cases() {
+  std::map<std::string, v1::Envelope> cases;
+  cases["envelope_empty"] = v1::Envelope();
+  cases["hello_default"].mutable_hello();
+  *cases["hello_guest"].mutable_hello() = GuestHello();
+  {
+    v1::Hello* hello = cases["hello_max_version"].mutable_hello();
+    hello->set_protocol_version(0xffffffffu);
+    hello->set_role(v1::ROLE_GUEST);
+  }
+  *cases["hello_accepted"].mutable_hello_accepted()->mutable_host() = HostHello();
+  {
+    v1::HelloRejected* rejected = cases["hello_rejected"].mutable_hello_rejected();
+    rejected->set_reason(v1::REJECT_REASON_SCHEMA_HASH_MISMATCH);
+    rejected->set_detail("스키마가 다릅니다 (schema differs)");
+    *rejected->mutable_host() = HostHello();
+  }
+  return cases;
+}
+
+std::string FromHex(const std::string& hex) {
+  std::string bytes;
+  for (size_t i = 0; i + 1 < hex.size(); i += 2) {
+    bytes.push_back(static_cast<char>(std::stoi(hex.substr(i, 2), nullptr, 16)));
+  }
+  return bytes;
+}
+
+std::string ToHex(const std::string& bytes) {
+  static const char* digits = "0123456789abcdef";
+  std::string hex;
+  for (unsigned char b : bytes) {
+    hex.push_back(digits[b >> 4]);
+    hex.push_back(digits[b & 0xf]);
+  }
+  return hex;
+}
+
+std::map<std::string, std::string> ReadVectors(const std::string& path) {
+  std::map<std::string, std::string> vectors;
+  std::ifstream file(path);
+  std::string line;
+  while (std::getline(file, line)) {
+    if (line.empty() || line[0] == '#') continue;
+    std::istringstream fields(line);
+    std::string name, hex = "-";
+    fields >> name >> hex;
+    vectors[name] = hex == "-" ? std::string() : FromHex(hex);
+  }
+  return vectors;
+}
+
+void pr2_the_cpp_codec_encodes_every_vector_byte_for_byte(
+    const std::map<std::string, std::string>& vectors) {
+  auto cases = Cases();
+  Check(vectors.size() == cases.size(), "the vector file and the cases list different names");
+  for (const auto& [name, envelope] : cases) {
+    auto expected = vectors.find(name);
+    std::string actual = envelope.SerializeAsString();
+    Check(expected != vectors.end() && expected->second == actual,
+          "encoding " + name + ": got " + ToHex(actual) + ", expected " +
+              (expected == vectors.end() ? std::string("nothing") : ToHex(expected->second)));
+  }
+}
+
+void pr2_the_cpp_codec_decodes_every_vector_to_the_same_message(
+    const std::map<std::string, std::string>& vectors) {
+  for (const auto& [name, envelope] : Cases()) {
+    auto bytes = vectors.find(name);
+    if (bytes == vectors.end()) continue;
+    v1::Envelope decoded;
+    Check(decoded.ParseFromString(bytes->second), "parsing " + name);
+    Check(decoded.body_case() == envelope.body_case(), "decoding " + name + ": wrong body");
+    Check(decoded.SerializeAsString() == envelope.SerializeAsString(), "decoding " + name);
+  }
+}
+
+void pr2_the_cpp_code_carries_the_shared_schema_hash(const std::string& protocol) {
+  std::ifstream file(protocol + "/schema.sha256");
+  std::string shared;
+  file >> shared;
+  Check(shared == v1::kSchemaHashHex,
+        std::string("kSchemaHashHex is ") + v1::kSchemaHashHex + " but schema.sha256 is " +
+            shared + "; regenerate with dsa-protocol-codegen");
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+  if (argc != 2) {
+    std::fprintf(stderr, "usage: vectors_test <dsa/protocol folder>\n");
+    return 2;
+  }
+  std::string protocol = argv[1];
+  auto vectors = ReadVectors(protocol + "/vectors/control.vectors");
+  pr2_the_cpp_codec_encodes_every_vector_byte_for_byte(vectors);
+  pr2_the_cpp_codec_decodes_every_vector_to_the_same_message(vectors);
+  pr2_the_cpp_code_carries_the_shared_schema_hash(protocol);
+  for (const auto& failure : failures) std::fprintf(stderr, "FAILED: %s\n", failure.c_str());
+  if (!failures.empty()) return 1;
+  std::printf("c++ vectors: %zu cases passed\n", Cases().size());
+  return 0;
+}

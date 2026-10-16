@@ -1,0 +1,9 @@
+# Control protocol vectors. Each line: a case name, then the bytes of one Envelope in
+# hex ("-" for none). Every language's generated codec must encode each case to
+# exactly these bytes and decode them back to the same message.
+envelope_empty -
+hello_accepted 12380a3608011220a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf1801220e6473612d686f737420302e312e30
+hello_default 0a00
+hello_guest 0a3808011220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f180222106473612d67756573746420302e312e30
+hello_max_version 0a0808ffffffff0f1802
+hello_rejected 1a660802122aec8aa4ed82a4eba788eab08020eb8ba4eba685eb8b88eb8ba42028736368656d612064696666657273291a3608011220a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf1801220e6473612d686f737420302e312e30
