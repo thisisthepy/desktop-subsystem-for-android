@@ -1,11 +1,16 @@
 # Builds the DSA package (dsa-<version>.msi) and setup.exe (setup-<version>.exe) into
-# dsa\target\installer. Needs Rust, and WiX 5:
+# dsa\target\installer. Needs Rust, the .NET SDK (for the setup screens in setup-ui\), and
+# WiX 5:
 #
 #   dotnet tool install --global wix --version 5.0.2
 #
 # The bootstrapper extension is downloaded from NuGet into dsa\target\installer and passed
 # to WiX by path. (In 5.0.2 its DLL is named WixToolset.BootstrapperApplications.wixext.dll,
-# which WiX does not find under the package's name.)
+# which WiX does not find under the package's name.) setup.exe needs it for the variables
+# that the command line may set.
+#
+# -AndroidMajor is the newest Android major the release supports; the first screen of
+# setup.exe shows it. Without it that screen leaves it out.
 #
 # -ImageDir names an image folder made by dsa/guest/image/make-image.py; its version comes
 # from its image.json. (-ImageVersion, -ImageMajor and -ImageBuild describe an older folder
@@ -22,7 +27,8 @@ param(
     [long]$ImageBuild,
     [string]$ListUrl,
     [string[]]$TrustedKey = @(),
-    [string]$PipeSddl
+    [string]$PipeSddl,
+    [int]$AndroidMajor
 )
 $ErrorActionPreference = "Stop"
 
@@ -86,6 +92,11 @@ if ($ListUrl) {
 }
 $config | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM (Join-Path $stage "dsa-hostd.json")
 
+# The setup screens: a .NET Framework 4.7.2 program that setup.exe carries and starts.
+$setupUi = Join-Path $out "setup-ui"
+dotnet build (Join-Path $installer "setup-ui\DsaSetup.csproj") -c Release -o $setupUi -p:Version=$Version
+if ($LASTEXITCODE -ne 0) { throw "building the setup screens failed" }
+
 $balVersion = "5.0.2"
 $balDir = Join-Path $out "ext\bal-$balVersion"
 $balDll = Join-Path $balDir "wixext5\WixToolset.BootstrapperApplications.wixext.dll"
@@ -110,7 +121,10 @@ Push-Location $installer
 try {
     wix build -arch x64 @defines dsa.wxs -o $msi
     if ($LASTEXITCODE -ne 0) { throw "building the package failed" }
-    wix build -arch x64 -ext $balDll -d "Version=$Version" -d "MsiPath=$msi" bundle.wxs -o $setup
+    $bundleDefines = @("-d", "Version=$Version", "-d", "MsiPath=$msi", "-d", "SetupUiDir=$setupUi")
+    if ($AndroidMajor -gt 0) { $bundleDefines += @("-d", "AndroidMajor=$AndroidMajor") }
+    if ($ImageDir) { $bundleDefines += @("-d", "BundledImage=1") }
+    wix build -arch x64 -ext $balDll @bundleDefines bundle.wxs -o $setup
     if ($LASTEXITCODE -ne 0) { throw "building setup.exe failed" }
 } finally { Pop-Location }
 Write-Host "built $msi and $setup"
