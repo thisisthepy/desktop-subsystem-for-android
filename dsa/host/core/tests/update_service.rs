@@ -13,7 +13,9 @@ use dsa_host_core::host_api::UserAndroid;
 use dsa_host_core::session::{GuestLauncher, Session, SessionConfig, SessionState};
 use dsa_host_core::update::manifest::{self, FileEntry, ImageEntry, Manifest, FORMAT};
 use dsa_host_core::update::policy::InstalledImage;
-use dsa_host_core::update::service::{check, check_reporting, UpdateNotices, UpdatingAndroid};
+use dsa_host_core::update::service::{
+    check, check_reporting, Download, UpdateNotices, UpdatingAndroid,
+};
 use dsa_host_core::update::store::{Fetch, ImageStore};
 use dsa_host_core::update::UpdateError;
 use dsa_protocol::control::Role;
@@ -307,12 +309,14 @@ fn fr14_a_check_says_which_image_it_downloads_before_it_starts() {
         &fetch,
         "mem://list.json",
         &trusted(),
-        &mut |image| {
-            assert!(
-                !store.image_dir(&image.version).exists(),
-                "announced after the download"
-            );
-            announced.push(image.version.clone());
+        &mut |download: &Download| {
+            if download.done == 0 {
+                assert!(
+                    !store.image_dir(&download.image.version).exists(),
+                    "announced after the download"
+                );
+                announced.push(download.image.version.clone());
+            }
         },
     )
     .unwrap();
@@ -324,9 +328,74 @@ fn fr14_a_check_says_which_image_it_downloads_before_it_starts() {
         &fetch,
         "mem://list.json",
         &trusted(),
-        &mut |image| panic!("announced {} with nothing to download", image.version),
+        &mut |download: &Download| {
+            panic!(
+                "announced {} with nothing to download",
+                download.image.version
+            )
+        },
     )
     .unwrap();
+}
+
+#[test]
+fn fr14_a_download_reports_its_progress_up_to_the_whole_size() {
+    let store = store_without_an_image();
+    let fetch = server(&[16], &[("16.0.2", 16, 2)], &key());
+    let mut seen = Vec::new();
+    check_reporting(
+        &store,
+        &fetch,
+        "mem://list.json",
+        &trusted(),
+        &mut |download: &Download| seen.push((download.done, download.total)),
+    )
+    .unwrap();
+    let total = "image 16.0.2".len() as u64;
+    assert_eq!(
+        seen.first(),
+        Some(&(0, total)),
+        "starts at nothing: {seen:?}"
+    );
+    assert_eq!(
+        seen.last(),
+        Some(&(total, total)),
+        "ends at the whole size: {seen:?}"
+    );
+    assert!(
+        seen.windows(2).all(|pair| pair[0].0 <= pair[1].0),
+        "never goes backwards: {seen:?}"
+    );
+}
+
+#[test]
+fn fr14_a_download_notice_says_how_far_it_has_got() {
+    let image = ImageEntry {
+        version: "17.0.0-1".into(),
+        android_major: 17,
+        build: 1,
+        files: Vec::new(),
+    };
+    let notice = |done, total| {
+        Download {
+            image: &image,
+            done,
+            total,
+        }
+        .notice()
+    };
+    assert_eq!(
+        notice(0, 1_800_000_000),
+        "downloading Android 17.0.0-1: 0% (0 of 1.8 GB)"
+    );
+    assert_eq!(
+        notice(450_000_000, 1_800_000_000),
+        "downloading Android 17.0.0-1: 25% (0.45 of 1.8 GB)"
+    );
+    assert_eq!(
+        notice(1_800_000_000, 1_800_000_000),
+        "downloading Android 17.0.0-1: 100% (1.8 of 1.8 GB)"
+    );
 }
 
 #[test]
