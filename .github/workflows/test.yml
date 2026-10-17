@@ -103,7 +103,7 @@ jobs:
           if [[ -n "$(git status --porcelain -- protocol)" ]]; then
             git status --short -- protocol
             git diff -- protocol | head -200
-            echo "::error::the generated protocol code does not match control.proto; run dsa-protocol-codegen and commit the result"
+            echo "::error::the generated protocol code does not match control.proto or host_api.proto; run dsa-protocol-codegen and commit the result"
             exit 1
           fi
 

@@ -32,6 +32,22 @@ fn pipe_pair() -> (Box<dyn Listener>, Box<dyn Connector>) {
 
 dsa_transport::transport_conformance!(pipe_pair());
 
+fn pipe_local_pair() -> dsa_host_core::host_api_conformance::LocalPair {
+    let name = fresh_name();
+    let listener = NamedPipeListener::bind(&name, TEST_SDDL).expect("creating the pipe");
+    (
+        Box::new(listener),
+        Box::new(NamedPipeConnector { name }),
+        dsa_host_windows::pipe::current_user_sid().unwrap(),
+    )
+}
+
+/// The local API itself over a real named pipe.
+mod host_api {
+    use super::*;
+    dsa_host_core::host_api_conformance!(pipe_local_pair());
+}
+
 #[test]
 fn pr5_the_service_learns_the_clients_user_from_windows() {
     let name = fresh_name();

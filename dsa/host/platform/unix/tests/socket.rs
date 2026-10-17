@@ -50,6 +50,22 @@ fn unix_pair() -> (Box<dyn Listener>, Box<dyn Connector>) {
 
 dsa_transport::transport_conformance!(unix_pair());
 
+fn unix_local_pair() -> dsa_host_core::host_api_conformance::LocalPair {
+    let path = socket_path();
+    let listener = UnixLocalListener::bind(&path, 0o600).expect("binding the socket");
+    (
+        Box::new(listener),
+        Box::new(UnixLocalConnector { path }),
+        format!("uid:{}", current_uid()),
+    )
+}
+
+/// The local API itself over a real socket.
+mod host_api {
+    use super::*;
+    dsa_host_core::host_api_conformance!(unix_local_pair());
+}
+
 #[test]
 fn pr5_the_server_learns_the_clients_user_from_the_kernel() {
     let path = socket_path();

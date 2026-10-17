@@ -91,6 +91,7 @@ dependencies = [
 name = "dsa-host-core"
 version = "0.1.0"
 dependencies = [
+ "dsa-host-core",
  "dsa-protocol",
  "dsa-transport",
 ]
@@ -99,6 +100,7 @@ dependencies = [
 name = "dsa-host-unix"
 version = "0.1.0"
 dependencies = [
+ "dsa-host-core",
  "dsa-transport",
  "libc",
 ]
