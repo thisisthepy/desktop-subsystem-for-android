@@ -1,0 +1,22 @@
+[package]
+name = "dsa-guest-channeld"
+version = "0.1.0"
+description = "The guest's control channel daemon: connects to the host, passes the handshake, carries frames"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+# Runs the daemon over vsock loopback (CID 1); needs the vsock_loopback kernel module.
+vsock-loopback-tests = []
+
+[dependencies]
+dsa-transport.workspace = true
+dsa-protocol.workspace = true
+
+[dev-dependencies]
+dsa-protocol-schema.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+dsa-guest-transport = { path = "../transport" }
