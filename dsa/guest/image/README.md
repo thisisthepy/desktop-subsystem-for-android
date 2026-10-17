@@ -44,8 +44,12 @@ In `dsa/target/image/<version>/`:
   Android formats on first boot. The service copies it for a new user, and on an update
   writes the new image's Android partitions into each user's disk.
 - `initrd.img`: the vendor ramdisk followed by the generic one.
+- `bzImage`, with `--kernel`: the guest kernel (`dsa/kernel/`). The host boots an image's
+  own kernel when it has one, so a kernel update ships with the image.
 - `image.json`: the version, the source build, the kernel command line, and the files'
   SHA-256.
+- `signed-target_files.zip`: the signed build inputs, kept to make later images and update
+  packages from. It is not part of the image and is never published.
 
 ## Moving to a newer build
 
