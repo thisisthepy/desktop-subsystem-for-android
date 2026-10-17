@@ -4,10 +4,15 @@
 //! dsa status
 //! dsa start [--wait]
 //! dsa stop [--wait]
+//! dsa update [--wait]
 //! ```
 //!
 //! It acts on the Android of the user who runs it: the service learns that user from the
 //! operating system, so there is no option to name another one.
+//!
+//! `dsa update` installs the newest version of DSA now instead of when no Android is
+//! running. It stops every user's Android, since the service restarts. With `--wait` it
+//! waits for the service to come back and shows what it says about the update.
 //!
 //! The service is found at the platform's usual place: the named pipe `\\.\pipe\dsa-host`
 //! on Windows, `/run/dsa/host.sock` on Linux, and
@@ -23,7 +28,8 @@ use dsa_host_core::host_api::{ClientError, HostApiClient, Status};
 use dsa_host_core::session::SessionState;
 use dsa_transport::Connector;
 
-pub const USAGE: &str = "usage: dsa <status | start | stop> [--wait] [--timeout <seconds>] \
+pub const USAGE: &str =
+    "usage: dsa <status | start | stop | update> [--wait] [--timeout <seconds>] \
                          [--pipe <name> | --socket <path>]";
 
 /// What to ask the service.
@@ -32,7 +38,12 @@ pub enum Command {
     Status,
     Start,
     Stop,
+    Update,
 }
+
+/// How long the service may take to answer `dsa update`: it may download the setup file
+/// first.
+const UPDATE_ANSWER_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// A parsed command line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,10 +65,11 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "status" | "start" | "stop" if command.is_none() => {
+            "status" | "start" | "stop" | "update" if command.is_none() => {
                 command = Some(match arg.as_str() {
                     "status" => Command::Status,
                     "start" => Command::Start,
+                    "update" => Command::Update,
                     _ => Command::Stop,
                 });
             }
@@ -84,36 +96,89 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     })
 }
 
-/// A line describing `status`, and a second one when there is news about an update.
+/// A line describing `status`, and one more for each piece of news about an update.
 pub fn describe(status: &Status) -> String {
     let mut line = format!("Android: {}", status.state);
     if let Some(reason) = &status.last_reason {
         let _ = write!(line, " (last stopped: {reason})");
     }
-    if let Some(notice) = &status.update_notice {
+    for notice in status
+        .update_notice
+        .iter()
+        .flat_map(|notice| notice.lines())
+    {
         let _ = write!(line, "\nUpdate: {notice}");
     }
     line
 }
 
-/// Runs `invocation` against the service `connector` reaches. Returns what to print.
-pub fn run(invocation: &Invocation, connector: &mut dyn Connector) -> Result<String, String> {
+fn build() -> String {
     // The installer build sets DSA_VERSION to the release's version.
     let version = option_env!("DSA_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
-    let build = format!("dsa {version}");
-    let mut client =
-        HostApiClient::connect(connector, &build, Duration::from_secs(10)).map_err(|error| {
-            match error {
-                ClientError::Connect(_) => format!(
-                "cannot reach the DSA service ({error}); check that it is installed and running"
-            ),
-                other => other.to_string(),
+    format!("dsa {version}")
+}
+
+fn connect(connector: &mut dyn Connector, timeout: Duration) -> Result<HostApiClient, String> {
+    HostApiClient::connect(connector, &build(), timeout).map_err(|error| match error {
+        ClientError::Connect(_) => format!(
+            "cannot reach the DSA service ({error}); check that it is installed and running"
+        ),
+        other => other.to_string(),
+    })
+}
+
+/// `dsa update`: asks the service to install the newest version now and, with `--wait`,
+/// waits for the service to go away and come back.
+fn update(
+    invocation: &Invocation,
+    mut client: HostApiClient,
+    connector: &mut dyn Connector,
+) -> Result<String, String> {
+    let update = client
+        .update_program(UPDATE_ANSWER_TIMEOUT)
+        .map_err(|e| e.to_string())?;
+    drop(client);
+    if !invocation.wait || update.installing.is_none() {
+        return Ok(update.detail);
+    }
+    let deadline = Instant::now() + invocation.timeout;
+    let mut went_away = false;
+    let mut last = None;
+    loop {
+        match connect(connector, Duration::from_secs(2))
+            .and_then(|mut client| client.status().map_err(|e| e.to_string()))
+        {
+            Ok(status) if went_away => {
+                return Ok(format!("{}\n{}", update.detail, describe(&status)))
             }
-        })?;
+            Ok(status) => last = Some(status),
+            Err(_) => went_away = true,
+        }
+        if Instant::now() >= deadline {
+            // A setup that failed before it stopped the service leaves it running, and the
+            // service says so in its status.
+            let now = last
+                .as_ref()
+                .map(|status| format!("\n{}", describe(status)))
+                .unwrap_or_default();
+            return Err(format!(
+                "{}\nthe service has not restarted after {} seconds{now}",
+                update.detail,
+                invocation.timeout.as_secs()
+            ));
+        }
+        thread::sleep(Duration::from_millis(250));
+    }
+}
+
+/// Runs `invocation` against the service `connector` reaches. Returns what to print.
+pub fn run(invocation: &Invocation, connector: &mut dyn Connector) -> Result<String, String> {
+    let mut client = connect(connector, Duration::from_secs(10))?;
     let status = match invocation.command {
         Command::Status => client.status(),
         Command::Start => client.start(),
         Command::Stop => client.stop(),
+        Command::Update => return update(invocation, client, connector),
     }
     .map_err(|e| e.to_string())?;
     if !invocation.wait || invocation.command == Command::Status {

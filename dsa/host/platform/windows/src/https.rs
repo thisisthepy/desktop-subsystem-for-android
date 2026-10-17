@@ -193,3 +193,19 @@ impl Fetch for WinHttpFetch {
         }
     }
 }
+
+/// Fetches `https:` and `http:` URLs through WinHTTP, and anything else as a file path:
+/// a mirror on a local or network drive. Integrity rests on the signed list either way.
+#[derive(Default)]
+pub struct UrlFetch(pub WinHttpFetch);
+
+impl Fetch for UrlFetch {
+    fn fetch(&self, url: &str, out: &mut dyn Write) -> Result<u64, String> {
+        let lower = url.to_ascii_lowercase();
+        if lower.starts_with("https://") || lower.starts_with("http://") {
+            self.0.fetch(url, out)
+        } else {
+            dsa_host_core::update::store::FileFetch.fetch(url, out)
+        }
+    }
+}

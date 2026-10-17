@@ -22,10 +22,10 @@
 //! }
 //! ```
 
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
-use super::{from_hex, UpdateError};
+use super::{check_signature, from_hex, UpdateError};
 
 /// The release list format this build reads.
 pub const FORMAT: u32 = 1;
@@ -89,21 +89,7 @@ pub fn verify(
     signature_hex: &str,
     keys: &[VerifyingKey],
 ) -> Result<Manifest, UpdateError> {
-    if keys.is_empty() {
-        return Err(UpdateError::BadSignature(
-            "no trusted key is configured".into(),
-        ));
-    }
-    let signature = from_hex::<64>(signature_hex)
-        .map(|bytes| Signature::from_bytes(&bytes))
-        .ok_or_else(|| {
-            UpdateError::BadSignature("the signature is not 64 bytes in hexadecimal".into())
-        })?;
-    if !keys.iter().any(|key| key.verify(bytes, &signature).is_ok()) {
-        return Err(UpdateError::BadSignature(
-            "the signature does not match any trusted key".into(),
-        ));
-    }
+    check_signature(bytes, signature_hex, keys).map_err(UpdateError::BadSignature)?;
     let manifest: Manifest =
         serde_json::from_slice(bytes).map_err(|e| UpdateError::BadManifest(e.to_string()))?;
     if manifest.format != FORMAT {

@@ -11,6 +11,8 @@
 //! - [`host_config`]: the configuration file `dsa-hostd` reads.
 //! - [`service`]: the local API and one VM per user behind it, as `dsa-hostd` serves them
 //!   (Windows only).
+//! - [`setup`]: running a downloaded setup file apart from the service, to update DSA
+//!   (the process part on Windows only).
 //! - [`profile`]: where a user's local application data is, from their SID (Windows only).
 //! - [`scm`]: running under the Service Control Manager (Windows only).
 //! - [`uninstall`]: what uninstalling needs from `dsa-hostd`.
@@ -46,6 +48,7 @@ pub mod profile;
 pub mod scm;
 #[cfg(windows)]
 pub mod service;
+pub mod setup;
 pub mod uninstall;
 #[cfg(windows)]
 pub mod user_disk;

@@ -17,6 +17,10 @@
 # that holds only system.vhdx.) Without -ImageDir the package carries no Android image; the service then downloads the
 # newest supported image from -ListUrl after installation. -PlaceholderKernel puts an empty
 # kernel in the package, for testing the installer before a kernel is built.
+#
+# -ProgramListUrl names the signed program list the service updates DSA itself from (it
+# needs -ListUrl, and the same -TrustedKey signs both lists). Without it the installed DSA
+# is updated by hand.
 param(
     [string]$Version = "0.1.0",
     [string]$Kernel,
@@ -27,6 +31,7 @@ param(
     [long]$ImageBuild,
     [string]$ListUrl,
     [string[]]$TrustedKey = @(),
+    [string]$ProgramListUrl,
     [string]$PipeSddl,
     [int]$AndroidMajor
 )
@@ -91,6 +96,13 @@ if ($PipeSddl) { $config.pipe_sddl = $PipeSddl }
 if ($ListUrl) {
     if ($TrustedKey.Count -eq 0) { throw "-ListUrl needs at least one -TrustedKey" }
     $config.update = [ordered]@{ list_url = $ListUrl; trusted_keys = $TrustedKey }
+}
+if ($ProgramListUrl) {
+    if (-not $ListUrl) { throw "-ProgramListUrl needs -ListUrl and -TrustedKey" }
+    # Downloaded setup files go to the service's own folder, which only SYSTEM and
+    # Administrators can write to, since the service runs them.
+    $config.update.program_list_url = $ProgramListUrl
+    $config.update.program_dir = "{data}\updates"
 }
 $config | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM (Join-Path $stage "dsa-hostd.json")
 

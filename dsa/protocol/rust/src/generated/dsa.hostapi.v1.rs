@@ -39,6 +39,12 @@ pub struct StartSession {}
 /// Stops the caller's Android. Returns at once; the state moves on its own.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct StopSession {}
+/// Installs the newest version of DSA now instead of waiting until no Android is running.
+/// It downloads that version first when it has not been downloaded yet, stops every user's
+/// Android, and starts setup, which stops the service and starts the new one. It returns
+/// once setup has started, or says that DSA is up to date.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdateProgram {}
 /// The caller's Android as the service sees it.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Status {
@@ -54,6 +60,16 @@ pub struct Status {
     #[prost(string, tag = "3")]
     pub update_notice: ::prost::alloc::string::String,
 }
+/// The answer to UpdateProgram.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ProgramUpdate {
+    /// The version setup is installing. Empty when there is nothing newer to install.
+    #[prost(string, tag = "1")]
+    pub installing: ::prost::alloc::string::String,
+    /// What happens next, in words for the user.
+    #[prost(string, tag = "2")]
+    pub detail: ::prost::alloc::string::String,
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Error {
     #[prost(enumeration = "ErrorCode", tag = "1")]
@@ -67,7 +83,7 @@ pub struct Error {
 pub struct Request {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "request::Body", tags = "2, 3, 4")]
+    #[prost(oneof = "request::Body", tags = "2, 3, 4, 5")]
     pub body: ::core::option::Option<request::Body>,
 }
 /// Nested message and enum types in `Request`.
@@ -80,13 +96,15 @@ pub mod request {
         StartSession(super::StartSession),
         #[prost(message, tag = "4")]
         StopSession(super::StopSession),
+        #[prost(message, tag = "5")]
+        UpdateProgram(super::UpdateProgram),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Response {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "response::Body", tags = "2, 3")]
+    #[prost(oneof = "response::Body", tags = "2, 3, 4")]
     pub body: ::core::option::Option<response::Body>,
 }
 /// Nested message and enum types in `Response`.
@@ -97,6 +115,8 @@ pub mod response {
         Status(super::Status),
         #[prost(message, tag = "3")]
         Error(super::Error),
+        #[prost(message, tag = "4")]
+        ProgramUpdate(super::ProgramUpdate),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.
@@ -267,6 +287,9 @@ pub enum ErrorCode {
     UnknownRequest = 1,
     /// The service could not provide an Android for this user.
     Unavailable = 2,
+    /// DSA could not be updated: updates are off, the program list or the setup file did not
+    /// check out, or setup could not start. The detail says which.
+    UpdateFailed = 3,
 }
 impl ErrorCode {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -278,6 +301,7 @@ impl ErrorCode {
             Self::Unspecified => "ERROR_CODE_UNSPECIFIED",
             Self::UnknownRequest => "ERROR_CODE_UNKNOWN_REQUEST",
             Self::Unavailable => "ERROR_CODE_UNAVAILABLE",
+            Self::UpdateFailed => "ERROR_CODE_UPDATE_FAILED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -286,6 +310,7 @@ impl ErrorCode {
             "ERROR_CODE_UNSPECIFIED" => Some(Self::Unspecified),
             "ERROR_CODE_UNKNOWN_REQUEST" => Some(Self::UnknownRequest),
             "ERROR_CODE_UNAVAILABLE" => Some(Self::Unavailable),
+            "ERROR_CODE_UPDATE_FAILED" => Some(Self::UpdateFailed),
             _ => None,
         }
     }
