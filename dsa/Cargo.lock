@@ -177,6 +177,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dsa-guest-channeld"
+version = "0.1.0"
+dependencies = [
+ "dsa-guest-transport",
+ "dsa-protocol",
+ "dsa-protocol-schema",
+ "dsa-transport",
+]
+
+[[package]]
 name = "dsa-guest-transport"
 version = "0.1.0"
 dependencies = [

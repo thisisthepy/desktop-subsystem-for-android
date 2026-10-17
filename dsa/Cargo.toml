@@ -12,6 +12,7 @@ members = [
     "host/platform/unix",
     "host/cli",
     "guest/transport",
+    "guest/channeld",
 ]
 
 [workspace.package]
