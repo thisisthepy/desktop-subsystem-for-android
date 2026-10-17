@@ -160,7 +160,17 @@ jobs:
           if ($code -ne 0) {
             Get-Service DsaHost | Format-List Name, Status
             Get-ChildItem "$env:DATA_DIR\logs" | Format-Table Name, Length, LastWriteTime
-            Get-ChildItem "$env:DATA_DIR\logs\setup-*.log" | ForEach-Object { "== $($_.Name)"; Get-Content $_ -Tail 60 }
+            Get-ChildItem "$env:DATA_DIR\logs\setup-*.msi.log" | ForEach-Object {
+              "== $($_.Name)"
+              Select-String -Path $_ -Pattern 'AppSearch|RegistrySearch|INSTALLFOLDER|DATAFOLDER|FindRelatedProducts|RemoveExistingProducts|StartServices|StopServices|DsaHost|Return value 3|Error 1' |
+                Select-Object -First 80 | ForEach-Object { $_.Line }
+            }
+            sc.exe qc DsaHost
+            Get-ItemProperty HKLM:\SOFTWARE\thisisthepy\DSA -ErrorAction SilentlyContinue
+            Get-ChildItem "C:\ProgramData\DSA", "C:\Program Files\DSA", "$env:PROGRAM_DIR" -ErrorAction SilentlyContinue | Format-Table FullName, Length
+            Get-Content "C:\ProgramData\DSA\logs\dsa-hostd.log" -ErrorAction SilentlyContinue
+            Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager' } -MaxEvents 15 -ErrorAction SilentlyContinue |
+              Format-List TimeCreated, Id, Message
             Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'MsiInstaller' } -MaxEvents 10 -ErrorAction SilentlyContinue |
               Format-List TimeCreated, Id, Message
             throw "dsa update failed ($code)"
@@ -190,12 +200,12 @@ jobs:
           if (Test-Path "$env:DATA_DIR\updates") { throw "the downloaded setup files are still there" }
           if (-not (Test-Path "$env:LOCALAPPDATA\DSA")) { throw "each user's Android folder must stay" }
 
-      # The upload takes files from the workspace only.
+      # The upload takes files from the workspace only, and not from hidden folders.
       - name: Collect the service's and setup's logs
         if: always()
         run: |
-          New-Item -ItemType Directory -Force .scratch\service-logs | Out-Null
-          Copy-Item "$env:DATA_DIR\logs\*" .scratch\service-logs -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force dsa\target\service-logs | Out-Null
+          Copy-Item "$env:DATA_DIR\logs\*" dsa\target\service-logs -ErrorAction SilentlyContinue
 
       - name: Keep the installer, the logs and the screenshot
         if: always()
@@ -209,4 +219,4 @@ jobs:
             install.log
             uninstall*.log
             setup-screen.png
-            .scratch/service-logs/
+            dsa/target/service-logs/
