@@ -296,7 +296,7 @@ namespace Dsa.Setup
 
         private Hyperlink Link(string text, Action open)
         {
-            var link = new Hyperlink(new Run(text)) { Style = (Style)this.FindResource("Link") };
+            var link = new Hyperlink(new Run(text)) { Style = (Style)this.FindResource("LinkStyle") };
             link.Click += (sender, e) => open();
             return link;
         }

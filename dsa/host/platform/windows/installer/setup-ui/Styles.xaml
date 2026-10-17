@@ -34,7 +34,7 @@
         <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
     </Style>
 
-    <Style x:Key="Link" TargetType="Hyperlink">
+    <Style x:Key="LinkStyle" TargetType="Hyperlink">
         <Setter Property="Foreground" Value="{DynamicResource Link}" />
         <Setter Property="TextDecorations" Value="{x:Null}" />
         <Setter Property="FocusVisualStyle" Value="{x:Null}" />
