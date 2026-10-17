@@ -85,7 +85,13 @@ jobs:
             Invoke-SetupButton ChangeButton
             Wait-SetupControl ProgramFolderBox | Out-Null
             Save-SetupScreen "$PWD\screens\$theme-change.png"
+            # Before installation starts, the folders page goes back to the first screen.
+            $back = Get-SetupText CancelButton
+            if ($back -ne 'Back') { throw "the folders page offers '$back', not Back" }
             Invoke-SetupButton CancelButton
+            Wait-SetupControl InstallButton -Enabled | Out-Null
+            $cancel = Get-SetupText CancelButton
+            if ($cancel -ne 'Cancel') { throw "the first screen offers '$cancel', not Cancel" }
             Invoke-SetupButton CancelButton
             $code = Wait-SetupExit $setup
             if ($code -ne 1602) { throw "closing setup.exe from its first screen returned $code, not 1602" }
