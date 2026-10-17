@@ -22,8 +22,15 @@ permissions:
 
 jobs:
   installer:
-    name: Build, install and uninstall the installer (windows-latest)
-    runs-on: windows-latest
+    name: Build, install and uninstall the installer (windows, ${{ matrix.version }})
+    # Server 2022 (build 20348) has the Windows 10 window manager, so setup shows its
+    # solid background and square corners there; Server 2025 (build 26100) has the
+    # Windows 11 one, with Mica and rounded corners.
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [2022, 2025]
+    runs-on: windows-${{ matrix.version }}
     defaults:
       run:
         shell: pwsh
@@ -62,6 +69,10 @@ jobs:
       # the light and the dark theme, of Change, and of the command line help.
       - name: Take pictures of setup.exe's first screens
         run: |
+          # What decides the window's look: the display adapter and the transparency setting.
+          Get-CimInstance Win32_VideoController | ForEach-Object { Write-Host "display adapter: $($_.Name)" }
+          $personalize = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -ErrorAction SilentlyContinue
+          Write-Host "EnableTransparency: $($personalize.EnableTransparency)"
           . .github/scripts/installer/setup-ui.ps1
           New-Item -ItemType Directory -Force screens | Out-Null
           foreach ($theme in 'light', 'dark') {
@@ -212,7 +223,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: installer
+          name: installer-windows-${{ matrix.version }}
           path: |
             dsa/target/installer/*.msi
             dsa/target/installer/*.cab

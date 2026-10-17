@@ -142,7 +142,7 @@
                     <ColumnDefinition Width="24" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Grid Width="24" Height="24" Margin="0,-2,0,0" VerticalAlignment="Top">
+                <Grid Width="24" Height="24" Margin="0,-1,0,0" VerticalAlignment="Top">
                     <Ellipse x:Name="ResultBadge" Fill="{DynamicResource Accent}" />
                     <Path x:Name="ResultGlyph" Width="16" Height="16" Stretch="None" StrokeThickness="1.75"
                           StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"

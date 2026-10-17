@@ -107,7 +107,8 @@ namespace Dsa.Setup
         protected override void Run()
         {
             this.dispatcher = Dispatcher.CurrentDispatcher;
-            this.Log("running the setup screens, display " + this.command.Display + ", action " + this.command.Action);
+            this.Log("running the setup screens, display " + this.command.Display + ", action " + this.command.Action +
+                     ", Windows build " + Palette.Build + (Palette.HasMica ? ", Mica and rounded corners" : ", solid background"));
             AppDomain.CurrentDomain.UnhandledException += (sender, e) => this.Log("failed: " + e.ExceptionObject);
             this.dispatcher.UnhandledException += (sender, e) =>
             {
@@ -126,6 +127,7 @@ namespace Dsa.Setup
                     this.window.Closed += (sender, e) => this.dispatcher.InvokeShutdown();
                     this.window.Show();
                     this.parentWindow = this.window.Handle;
+                    this.Log("window manager answered: " + Palette.BackdropResult);
                 }
                 else
                 {
