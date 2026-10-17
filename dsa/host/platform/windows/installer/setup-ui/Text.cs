@@ -5,7 +5,7 @@ namespace Dsa.Setup
     {
         public const string Caption = "Desktop Subsystem for Android Setup";
         public const string Title = "Desktop Subsystem for Android\u2122";
-        public const string Publisher = "thisisthepy";
+        public const string Publisher = "Thisisthepy";
         public const string Architecture = "x64";
         public const string VersionChip = "Version {0}";
         public const string AndroidChip = "Android {0}";
