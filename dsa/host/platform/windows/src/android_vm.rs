@@ -7,6 +7,7 @@ use dsa_host_core::session::GuestLauncher;
 use crate::guid::Guid;
 use crate::hcs::ComputeSystem;
 use crate::vm::AndroidVmConfig;
+use crate::vm_listener::VmIdSlot;
 
 /// How long a single HCS call (create, start, terminate) may take.
 const CALL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -22,6 +23,7 @@ pub struct AndroidVmLauncher {
     id: String,
     config: AndroidVmConfig,
     system: Option<ComputeSystem>,
+    vm_id: VmIdSlot,
 }
 
 impl AndroidVmLauncher {
@@ -31,16 +33,22 @@ impl AndroidVmLauncher {
             id: id.to_string(),
             config,
             system: None,
+            vm_id: VmIdSlot::default(),
         }
+    }
+
+    /// Holds the running VM's ID, for the control channel's listener to bind to. It is set
+    /// once the VM has started and cleared once it has stopped.
+    pub fn vm_id_slot(&self) -> VmIdSlot {
+        VmIdSlot::clone(&self.vm_id)
     }
 
     /// The running VM's ID, which the control channel's Hyper-V sockets are bound to.
     pub fn runtime_id(&self) -> Result<Guid, String> {
-        let system = self
-            .system
-            .as_ref()
-            .ok_or("the Android VM is not running")?;
-        system.runtime_id(CALL_TIMEOUT).map_err(|e| e.to_string())
+        self.vm_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .ok_or_else(|| "the Android VM is not running".to_string())
     }
 }
 
@@ -56,8 +64,15 @@ impl GuestLauncher for AndroidVmLauncher {
             .to_string();
         let system =
             ComputeSystem::create(&self.id, &document, CALL_TIMEOUT).map_err(|e| e.to_string())?;
-        // On failure the system is dropped, which closes the handle and removes the VM.
+        // On any failure below the system is dropped, which closes the handle and so
+        // removes the VM.
         system.start(CALL_TIMEOUT).map_err(|e| e.to_string())?;
+        // Without its ID nothing can reach the VM, so a VM whose ID cannot be read is of no
+        // use.
+        let vm_id = system
+            .runtime_id(CALL_TIMEOUT)
+            .map_err(|e| format!("the Android VM started but its ID could not be read: {e}"))?;
+        *self.vm_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(vm_id);
         self.system = Some(system);
         Ok(())
     }
@@ -78,6 +93,7 @@ impl GuestLauncher for AndroidVmLauncher {
             }
         }
         self.system = None;
+        *self.vm_id.lock().unwrap_or_else(|e| e.into_inner()) = None;
         Ok(())
     }
 }
