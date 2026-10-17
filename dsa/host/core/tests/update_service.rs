@@ -13,7 +13,7 @@ use dsa_host_core::host_api::UserAndroid;
 use dsa_host_core::session::{GuestLauncher, Session, SessionConfig, SessionState};
 use dsa_host_core::update::manifest::{self, FileEntry, ImageEntry, Manifest, FORMAT};
 use dsa_host_core::update::policy::InstalledImage;
-use dsa_host_core::update::service::{check, UpdateNotices, UpdatingAndroid};
+use dsa_host_core::update::service::{check, check_reporting, UpdateNotices, UpdatingAndroid};
 use dsa_host_core::update::store::{Fetch, ImageStore};
 use dsa_host_core::update::UpdateError;
 use dsa_protocol::control::Role;
@@ -104,6 +104,24 @@ fn fresh_store() -> Arc<ImageStore> {
     Arc::new(ImageStore::open(&root, &first()).unwrap())
 }
 
+/// A store as an installer without a bundled image leaves it: the first image is only a
+/// name, `none`, with no folder, so the first check downloads a real one.
+fn store_without_an_image() -> Arc<ImageStore> {
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "update-service-none-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    let none = InstalledImage {
+        version: "none".into(),
+        android_major: 0,
+        build: 0,
+    };
+    Arc::new(ImageStore::open(&root, &none).unwrap())
+}
+
 #[test]
 fn fr14_a_check_downloads_the_newer_image_and_tells_the_user() {
     let store = fresh_store();
@@ -155,6 +173,12 @@ struct StoreLauncher {
 impl GuestLauncher for StoreLauncher {
     fn start(&mut self) -> Result<(), String> {
         let current = self.store.state().map_err(|e| e.to_string())?.current;
+        if !self.store.image_dir(&current.version).is_dir() {
+            return Err(format!(
+                "booted {}, which has no image files",
+                current.version
+            ));
+        }
         if self.broken.contains(&current.version) {
             return Err(format!("{} does not boot", current.version));
         }
@@ -270,5 +294,104 @@ fn fr14_a_new_image_that_does_not_boot_is_undone_and_the_session_started_again()
     let state = store.state().unwrap();
     assert_eq!(state.current.version, "16.0.1");
     assert_eq!(state.failed, ["16.0.2"]);
+    done.store(true, Ordering::Relaxed);
+}
+
+#[test]
+fn fr14_a_check_says_which_image_it_downloads_before_it_starts() {
+    let store = store_without_an_image();
+    let fetch = server(&[16], &[("16.0.2", 16, 2)], &key());
+    let mut announced = Vec::new();
+    check_reporting(
+        &store,
+        &fetch,
+        "mem://list.json",
+        &trusted(),
+        &mut |image| {
+            assert!(
+                !store.image_dir(&image.version).exists(),
+                "announced after the download"
+            );
+            announced.push(image.version.clone());
+        },
+    )
+    .unwrap();
+    assert_eq!(announced, ["16.0.2"]);
+    // Up to date: nothing to announce.
+    store.confirm().unwrap();
+    check_reporting(
+        &store,
+        &fetch,
+        "mem://list.json",
+        &trusted(),
+        &mut |image| panic!("announced {} with nothing to download", image.version),
+    )
+    .unwrap();
+}
+
+#[test]
+fn fr14_starting_before_any_image_is_downloaded_says_so_and_boots_nothing() {
+    let store = store_without_an_image();
+    let (android, done) = updating_android(&store, &[]);
+    android.start();
+    assert_eq!(android.state(), SessionState::Stopped);
+    let reason = android.last_reason().unwrap_or_default();
+    assert!(
+        reason.contains("no Android image is installed yet"),
+        "{reason}"
+    );
+    done.store(true, Ordering::Relaxed);
+}
+
+#[test]
+fn fr14_the_first_image_downloaded_after_installation_boots() {
+    let store = store_without_an_image();
+    check(
+        &store,
+        &server(&[16], &[("16.0.2", 16, 2)], &key()),
+        "mem://list.json",
+        &trusted(),
+    )
+    .unwrap();
+    let (android, done) = updating_android(&store, &[]);
+    android.start();
+    assert_eq!(wait_for_notice(&android), "Android 16.0.2 is installed");
+    assert!(android.session.wait_for(SessionState::Active, WAIT));
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "16.0.2");
+    assert!(!state.on_trial);
+    done.store(true, Ordering::Relaxed);
+}
+
+#[test]
+fn fr14_a_first_image_that_does_not_boot_is_given_up_without_booting_the_placeholder() {
+    let store = store_without_an_image();
+    check(
+        &store,
+        &server(&[16], &[("16.0.2", 16, 2)], &key()),
+        "mem://list.json",
+        &trusted(),
+    )
+    .unwrap();
+    let (android, done) = updating_android(&store, &["16.0.2"]);
+    android.start();
+    let notice = wait_for_notice(&android);
+    assert!(
+        notice.starts_with("Android 16.0.2 did not start") && notice.contains("another image"),
+        "{notice}"
+    );
+    assert_eq!(android.state(), SessionState::Stopped);
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "none");
+    assert_eq!(state.failed, ["16.0.2"]);
+    // The next check moves on to an image that has not failed.
+    let next = check(
+        &store,
+        &server(&[16], &[("16.0.2", 16, 2), ("16.0.1", 16, 1)], &key()),
+        "mem://list.json",
+        &trusted(),
+    )
+    .unwrap();
+    assert!(next.unwrap_or_default().contains("16.0.1"));
     done.store(true, Ordering::Relaxed);
 }
