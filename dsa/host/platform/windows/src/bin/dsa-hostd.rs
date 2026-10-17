@@ -160,12 +160,13 @@ mod windows_host {
         } else {
             None
         };
-        let launcher = AndroidVmLauncher::new(
-            &config.vm_name,
-            config
-                .vm_config(fallback_sid.as_deref())
-                .map_err(|e| e.to_string())?,
-        );
+        let vm = config
+            .vm_config(fallback_sid.as_deref())
+            .map_err(|e| e.to_string())?;
+        let user = config.user_sid.clone().or(fallback_sid).unwrap_or_default();
+        let console_log = config.console_log_path(&user, &vm.data_disk);
+        println!("the Android console is kept in {}", console_log.display());
+        let launcher = AndroidVmLauncher::new(&config.vm_name, vm).with_console_log(console_log);
         let service = Guid::vsock_service(config.control_port);
         let listener = VmBoundListener::new(
             launcher.vm_id_slot(),
