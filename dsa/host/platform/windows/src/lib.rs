@@ -18,6 +18,13 @@
 //! - [`account`]: the Windows account the host runs as (Windows only).
 //! - [`wsl`]: a launcher for a container in WSL, kept for a later second backend.
 
+/// The DSA release this program belongs to. The installer build sets `DSA_VERSION` to the
+/// release's version; a plain `cargo build` falls back to the crate's version.
+pub const VERSION: &str = match option_env!("DSA_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 #[cfg(windows)]
 pub mod account;
 #[cfg(windows)]

@@ -99,7 +99,7 @@ impl Fetch for WinHttpFetch {
             (host, path)
         };
 
-        let agent = wide(concat!("DSA/", env!("CARGO_PKG_VERSION")));
+        let agent = wide(&format!("DSA/{}", crate::VERSION));
         // SAFETY: a NUL-terminated agent string; the proxy follows the system settings.
         let session = Handle::new(
             unsafe {

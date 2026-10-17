@@ -347,3 +347,38 @@ fn fr14_nothing_new_is_staged_while_an_image_is_on_trial() {
         .unwrap_err();
     assert!(matches!(error, UpdateError::Refused(_)), "{error}");
 }
+
+#[test]
+fn fr14_an_image_that_failed_under_another_dsa_build_is_tried_again() {
+    // A failure recorded before builds were recorded (0.1.0) is not held against the image.
+    let (store, root, manifest) = staged_store();
+    let mut guest = FakeGuest {
+        broken: vec!["16.0.2".into()],
+        booted: vec![],
+        halts: 0,
+    };
+    trial::start(&store, &mut guest, Duration::from_secs(120)).unwrap();
+    assert_eq!(store.state().unwrap().failed, ["16.0.2"]);
+    let first = installed("ignored", 1, 1);
+    let store = ImageStore::open_as(&root, &first, "dsa-hostd 0.1.1").unwrap();
+    let state = store.state().unwrap();
+    assert!(state.failed.is_empty(), "{state:?}");
+    assert_eq!(
+        decide(&state.current, &manifest, &state.failed),
+        Decision::Apply(manifest.images[0].clone())
+    );
+
+    // The same build remembers its own failure; the next build tries the image again.
+    store
+        .stage(
+            &manifest.images[0],
+            &manifest,
+            &serving(&[("16.0.2", b"second image")]),
+        )
+        .unwrap();
+    trial::start(&store, &mut guest, Duration::from_secs(120)).unwrap();
+    let same = ImageStore::open_as(&root, &first, "dsa-hostd 0.1.1").unwrap();
+    assert_eq!(same.state().unwrap().failed, ["16.0.2"]);
+    let next = ImageStore::open_as(&root, &first, "dsa-hostd 0.1.2").unwrap();
+    assert!(next.state().unwrap().failed.is_empty());
+}
