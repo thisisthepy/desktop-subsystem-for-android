@@ -123,3 +123,44 @@ fn fr14_an_image_folder_becomes_a_list_entry_from_its_image_json() {
     ]);
     assert!(!ok && err.contains("initrd.img"), "{err}");
 }
+
+#[test]
+fn fr15_a_program_list_written_and_signed_by_the_release_tool_is_accepted() {
+    use dsa_host_core::update::program;
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("release-program-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let key = dir.join("secret.key");
+    let key = key.to_str().unwrap();
+    let (ok, public, err) = tool(&["keygen", key]);
+    assert!(ok, "{err}");
+
+    let setup = dir.join("setup-0.1.1.exe");
+    std::fs::write(&setup, b"a setup file").unwrap();
+    let url = "https://example.invalid/releases/download/v0.1.1/setup-0.1.1.exe";
+    let (ok, list, err) = tool(&["program", "0.1.1", url, setup.to_str().unwrap()]);
+    assert!(ok, "{err}");
+    let list_path = dir.join("program.json");
+    std::fs::write(&list_path, format!("{list}\n")).unwrap();
+    let list_path = list_path.to_str().unwrap();
+    let (ok, _, err) = tool(&["sign", key, list_path]);
+    assert!(ok, "{err}");
+    let (ok, out, err) = tool(&["verify-program", &public, list_path]);
+    assert!(ok && out.contains("DSA 0.1.1"), "{out} {err}");
+
+    let bytes = std::fs::read(list_path).unwrap();
+    let signature = std::fs::read_to_string(format!("{list_path}.sig")).unwrap();
+    let trusted = [manifest::parse_key(&public).unwrap()];
+    let list = program::verify(&bytes, &signature, &trusted).unwrap();
+    assert_eq!(list.version, "0.1.1");
+    assert_eq!(list.setup.url, url);
+    assert_eq!(list.setup.size, 12);
+
+    // The image list's check does not take a program list, and the other way round.
+    let (ok, _, err) = tool(&["verify", &public, list_path]);
+    assert!(!ok && err.contains("not usable"), "{err}");
+
+    let (ok, _, err) = tool(&["program", "0.1.1-beta", url, setup.to_str().unwrap()]);
+    assert!(!ok && err.contains("dot-separated numbers"), "{err}");
+}

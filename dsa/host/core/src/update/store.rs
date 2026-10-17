@@ -266,6 +266,8 @@ struct Hashing<'a, W> {
     hash: Sha256,
     written: u64,
     limit: u64,
+    /// The list the expected size comes from, for the error.
+    list: &'a str,
     /// Told the bytes written so far, after every write.
     progress: &'a mut dyn FnMut(u64),
 }
@@ -273,7 +275,10 @@ struct Hashing<'a, W> {
 impl<W: Write> Write for Hashing<'_, W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.written + buf.len() as u64 > self.limit {
-            return Err(io::Error::other("longer than the release list says"));
+            return Err(io::Error::other(format!(
+                "longer than the {} says",
+                self.list
+            )));
         }
         let n = self.inner.write(buf)?;
         self.hash.update(&buf[..n]);
@@ -286,44 +291,96 @@ impl<W: Write> Write for Hashing<'_, W> {
     }
 }
 
+/// Why [`download_checked`] failed.
+pub(crate) enum DownloadFailure {
+    /// The download failed, or what arrived is not what the list describes.
+    Download(String),
+    /// Writing the file failed.
+    Store(String),
+}
+
+/// What a signed list says about one file: where it is, its size and its SHA-256.
+pub(crate) struct Expected<'a> {
+    /// The file's name in messages.
+    pub name: &'a str,
+    pub url: &'a str,
+    pub size: u64,
+    /// SHA-256 in hexadecimal, already checked to be well formed.
+    pub sha256: &'a str,
+    /// The list that describes the file, for messages: "release list", "program list".
+    pub list: &'a str,
+}
+
+/// Downloads `file` to `path`, refusing it as soon as it is longer than the list says and
+/// at the end when its size or SHA-256 differs. The file is left behind on failure; the
+/// caller removes it.
+pub(crate) fn download_checked(
+    file: &Expected,
+    path: &Path,
+    fetch: &dyn Fetch,
+    progress: &mut dyn FnMut(u64),
+) -> Result<(), DownloadFailure> {
+    let stored = |what: &str, e: &dyn std::fmt::Display| {
+        DownloadFailure::Store(format!("{what} {}: {e}", path.display()))
+    };
+    let out = fs::File::create(path).map_err(|e| stored("creating", &e))?;
+    let mut writer = Hashing {
+        inner: io::BufWriter::new(out),
+        hash: Sha256::new(),
+        written: 0,
+        limit: file.size,
+        list: file.list,
+        progress,
+    };
+    fetch
+        .fetch(file.url, &mut writer)
+        .map_err(|e| DownloadFailure::Download(format!("{}: {e}", file.name)))?;
+    writer.flush().map_err(|e| stored("writing", &e))?;
+    let written = writer.written;
+    let actual: [u8; 32] = writer.hash.finalize().into();
+    let file_handle = writer
+        .inner
+        .into_inner()
+        .map_err(|e| stored("writing", &e.into_error()))?;
+    file_handle.sync_all().map_err(|e| stored("writing", &e))?;
+    if written != file.size {
+        return Err(DownloadFailure::Download(format!(
+            "{} is {written} bytes; the {} says {}",
+            file.name, file.list, file.size
+        )));
+    }
+    let expected = from_hex::<32>(file.sha256).expect("checked when the list was verified");
+    if actual != expected {
+        return Err(DownloadFailure::Download(format!(
+            "{} has SHA-256 {}; the {} says {}",
+            file.name,
+            to_hex(&actual),
+            file.list,
+            file.sha256
+        )));
+    }
+    Ok(())
+}
+
 fn download(
     file: &super::manifest::FileEntry,
     folder: &Path,
     fetch: &dyn Fetch,
     progress: &mut dyn FnMut(u64),
 ) -> Result<(), UpdateError> {
-    let path = folder.join(&file.name);
-    let out = fs::File::create(&path).map_err(|e| store_error("creating", &path, e))?;
-    let mut writer = Hashing {
-        inner: io::BufWriter::new(out),
-        hash: Sha256::new(),
-        written: 0,
-        limit: file.size,
-        progress,
+    let expected = Expected {
+        name: &file.name,
+        url: &file.url,
+        size: file.size,
+        sha256: &file.sha256,
+        list: "release list",
     };
-    fetch
-        .fetch(&file.url, &mut writer)
-        .map_err(|e| UpdateError::Download(format!("{}: {e}", file.name)))?;
-    writer
-        .flush()
-        .map_err(|e| store_error("writing", &path, e))?;
-    if writer.written != file.size {
-        return Err(UpdateError::Download(format!(
-            "{} is {} bytes; the release list says {}",
-            file.name, writer.written, file.size
-        )));
-    }
-    let actual: [u8; 32] = writer.hash.finalize().into();
-    let expected = from_hex::<32>(&file.sha256).expect("checked when the list was verified");
-    if actual != expected {
-        return Err(UpdateError::Download(format!(
-            "{} has SHA-256 {}; the release list says {}",
-            file.name,
-            to_hex(&actual),
-            file.sha256
-        )));
-    }
-    Ok(())
+    download_checked(&expected, &folder.join(&file.name), fetch, progress).map_err(|failure| {
+        match failure {
+            DownloadFailure::Download(why) => UpdateError::Download(why),
+            DownloadFailure::Store(why) => UpdateError::Store(why),
+        }
+    })
 }
 
 /// Reads all of a `Read`, for small files such as the release list.

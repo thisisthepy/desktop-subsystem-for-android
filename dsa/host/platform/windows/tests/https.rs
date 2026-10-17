@@ -68,3 +68,26 @@ fn fr14_other_schemes_are_refused() {
         .unwrap_err();
     assert!(!error.is_empty());
 }
+
+#[test]
+fn fr15_a_mirror_on_a_drive_is_read_as_a_file_and_the_web_through_winhttp() {
+    use dsa_host_windows::https::UrlFetch;
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("mirror {}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("program.json");
+    std::fs::write(&file, b"{}").unwrap();
+    let mut body = Vec::new();
+    UrlFetch::default()
+        .fetch(file.to_str().unwrap(), &mut body)
+        .unwrap();
+    assert_eq!(body, b"{}");
+
+    let (base, server) = serve_once("200 OK", b"from the web".to_vec());
+    let mut body = Vec::new();
+    UrlFetch::default()
+        .fetch(&format!("{base}/program.json"), &mut body)
+        .unwrap();
+    assert_eq!(body, b"from the web");
+    assert_eq!(server.join().unwrap(), "GET /program.json HTTP/1.1");
+}
