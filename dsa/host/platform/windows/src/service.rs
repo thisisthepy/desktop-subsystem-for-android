@@ -64,6 +64,7 @@ pub fn create_user_android(
         prepare_user_data_disk(&user.config.data_disk, user.data_disk_size_gb)?;
     }
     let disk_size_gb = user.data_disk_size_gb;
+    let console_log = user.console_log.clone();
     let launcher = match updates {
         None => AndroidVmLauncher::new(&user.vm_name, user.config),
         Some(updates) => {
@@ -86,11 +87,13 @@ pub fn create_user_android(
                     vm.initrd = files.initrd;
                     vm.kernel_cmdline = files.kernel_cmdline;
                     vm.system_image = files.system_image;
+                    vm.image_version = Some(current.version.clone());
                     Ok(vm)
                 }),
             )
         }
-    };
+    }
+    .with_console_log(console_log);
     let service = Guid::vsock_service(config.control_port);
     let listener = VmBoundListener::new(
         launcher.vm_id_slot(),

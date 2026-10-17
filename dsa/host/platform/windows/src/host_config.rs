@@ -38,7 +38,7 @@ use dsa_host_core::update::policy::InstalledImage;
 use dsa_host_core::update::program_service::ProgramSettings;
 use ed25519_dalek::VerifyingKey;
 
-use crate::vm::{is_sid, AndroidVmConfig};
+use crate::vm::{console_pipe_path, is_sid, AndroidVmConfig};
 
 /// `<dir>\<sid>\data.vhdx`. Built as text so it is a Windows path on every platform the
 /// tests run on.
@@ -68,6 +68,16 @@ pub struct UserVm {
     /// The disk is in the user's own profile, which already admits only them, SYSTEM and
     /// administrators. A disk under `data_dir` is in a folder the service protects itself.
     pub disk_in_profile: bool,
+    /// Where the VM's console output is kept, `android-<SID>.log`.
+    pub console_log: PathBuf,
+}
+
+/// `name` in the folder that holds `path`, a Windows path. Split as text, so it is a
+/// Windows path on every platform the tests run on.
+fn beside(path: &std::path::Path, name: &str) -> Option<PathBuf> {
+    let text = path.to_string_lossy();
+    let end = text.rfind(['\\', '/'])?;
+    Some(PathBuf::from(format!("{}{name}", &text[..=end])))
 }
 
 /// Finds a user's local application data folder from their SID.
@@ -310,15 +320,7 @@ impl HostConfig {
         let Some(dir) = &update.program_dir else {
             return Ok(None);
         };
-        // Split as text, so it is a Windows path on every platform the tests run on.
-        let log_dir = self
-            .log_file
-            .as_ref()
-            .and_then(|log| {
-                let log = log.to_string_lossy();
-                log.rfind(['\\', '/']).map(|end| PathBuf::from(&log[..end]))
-            })
-            .unwrap_or_else(|| dir.clone());
+        let log_dir = self.log_dir().unwrap_or_else(|| dir.clone());
         Ok(Some(ProgramSettings {
             list_url: update.program_list_url.clone(),
             enabled: update.program,
@@ -329,6 +331,26 @@ impl HostConfig {
             stop_timeout: Duration::from_secs(self.stop_timeout_secs + 15),
             settle: Duration::from_secs(60),
         }))
+    }
+
+    /// The service's log folder: the folder of `log_file`, when there is one. Split as
+    /// text, so it is a Windows path on every platform the tests run on.
+    fn log_dir(&self) -> Option<PathBuf> {
+        self.log_file.as_ref().and_then(|log| {
+            let log = log.to_string_lossy();
+            log.rfind(['\\', '/']).map(|end| PathBuf::from(&log[..end]))
+        })
+    }
+
+    /// Where the console of `user`'s VM is kept: `android-<user>.log` in the service's log
+    /// folder, or beside the user's disk `data_disk` when the file names no log.
+    pub fn console_log_path(&self, user: &str, data_disk: &std::path::Path) -> PathBuf {
+        let name = format!("android-{user}.log");
+        self.log_file
+            .as_deref()
+            .and_then(|log| beside(log, &name))
+            .or_else(|| beside(data_disk, &name))
+            .unwrap_or_else(|| PathBuf::from(name))
     }
 
     /// The VM configuration for running one VM by hand. `fallback_sid` is used when the file
@@ -387,12 +409,14 @@ impl HostConfig {
             ),
         };
         let vm_name = format!("{}-{sid}", self.vm_name);
+        let console_log = self.console_log_path(sid, &disk);
         let config = self.base_vm_config(&vm_name, disk, vec![sid.into()]);
         Ok(UserVm {
             vm_name,
             config,
             data_disk_size_gb: self.data_disk_size_gb,
             disk_in_profile,
+            console_log,
         })
     }
 
@@ -469,6 +493,11 @@ impl HostConfig {
             data_disk,
             socket_sids,
             page_reporting_order: self.page_reporting_order,
+            console_pipe: Some(console_pipe_path(vm_name)),
+            image_version: match (&self.system_image, &self.first_image) {
+                (None, Some(first)) => Some(first.version.clone()),
+                _ => None,
+            },
         }
     }
 

@@ -47,7 +47,7 @@ pub const DEFAULT_PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)";
 
 const BUFFER_SIZE: u32 = 64 * 1024;
 
-fn wide(text: &str) -> Vec<u16> {
+pub(crate) fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
@@ -60,7 +60,7 @@ pub fn pipe_path(name: &str) -> String {
     format!(r"\\.\pipe\{name}")
 }
 
-struct OwnedHandle(HANDLE);
+pub(crate) struct OwnedHandle(pub(crate) HANDLE);
 
 impl Drop for OwnedHandle {
     fn drop(&mut self) {
@@ -72,7 +72,7 @@ impl Drop for OwnedHandle {
 // SAFETY: kernel handles may be used from any thread.
 unsafe impl Send for OwnedHandle {}
 
-fn new_event() -> io::Result<OwnedHandle> {
+pub(crate) fn new_event() -> io::Result<OwnedHandle> {
     // SAFETY: an unnamed, manual-reset, initially unset event.
     let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
     if event.is_null() {
@@ -81,7 +81,7 @@ fn new_event() -> io::Result<OwnedHandle> {
     Ok(OwnedHandle(event))
 }
 
-fn millis(timeout: Option<Duration>) -> u32 {
+pub(crate) fn millis(timeout: Option<Duration>) -> u32 {
     match timeout {
         None => u32::MAX, // INFINITE
         Some(timeout) => timeout.as_millis().clamp(1, u32::MAX as u128 - 1) as u32,
@@ -97,7 +97,7 @@ fn is_closed_pipe(error: &io::Error) -> bool {
 }
 
 /// One end of a connected pipe.
-struct PipeStream {
+pub(crate) struct PipeStream {
     /// `None` once shut down: closing the handle is what lets the peer read end of stream
     /// after the data already in the pipe.
     handle: Option<OwnedHandle>,
@@ -106,7 +106,7 @@ struct PipeStream {
 }
 
 impl PipeStream {
-    fn new(handle: OwnedHandle) -> io::Result<PipeStream> {
+    pub(crate) fn new(handle: OwnedHandle) -> io::Result<PipeStream> {
         Ok(PipeStream {
             handle: Some(handle),
             event: new_event()?,

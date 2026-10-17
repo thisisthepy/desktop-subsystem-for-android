@@ -8,7 +8,11 @@
 //!   command line);
 //! - the kernel booted directly (`LinuxKernelDirect`), straight into Android's init;
 //! - the system image attached read only, the user data on a disk that may stay sparse;
-//! - Hyper-V sockets limited to SYSTEM and the user the VM belongs to.
+//! - Hyper-V sockets limited to SYSTEM and the user the VM belongs to;
+//! - the guest's console on the first serial port, which HCS connects to a named pipe the
+//!   host serves, as WSL does for its debug console. A Linux guest prints there from the
+//!   first instruction (`earlycon`), so a boot that fails before Android's agent connects
+//!   still leaves a record of why.
 //!
 //! This module only builds the document, so it is tested on every platform. Creating the
 //! VM from it is `hcs` (Windows only).
@@ -22,6 +26,19 @@ use crate::guid::Guid;
 
 /// HCS allocates VM memory in 2 MiB units.
 const MEMORY_GRANULARITY_MB: u32 = 2;
+
+/// The kernel's console: the first serial port (COM1, I/O port 0x3f8) from the first
+/// instruction through `earlycon`, then the 8250 driver. HCS connects that port to the
+/// console pipe.
+pub const CONSOLE_CMDLINE: &str = "earlycon=uart8250,io,0x3f8,115200 console=ttyS0,115200";
+
+const PIPE_PREFIX: &str = r"\\.\pipe\";
+
+/// The pipe the console of VM `vm_name` is served on: `\\.\pipe\dsa-console-<vm_name>`.
+/// Each user's VM has its own name, so each has its own pipe.
+pub fn console_pipe_path(vm_name: &str) -> String {
+    format!("{PIPE_PREFIX}dsa-console-{vm_name}")
+}
 
 /// Everything needed to describe the Android VM.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +66,11 @@ pub struct AndroidVmConfig {
     /// Free page reporting granularity, as a page order (5 is 128 KiB, 9 is 2 MiB). WSL uses
     /// 5 on recent Windows builds and 9 on older ones.
     pub page_reporting_order: u8,
+    /// The named pipe (`\\.\pipe\...`) HCS connects the guest's serial console to. The
+    /// host must serve it before the VM starts; without it the VM has no serial port.
+    pub console_pipe: Option<String>,
+    /// The version of the image booted, for the console log. It does not change the VM.
+    pub image_version: Option<String>,
 }
 
 /// Why a configuration cannot describe a VM.
@@ -124,6 +146,15 @@ impl AndroidVmConfig {
         if let Some(bad) = self.socket_sids.iter().find(|sid| !is_sid(sid)) {
             return Err(ConfigError(format!("{bad:?} is not a SID (S-1-...)")));
         }
+        if let Some(pipe) = &self.console_pipe {
+            let name = pipe.strip_prefix(PIPE_PREFIX).unwrap_or_default();
+            if name.is_empty() || name.contains(['\\', '/', '"']) {
+                return Err(ConfigError(format!(
+                    "the console pipe {pipe:?} must be {PIPE_PREFIX}<name>, with no slashes \
+                     or quotes in the name"
+                )));
+            }
+        }
         Ok(memory_mb)
     }
 
@@ -140,7 +171,7 @@ impl AndroidVmConfig {
     /// The kernel command line: the settings the VM needs, then [`kernel_cmdline`](Self::kernel_cmdline).
     pub fn full_kernel_cmdline(&self) -> String {
         let mut cmdline = format!(
-            "console=hvc0 panic=-1 page_reporting.page_reporting_order={}",
+            "{CONSOLE_CMDLINE} panic=-1 page_reporting.page_reporting_order={}",
             self.page_reporting_order
         );
         if !self.kernel_cmdline.trim().is_empty() {
@@ -167,6 +198,23 @@ impl AndroidVmConfig {
             "ReadOnly": false,
             "AlwaysAllowSparseFiles": true,
         });
+        let mut devices = json!({
+            "Scsi": {
+                "0": {
+                    "Attachments": Value::Null,
+                },
+            },
+            "HvSocket": {
+                "HvSocketConfig": {
+                    "DefaultBindSecurityDescriptor": sddl,
+                    "DefaultConnectSecurityDescriptor": sddl,
+                },
+            },
+        });
+        if let Some(pipe) = &self.console_pipe {
+            // Port "0" is COM1, the port CONSOLE_CMDLINE names.
+            devices["ComPorts"] = json!({ "0": { "NamedPipe": pipe } });
+        }
         let attachments = match &self.system_image {
             Some(system) => json!({
                 "0": { "Type": "VirtualDisk", "Path": path_string(system), "ReadOnly": true },
@@ -174,6 +222,7 @@ impl AndroidVmConfig {
             }),
             None => json!({ "0": data }),
         };
+        devices["Scsi"]["0"]["Attachments"] = attachments;
         Ok(json!({
             "Owner": self.owner,
             "SchemaVersion": { "Major": 2, "Minor": 3 },
@@ -193,19 +242,7 @@ impl AndroidVmConfig {
                     },
                     "Processor": { "Count": self.processors },
                 },
-                "Devices": {
-                    "Scsi": {
-                        "0": {
-                            "Attachments": attachments,
-                        },
-                    },
-                    "HvSocket": {
-                        "HvSocketConfig": {
-                            "DefaultBindSecurityDescriptor": sddl,
-                            "DefaultConnectSecurityDescriptor": sddl,
-                        },
-                    },
-                },
+                "Devices": devices,
             },
         }))
     }
