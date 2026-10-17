@@ -341,21 +341,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "publishing the installer failed" }
 
       # The installed services read this list to update themselves to this version. It
-      # names the setup file as published above, and is signed with the image list's key.
+      # names the setup file as published above (and hashes that file), and is signed with the
+      # image list's key.
       - name: Write, sign and check the program list
         env:
           SIGNING_KEY: ${{ secrets.DSA_RELEASE_SIGNING_KEY }}
         run: |
           if (-not $env:SIGNING_KEY) { throw "The DSA_RELEASE_SIGNING_KEY secret is not set; see the top of this workflow." }
           $version = '${{ inputs.installer_version }}'
-          $asset = "setup-$version.exe"
+          # The asset the step above published, under its release name.
+          $asset = "DSA-$version-win-x64-setup.exe"
           $url = "https://github.com/${{ github.repository }}/releases/download/v$version/$asset"
           Push-Location dsa
           cargo build -q --release -p dsa-host-core --bin dsa-release
           if ($LASTEXITCODE -ne 0) { throw "building dsa-release failed" }
           Pop-Location
           $tool = "dsa\target\release\dsa-release.exe"
-          $list = & $tool program $version $url "dsa\target\installer\$asset"
+          $list = & $tool program $version $url "dsa\target\release-assets\$asset"
           if ($LASTEXITCODE -ne 0) { throw "writing the program list failed" }
           ($list -join "`n") + "`n" | Set-Content -NoNewline -Encoding utf8NoBOM program.json
           $key = Join-Path $env:RUNNER_TEMP "release.key"
