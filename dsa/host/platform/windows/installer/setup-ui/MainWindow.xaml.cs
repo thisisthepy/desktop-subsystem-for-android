@@ -180,6 +180,8 @@ namespace Dsa.Setup
 
             bool passive = this.app.Display != Display.Full;
             this.CancelButton.Visibility = Visible(screen == Screen.Detecting || screen == Screen.Install || screen == Screen.Options || screen == Screen.Progress);
+            // The folders page is a step before installation, so its way out goes back.
+            this.CancelButton.Content = screen == Screen.Options ? Text.BackButton : Text.CancelButton;
             this.CloseButton.Visibility = Visible(screen == Screen.Maintenance || close);
             this.UninstallButton.Visibility = Visible(screen == Screen.Maintenance);
             this.RepairButton.Visibility = Visible(screen == Screen.Maintenance);

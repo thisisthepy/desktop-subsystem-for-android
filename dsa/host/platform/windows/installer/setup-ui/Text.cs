@@ -87,6 +87,7 @@ namespace Dsa.Setup
 
         public const string InstallButton = "Install";
         public const string CancelButton = "Cancel";
+        public const string BackButton = "Back";
         public const string CloseButton = "Close";
         public const string DoneButton = "Done";
         public const string OkButton = "OK";
