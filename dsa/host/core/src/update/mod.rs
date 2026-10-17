@@ -15,10 +15,19 @@
 //!
 //! - [`service`]: the periodic check and a user's Android that boots a new image on trial.
 //!
+//! Updating DSA itself follows the same pattern:
+//!
+//! - [`program`]: the signed program list, which names the newest release and its setup
+//!   file, and the rule that only a newer version is ever installed.
+//! - [`program_service`]: downloading that setup file, running it once no user's Android
+//!   is running (or at once when a user asks), and telling the users how it went.
+//!
 //! Downloading is behind [`store::Fetch`]; the platform crates supply HTTPS.
 
 pub mod manifest;
 pub mod policy;
+pub mod program;
+pub mod program_service;
 pub mod service;
 pub mod store;
 pub mod trial;
