@@ -5,6 +5,7 @@
 //! - [`hvsocket`]: the control channel's transport, Hyper-V sockets (Windows only).
 //! - [`pipe`]: the local API over a named pipe (Windows only).
 //! - [`https`]: downloads for image updates, through WinHTTP (Windows only).
+//! - [`gpt`]: finding and copying the partitions of a user's Android disk.
 //! - [`guid`]: the VM and service IDs those sockets are addressed by.
 //! - [`vm_listener`]: a control channel listener that follows the VM's ID across restarts.
 //! - [`host_config`]: the configuration file `dsa-hostd` reads.
@@ -20,6 +21,7 @@
 pub mod account;
 #[cfg(windows)]
 pub mod android_vm;
+pub mod gpt;
 pub mod guid;
 #[cfg(windows)]
 pub mod hcs;
