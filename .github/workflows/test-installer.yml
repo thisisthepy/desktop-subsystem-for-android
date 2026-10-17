@@ -69,6 +69,10 @@ jobs:
       # the light and the dark theme, of Change, and of the command line help.
       - name: Take pictures of setup.exe's first screens
         run: |
+          # What decides the window's look: the display adapter and the transparency setting.
+          Get-CimInstance Win32_VideoController | ForEach-Object { Write-Host "display adapter: $($_.Name)" }
+          $personalize = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -ErrorAction SilentlyContinue
+          Write-Host "EnableTransparency: $($personalize.EnableTransparency)"
           . .github/scripts/installer/setup-ui.ps1
           New-Item -ItemType Directory -Force screens | Out-Null
           foreach ($theme in 'light', 'dark') {

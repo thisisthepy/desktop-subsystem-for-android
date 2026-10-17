@@ -127,6 +127,7 @@ namespace Dsa.Setup
                     this.window.Closed += (sender, e) => this.dispatcher.InvokeShutdown();
                     this.window.Show();
                     this.parentWindow = this.window.Handle;
+                    this.Log("window manager answered: " + Palette.BackdropResult);
                 }
                 else
                 {
