@@ -252,8 +252,9 @@ impl UserAndroid for UpdatingAndroid {
                     failed.version, image.version
                 ),
                 Ok(Outcome::GaveUp { failed, reason }) => format!(
-                    "Android {} did not start ({reason}); no other image is installed, so the \
-                     service will download another image and Android can start once it has",
+                    "Android {} did not start ({reason}); no other image is installed. The \
+                     service downloads another image if there is one, and the next \
+                     version of DSA tries this one again",
                     failed.version
                 ),
                 Err(error) => error.to_string(),

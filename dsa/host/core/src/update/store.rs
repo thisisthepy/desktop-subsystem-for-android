@@ -51,13 +51,19 @@ pub struct State {
     /// Set while `current` has not yet booted here.
     #[serde(default)]
     pub on_trial: bool,
-    /// Versions that failed to boot here and are not tried again.
+    /// Versions that failed to boot here and are not tried again by the same build.
     #[serde(default)]
     pub failed: Vec<String>,
+    /// The DSA build that saw them fail. A failure can be the host's fault rather than the
+    /// image's, so a new build of the host tries those images again.
+    #[serde(default)]
+    pub failed_build: Option<String>,
 }
 
 pub struct ImageStore {
     root: PathBuf,
+    /// The DSA build using the store, recorded with each failure.
+    build: Option<String>,
 }
 
 fn store_error(what: &str, path: &Path, error: impl std::fmt::Display) -> UpdateError {
@@ -68,8 +74,34 @@ impl ImageStore {
     /// Opens a store whose first image is already in `images/<version>/`, as the installer
     /// leaves it. Creates the state when there is none.
     pub fn open(root: &Path, installed: &InstalledImage) -> Result<ImageStore, UpdateError> {
+        Self::open_with(root, installed, None)
+    }
+
+    /// [`open`](Self::open) for the DSA build `build`. Images that failed under another
+    /// build, or under one that did not record itself, may be tried again.
+    pub fn open_as(
+        root: &Path,
+        installed: &InstalledImage,
+        build: &str,
+    ) -> Result<ImageStore, UpdateError> {
+        let store = Self::open_with(root, installed, Some(build.to_string()))?;
+        let mut state = store.state()?;
+        if !state.failed.is_empty() && state.failed_build.as_deref() != Some(build) {
+            state.failed.clear();
+            state.failed_build = None;
+            store.write_state(&state)?;
+        }
+        Ok(store)
+    }
+
+    fn open_with(
+        root: &Path,
+        installed: &InstalledImage,
+        build: Option<String>,
+    ) -> Result<ImageStore, UpdateError> {
         let store = ImageStore {
             root: root.to_path_buf(),
+            build,
         };
         if !store.state_path().exists() {
             if !is_plain_name(&installed.version) {
@@ -83,6 +115,7 @@ impl ImageStore {
                 previous: None,
                 on_trial: false,
                 failed: Vec::new(),
+                failed_build: None,
             })?;
         }
         store.state()?;
@@ -204,6 +237,7 @@ impl ImageStore {
         })?;
         let failed = std::mem::replace(&mut state.current, previous);
         state.failed.push(failed.version.clone());
+        state.failed_build = self.build.clone();
         state.on_trial = false;
         self.write_state(&state)?;
         let _ = fs::remove_dir_all(self.image_dir(&failed.version));
