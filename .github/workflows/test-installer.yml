@@ -1,7 +1,7 @@
 # Builds the Windows installer and checks it on a real Windows machine: installs the
 # package, checks the service and the dsa command, shows setup.exe's first screen, and
 # uninstalls. The kernel and the Android image are built elsewhere, so the package here
-# carries a placeholder kernel and no image.
+# carries a placeholder kernel and a small stand-in image laid out like a real one.
 
 name: Installer test
 
@@ -34,11 +34,22 @@ jobs:
           dotnet tool install --global wix --version 5.0.2
           wix --version
 
+      - name: Make a stand-in image
+        run: |
+          $dir = New-Item -ItemType Directory -Force .scratch\stand-in-image
+          Set-Content -Path "$dir\disk.vhdx" -Value "a disk" -NoNewline
+          Set-Content -Path "$dir\initrd.img" -Value "a ramdisk" -NoNewline
+          Set-Content -Path "$dir\bzImage" -Value "a kernel" -NoNewline
+          @{ version = "17.0.0-1"; android_major = 17; build = 1; kernel_cmdline = "console=ttyS0";
+             files = @{ "disk.vhdx" = @{}; "initrd.img" = @{}; "bzImage" = @{} } } |
+            ConvertTo-Json -Depth 4 | Set-Content -Path "$dir\image.json"
+
       # The runner's account is not an interactive user, which the default pipe access
       # would not admit, so the test build also admits authenticated users.
       - name: Build the package and setup.exe
         run: >
           dsa/host/platform/windows/installer/build.ps1 -Version 0.1.0 -PlaceholderKernel
+          -ImageDir .scratch\stand-in-image
           -PipeSddl "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)"
 
       - name: Install the package
@@ -58,6 +69,18 @@ jobs:
           if ($acl -notmatch 'S-1-5-83-0') { throw "the VMs cannot read the data folder" }
           if ($acl -match ';;;BU\)') { throw "users can open the service's data folder" }
           Get-Content 'C:\ProgramData\DSA\logs\dsa-hostd.log'
+
+      - name: Check the first image and the configuration that names it
+        run: |
+          $image = 'C:\ProgramData\DSA\images\images\17.0.0-1'
+          foreach ($name in 'image.json', 'disk.vhdx', 'initrd.img', 'bzImage') {
+            if (-not (Test-Path "$image\$name")) { throw "the first image has no $name" }
+          }
+          $config = Get-Content -Raw 'C:\ProgramData\DSA\dsa-hostd.json' | ConvertFrom-Json
+          Write-Host ($config | ConvertTo-Json -Depth 5)
+          if ($config.first_image.version -ne '17.0.0-1' -or $config.first_image.android_major -ne 17) {
+            throw "the configuration does not name the first image"
+          }
 
       - name: Show the first screen of setup.exe
         run: |
@@ -86,6 +109,7 @@ jobs:
           name: installer
           path: |
             dsa/target/installer/*.msi
+            dsa/target/installer/*.cab
             dsa/target/installer/*.exe
             install.log
             uninstall.log
