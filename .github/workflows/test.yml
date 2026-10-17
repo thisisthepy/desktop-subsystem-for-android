@@ -67,3 +67,35 @@ jobs:
         run: |
           sudo modprobe vsock_loopback
           cargo test -p dsa-guest-transport --features vsock-loopback-tests
+
+  protocol:
+    name: Check the generated protocol code (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # protoc and the runtimes must be the same version as the checked-in generated code
+      # (3.21, the version Ubuntu 24.04 ships).
+      - name: Install protoc and the protobuf runtimes
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            protobuf-compiler libprotobuf-dev libprotobuf-java default-jdk-headless g++
+          protoc --version
+
+      - name: Regenerate and compare with what is checked in
+        working-directory: dsa
+        run: |
+          PROTOC="$(command -v protoc)" cargo run -p dsa-protocol-codegen
+          if [[ -n "$(git status --porcelain -- protocol)" ]]; then
+            git status --short -- protocol
+            git diff -- protocol | head -200
+            echo "::error::the generated protocol code does not match control.proto; run dsa-protocol-codegen and commit the result"
+            exit 1
+          fi
+
+      - name: Check the Java codec against the vectors
+        run: dsa/protocol/java/test.sh
+
+      - name: Check the C++ codec against the vectors
+        run: dsa/protocol/cpp/test.sh
