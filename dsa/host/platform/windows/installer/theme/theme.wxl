@@ -14,7 +14,9 @@
     <String Id="UpdateButton" Value="Update setup first" />
     <String Id="OptionsButton" Value="Options" />
     <String Id="OptionsHeader" Value="Options" />
-    <String Id="OptionsLocationLabel" Value="Install to:" />
+    <String Id="OptionsLocationLabel" Value="Program folder:" />
+    <String Id="OptionsDataLabel" Value="Folder for the Android images, settings and logs:" />
+    <String Id="OptionsDataNote" Value="Each user's Android data is kept in their own profile, under AppData\Local\DSA." />
     <String Id="BrowseButton" Value="Browse..." />
     <String Id="OkButton" Value="OK" />
     <String Id="CancelButton" Value="Cancel" />
@@ -28,7 +30,7 @@
     <String Id="SuccessHeader" Value="Installed" />
     <String Id="SuccessText" Value="The DSA service is running. Type dsa status in a terminal to see your Android." />
     <String Id="SuccessUninstallHeader" Value="Uninstalled" />
-    <String Id="SuccessUninstallText" Value="Each user's Android data is kept in ProgramData\DSA\users until you delete it." />
+    <String Id="SuccessUninstallText" Value="Each user's Android data is kept in their profile, under AppData\Local\DSA, until they delete it." />
     <String Id="SuccessRepairHeader" Value="Repaired" />
     <String Id="LaunchButton" Value="Open" />
     <String Id="RestartText" Value="Restart the computer to finish." />

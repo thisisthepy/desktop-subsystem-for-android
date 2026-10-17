@@ -18,6 +18,15 @@ The results land in `dsa/target/installer/`.
   `dsa` on the system PATH.
 - Writes the service's configuration to `C:\ProgramData\DSA\dsa-hostd.json`. A later
   install keeps an edited file.
+- Lets the user choose both folders in `setup.exe`'s Options: the program folder
+  (`C:\Program Files\DSA` by default) and the folder for the configuration, logs and
+  Android images (`C:\ProgramData\DSA` by default). The configuration names them as
+  `{program}` and `{data}`, and the service fills them in when it reads it. With the MSI
+  alone they are the `INSTALLFOLDER` and `DATAFOLDER` properties.
+- Keeps each user's Android disk in their own profile, as
+  `%LOCALAPPDATA%\DSA\android.vhdx`, the way WSL keeps each user's distributions. The
+  service creates it the first time that user starts Android, and gives the VM access to
+  that one file when it starts.
 - Puts the guest kernel in `C:\Program Files\DSA\vm\` and, when built with `-ImageDir`,
   the first Android image in the update store. `-ImageDir` names a folder made by
   `dsa/guest/image/make-image.py`, and the image's version comes from its `image.json`.
@@ -30,7 +39,7 @@ The results land in `dsa/target/installer/`.
 - Stops with a message saying how to turn on Virtual Machine Platform when it is off. It
   never turns the feature on by itself.
 - Uninstalling removes the program, the service and the downloaded images, and keeps each
-  user's Android data in `C:\ProgramData\DSA\users\`.
+  user's Android disk in their profile.
 
 ## Why WiX 5
 

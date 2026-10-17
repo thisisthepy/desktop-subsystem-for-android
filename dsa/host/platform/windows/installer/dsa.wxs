@@ -5,7 +5,12 @@
   It installs dsa-hostd as the DsaHost service (SYSTEM, started automatically), the dsa
   command on the system PATH, the service's configuration, the guest kernel and, when the
   build has one, the first Android image. Uninstalling removes all of that and the Android
-  images the service downloaded since, and keeps each user's Android data.
+  images the service downloaded since. Each user's Android disk is in their own profile
+  (%LOCALAPPDATA%\DSA), so it is not part of the package and stays.
+
+  INSTALLFOLDER (the program) and DATAFOLDER (configuration, logs and images) can be set
+  on the command line or from setup.exe's Options. The configuration names them as
+  {program} and {data}, which the service fills in.
 
   Build variables (-d): Version, SourceDir (the built binaries and dsa-hostd.json), and,
   when an image is bundled, ImageDir and ImageVersion, plus ImageManifest when the image
@@ -129,7 +134,7 @@
         <?endif?>
 
         <!-- The images the service downloaded are not files of this package, so the service
-             removes them itself; each user's data under users\ stays. -->
+             removes them itself; each user's Android disk, in their profile, stays. -->
         <CustomAction Id="RemoveImages"
                       FileRef="HostdExe"
                       ExeCommand="remove-images &quot;[IMAGESFOLDER]&quot;"

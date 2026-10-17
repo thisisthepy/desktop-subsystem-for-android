@@ -11,9 +11,10 @@
 //! - [`host_config`]: the configuration file `dsa-hostd` reads.
 //! - [`service`]: the local API and one VM per user behind it, as `dsa-hostd` serves them
 //!   (Windows only).
+//! - [`profile`]: where a user's local application data is, from their SID (Windows only).
 //! - [`scm`]: running under the Service Control Manager (Windows only).
 //! - [`uninstall`]: what uninstalling needs from `dsa-hostd`.
-//! - [`user_disk`]: each user's data disk and its protected folder (Windows only).
+//! - [`user_disk`]: each user's Android disk (Windows only).
 //! - [`account`]: the Windows account the host runs as (Windows only).
 //! - [`wsl`]: a launcher for a container in WSL, kept for a later second backend.
 
@@ -32,6 +33,8 @@ pub mod https;
 pub mod hvsocket;
 #[cfg(windows)]
 pub mod pipe;
+#[cfg(windows)]
+pub mod profile;
 #[cfg(windows)]
 pub mod scm;
 #[cfg(windows)]

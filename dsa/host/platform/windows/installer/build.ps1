@@ -49,7 +49,6 @@ if ($Kernel) {
     throw "name the guest kernel with -Kernel (or -PlaceholderKernel for an installer test)"
 }
 
-$data = "C:\ProgramData\DSA"
 if ($ImageDir) { $ImageDir = (Resolve-Path $ImageDir).Path }
 $imageManifest = $ImageDir -and (Test-Path (Join-Path $ImageDir "image.json"))
 if ($imageManifest) {
@@ -71,12 +70,14 @@ if ($ImageDir) {
     # No image yet: any supported image is newer than this, so the first check downloads one.
     $first = [ordered]@{ version = "none"; android_major = 0; build = 0 }
 }
+# The user chooses both folders while installing, so the service fills in {program} (its
+# own folder) and {data} (this file's folder) when it reads the file. Each user's Android
+# disk is in their own profile, so the file names no data_dir.
 $config = [ordered]@{
-    kernel        = "C:\Program Files\DSA\vm\bzImage"
-    images_dir    = "$data\images"
+    kernel        = "{program}\vm\bzImage"
+    images_dir    = "{data}\images"
     first_image   = $first
-    data_dir      = "$data\users"
-    log_file      = "$data\logs\dsa-hostd.log"
+    log_file      = "{data}\logs\dsa-hostd.log"
 }
 if ($PipeSddl) { $config.pipe_sddl = $PipeSddl }
 if ($ListUrl) {

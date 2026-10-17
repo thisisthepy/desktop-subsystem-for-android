@@ -7,15 +7,16 @@
 //! {
 //!   "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
 //!   "system_image": "C:\\Program Files\\DSA\\vm\\system.vhdx",
-//!   "data_dir": "C:\\ProgramData\\DSA\\users",
 //!   "memory_mb": 4096
 //! }
 //! ```
 //!
-//! The service runs one VM per user. Each user's VM is named after the user's SID, keeps
-//! its data on a disk in its own folder under `data_dir`, and lets only that user (and
-//! SYSTEM) use its Hyper-V sockets. `data_disk` names a single disk instead, for running
-//! one VM by hand.
+//! The service runs one VM per user. Each user's VM is named after the user's SID and lets
+//! only that user (and SYSTEM) use its Hyper-V sockets. Its disk is in the user's own
+//! profile, `%LOCALAPPDATA%\DSA\android.vhdx`, as WSL keeps each user's distributions in
+//! theirs. `data_dir` keeps every user's disk in one protected folder instead, as
+//! `<data_dir>\<SID>\data.vhdx`, and `data_disk` names a single disk, for running one VM
+//! by hand.
 //!
 //! With `images_dir`, the Android image comes from the update store there instead of
 //! `system_image`: `first_image` names the image the installer put in it, and `update`
@@ -59,6 +60,47 @@ pub struct UserVm {
     pub vm_name: String,
     pub config: AndroidVmConfig,
     pub data_disk_size_gb: u32,
+    /// The disk is in the user's own profile, which already admits only them, SYSTEM and
+    /// administrators. A disk under `data_dir` is in a folder the service protects itself.
+    pub disk_in_profile: bool,
+}
+
+/// Finds a user's local application data folder from their SID.
+pub type LocalAppData<'a> = &'a dyn Fn(&str) -> Result<PathBuf, String>;
+
+/// The local application data folder of the user with SID `sid`, from the registry.
+pub fn local_app_data(sid: &str) -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        crate::profile::local_app_data(sid)
+    }
+    #[cfg(not(windows))]
+    {
+        Err(format!(
+            "{sid}'s profile can only be found on Windows; set data_dir or data_disk"
+        ))
+    }
+}
+
+/// Replaces `{data}` and `{program}` in the configuration file's text with the folders the
+/// installer put the data and the program in. The user chooses both while installing, so
+/// the file cannot name them when it is built.
+pub fn expand_locations(text: &str, data: &std::path::Path, program: &std::path::Path) -> String {
+    let json = |path: &std::path::Path| {
+        let path = path.to_string_lossy();
+        serde_json::to_string(path.trim_end_matches(['\\', '/']))
+            .expect("a string serialises")
+            .trim_matches('"')
+            .to_string()
+    };
+    text.replace("{data}", &json(data))
+        .replace("{program}", &json(program))
+}
+
+/// Where a user's Android disk is kept in their profile, below their local application data.
+pub fn profile_disk(local_app_data: &std::path::Path) -> PathBuf {
+    let dir = local_app_data.to_string_lossy();
+    PathBuf::from(format!("{}\\DSA\\android.vhdx", dir.trim_end_matches('\\')))
 }
 
 fn default_vm_name() -> String {
@@ -122,7 +164,8 @@ pub struct HostConfig {
     /// One data disk, for running a single VM by hand.
     #[serde(default)]
     pub data_disk: Option<PathBuf>,
-    /// The folder holding each user's data disk, as `<data_dir>\<SID>\data.vhdx`.
+    /// One folder for every user's disk, as `<data_dir>\<SID>\data.vhdx`. Without it each
+    /// user's disk is in their own profile.
     #[serde(default)]
     pub data_dir: Option<PathBuf>,
     /// The size a new user's data disk may grow to. It starts empty and grows as used.
@@ -221,11 +264,6 @@ impl HostConfig {
             }
             _ => {}
         }
-        if config.data_disk.is_none() && config.data_dir.is_none() {
-            return Err(HostConfigError(
-                "name either data_disk (one VM) or data_dir (one VM per user)".into(),
-            ));
-        }
         if let Some(update) = &config.update {
             if config.images_dir.is_none() {
                 return Err(HostConfigError("update needs images_dir".into()));
@@ -237,37 +275,66 @@ impl HostConfig {
 
     /// The VM configuration for running one VM by hand. `fallback_sid` is used when the file
     /// names no user.
-    pub fn vm_config(&self, fallback_sid: Option<&str>) -> AndroidVmConfig {
+    pub fn vm_config(
+        &self,
+        fallback_sid: Option<&str>,
+    ) -> Result<AndroidVmConfig, HostConfigError> {
+        self.vm_config_with(fallback_sid, &local_app_data)
+    }
+
+    /// [`vm_config`](Self::vm_config), finding a profile with `local_app_data`.
+    pub fn vm_config_with(
+        &self,
+        fallback_sid: Option<&str>,
+        local_app_data: LocalAppData,
+    ) -> Result<AndroidVmConfig, HostConfigError> {
         let user = self.user_sid.as_deref().or(fallback_sid);
         let socket_sids = user.map(|sid| vec![sid.to_string()]).unwrap_or_default();
         let data_disk = match (&self.data_disk, &self.data_dir, user) {
             (Some(disk), _, _) => disk.clone(),
             (None, Some(dir), Some(sid)) => user_data_disk(dir, sid),
             (None, Some(dir), None) => dir.join("data.vhdx"),
-            (None, None, _) => unreachable!("parse requires data_disk or data_dir"),
+            (None, None, Some(sid)) => profile_disk(&local_app_data(sid).map_err(HostConfigError)?),
+            (None, None, None) => {
+                return Err(HostConfigError(
+                    "no user to keep the disk for; name data_disk, data_dir or user_sid".into(),
+                ))
+            }
         };
-        self.base_vm_config(&self.vm_name, data_disk, socket_sids)
+        Ok(self.base_vm_config(&self.vm_name, data_disk, socket_sids))
     }
 
     /// The VM of the user with SID `sid`, as the service runs it.
     pub fn user_vm(&self, sid: &str) -> Result<UserVm, HostConfigError> {
+        self.user_vm_with(sid, &local_app_data)
+    }
+
+    /// [`user_vm`](Self::user_vm), finding the user's profile with `local_app_data`.
+    pub fn user_vm_with(
+        &self,
+        sid: &str,
+        local_app_data: LocalAppData,
+    ) -> Result<UserVm, HostConfigError> {
         // The SID becomes part of a path and a VM name, so only a well-formed one is used.
         if !is_sid(sid) {
             return Err(HostConfigError(format!(
                 "{sid:?} is not a Windows SID, so no VM is made for it"
             )));
         }
-        let dir = self.data_dir.as_ref().ok_or_else(|| {
-            HostConfigError(
-                "serving users needs data_dir, the folder for each user's data disk".into(),
-            )
-        })?;
+        let (disk, disk_in_profile) = match &self.data_dir {
+            Some(dir) => (user_data_disk(dir, sid), false),
+            None => (
+                profile_disk(&local_app_data(sid).map_err(HostConfigError)?),
+                true,
+            ),
+        };
         let vm_name = format!("{}-{sid}", self.vm_name);
-        let config = self.base_vm_config(&vm_name, user_data_disk(dir, sid), vec![sid.into()]);
+        let config = self.base_vm_config(&vm_name, disk, vec![sid.into()]);
         Ok(UserVm {
             vm_name,
             config,
             data_disk_size_gb: self.data_disk_size_gb,
+            disk_in_profile,
         })
     }
 
