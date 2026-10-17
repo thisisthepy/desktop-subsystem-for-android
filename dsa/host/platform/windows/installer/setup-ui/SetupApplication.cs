@@ -105,16 +105,33 @@ namespace Dsa.Setup
         {
             this.dispatcher = Dispatcher.CurrentDispatcher;
             this.Log("running the setup screens, display " + this.command.Display + ", action " + this.command.Action);
-
-            if (this.command.Display == Display.Full || this.command.Display == Display.Passive)
+            AppDomain.CurrentDomain.UnhandledException += (sender, e) => this.Log("failed: " + e.ExceptionObject);
+            this.dispatcher.UnhandledException += (sender, e) =>
             {
-                this.window = new MainWindow(this);
-                this.window.Closed += (sender, e) => this.dispatcher.InvokeShutdown();
-                this.window.Show();
-            }
+                // A fault in the window must not leave the engine waiting forever.
+                this.Log("failed: " + e.Exception);
+                this.result = unchecked((int)0x8007064C); // ERROR_INSTALL_FAILURE
+                e.Handled = true;
+                this.dispatcher.InvokeShutdown();
+            };
 
-            this.engine.Detect();
-            Dispatcher.Run();
+            try
+            {
+                if (this.command.Display == Display.Full || this.command.Display == Display.Passive)
+                {
+                    this.window = new MainWindow(this);
+                    this.window.Closed += (sender, e) => this.dispatcher.InvokeShutdown();
+                    this.window.Show();
+                }
+
+                this.engine.Detect();
+                Dispatcher.Run();
+            }
+            catch (Exception e)
+            {
+                this.Log("failed: " + e);
+                this.result = unchecked((int)0x8007064C);
+            }
 
             int exitCode = this.result;
             if ((exitCode & 0xFFFF0000) == unchecked((int)0x80070000))

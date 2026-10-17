@@ -28,7 +28,25 @@ function Wait-SetupControl([string]$Id, [int]$Seconds = 60, [switch]$Enabled) {
         }
         Start-Sleep -Milliseconds 250
     }
+    Show-Desktop "timeout-$Id"
     throw "setup.exe did not show $Id within $Seconds seconds"
+}
+
+# Says what is on the screen: the top-level windows and a picture of the whole screen.
+function Show-Desktop([string]$Name) {
+    $Auto::RootElement.FindAll($Scope::Children, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
+        $process = Get-Process -Id $_.Current.ProcessId -ErrorAction SilentlyContinue
+        Write-Host ("window '{0}' id '{1}' process {2}" -f $_.Current.Name, $_.Current.AutomationId, $process.ProcessName)
+    }
+    Get-Process | Where-Object { $_.ProcessName -match 'setup|DsaSetup' } | ForEach-Object { Write-Host "process $($_.ProcessName) $($_.Id)" }
+    New-Item -ItemType Directory -Force screens | Out-Null
+    $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $graphics.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+    $bitmap.Save("$PWD\screens\$Name.png")
+    $graphics.Dispose()
+    $bitmap.Dispose()
 }
 
 function Invoke-SetupButton([string]$Id, [int]$Seconds = 60) {

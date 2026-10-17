@@ -66,7 +66,7 @@ jobs:
           New-Item -ItemType Directory -Force screens | Out-Null
           foreach ($theme in 'light', 'dark') {
             Set-AppTheme -Dark:($theme -eq 'dark')
-            $setup = Start-Process 'dsa\target\installer\setup-0.0.9.exe' -PassThru
+            $setup = Start-Process 'dsa\target\installer\setup-0.0.9.exe' -ArgumentList '/log', "$PWD\first-$theme.log" -PassThru
             $null = $setup.Handle
             Wait-SetupControl InstallButton -Enabled | Out-Null
             Save-SetupScreen "$PWD\screens\$theme-install.png"
@@ -80,7 +80,7 @@ jobs:
             if ($code -ne 1602) { throw "closing setup.exe from its first screen returned $code, not 1602" }
           }
           Set-AppTheme
-          $setup = Start-Process 'dsa\target\installer\setup-0.0.9.exe' -ArgumentList '/?' -PassThru
+          $setup = Start-Process 'dsa\target\installer\setup-0.0.9.exe' -ArgumentList '/?', '/log', "$PWD\first-help.log" -PassThru
           $null = $setup.Handle
           Wait-SetupControl CloseButton -Enabled | Out-Null
           Save-SetupScreen "$PWD\screens\light-help.png"
@@ -212,5 +212,6 @@ jobs:
             uninstall.log
             bundle-*.log
             ui-*.log
+            first-*.log
             setup-screen.png
             screens/*.png
