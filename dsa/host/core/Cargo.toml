@@ -9,3 +9,4 @@ publish.workspace = true
 
 [dependencies]
 dsa-transport.workspace = true
+dsa-protocol.workspace = true

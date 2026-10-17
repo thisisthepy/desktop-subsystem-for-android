@@ -5,10 +5,12 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::session::{
-    GuestLauncher, Handshake, Session, SessionConfig, SessionError, SessionEvent, SessionState,
-    StopReason,
+    GuestLauncher, Session, SessionConfig, SessionError, SessionEvent, SessionState, StopReason,
 };
+use dsa_protocol::control::Role;
+use dsa_protocol::handshake::{guest_connect, local_hello, HandshakeError};
 use dsa_transport::memory::{self, MemoryConnector};
 use dsa_transport::{Connection, Connector, TransportError};
 
@@ -61,25 +63,9 @@ impl GuestLauncher for FakeLauncher {
     }
 }
 
-/// Stands in for the protocol's version and schema check, which is not generated yet: it
-/// accepts or refuses every connection.
-struct Verdict(Result<(), String>);
-
-impl Handshake for Verdict {
-    fn accept(&mut self, _connection: &mut dyn Connection) -> Result<(), String> {
-        self.0.clone()
-    }
-}
-
-fn accept_all() -> Verdict {
-    Verdict(Ok(()))
-}
-
-fn session_with(
-    launcher: FakeLauncher,
-    handshake: Verdict,
-    connect_timeout: Duration,
-) -> (Session, MemoryConnector) {
+/// A session that checks the agent with the real control protocol handshake.
+fn session_with(launcher: FakeLauncher, connect_timeout: Duration) -> (Session, MemoryConnector) {
+    let handshake = ControlHandshake::new("dsa-host test", WAIT);
     let (listener, connector) = memory::pair();
     let config = SessionConfig {
         connect_timeout,
@@ -101,13 +87,21 @@ fn states(events: &[SessionEvent]) -> Vec<SessionState> {
     events.iter().map(|event| event.state).collect()
 }
 
+/// Connects as the guest's channel daemon would: the transport, then the handshake.
 fn connect_agent(connector: &mut MemoryConnector) -> Box<dyn Connection> {
-    connector.connect(WAIT).expect("the agent connects")
+    let mut agent = connector.connect(WAIT).expect("the agent connects");
+    guest_connect(
+        agent.as_mut(),
+        &local_hello(Role::Guest, "dsa-guestd test"),
+        WAIT,
+    )
+    .expect("the host accepts the agent");
+    agent
 }
 
 #[test]
 fn fr2_a_new_session_is_stopped() {
-    let (session, _connector) = session_with(FakeLauncher::default(), accept_all(), WAIT);
+    let (session, _connector) = session_with(FakeLauncher::default(), WAIT);
     assert_eq!(session.state(), SessionState::Stopped);
     assert_eq!(session.last_reason(), None);
 }
@@ -115,7 +109,7 @@ fn fr2_a_new_session_is_stopped() {
 #[test]
 fn fr2_the_session_is_active_once_the_agent_connects() {
     let launcher = FakeLauncher::default();
-    let (session, mut connector) = session_with(launcher.clone(), accept_all(), WAIT);
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
     let events = session.events();
     session.start();
     assert!(session.wait_for(SessionState::Starting, WAIT));
@@ -133,7 +127,7 @@ fn fr2_the_session_is_active_once_the_agent_connects() {
 fn fr2_an_agent_that_never_connects_returns_the_session_to_stopped_with_the_cause() {
     let launcher = FakeLauncher::default();
     let timeout = Duration::from_millis(200);
-    let (session, _connector) = session_with(launcher.clone(), accept_all(), timeout);
+    let (session, _connector) = session_with(launcher.clone(), timeout);
     let events = session.events();
     session.start();
 
@@ -161,7 +155,7 @@ fn fr2_an_agent_that_never_connects_returns_the_session_to_stopped_with_the_caus
 #[test]
 fn fr2_stop_reports_stopped_only_after_every_guest_process_has_ended() {
     let launcher = FakeLauncher::default();
-    let (session, mut connector) = session_with(launcher.clone(), accept_all(), WAIT);
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
     let _agent = connect_agent(&mut connector);
     assert!(session.wait_for(SessionState::Active, WAIT));
@@ -180,7 +174,7 @@ fn fr2_stop_reports_stopped_only_after_every_guest_process_has_ended() {
 #[test]
 fn fr2_a_stop_that_leaves_processes_running_is_not_reported_as_stopped() {
     let launcher = FakeLauncher::default();
-    let (session, mut connector) = session_with(launcher.clone(), accept_all(), WAIT);
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
     let _agent = connect_agent(&mut connector);
     assert!(session.wait_for(SessionState::Active, WAIT));
@@ -210,7 +204,7 @@ fn fr2_a_stop_that_leaves_processes_running_is_not_reported_as_stopped() {
 fn fr2_a_guest_that_fails_to_start_is_reported_with_the_cause() {
     let launcher = FakeLauncher::default();
     launcher.0.lock().unwrap().fail_start = Some("the distribution is not installed".into());
-    let (session, _connector) = session_with(launcher, accept_all(), WAIT);
+    let (session, _connector) = session_with(launcher, WAIT);
     let events = session.events();
     session.start();
     let seen = next_states(&events, 2);
@@ -227,13 +221,19 @@ fn fr2_a_guest_that_fails_to_start_is_reported_with_the_cause() {
 }
 
 #[test]
-fn fr2_a_refused_handshake_stops_the_guest_and_reports_why() {
+fn fr2_an_agent_from_a_different_protocol_definition_is_refused_and_the_guest_stopped() {
     let launcher = FakeLauncher::default();
-    let refusal = Verdict(Err("built from a different protocol definition".into()));
-    let (session, mut connector) = session_with(launcher.clone(), refusal, WAIT);
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
     let events = session.events();
     session.start();
-    let mut agent = connect_agent(&mut connector);
+    let mut agent = connector.connect(WAIT).expect("the agent connects");
+    let mut hello = local_hello(Role::Guest, "dsa-guestd other");
+    hello.schema_hash = vec![0x5a; 32];
+    let refusal = guest_connect(agent.as_mut(), &hello, WAIT);
+    assert!(
+        matches!(refusal, Err(HandshakeError::Rejected { .. })),
+        "the agent is told it was refused: {refusal:?}"
+    );
 
     let seen = next_states(&events, 3);
     assert_eq!(
@@ -244,12 +244,12 @@ fn fr2_a_refused_handshake_stops_the_guest_and_reports_why() {
             SessionState::Stopped
         ]
     );
-    assert_eq!(
-        seen[2].reason,
-        Some(StopReason::HandshakeRejected(
-            "built from a different protocol definition".into()
-        ))
-    );
+    match &seen[2].reason {
+        Some(StopReason::HandshakeRejected(why)) => {
+            assert!(why.contains("different protocol definition"), "{why}")
+        }
+        other => panic!("expected HandshakeRejected, got {other:?}"),
+    }
     assert_eq!(launcher.processes(), 0);
     assert_eq!(agent.recv(Some(WAIT)), Err(TransportError::Closed));
 }
@@ -257,7 +257,7 @@ fn fr2_a_refused_handshake_stops_the_guest_and_reports_why() {
 #[test]
 fn fr2_stop_while_starting_stops_the_guest() {
     let launcher = FakeLauncher::default();
-    let (session, _connector) = session_with(launcher.clone(), accept_all(), WAIT);
+    let (session, _connector) = session_with(launcher.clone(), WAIT);
     session.start();
     assert!(session.wait_for(SessionState::Starting, WAIT));
     session.stop();
@@ -269,7 +269,7 @@ fn fr2_stop_while_starting_stops_the_guest() {
 #[test]
 fn fr2_a_lost_control_channel_stops_the_session_and_says_so() {
     let launcher = FakeLauncher::default();
-    let (session, mut connector) = session_with(launcher.clone(), accept_all(), WAIT);
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
     let agent = connect_agent(&mut connector);
     assert!(session.wait_for(SessionState::Active, WAIT));
@@ -286,7 +286,7 @@ fn fr2_a_lost_control_channel_stops_the_session_and_says_so() {
 #[test]
 fn fr2_a_stopped_session_can_start_again() {
     let launcher = FakeLauncher::default();
-    let (session, mut connector) = session_with(launcher.clone(), accept_all(), WAIT);
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
     for _ in 0..2 {
         session.start();
         let _agent = connect_agent(&mut connector);
@@ -299,7 +299,7 @@ fn fr2_a_stopped_session_can_start_again() {
 
 #[test]
 fn fr2_frames_flow_both_ways_while_active() {
-    let (session, mut connector) = session_with(FakeLauncher::default(), accept_all(), WAIT);
+    let (session, mut connector) = session_with(FakeLauncher::default(), WAIT);
     let incoming = session.incoming();
     assert_eq!(
         session.send(b"too early".to_vec()),
@@ -318,7 +318,7 @@ fn fr2_frames_flow_both_ways_while_active() {
 #[test]
 fn fr2_dropping_an_active_session_stops_the_guest() {
     let launcher = FakeLauncher::default();
-    let (session, mut connector) = session_with(launcher.clone(), accept_all(), WAIT);
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
     let _agent = connect_agent(&mut connector);
     assert!(session.wait_for(SessionState::Active, WAIT));

@@ -1,0 +1,11 @@
+[package]
+name = "dsa-protocol-schema"
+version = "0.1.0"
+description = "The schema hash of the control protocol definition"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sha2 = "0.11"
