@@ -42,7 +42,10 @@ jobs:
             build-essential flex bison bc dwarves libssl-dev libelf-dev cpio
 
       - name: Build
-        run: DSA_KERNEL_OUT="$PWD/.scratch/kernel-out" dsa/kernel/build.sh
+        run: |
+          DSA_KERNEL_OUT="$PWD/.scratch/kernel-out" dsa/kernel/build.sh
+          # build.sh names the kernel bzImage-<release>; the jobs below take it as bzImage.
+          mv .scratch/kernel-out/bzImage-* .scratch/kernel-out/bzImage
 
       - uses: actions/upload-artifact@v4
         with:
