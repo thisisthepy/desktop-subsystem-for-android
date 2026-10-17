@@ -1,0 +1,235 @@
+# Publishes the Android images: builds the guest kernel, makes each image in
+# dsa/guest/image/inputs.json with the project's keys, publishes each one as the GitHub
+# release android-<version>, and publishes the signed release list the service reads as
+# the release "images" (images.json and images.json.sig).
+#
+# It runs only by hand. It needs two repository secrets:
+#   DSA_ANDROID_KEYS          the Android key set from dsa/guest/image/make-keys.sh, as
+#                             tar czf - -C <keys> . | base64 -w0
+#   DSA_RELEASE_SIGNING_KEY   the list's Ed25519 key from dsa-release keygen
+# The service trusts the list through the public half of the second one, which
+# dsa-release public-key prints.
+
+name: Image release
+
+on:
+  workflow_dispatch:
+    inputs:
+      installer_version:
+        description: "Also publish the installer as this version (for example 0.1.0); empty for images only"
+        required: false
+        default: ""
+
+concurrency:
+  group: release-image
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  kernel:
+    name: Build the guest kernel (x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential flex bison bc dwarves libssl-dev libelf-dev cpio
+
+      - name: Build
+        run: DSA_KERNEL_OUT="$PWD/.scratch/kernel-out" dsa/kernel/build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-kernel
+          path: .scratch/kernel-out/bzImage
+          if-no-files-found: error
+
+  image:
+    name: Make and publish the guest image (ubuntu-latest, Android ${{ matrix.android }})
+    needs: kernel
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: true
+      matrix:
+        android: [17, 16]
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make room
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Install the disk tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gdisk qemu-utils
+
+      - name: Restore the Android keys
+        env:
+          KEYS: ${{ secrets.DSA_ANDROID_KEYS }}
+        run: |
+          if [[ -z "$KEYS" ]]; then
+            echo "::error::The DSA_ANDROID_KEYS secret is not set; see the top of this workflow." >&2
+            exit 1
+          fi
+          mkdir -p .scratch/image-keys
+          base64 -d <<<"$KEYS" | tar xzf - -C .scratch/image-keys
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: guest-kernel
+          path: .scratch/kernel-out
+
+      - name: Fetch the pinned inputs
+        run: dsa/guest/image/fetch.sh ${{ matrix.android }}
+
+      - name: Make the image
+        run: >
+          python3 dsa/guest/image/make-image.py --major ${{ matrix.android }}
+          --keys .scratch/image-keys --kernel .scratch/kernel-out/bzImage
+
+      - name: Check the image
+        run: python3 dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
+
+      - name: Publish the image
+        id: publish
+        run: |
+          dir="$(echo dsa/target/image/*/)"
+          version="$(jq -r .version "$dir/image.json")"
+          tag="android-$version"
+          files=()
+          for name in image.json $(jq -r '.files | keys[]' "$dir/image.json"); do
+            files+=("$dir/$name")
+          done
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+          else
+            gh release create "$tag" "${files[@]}" --target "$GITHUB_SHA" \
+              --title "Android image $version" \
+              --notes "Android image $version for Desktop Subsystem for Android. The service downloads it through the signed list in the release \"images\"."
+          fi
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Describe the image for the list
+        working-directory: dsa
+        run: |
+          cargo build -q --release -p dsa-host-core --bin dsa-release
+          base="https://github.com/${{ github.repository }}/releases/download/${{ steps.publish.outputs.tag }}"
+          target/release/dsa-release image-entry "$base" "../${{ steps.publish.outputs.dir }}" > ../entry-${{ matrix.android }}.json
+          cat ../entry-${{ matrix.android }}.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: entry-${{ matrix.android }}
+          path: entry-${{ matrix.android }}.json
+          if-no-files-found: error
+
+  list:
+    name: Sign and publish the release list
+    needs: image
+    runs-on: ubuntu-latest
+    outputs:
+      public_key: ${{ steps.sign.outputs.public_key }}
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: entry-*
+          merge-multiple: true
+          path: entries
+
+      - name: Write the list
+        run: |
+          jq -n --slurpfile inputs dsa/guest/image/inputs.json --slurpfile images <(jq -s . entries/*.json) \
+            '{format: 1, supported_majors: ([$inputs[0].images[].android_major] | sort), images: $images[0]}' \
+            > images.json
+          cat images.json
+
+      - name: Sign and check the list
+        id: sign
+        working-directory: dsa
+        env:
+          SIGNING_KEY: ${{ secrets.DSA_RELEASE_SIGNING_KEY }}
+        run: |
+          if [[ -z "$SIGNING_KEY" ]]; then
+            echo "::error::The DSA_RELEASE_SIGNING_KEY secret is not set; see the top of this workflow." >&2
+            exit 1
+          fi
+          cargo build -q --release -p dsa-host-core --bin dsa-release
+          umask 077
+          key="$RUNNER_TEMP/release.key"
+          printf '%s\n' "$SIGNING_KEY" > "$key"
+          target/release/dsa-release sign "$key" ../images.json
+          public="$(target/release/dsa-release public-key "$key")"
+          rm -f "$key"
+          target/release/dsa-release verify "$public" ../images.json
+          echo "The service trusts this list with the public key $public"
+          echo "public_key=$public" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the list
+        run: |
+          if gh release view images >/dev/null 2>&1; then
+            gh release upload images images.json images.json.sig --clobber
+          else
+            gh release create images images.json images.json.sig --target "$GITHUB_SHA" \
+              --title "Android image list" \
+              --notes "The signed list of Android images the Desktop Subsystem for Android service reads."
+          fi
+
+  installer:
+    name: Build and publish the installer (windows-latest)
+    if: inputs.installer_version != ''
+    needs: [kernel, list]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: guest-kernel
+          path: .scratch/kernel-out
+
+      - name: Install WiX 5
+        run: dotnet tool install --global wix --version 5.0.2
+
+      # No image inside: the service downloads the newest supported one from the list.
+      - name: Build the package and setup.exe
+        run: >
+          dsa/host/platform/windows/installer/build.ps1 -Version ${{ inputs.installer_version }}
+          -Kernel .scratch/kernel-out/bzImage
+          -ListUrl https://github.com/${{ github.repository }}/releases/download/images/images.json
+          -TrustedKey ${{ needs.list.outputs.public_key }}
+
+      - name: Publish the installer
+        run: |
+          $version = '${{ inputs.installer_version }}'
+          $files = "dsa/target/installer/setup-$version.exe", "dsa/target/installer/dsa-$version.msi"
+          gh release create "v$version" @files --target $env:GITHUB_SHA `
+            --title "Desktop Subsystem for Android $version" `
+            --notes "Run setup-$version.exe. It installs the service and downloads the newest supported Android image."
+          if ($LASTEXITCODE -ne 0) { throw "publishing the installer failed" }

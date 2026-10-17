@@ -246,6 +246,8 @@ def main():
     parser.add_argument("--keys", type=Path, required=True)
     parser.add_argument("--inputs", type=Path, default=REPO / ".scratch/aosp-inputs")
     parser.add_argument("--out", type=Path, default=REPO / "dsa/target/image")
+    parser.add_argument("--kernel", type=Path, help="the guest kernel (bzImage) the image boots with; "
+                        "without it the host's own kernel is used")
     args = parser.parse_args()
 
     spec = next(i for i in json.loads((HERE / "inputs.json").read_text())["images"] if i["android_major"] == args.major)
@@ -287,6 +289,11 @@ def main():
 
     ramdisk(signed, otatools, work, out / "initrd.img")
     disk(images, otatools, work, out / "disk.vhdx")
+    files = ["disk.vhdx", "initrd.img"]
+    (out / "bzImage").unlink(missing_ok=True)
+    if args.kernel:
+        shutil.copy(args.kernel, out / "bzImage")
+        files.append("bzImage")
 
     cmdline = " ".join([
         "console=ttyS0", "printk.devkmsg=on", "audit=1", "panic=-1", "8250.nr_uarts=1",
@@ -302,7 +309,7 @@ def main():
         "build": int(spec["build_id"]),
         "source": {"branch": spec["branch"], "target": spec["target"], "build_id": spec["build_id"], "security_patch": spec["security_patch"]},
         "kernel_cmdline": cmdline,
-        "files": {name: {"size": (out / name).stat().st_size, "sha256": sha256(out / name)} for name in ["disk.vhdx", "initrd.img"]},
+        "files": {name: {"size": (out / name).stat().st_size, "sha256": sha256(out / name)} for name in files},
     }
     (out / "image.json").write_text(json.dumps(manifest, indent=2) + "\n")
     shutil.copy(signed, out / "signed-target_files.zip")

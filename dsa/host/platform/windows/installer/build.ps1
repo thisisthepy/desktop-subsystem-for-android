@@ -7,7 +7,9 @@
 # to WiX by path. (In 5.0.2 its DLL is named WixToolset.BootstrapperApplications.wixext.dll,
 # which WiX does not find under the package's name.)
 #
-# Without -ImageDir the package carries no Android image; the service then downloads the
+# -ImageDir names an image folder made by dsa/guest/image/make-image.py; its version comes
+# from its image.json. (-ImageVersion, -ImageMajor and -ImageBuild describe an older folder
+# that holds only system.vhdx.) Without -ImageDir the package carries no Android image; the service then downloads the
 # newest supported image from -ListUrl after installation. -PlaceholderKernel puts an empty
 # kernel in the package, for testing the installer before a kernel is built.
 param(
@@ -48,8 +50,22 @@ if ($Kernel) {
 }
 
 $data = "C:\ProgramData\DSA"
+if ($ImageDir) { $ImageDir = (Resolve-Path $ImageDir).Path }
+$imageManifest = $ImageDir -and (Test-Path (Join-Path $ImageDir "image.json"))
+if ($imageManifest) {
+    $image = Get-Content -Raw (Join-Path $ImageDir "image.json") | ConvertFrom-Json
+    foreach ($name in @($image.files.PSObject.Properties.Name)) {
+        if ($name -notin @("disk.vhdx", "initrd.img", "bzImage")) {
+            throw "image.json names $name, which this package does not know how to install"
+        }
+        if (-not (Test-Path (Join-Path $ImageDir $name))) { throw "$ImageDir has no $name" }
+    }
+    $ImageVersion = $image.version
+    $ImageMajor = $image.android_major
+    $ImageBuild = $image.build
+}
 if ($ImageDir) {
-    if (-not $ImageVersion) { throw "-ImageDir needs -ImageVersion, -ImageMajor and -ImageBuild" }
+    if (-not $ImageVersion) { throw "-ImageDir needs an image.json, or -ImageVersion, -ImageMajor and -ImageBuild" }
     $first = [ordered]@{ version = $ImageVersion; android_major = $ImageMajor; build = $ImageBuild }
 } else {
     # No image yet: any supported image is newer than this, so the first check downloads one.
@@ -84,6 +100,10 @@ $msi = Join-Path $out "dsa-$Version.msi"
 $setup = Join-Path $out "setup-$Version.exe"
 $defines = @("-d", "Version=$Version", "-d", "SourceDir=$stage")
 if ($ImageDir) { $defines += @("-d", "ImageDir=$ImageDir", "-d", "ImageVersion=$ImageVersion") }
+if ($imageManifest) {
+    $defines += @("-d", "ImageManifest=1")
+    if ($image.files.PSObject.Properties.Name -contains "bzImage") { $defines += @("-d", "ImageKernel=1") }
+}
 
 Push-Location $installer
 try {

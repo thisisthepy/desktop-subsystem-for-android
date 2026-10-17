@@ -44,10 +44,34 @@ In `dsa/target/image/<version>/`:
   Android formats on first boot. The service copies it for a new user, and on an update
   writes the new image's Android partitions into each user's disk.
 - `initrd.img`: the vendor ramdisk followed by the generic one.
+- `bzImage`, with `--kernel`: the guest kernel (`dsa/kernel/`). The host boots an image's
+  own kernel when it has one, so a kernel update ships with the image.
 - `image.json`: the version, the source build, the kernel command line, and the files'
   SHA-256.
+- `signed-target_files.zip`: the signed build inputs, kept to make later images and update
+  packages from. It is not part of the image and is never published.
 
 ## Moving to a newer build
 
 Change the build number and the two SHA-256 values in `inputs.json`. The Image test
 workflow makes and checks the image from it.
+
+## Releasing
+
+The Image release workflow (`.github/workflows/release-image.yml`, run by hand) makes
+every image in `inputs.json` with the project's keys and the kernel it builds, publishes
+each as the GitHub release `android-<version>`, and publishes the signed list the service
+reads as the release `images`. It needs two repository secrets:
+
+- `DSA_ANDROID_KEYS`: the key set, made once and kept, since every later image must be
+  signed with the same keys for an update to keep each user's data:
+
+  ```
+  dsa/guest/image/make-keys.sh .scratch/release-keys
+  tar czf - -C .scratch/release-keys . | base64 -w0
+  ```
+
+- `DSA_RELEASE_SIGNING_KEY`: the list's key, from `dsa-release keygen`.
+
+Keep a copy of both outside GitHub: a secret cannot be read back, and losing the Android
+keys means no image can update an existing install again.
