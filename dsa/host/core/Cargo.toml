@@ -1,0 +1,12 @@
+[package]
+name = "dsa-host-core"
+version = "0.1.0"
+description = "The platform-neutral host: the session and its state"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+dsa-transport.workspace = true
+dsa-protocol.workspace = true
