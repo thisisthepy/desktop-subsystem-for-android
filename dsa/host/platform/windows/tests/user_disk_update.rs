@@ -125,3 +125,28 @@ fn fr14_a_users_disk_gets_the_new_android_and_keeps_its_data() {
     bring_disk_to(&user, &template_v1, "v2").unwrap();
     assert!(read_partition(&user, "super").iter().all(|&b| b == 0x22));
 }
+
+#[test]
+fn fr14_a_blank_disk_made_before_any_image_was_downloaded_becomes_the_template() {
+    if std::env::var_os("DSA_SERVICE_TESTS").is_none() {
+        eprintln!("skipped: set DSA_SERVICE_TESTS=1 to attach disks");
+        return;
+    }
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("disk-blank-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let template = dir.join("v1").join("disk.vhdx");
+    make_disk(&template, 0x11);
+
+    // 0.1.1 made an empty disk when a user asked for Android before the first image was in.
+    let user = dir.join("user").join("android.vhdx");
+    prepare_user_data_disk(&user, 1).unwrap();
+    assert_eq!(disk_image_version(&user), None);
+
+    bring_disk_to(&user, &template, "v1").unwrap();
+    assert_eq!(disk_image_version(&user).as_deref(), Some("v1"));
+    assert!(
+        read_partition(&user, "super").iter().all(|&b| b == 0x11),
+        "the blank disk is replaced by the template"
+    );
+}
