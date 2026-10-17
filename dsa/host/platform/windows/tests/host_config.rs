@@ -296,3 +296,66 @@ fn fr1_the_folders_chosen_at_installation_fill_in_the_configuration() {
         Some(PathBuf::from(r"D:\Android Data\logs\dsa-hostd.log"))
     );
 }
+
+const SELF_UPDATING: &str = r#"{
+  "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
+  "images_dir": "C:\\ProgramData\\DSA\\images",
+  "first_image": {"version": "16.0.1", "android_major": 16, "build": 1},
+  "log_file": "C:\\ProgramData\\DSA\\logs\\dsa-hostd.log",
+  "update": {
+    "list_url": "https://example.invalid/dsa/images.json",
+    "program_list_url": "https://example.invalid/dsa/program.json",
+    "program_dir": "C:\\ProgramData\\DSA\\updates",
+    "trusted_keys": ["17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce"]
+  }
+}"#;
+
+#[test]
+fn fr15_the_program_list_and_the_folder_for_setup_files_come_from_the_configuration() {
+    let config = HostConfig::parse(SELF_UPDATING).unwrap();
+    let settings = config.program_settings("0.1.0").unwrap().unwrap();
+    assert_eq!(
+        settings.list_url.as_deref(),
+        Some("https://example.invalid/dsa/program.json")
+    );
+    assert!(settings.enabled, "on unless a setting turns it off");
+    assert_eq!(settings.keys.len(), 1);
+    assert_eq!(settings.dir, PathBuf::from(r"C:\ProgramData\DSA\updates"));
+    assert_eq!(
+        settings.log_dir,
+        PathBuf::from(r"C:\ProgramData\DSA\logs"),
+        "setup logs go beside the service's"
+    );
+    assert_eq!(settings.running, "0.1.0");
+    assert_eq!(settings.stop_timeout, Duration::from_secs(30 + 15));
+}
+
+#[test]
+fn fr15_a_setting_turns_updating_dsa_off() {
+    let off = SELF_UPDATING.replace(
+        r#""program_dir""#,
+        r#""program": false,
+    "program_dir""#,
+    );
+    let settings = HostConfig::parse(&off)
+        .unwrap()
+        .program_settings("0.1.0")
+        .unwrap()
+        .unwrap();
+    assert!(!settings.enabled);
+}
+
+#[test]
+fn fr15_without_a_program_folder_dsa_does_not_update_itself() {
+    // An older configuration names no program list: nothing changes for it.
+    let config = HostConfig::parse(UPDATING).unwrap();
+    assert!(config.program_settings("0.1.0").unwrap().is_none());
+    // A program list needs the folder the setup files are downloaded to.
+    let no_dir = SELF_UPDATING.replace(
+        r#"    "program_dir": "C:\\ProgramData\\DSA\\updates",
+"#,
+        "",
+    );
+    let error = HostConfig::parse(&no_dir).unwrap_err().to_string();
+    assert!(error.contains("program_dir"), "{error}");
+}

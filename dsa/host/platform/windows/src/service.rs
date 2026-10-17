@@ -9,6 +9,11 @@
 //! `update` a background thread checks the signed release list and downloads new images.
 //! The next start of a user's Android boots a new image on trial and goes back to the
 //! previous one when it does not finish booting; users are told through the local API.
+//!
+//! With `update.program_list_url`, another thread checks the signed program list and
+//! downloads a newer setup file, and runs it once no user's Android is running, or at
+//! once on `dsa update`. Setup stops this service and starts the new one, which tells the
+//! users how the update went.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -18,6 +23,9 @@ use std::time::{Duration, Instant};
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid, UserAndroids};
 use dsa_host_core::session::Session;
+use dsa_host_core::update::program_service::{
+    ProgramStatus, ProgramUpdates, Timing, WithProgramStatus,
+};
 use dsa_host_core::update::service::{check_reporting, Download, UpdateNotices, UpdatingAndroid};
 use dsa_host_core::update::store::ImageStore;
 use dsa_transport::Listener;
@@ -25,9 +33,10 @@ use dsa_transport::Listener;
 use crate::android_vm::AndroidVmLauncher;
 use crate::guid::Guid;
 use crate::host_config::HostConfig;
-use crate::https::WinHttpFetch;
+use crate::https::{UrlFetch, WinHttpFetch};
 use crate::hvsocket::HvSocketListener;
 use crate::pipe::{NamedPipeListener, DEFAULT_PIPE_SDDL};
+use crate::setup::SetupInstaller;
 use crate::user_disk::{bring_disk_to, prepare_user_data_disk, prepare_user_disk_folder};
 use crate::vm_listener::VmBoundListener;
 
@@ -228,16 +237,61 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
             .spawn(move || check_for_updates(config, updates, build, stop))
             .map_err(|e| format!("starting the update check: {e}"))?;
     }
+    let program = config
+        .program_settings(crate::VERSION)
+        .map_err(|e| e.to_string())?;
+    let program_status = Arc::new(ProgramStatus::default());
     let factory_config = config.clone();
     let factory_build = build.to_string();
+    let factory_status = program.as_ref().map(|_| Arc::clone(&program_status));
     let androids = Arc::new(PerUser::new(move |sid: &str| {
         let android = create_user_android(&factory_config, &factory_build, sid, updates.as_ref());
         if let Err(why) = &android {
             eprintln!("{factory_build}: no Android for {sid}: {why}");
         }
-        android
+        // Tells about updates of DSA itself, and holds starts back while setup runs.
+        match &factory_status {
+            Some(status) => android.map(|android| {
+                Arc::new(WithProgramStatus {
+                    android,
+                    status: Arc::clone(status),
+                }) as Arc<dyn UserAndroid>
+            }),
+            None => android,
+        }
     }));
-    let service = Arc::new(HostApiService::new(androids.clone(), build));
+    let mut service = HostApiService::new(androids.clone(), build);
+    if let Some(settings) = program {
+        let check_interval = config
+            .update
+            .as_ref()
+            .map(|update| update.check_interval_hours.max(1))
+            .unwrap_or(24);
+        let updates = ProgramUpdates::new(
+            settings,
+            Box::new(UrlFetch::default()),
+            Box::new(SetupInstaller),
+            androids.clone(),
+            program_status,
+            build,
+        );
+        service = service.with_program_updates(updates.clone());
+        let stop = Arc::clone(&stop);
+        thread::Builder::new()
+            .name("dsa-program-updates".into())
+            .spawn(move || {
+                updates.run(
+                    &stop,
+                    Timing {
+                        first_check: Duration::from_secs(60),
+                        check_interval: Duration::from_secs(check_interval * 3600),
+                        retry: Duration::from_secs(60),
+                    },
+                )
+            })
+            .map_err(|e| format!("starting the program update check: {e}"))?;
+    }
+    let service = Arc::new(service);
     service.serve(Box::new(listener), stop);
     eprintln!("{build}: stopping every user's Android");
     let not_stopped = androids.stop_all(grace);

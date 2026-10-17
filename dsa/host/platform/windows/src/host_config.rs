@@ -21,6 +21,10 @@
 //! With `images_dir`, the Android image comes from the update store there instead of
 //! `system_image`: `first_image` names the image the installer put in it, and `update`
 //! says where the signed release list is and which keys may sign it.
+//!
+//! `update.program_list_url` and `update.program_dir` let the service update DSA itself
+//! from the signed program list, downloading setup files into that folder;
+//! `"program": false` turns that off.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -31,6 +35,7 @@ use serde::Deserialize;
 
 use dsa_host_core::update::manifest;
 use dsa_host_core::update::policy::InstalledImage;
+use dsa_host_core::update::program_service::ProgramSettings;
 use ed25519_dalek::VerifyingKey;
 
 use crate::vm::{is_sid, AndroidVmConfig};
@@ -205,6 +210,9 @@ fn default_check_interval_hours() -> u64 {
 fn default_boot_timeout_secs() -> u64 {
     300
 }
+fn default_true() -> bool {
+    true
+}
 
 /// Where new images are published and who may sign them.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -219,6 +227,16 @@ pub struct UpdateSettings {
     /// How long a new image may take to finish its first boot before it is undone.
     #[serde(default = "default_boot_timeout_secs")]
     pub boot_timeout_secs: u64,
+    /// The signed program list, for updating DSA itself. Its signature is at the same URL
+    /// plus `.sig`, and the same keys may sign it. Without it DSA is not updated.
+    #[serde(default)]
+    pub program_list_url: Option<String>,
+    /// False turns updating DSA itself off; the program list is then never fetched.
+    #[serde(default = "default_true")]
+    pub program: bool,
+    /// The service's own folder for downloaded setup files.
+    #[serde(default)]
+    pub program_dir: Option<PathBuf>,
 }
 
 impl UpdateSettings {
@@ -269,8 +287,48 @@ impl HostConfig {
                 return Err(HostConfigError("update needs images_dir".into()));
             }
             update.keys()?;
+            if update.program_list_url.is_some() && update.program_dir.is_none() {
+                return Err(HostConfigError(
+                    "program_list_url needs program_dir, the folder setup files are \
+                     downloaded to"
+                        .into(),
+                ));
+            }
         }
         Ok(config)
+    }
+
+    /// How the service updates DSA itself, running version `running`. `None` when the
+    /// file names no folder for setup files, so DSA does not update itself.
+    pub fn program_settings(
+        &self,
+        running: &str,
+    ) -> Result<Option<ProgramSettings>, HostConfigError> {
+        let Some(update) = &self.update else {
+            return Ok(None);
+        };
+        let Some(dir) = &update.program_dir else {
+            return Ok(None);
+        };
+        // Split as text, so it is a Windows path on every platform the tests run on.
+        let log_dir = self
+            .log_file
+            .as_ref()
+            .and_then(|log| {
+                let log = log.to_string_lossy();
+                log.rfind(['\\', '/']).map(|end| PathBuf::from(&log[..end]))
+            })
+            .unwrap_or_else(|| dir.clone());
+        Ok(Some(ProgramSettings {
+            list_url: update.program_list_url.clone(),
+            enabled: update.program,
+            keys: update.keys()?,
+            dir: dir.clone(),
+            log_dir,
+            running: running.to_string(),
+            stop_timeout: Duration::from_secs(self.stop_timeout_secs + 15),
+            settle: Duration::from_secs(60),
+        }))
     }
 
     /// The VM configuration for running one VM by hand. `fallback_sid` is used when the file
