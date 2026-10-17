@@ -51,7 +51,7 @@ jobs:
         run: python3 dsa/guest/image/make-image.py --major ${{ matrix.android }} --keys .scratch/image-keys
 
       - name: Check the image
-        run: python3 dsa/guest/image/check-image.py dsa/target/image/*/
+        run: python3 dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
 
       - name: Keep the ramdisk and the manifest
         uses: actions/upload-artifact@v4

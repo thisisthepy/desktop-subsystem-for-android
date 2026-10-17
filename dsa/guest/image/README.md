@@ -17,7 +17,7 @@ them with the project's keys.
 dsa/guest/image/fetch.sh 17
 dsa/guest/image/make-keys.sh .scratch/image-keys
 uv run dsa/guest/image/make-image.py --major 17 --keys .scratch/image-keys
-uv run dsa/guest/image/check-image.py dsa/target/image/17.0.0-16373615
+uv run dsa/guest/image/check-image.py dsa/target/image/17.0.0-16373615 .scratch/image-keys
 ```
 
 It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and OpenSSL.
