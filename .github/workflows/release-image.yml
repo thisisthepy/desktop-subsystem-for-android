@@ -28,6 +28,11 @@ on:
         type: boolean
         required: false
         default: true
+      replace_release:
+        description: "Replace an installer release of the same version that is already published (its assets and tag)"
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: release-image
@@ -320,6 +325,14 @@ jobs:
 
           Android is a trademark of Google LLC.
           "@
+          gh release view "v$version" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            if ('${{ inputs.replace_release }}' -ne 'true') {
+              throw "v$version is already published; run again with replace_release to replace it"
+            }
+            gh release delete "v$version" --yes --cleanup-tag
+            if ($LASTEXITCODE -ne 0) { throw "removing the published v$version failed" }
+          }
           gh release create "v$version" (Join-Path $out $asset) (Join-Path $out SHA256SUMS.txt) --target $env:GITHUB_SHA `
             --title "DSA v$version" --notes $notes --generate-notes
           if ($LASTEXITCODE -ne 0) { throw "publishing the installer failed" }
