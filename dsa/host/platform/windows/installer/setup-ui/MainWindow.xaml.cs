@@ -349,10 +349,42 @@ namespace Dsa.Setup
             {
                 // The Mica material shows only through a transparent surface.
                 source.CompositionTarget.BackgroundColor = Colors.Transparent;
+                HideNativeCaptionButtons(source.Handle);
             }
 
             Palette.ApplyBackdrop(source.Handle, this.dark);
             source.AddHook(this.WndProc);
+        }
+
+        /// <summary>
+        /// The window manager draws its own caption buttons on a frame that covers the whole
+        /// window, and they show through the transparent Mica surface beside this window's
+        /// own. Without the system menu style it draws none.
+        /// </summary>
+        private static void HideNativeCaptionButtons(IntPtr handle)
+        {
+            const int GwlStyle = -16;
+            const int WsSysMenu = 0x00080000;
+            int style = GetWindowLong(handle, GwlStyle);
+            if ((style & WsSysMenu) != 0)
+            {
+                SetWindowLong(handle, GwlStyle, style & ~WsSysMenu);
+            }
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
+        private static extern int GetWindowLong(IntPtr hwnd, int index);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLongW")]
+        private static extern int SetWindowLong(IntPtr hwnd, int index, int value);
+
+        protected override void OnStateChanged(EventArgs e)
+        {
+            base.OnStateChanged(e);
+            if (Palette.HasMica)
+            {
+                HideNativeCaptionButtons(this.Handle);
+            }
         }
 
         protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)

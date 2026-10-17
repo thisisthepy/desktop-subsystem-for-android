@@ -5,6 +5,7 @@ namespace Dsa.Setup
     using System.IO;
     using System.Text.RegularExpressions;
     using System.Windows;
+    using System.Windows.Interop;
     using System.Windows.Threading;
     using WixToolset.BootstrapperApplicationApi;
     using ErrorEventArgs = WixToolset.BootstrapperApplicationApi.ErrorEventArgs;
@@ -37,6 +38,8 @@ namespace Dsa.Setup
         private IMbaCommand mbaCommand;
         private Dispatcher dispatcher;
         private MainWindow window;
+        private HwndSource hiddenWindow;
+        private IntPtr parentWindow;
 
         private volatile bool canceled;
         private volatile bool applying;
@@ -122,9 +125,16 @@ namespace Dsa.Setup
                     this.window = new MainWindow(this);
                     this.window.Closed += (sender, e) => this.dispatcher.InvokeShutdown();
                     this.window.Show();
+                    this.parentWindow = this.window.Handle;
+                }
+                else
+                {
+                    // The engine wants a parent window for apply even when nothing is shown.
+                    this.hiddenWindow = new HwndSource(new HwndSourceParameters("DsaSetup") { Width = 0, Height = 0, WindowStyle = 0 });
+                    this.parentWindow = this.hiddenWindow.Handle;
                 }
 
-                this.engine.Detect();
+                this.engine.Detect(this.parentWindow);
                 Dispatcher.Run();
             }
             catch (Exception e)
@@ -144,6 +154,7 @@ namespace Dsa.Setup
                 exitCode = this.restartAccepted ? ErrorSuccessRebootInitiated : ErrorSuccessRebootRequired;
             }
 
+            this.hiddenWindow?.Dispose();
             this.engine.Quit(exitCode);
         }
 
@@ -172,7 +183,15 @@ namespace Dsa.Setup
             this.canceled = false;
             this.lastError = null;
             this.window?.ShowProgress(action);
-            this.engine.Plan(action);
+            try
+            {
+                this.engine.Plan(action);
+            }
+            catch (Exception e)
+            {
+                this.Log("could not plan: " + e.Message);
+                this.Finish(e.HResult < 0 ? e.HResult : unchecked((int)0x8007064C));
+            }
         }
 
         /// <summary>Cancel during apply. Returns false when the user chose to keep going.</summary>
@@ -359,7 +378,18 @@ namespace Dsa.Setup
             }
 
             this.applying = true;
-            this.engine.Apply(this.window?.Handle ?? IntPtr.Zero);
+            try
+            {
+                this.engine.Apply(this.parentWindow);
+            }
+            catch (Exception e)
+            {
+                // An engine that refuses to apply calls back no more, so setup ends here.
+                this.Log("could not apply: " + e.Message);
+                this.applying = false;
+                int status = e.HResult < 0 ? e.HResult : unchecked((int)0x8007064C);
+                this.OnWindowThread(() => this.Finish(status));
+            }
         }
 
         protected override void OnApplyBegin(ApplyBeginEventArgs args)
