@@ -1,17 +1,26 @@
 # Builds the DSA package (dsa-<version>.msi) and setup.exe (setup-<version>.exe) into
-# dsa\target\installer. Needs Rust, and WiX 5:
+# dsa\target\installer. Needs Rust, the .NET SDK (for the setup screens in setup-ui\), and
+# WiX 5:
 #
 #   dotnet tool install --global wix --version 5.0.2
 #
 # The bootstrapper extension is downloaded from NuGet into dsa\target\installer and passed
 # to WiX by path. (In 5.0.2 its DLL is named WixToolset.BootstrapperApplications.wixext.dll,
-# which WiX does not find under the package's name.)
+# which WiX does not find under the package's name.) setup.exe needs it for the variables
+# that the command line may set.
+#
+# -AndroidMajor is the newest Android major the release supports; the first screen of
+# setup.exe shows it. Without it that screen leaves it out.
 #
 # -ImageDir names an image folder made by dsa/guest/image/make-image.py; its version comes
 # from its image.json. (-ImageVersion, -ImageMajor and -ImageBuild describe an older folder
 # that holds only system.vhdx.) Without -ImageDir the package carries no Android image; the service then downloads the
 # newest supported image from -ListUrl after installation. -PlaceholderKernel puts an empty
 # kernel in the package, for testing the installer before a kernel is built.
+#
+# -ProgramListUrl names the signed program list the service updates DSA itself from (it
+# needs -ListUrl, and the same -TrustedKey signs both lists). Without it the installed DSA
+# is updated by hand.
 param(
     [string]$Version = "0.1.0",
     [string]$Kernel,
@@ -22,7 +31,9 @@ param(
     [long]$ImageBuild,
     [string]$ListUrl,
     [string[]]$TrustedKey = @(),
-    [string]$PipeSddl
+    [string]$ProgramListUrl,
+    [string]$PipeSddl,
+    [int]$AndroidMajor
 )
 $ErrorActionPreference = "Stop"
 
@@ -33,6 +44,8 @@ $stage = Join-Path $out "stage"
 Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $stage | Out-Null
 
+# The programs report this release's version, not their crates' own.
+$env:DSA_VERSION = $Version
 Push-Location $dsa
 try {
     cargo build --release -p dsa-host-windows --bin dsa-hostd -p dsa-cli --bin dsa
@@ -49,7 +62,6 @@ if ($Kernel) {
     throw "name the guest kernel with -Kernel (or -PlaceholderKernel for an installer test)"
 }
 
-$data = "C:\ProgramData\DSA"
 if ($ImageDir) { $ImageDir = (Resolve-Path $ImageDir).Path }
 $imageManifest = $ImageDir -and (Test-Path (Join-Path $ImageDir "image.json"))
 if ($imageManifest) {
@@ -71,19 +83,33 @@ if ($ImageDir) {
     # No image yet: any supported image is newer than this, so the first check downloads one.
     $first = [ordered]@{ version = "none"; android_major = 0; build = 0 }
 }
+# The user chooses both folders while installing, so the service fills in {program} (its
+# own folder) and {data} (this file's folder) when it reads the file. Each user's Android
+# disk is in their own profile, so the file names no data_dir.
 $config = [ordered]@{
-    kernel        = "C:\Program Files\DSA\vm\bzImage"
-    images_dir    = "$data\images"
+    kernel        = "{program}\vm\bzImage"
+    images_dir    = "{data}\images"
     first_image   = $first
-    data_dir      = "$data\users"
-    log_file      = "$data\logs\dsa-hostd.log"
+    log_file      = "{data}\logs\dsa-hostd.log"
 }
 if ($PipeSddl) { $config.pipe_sddl = $PipeSddl }
 if ($ListUrl) {
     if ($TrustedKey.Count -eq 0) { throw "-ListUrl needs at least one -TrustedKey" }
     $config.update = [ordered]@{ list_url = $ListUrl; trusted_keys = $TrustedKey }
 }
+if ($ProgramListUrl) {
+    if (-not $ListUrl) { throw "-ProgramListUrl needs -ListUrl and -TrustedKey" }
+    # Downloaded setup files go to the service's own folder, which only SYSTEM and
+    # Administrators can write to, since the service runs them.
+    $config.update.program_list_url = $ProgramListUrl
+    $config.update.program_dir = "{data}\updates"
+}
 $config | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM (Join-Path $stage "dsa-hostd.json")
+
+# The setup screens: a .NET Framework 4.7.2 program that setup.exe carries and starts.
+$setupUi = Join-Path $out "setup-ui"
+dotnet build (Join-Path $installer "setup-ui\DsaSetup.csproj") -c Release -o $setupUi -p:Version=$Version
+if ($LASTEXITCODE -ne 0) { throw "building the setup screens failed" }
 
 $balVersion = "5.0.2"
 $balDir = Join-Path $out "ext\bal-$balVersion"
@@ -109,7 +135,10 @@ Push-Location $installer
 try {
     wix build -arch x64 @defines dsa.wxs -o $msi
     if ($LASTEXITCODE -ne 0) { throw "building the package failed" }
-    wix build -arch x64 -ext $balDll -d "Version=$Version" -d "MsiPath=$msi" bundle.wxs -o $setup
+    $bundleDefines = @("-d", "Version=$Version", "-d", "MsiPath=$msi", "-d", "SetupUiDir=$setupUi")
+    if ($AndroidMajor -gt 0) { $bundleDefines += @("-d", "AndroidMajor=$AndroidMajor") }
+    if ($ImageDir) { $bundleDefines += @("-d", "BundledImage=1") }
+    wix build -arch x64 -ext $balDll @bundleDefines bundle.wxs -o $setup
     if ($LASTEXITCODE -ne 0) { throw "building setup.exe failed" }
 } finally { Pop-Location }
 Write-Host "built $msi and $setup"

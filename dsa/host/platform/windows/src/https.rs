@@ -99,7 +99,7 @@ impl Fetch for WinHttpFetch {
             (host, path)
         };
 
-        let agent = wide(concat!("DSA/", env!("CARGO_PKG_VERSION")));
+        let agent = wide(&format!("DSA/{}", crate::VERSION));
         // SAFETY: a NUL-terminated agent string; the proxy follows the system settings.
         let session = Handle::new(
             unsafe {
@@ -190,6 +190,22 @@ impl Fetch for WinHttpFetch {
             out.write_all(&buffer[..read as usize])
                 .map_err(|e| format!("{url}: writing the download: {e}"))?;
             total += u64::from(read);
+        }
+    }
+}
+
+/// Fetches `https:` and `http:` URLs through WinHTTP, and anything else as a file path:
+/// a mirror on a local or network drive. Integrity rests on the signed list either way.
+#[derive(Default)]
+pub struct UrlFetch(pub WinHttpFetch);
+
+impl Fetch for UrlFetch {
+    fn fetch(&self, url: &str, out: &mut dyn Write) -> Result<u64, String> {
+        let lower = url.to_ascii_lowercase();
+        if lower.starts_with("https://") || lower.starts_with("http://") {
+            self.0.fetch(url, out)
+        } else {
+            dsa_host_core::update::store::FileFetch.fetch(url, out)
         }
     }
 }

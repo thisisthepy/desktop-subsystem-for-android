@@ -15,15 +15,26 @@
 //!
 //! - [`service`]: the periodic check and a user's Android that boots a new image on trial.
 //!
+//! Updating DSA itself follows the same pattern:
+//!
+//! - [`program`]: the signed program list, which names the newest release and its setup
+//!   file, and the rule that only a newer version is ever installed.
+//! - [`program_service`]: downloading that setup file, running it once no user's Android
+//!   is running (or at once when a user asks), and telling the users how it went.
+//!
 //! Downloading is behind [`store::Fetch`]; the platform crates supply HTTPS.
 
 pub mod manifest;
 pub mod policy;
+pub mod program;
+pub mod program_service;
 pub mod service;
 pub mod store;
 pub mod trial;
 
 use std::fmt;
+
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
 /// Why an update was not applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,4 +83,23 @@ pub(crate) fn from_hex<const N: usize>(text: &str) -> Option<[u8; N]> {
         *byte = u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).ok()?;
     }
     Some(out)
+}
+
+/// Checks `signature_hex` (64 bytes in hexadecimal) over `bytes` against `keys`. The error
+/// says why in words, for the caller to say which list it was.
+pub(crate) fn check_signature(
+    bytes: &[u8],
+    signature_hex: &str,
+    keys: &[VerifyingKey],
+) -> Result<(), String> {
+    if keys.is_empty() {
+        return Err("no trusted key is configured".into());
+    }
+    let signature = from_hex::<64>(signature_hex)
+        .map(|bytes| Signature::from_bytes(&bytes))
+        .ok_or("the signature is not 64 bytes in hexadecimal")?;
+    if !keys.iter().any(|key| key.verify(bytes, &signature).is_ok()) {
+        return Err("the signature does not match any trusted key".into());
+    }
+    Ok(())
 }

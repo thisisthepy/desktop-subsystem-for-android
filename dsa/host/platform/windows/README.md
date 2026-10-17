@@ -73,3 +73,37 @@ the Android image up to date:
 - Users see what happened in `dsa status`: an update waiting for the next start, an update
   applied, or one undone and why.
 
+
+### Updating DSA itself
+
+With `program_list_url` and `program_dir` in `update`, the service also keeps DSA itself
+up to date, from a second signed list that the same `trusted_keys` sign:
+
+```json
+"update": {
+  "list_url": "https://.../images.json",
+  "program_list_url": "https://.../program.json",
+  "program_dir": "C:\\ProgramData\\DSA\\updates",
+  "trusted_keys": ["<public key from dsa-release keygen>"]
+}
+```
+
+- A minute after it starts and then every `check_interval_hours`, it reads the program
+  list and its signature (`program.json.sig`). The list names the newest version and its
+  `setup.exe`, with the file's size and SHA-256 (`dsa-release program` writes it).
+- Only a newer version is installed; versions compare as numbers (0.1.10 is newer than
+  0.1.9). The setup file is downloaded into `program_dir`, a folder only SYSTEM and
+  Administrators can write to, and checked against the list when it arrives and again
+  just before it runs.
+- Setup runs once no user's Android is running, and no Android starts while it runs.
+  `dsa update` runs it at once and stops every user's Android first, since the service
+  restarts. Setup runs quietly (`/quiet /norestart`) as a process apart from the service,
+  because it stops and replaces the service, and logs to `setup-<version>.log` beside
+  the service's log.
+- Users see what happened in `dsa status`: a version waiting to be installed, an
+  installation running, and after the restart that DSA was updated, or that updating
+  failed (with setup's log) and the old version is still installed. A version that failed
+  is not installed again on its own; `dsa update` tries it again.
+- `"program": false` in `update` turns it off. The program list is then never fetched.
+  A path instead of a URL reads the lists from a folder, such as a mirror on a network
+  drive.

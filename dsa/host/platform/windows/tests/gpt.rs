@@ -2,7 +2,7 @@
 
 use std::io::{Cursor, Seek, SeekFrom, Write};
 
-use dsa_host_windows::gpt::{copy_partitions, partitions, SECTOR};
+use dsa_host_windows::gpt::{copy_partitions, is_blank, partitions, SECTOR};
 
 /// A disk image with a GPT holding `parts` (name, sectors), laid out one after another
 /// from sector 2048, each filled with `fill`.
@@ -106,4 +106,15 @@ fn fr14_a_larger_partition_than_the_new_image_needs_is_zero_filled_and_a_smaller
 fn fr14_a_disk_without_a_partition_table_is_refused() {
     let mut blank = Cursor::new(vec![0u8; 1 << 20]);
     assert!(partitions(&mut blank).is_err());
+}
+
+#[test]
+fn fr14_a_disk_nothing_was_written_to_is_blank_and_one_with_a_table_is_not() {
+    let mut empty = Cursor::new(vec![0u8; 4 << 20]);
+    assert!(is_blank(&mut empty).unwrap());
+    let mut formatted = Cursor::new(vec![0u8; 4 << 20]);
+    // A file system written straight onto the disk, as the guest does with an empty one.
+    formatted.get_mut()[1024 + 56..1024 + 58].copy_from_slice(&[0x53, 0xef]);
+    assert!(!is_blank(&mut formatted).unwrap());
+    assert!(!is_blank(&mut disk(&[("misc", 2048)], 0)).unwrap());
 }

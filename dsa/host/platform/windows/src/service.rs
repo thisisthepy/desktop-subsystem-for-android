@@ -9,6 +9,11 @@
 //! `update` a background thread checks the signed release list and downloads new images.
 //! The next start of a user's Android boots a new image on trial and goes back to the
 //! previous one when it does not finish booting; users are told through the local API.
+//!
+//! With `update.program_list_url`, another thread checks the signed program list and
+//! downloads a newer setup file, and runs it once no user's Android is running, or at
+//! once on `dsa update`. Setup stops this service and starts the new one, which tells the
+//! users how the update went.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -16,18 +21,22 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::handshake::ControlHandshake;
-use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid};
+use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid, UserAndroids};
 use dsa_host_core::session::Session;
-use dsa_host_core::update::service::{check, UpdateNotices, UpdatingAndroid};
+use dsa_host_core::update::program_service::{
+    ProgramStatus, ProgramUpdates, Timing, WithProgramStatus,
+};
+use dsa_host_core::update::service::{check_reporting, Download, UpdateNotices, UpdatingAndroid};
 use dsa_host_core::update::store::ImageStore;
 use dsa_transport::Listener;
 
 use crate::android_vm::AndroidVmLauncher;
 use crate::guid::Guid;
 use crate::host_config::HostConfig;
-use crate::https::WinHttpFetch;
+use crate::https::{UrlFetch, WinHttpFetch};
 use crate::hvsocket::HvSocketListener;
 use crate::pipe::{NamedPipeListener, DEFAULT_PIPE_SDDL};
+use crate::setup::SetupInstaller;
 use crate::user_disk::{bring_disk_to, prepare_user_data_disk, prepare_user_disk_folder};
 use crate::vm_listener::VmBoundListener;
 
@@ -48,23 +57,14 @@ pub fn create_user_android(
     updates: Option<&Updates>,
 ) -> Result<Arc<dyn UserAndroid>, String> {
     let user = config.user_vm(sid).map_err(|e| e.to_string())?;
-    let template_layout = updates.is_some_and(|u| {
-        u.store
-            .state()
-            .map(|s| {
-                config
-                    .image_files(Some(&u.store.image_dir(&s.current.version)))
-                    .disk_template
-                    .is_some()
-            })
-            .unwrap_or(false)
-    });
-    if template_layout {
-        // The disk is copied from the image's template when the VM first starts.
-        prepare_user_disk_folder(&user.config.data_disk)?;
-    } else {
+    prepare_user_disk_folder(&user.config.data_disk, !user.disk_in_profile)?;
+    // With updates the disk is made when the VM first starts, from the image current then:
+    // before the first image is downloaded there is nothing to copy it from yet.
+    if updates.is_none() {
         prepare_user_data_disk(&user.config.data_disk, user.data_disk_size_gb)?;
     }
+    let disk_size_gb = user.data_disk_size_gb;
+    let console_log = user.console_log.clone();
     let launcher = match updates {
         None => AndroidVmLauncher::new(&user.vm_name, user.config),
         Some(updates) => {
@@ -77,20 +77,23 @@ pub fn create_user_android(
                     let current = store.state().map_err(|e| e.to_string())?.current;
                     let files = config.image_files(Some(&store.image_dir(&current.version)));
                     let mut vm = base.clone();
-                    if let Some(template) = &files.disk_template {
+                    match &files.disk_template {
                         // A new user's disk is the template; an existing one gets this
                         // image's Android and keeps the user's data.
-                        bring_disk_to(&vm.data_disk, template, &current.version)?;
+                        Some(template) => bring_disk_to(&vm.data_disk, template, &current.version)?,
+                        None => prepare_user_data_disk(&vm.data_disk, disk_size_gb)?,
                     }
                     vm.kernel = files.kernel;
                     vm.initrd = files.initrd;
                     vm.kernel_cmdline = files.kernel_cmdline;
                     vm.system_image = files.system_image;
+                    vm.image_version = Some(current.version.clone());
                     Ok(vm)
                 }),
             )
         }
-    };
+    }
+    .with_console_log(console_log);
     let service = Guid::vsock_service(config.control_port);
     let listener = VmBoundListener::new(
         launcher.vm_id_slot(),
@@ -114,11 +117,11 @@ pub fn create_user_android(
 }
 
 /// Opens the update store when the configuration names one.
-fn open_updates(config: &HostConfig) -> Result<Option<Updates>, String> {
+fn open_updates(config: &HostConfig, build: &str) -> Result<Option<Updates>, String> {
     let (Some(root), Some(first)) = (&config.images_dir, &config.first_image) else {
         return Ok(None);
     };
-    let store = ImageStore::open(root, first).map_err(|e| e.to_string())?;
+    let store = ImageStore::open_as(root, first, build).map_err(|e| e.to_string())?;
     let boot_timeout = config
         .update
         .as_ref()
@@ -133,7 +136,9 @@ fn open_updates(config: &HostConfig) -> Result<Option<Updates>, String> {
 }
 
 /// Checks the release list a minute after the service starts and then every
-/// `check_interval_hours`, until `stop` is set.
+/// `check_interval_hours`, until `stop` is set. Without an image to boot (an installation
+/// that bundled none), it checks at once and again every few minutes until one is in place,
+/// and tells the user what it is downloading.
 fn check_for_updates(config: HostConfig, updates: Updates, build: String, stop: Arc<AtomicBool>) {
     let Some(settings) = config.update.clone() else {
         return;
@@ -143,28 +148,74 @@ fn check_for_updates(config: HostConfig, updates: Updates, build: String, stop: 
         Err(error) => return eprintln!("{build}: not checking for updates: {error}"),
     };
     let interval = Duration::from_secs(settings.check_interval_hours.max(1) * 3600);
-    let mut next = Instant::now() + Duration::from_secs(60);
+    let no_image = || {
+        updates
+            .store
+            .state()
+            .map(|state| !updates.store.has_image(&state.current.version))
+            .unwrap_or(false)
+    };
+    let mut next = if no_image() {
+        Instant::now()
+    } else {
+        Instant::now() + Duration::from_secs(60)
+    };
     while !stop.load(Ordering::Relaxed) {
         if Instant::now() < next {
             thread::sleep(Duration::from_secs(1));
             continue;
         }
-        next = Instant::now() + interval;
-        match check(
+        let waiting_for_first = no_image();
+        // The notice changes with every whole percent; the log gets the start only.
+        let mut shown = None;
+        let mut announce = |download: &Download| {
+            let percent = (download.done as u128 * 100)
+                .checked_div(download.total as u128)
+                .unwrap_or(100);
+            if shown == Some(percent) {
+                return;
+            }
+            shown = Some(percent);
+            let notice = download.notice();
+            if download.done == 0 {
+                eprintln!("{build}: {notice}");
+            }
+            updates.notices.set(notice);
+        };
+        match check_reporting(
             &updates.store,
             &WinHttpFetch::default(),
             &settings.list_url,
             &keys,
+            &mut announce,
         ) {
             Ok(Some(notice)) => {
                 eprintln!("{build}: {notice}");
                 updates.notices.set(notice);
             }
             Ok(None) => {}
-            Err(error) => eprintln!("{build}: checking for updates: {error}"),
+            Err(error) => {
+                eprintln!("{build}: checking for updates: {error}");
+                if waiting_for_first {
+                    updates.notices.set(format!(
+                        "the Android image could not be downloaded yet ({error}); \
+                         the service tries again in {} minutes",
+                        FIRST_IMAGE_RETRY.as_secs() / 60
+                    ));
+                }
+            }
         }
+        next = Instant::now()
+            + if no_image() {
+                FIRST_IMAGE_RETRY
+            } else {
+                interval
+            };
     }
 }
+
+/// How soon the service tries again while it has no image to boot.
+const FIRST_IMAGE_RETRY: Duration = Duration::from_secs(300);
 
 /// Serves the local API until `stop` is set, then stops every user's VM.
 pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(), String> {
@@ -176,7 +227,7 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
         config.pipe_name
     );
     let grace = Duration::from_secs(config.stop_timeout_secs + 15);
-    let updates = open_updates(&config)?;
+    let updates = open_updates(&config, build)?;
     if let Some(updates) = &updates {
         let (config, updates, build, stop) = (
             config.clone(),
@@ -189,16 +240,61 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
             .spawn(move || check_for_updates(config, updates, build, stop))
             .map_err(|e| format!("starting the update check: {e}"))?;
     }
+    let program = config
+        .program_settings(crate::VERSION)
+        .map_err(|e| e.to_string())?;
+    let program_status = Arc::new(ProgramStatus::default());
     let factory_config = config.clone();
     let factory_build = build.to_string();
+    let factory_status = program.as_ref().map(|_| Arc::clone(&program_status));
     let androids = Arc::new(PerUser::new(move |sid: &str| {
         let android = create_user_android(&factory_config, &factory_build, sid, updates.as_ref());
         if let Err(why) = &android {
             eprintln!("{factory_build}: no Android for {sid}: {why}");
         }
-        android
+        // Tells about updates of DSA itself, and holds starts back while setup runs.
+        match &factory_status {
+            Some(status) => android.map(|android| {
+                Arc::new(WithProgramStatus {
+                    android,
+                    status: Arc::clone(status),
+                }) as Arc<dyn UserAndroid>
+            }),
+            None => android,
+        }
     }));
-    let service = Arc::new(HostApiService::new(androids.clone(), build));
+    let mut service = HostApiService::new(androids.clone(), build);
+    if let Some(settings) = program {
+        let check_interval = config
+            .update
+            .as_ref()
+            .map(|update| update.check_interval_hours.max(1))
+            .unwrap_or(24);
+        let updates = ProgramUpdates::new(
+            settings,
+            Box::new(UrlFetch::default()),
+            Box::new(SetupInstaller),
+            androids.clone(),
+            program_status,
+            build,
+        );
+        service = service.with_program_updates(updates.clone());
+        let stop = Arc::clone(&stop);
+        thread::Builder::new()
+            .name("dsa-program-updates".into())
+            .spawn(move || {
+                updates.run(
+                    &stop,
+                    Timing {
+                        first_check: Duration::from_secs(60),
+                        check_interval: Duration::from_secs(check_interval * 3600),
+                        retry: Duration::from_secs(60),
+                    },
+                )
+            })
+            .map_err(|e| format!("starting the program update check: {e}"))?;
+    }
+    let service = Arc::new(service);
     service.serve(Box::new(listener), stop);
     eprintln!("{build}: stopping every user's Android");
     let not_stopped = androids.stop_all(grace);

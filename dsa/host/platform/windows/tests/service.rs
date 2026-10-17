@@ -241,3 +241,138 @@ fn fr14_a_new_image_that_does_not_boot_is_undone_by_the_service() {
     assert_eq!(state.failed, ["16.0.2"]);
     assert!(!state.on_trial);
 }
+
+#[test]
+fn fr15_the_installed_service_runs_a_signed_setup_and_reports_when_it_fails() {
+    use dsa_host_core::update::program::{ProgramManifest, SetupFile, FORMAT};
+    use ed25519_dalek::{Signer, SigningKey};
+    use sha2::{Digest, Sha256};
+
+    if std::env::var_os("DSA_SERVICE_TESTS").is_none() {
+        eprintln!("skipped: set DSA_SERVICE_TESTS=1 to install and run the service");
+        return;
+    }
+    let hex = |bytes: &[u8]| -> String { bytes.iter().map(|b| format!("{b:02x}")).collect() };
+    let id = std::process::id();
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("service-program {id}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("images").join("images").join("16.0.1")).unwrap();
+
+    // The stand-in setup is dsa-hostd itself: it refuses setup's options and ends with exit
+    // code 1 without replacing anything, which is how a failed setup looks to the service.
+    let mirror = dir.join("mirror");
+    std::fs::create_dir_all(&mirror).unwrap();
+    let setup = mirror.join("setup-9.9.9.exe");
+    std::fs::copy(env!("CARGO_BIN_EXE_dsa-hostd"), &setup).unwrap();
+    let contents = std::fs::read(&setup).unwrap();
+    let key = SigningKey::from_bytes(&[7; 32]);
+    let list = serde_json::to_vec(&ProgramManifest {
+        format: FORMAT,
+        version: "9.9.9".into(),
+        setup: SetupFile {
+            url: setup.to_string_lossy().into_owned(),
+            size: contents.len() as u64,
+            sha256: hex(&Sha256::digest(&contents)),
+        },
+    })
+    .unwrap();
+    let list_path = mirror.join("program.json");
+    std::fs::write(&list_path, &list).unwrap();
+    std::fs::write(
+        mirror.join("program.json.sig"),
+        hex(&key.sign(&list).to_bytes()),
+    )
+    .unwrap();
+
+    let pipe = format!("dsa-test-program-{id}");
+    let config = serde_json::json!({
+        "kernel": dir.join("missing").join("bzImage"),
+        "images_dir": dir.join("images"),
+        "first_image": {"version": "16.0.1", "android_major": 16, "build": 1},
+        "data_dir": dir.join("users"),
+        "pipe_name": pipe,
+        "pipe_sddl": "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)",
+        "log_file": dir.join("logs").join("dsa-hostd.log"),
+        "stop_timeout_secs": 5,
+        "update": {
+            "list_url": mirror.join("images.json"),
+            "program_list_url": list_path,
+            "program_dir": dir.join("updates"),
+            "trusted_keys": [hex(key.verifying_key().as_bytes())],
+        },
+    });
+    let config_path = dir.join("dsa-hostd.json");
+    std::fs::write(&config_path, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+    let name = format!("dsa-test-program-{id}");
+    let bin_path = format!(
+        "\"{}\" service \"{}\"",
+        env!("CARGO_BIN_EXE_dsa-hostd"),
+        config_path.display()
+    );
+    let created = sc(&["create", &name, "binPath=", &bin_path, "start=", "demand"]);
+    assert!(created.contains("SUCCESS"), "sc create: {created}");
+    let _service = Installed(name.clone());
+    sc(&["start", &name]);
+
+    let mut connector = NamedPipeConnector { name: pipe };
+    let mut client = None;
+    wait_until("the service's pipe", Duration::from_secs(20), || {
+        client =
+            HostApiClient::connect(&mut connector, "service test", Duration::from_secs(5)).ok();
+        client.is_some()
+    });
+    let mut client = client.unwrap();
+
+    let update = client
+        .update_program(Duration::from_secs(120))
+        .expect("dsa update");
+    assert_eq!(
+        update.installing.as_deref(),
+        Some("9.9.9"),
+        "{}",
+        update.detail
+    );
+    let downloaded = dir.join("updates").join("9.9.9").join("setup-9.9.9.exe");
+    assert!(
+        downloaded.exists(),
+        "{} was downloaded",
+        downloaded.display()
+    );
+    let status = client.status().unwrap();
+    assert!(
+        status
+            .last_reason
+            .as_deref()
+            .is_some_and(|why| why.contains("being installed")),
+        "{status:?}"
+    );
+
+    // The service waits a minute after setup ends before it counts the update as failed.
+    let mut notice = String::new();
+    wait_until(
+        "the failure to be reported",
+        Duration::from_secs(180),
+        || {
+            notice = client.status().unwrap().update_notice.unwrap_or_default();
+            notice.contains("failed")
+        },
+    );
+    eprintln!("the service told the user: {notice}");
+    assert!(notice.contains("updating DSA to 9.9.9 failed"), "{notice}");
+    assert!(notice.contains("exit code 1"), "{notice}");
+    assert!(
+        notice.contains(&format!(
+            "DSA {} is still installed",
+            dsa_host_windows::VERSION
+        )),
+        "{notice}"
+    );
+    let log = dir.join("logs").join("setup-9.9.9.log");
+    assert!(notice.contains(&log.display().to_string()), "{notice}");
+    // Android may start again.
+    let status = client.status().unwrap();
+    assert!(!status
+        .last_reason
+        .unwrap_or_default()
+        .contains("being installed"));
+}

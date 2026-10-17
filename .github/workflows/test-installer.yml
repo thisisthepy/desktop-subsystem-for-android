@@ -1,7 +1,9 @@
-# Builds the Windows installer and checks it on a real Windows machine: installs the
-# package, checks the service and the dsa command, shows setup.exe's first screen, and
-# uninstalls. The kernel and the Android image are built elsewhere, so the package here
-# carries a placeholder kernel and a small stand-in image laid out like a real one.
+# Builds the Windows installer and checks it on a real Windows machine: takes pictures of
+# setup.exe's screens, installs the package, checks the service and the dsa command, lets
+# the service update DSA to a newer version from a signed program list, and uninstalls;
+# then does the same through setup.exe, quietly and through its screens. The
+# kernel and the Android image are built elsewhere, so the package here carries a
+# placeholder kernel and a small stand-in image laid out like a real one.
 
 name: Installer test
 
@@ -21,11 +23,23 @@ permissions:
 
 jobs:
   installer:
-    name: Build, install and uninstall the installer (windows-latest)
-    runs-on: windows-latest
+    name: Build, install and uninstall the installer (windows, ${{ matrix.version }})
+    # Server 2022 (build 20348) has the Windows 10 window manager, so setup shows its
+    # solid background and square corners there; Server 2025 (build 26100) has the
+    # Windows 11 one, with Mica and rounded corners.
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [2022, 2025]
+    runs-on: windows-${{ matrix.version }}
     defaults:
       run:
         shell: pwsh
+    # Somewhere other than the defaults, with spaces, so that the folders chosen at
+    # installation are known to reach the service.
+    env:
+      PROGRAM_DIR: 'C:\DSA Test\Program'
+      DATA_DIR: 'C:\DSA Test\Data'
     steps:
       - uses: actions/checkout@v4
 
@@ -44,73 +58,299 @@ jobs:
              files = @{ "disk.vhdx" = @{}; "initrd.img" = @{}; "bzImage" = @{} } } |
             ConvertTo-Json -Depth 4 | Set-Content -Path "$dir\image.json"
 
+      # The lists the installed service reads are files in this folder, signed with a key
+      # made for this run.
+      - name: Make a signing key and a folder for the lists
+        run: |
+          Push-Location dsa
+          cargo build -q --release -p dsa-host-core --bin dsa-release
+          if ($LASTEXITCODE -ne 0) { throw "building dsa-release failed" }
+          Pop-Location
+          $mirror = (New-Item -ItemType Directory -Force .scratch\update-mirror).FullName
+          $public = & dsa\target\release\dsa-release.exe keygen "$mirror\..\test-release.key"
+          if ($LASTEXITCODE -ne 0) { throw "making the key failed" }
+          "MIRROR=$mirror" >> $env:GITHUB_ENV
+          "TEST_PUBLIC_KEY=$public" >> $env:GITHUB_ENV
+
       # The runner's account is not an interactive user, which the default pipe access
       # would not admit, so the test build also admits authenticated users.
       - name: Build the package and setup.exe
         run: >
-          dsa/host/platform/windows/installer/build.ps1 -Version 0.1.0 -PlaceholderKernel
-          -ImageDir .scratch\stand-in-image
+          dsa/host/platform/windows/installer/build.ps1 -Version 0.0.9 -PlaceholderKernel
+          -ImageDir .scratch\stand-in-image -AndroidMajor 17
           -PipeSddl "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)"
+          -ListUrl "$env:MIRROR\images.json" -TrustedKey $env:TEST_PUBLIC_KEY
+          -ProgramListUrl "$env:MIRROR\program.json"
+
+      # Nothing is installed yet, so setup.exe opens on its first screen. Pictures of it in
+      # the light and the dark theme, of Change, and of the command line help.
+      - name: Take pictures of setup.exe's first screens
+        run: |
+          # What decides the window's look: the display adapter and the transparency setting.
+          Get-CimInstance Win32_VideoController | ForEach-Object { Write-Host "display adapter: $($_.Name)" }
+          $personalize = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -ErrorAction SilentlyContinue
+          Write-Host "EnableTransparency: $($personalize.EnableTransparency)"
+          . .github/scripts/installer/setup-ui.ps1
+          New-Item -ItemType Directory -Force screens | Out-Null
+          foreach ($theme in 'light', 'dark') {
+            Set-AppTheme -Dark:($theme -eq 'dark')
+            $setup = Start-Process 'dsa\target\installer\setup-0.0.9.exe' -ArgumentList '/log', "$PWD\first-$theme.log" -PassThru
+            $null = $setup.Handle
+            Wait-SetupControl InstallButton -Enabled | Out-Null
+            Save-SetupScreen "$PWD\screens\$theme-install.png"
+            $publisher = Get-SetupText HeroPublisher
+            if ($publisher -cne 'Thisisthepy') { throw "the first screen names the publisher '$publisher', not Thisisthepy" }
+            if ($theme -eq 'light') { Copy-Item "screens\light-install.png" setup-screen.png }
+            Invoke-SetupButton ChangeButton
+            Wait-SetupControl ProgramFolderBox | Out-Null
+            Save-SetupScreen "$PWD\screens\$theme-change.png"
+            # Before installation starts, the folders page goes back to the first screen.
+            $back = Get-SetupText CancelButton
+            if ($back -ne 'Back') { throw "the folders page offers '$back', not Back" }
+            Invoke-SetupButton CancelButton
+            Wait-SetupControl InstallButton -Enabled | Out-Null
+            $cancel = Get-SetupText CancelButton
+            if ($cancel -ne 'Cancel') { throw "the first screen offers '$cancel', not Cancel" }
+            Invoke-SetupButton CancelButton
+            $code = Wait-SetupExit $setup
+            if ($code -ne 1602) { throw "closing setup.exe from its first screen returned $code, not 1602" }
+          }
+          Set-AppTheme
+          $setup = Start-Process 'dsa\target\installer\setup-0.0.9.exe' -ArgumentList '/?', '/log', "$PWD\first-help.log" -PassThru
+          $null = $setup.Handle
+          Wait-SetupControl CloseButton -Enabled | Out-Null
+          Save-SetupScreen "$PWD\screens\light-help.png"
+          Invoke-SetupButton CloseButton
+          Wait-SetupExit $setup | Out-Null
 
       - name: Install the package
         run: |
-          $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/i', 'dsa\target\installer\dsa-0.1.0.msi', '/qn', '/l*v', 'install.log'
+          $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/i', 'dsa\target\installer\dsa-0.0.9.msi', '/qn', '/l*v', 'install.log', "INSTALLFOLDER=`"$env:PROGRAM_DIR`"", "DATAFOLDER=`"$env:DATA_DIR`""
           if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 80; throw "install failed ($($p.ExitCode))" }
 
       - name: Check the service, the command and the access lists
         run: |
           $service = Get-Service DsaHost
           if ($service.Status -ne 'Running') { throw "DsaHost is $($service.Status)" }
-          $out = & 'C:\Program Files\DSA\dsa.exe' status 2>&1
+          $entry = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+            Where-Object { $_.DisplayName -eq 'Desktop Subsystem for Android' } | Select-Object -First 1
+          if ($entry.Publisher -cne 'Thisisthepy') { throw "the package names its publisher '$($entry.Publisher)', not Thisisthepy" }
+          $out = & "$env:PROGRAM_DIR\dsa.exe" status 2>&1
           Write-Host $out
           if ($LASTEXITCODE -ne 0 -or -not ($out -match '^Android: Stopped')) { throw "dsa status: $out" }
-          $acl = (Get-Acl 'C:\ProgramData\DSA').Sddl
+          $acl = (Get-Acl $env:DATA_DIR).Sddl
           Write-Host $acl
           if ($acl -notmatch 'S-1-5-83-0') { throw "the VMs cannot read the data folder" }
           if ($acl -match ';;;BU\)') { throw "users can open the service's data folder" }
-          Get-Content 'C:\ProgramData\DSA\logs\dsa-hostd.log'
+          $log = Get-Content "$env:DATA_DIR\logs\dsa-hostd.log"
+          $log
+          # The programs carry the release's version, which differs from the crates' here.
+          if (-not ($log -match '^dsa-hostd 0\.0\.9:')) { throw "the service does not report the release's version" }
+          # Asking for status made the service set up this user's Android, in their profile.
+          if (-not (Test-Path "$env:LOCALAPPDATA\DSA")) { throw "no Android folder in the user's profile" }
 
       - name: Check the first image and the configuration that names it
         run: |
-          $image = 'C:\ProgramData\DSA\images\images\17.0.0-1'
+          $image = "$env:DATA_DIR\images\images\17.0.0-1"
           foreach ($name in 'image.json', 'disk.vhdx', 'initrd.img', 'bzImage') {
             if (-not (Test-Path "$image\$name")) { throw "the first image has no $name" }
           }
-          $config = Get-Content -Raw 'C:\ProgramData\DSA\dsa-hostd.json' | ConvertFrom-Json
+          $config = Get-Content -Raw "$env:DATA_DIR\dsa-hostd.json" | ConvertFrom-Json
           Write-Host ($config | ConvertTo-Json -Depth 5)
           if ($config.first_image.version -ne '17.0.0-1' -or $config.first_image.android_major -ne 17) {
             throw "the configuration does not name the first image"
           }
+          if ($config.update.program_list_url -ne "$env:MIRROR\program.json") {
+            throw "the configuration does not name the program list"
+          }
+          if ($config.update.program_dir -ne '{data}\updates') {
+            throw "the configuration does not name the folder for setup files"
+          }
 
-      - name: Show the first screen of setup.exe
+      # The same package as a newer version, offered by a signed program list. dsa update
+      # makes the installed service download it, run its setup.exe and restart as it. The
+      # list is staged beside the mirror and put in place just before dsa update, so the
+      # service's own first check (a minute after it started) cannot find it first.
+      - name: Build version 0.0.10 and offer it in the program list
         run: |
-          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-          $setup = Start-Process 'dsa\target\installer\setup-0.1.0.exe' -PassThru
-          Start-Sleep -Seconds 8
-          $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
-          [System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
-          $bitmap.Save("$PWD\setup-screen.png")
-          Stop-Process -Id $setup.Id -Force -ErrorAction SilentlyContinue
+          dsa/host/platform/windows/installer/build.ps1 -Version 0.0.10 -PlaceholderKernel `
+            -ImageDir .scratch\stand-in-image -AndroidMajor 17 `
+            -PipeSddl "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)" `
+            -ListUrl "$env:MIRROR\images.json" -TrustedKey $env:TEST_PUBLIC_KEY `
+            -ProgramListUrl "$env:MIRROR\program.json"
+          $setup = "$env:MIRROR\setup-0.0.10.exe"
+          Copy-Item dsa\target\installer\setup-0.0.10.exe $setup
+          $tool = "dsa\target\release\dsa-release.exe"
+          $staged = (New-Item -ItemType Directory -Force .scratch\update-staged).FullName
+          $list = & $tool program 0.0.10 $setup $setup
+          if ($LASTEXITCODE -ne 0) { throw "writing the program list failed" }
+          ($list -join "`n") + "`n" | Set-Content -NoNewline -Encoding utf8NoBOM "$staged\program.json"
+          & $tool sign "$env:MIRROR\..\test-release.key" "$staged\program.json"
+          if ($LASTEXITCODE -ne 0) { throw "signing the program list failed" }
+          & $tool verify-program $env:TEST_PUBLIC_KEY "$staged\program.json"
+          if ($LASTEXITCODE -ne 0) { throw "the program list does not verify" }
+          Get-Content "$staged\program.json"
+
+      - name: Update DSA to 0.0.10 with dsa update
+        run: |
+          # An edited configuration must survive the upgrade.
+          $configPath = "$env:DATA_DIR\dsa-hostd.json"
+          $edited = Get-Content -Raw $configPath | ConvertFrom-Json
+          $edited.update | Add-Member -NotePropertyName check_interval_hours -NotePropertyValue 48
+          $edited | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM $configPath
+          Copy-Item .scratch\update-staged\program.json, .scratch\update-staged\program.json.sig $env:MIRROR
+          $out = & "$env:PROGRAM_DIR\dsa.exe" update --wait --timeout 600 2>&1
+          $code = $LASTEXITCODE
+          $out
+          Get-Content "$env:DATA_DIR\logs\dsa-hostd.log" -Tail 40
+          if ($code -ne 0) {
+            Get-Service DsaHost | Format-List Name, Status
+            Get-ChildItem "$env:DATA_DIR\logs" | Format-Table Name, Length, LastWriteTime
+            Get-ChildItem "$env:DATA_DIR\logs\setup-*.msi.log" | ForEach-Object {
+              "== $($_.Name)"
+              Select-String -Path $_ -Pattern 'AppSearch|RegistrySearch|INSTALLFOLDER|DATAFOLDER|FindRelatedProducts|RemoveExistingProducts|StartServices|StopServices|DsaHost|Return value 3|Error 1' |
+                Select-Object -First 80 | ForEach-Object { $_.Line }
+            }
+            sc.exe qc DsaHost
+            Get-ItemProperty HKLM:\SOFTWARE\thisisthepy\DSA -ErrorAction SilentlyContinue
+            Get-ChildItem "C:\ProgramData\DSA", "C:\Program Files\DSA", "$env:PROGRAM_DIR", "$env:DATA_DIR" -ErrorAction SilentlyContinue | Format-Table FullName, Length
+            Get-Content "C:\ProgramData\DSA\logs\dsa-hostd.log" -ErrorAction SilentlyContinue
+            Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager' } -MaxEvents 15 -ErrorAction SilentlyContinue |
+              Format-List TimeCreated, Id, Message
+            Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'MsiInstaller' } -MaxEvents 10 -ErrorAction SilentlyContinue |
+              Format-List TimeCreated, Id, Message
+            throw "dsa update failed ($code)"
+          }
+          if (-not ($out -match 'Update: DSA was updated to 0\.0\.10')) { throw "the user was not told about the update" }
+          $service = Get-Service DsaHost
+          if ($service.Status -ne 'Running') { throw "DsaHost is $($service.Status) after the update" }
+          $log = Get-Content "$env:DATA_DIR\logs\dsa-hostd.log"
+          if (-not ($log -match '^dsa-hostd 0\.0\.10:')) { throw "the service did not restart as 0.0.10" }
+          # The upgrade stayed in the folders chosen at installation.
+          $path = (Get-CimInstance Win32_Service -Filter "Name='DsaHost'").PathName
+          Write-Host $path
+          if (-not $path.StartsWith("`"$env:PROGRAM_DIR\")) { throw "the service moved to $path" }
+          if (-not (Test-Path "$env:DATA_DIR\logs\setup-0.0.10.log")) { throw "setup left no log where the service said" }
+          # setup.exe is still ending when the new service starts, so the file it ran from
+          # goes on the service's next round, a minute later.
+          $deadline = (Get-Date).AddMinutes(3)
+          while ((Test-Path "$env:DATA_DIR\updates\0.0.10") -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 5 }
+          if (Test-Path "$env:DATA_DIR\updates\0.0.10") { throw "the setup file was not removed after the update" }
+          if ((Get-Content -Raw $configPath | ConvertFrom-Json).update.check_interval_hours -ne 48) {
+            throw "the upgrade replaced the edited configuration"
+          }
+          $status = & "$env:PROGRAM_DIR\dsa.exe" status 2>&1
+          $status
+          if (-not ($status -match 'Update: DSA was updated to 0\.0\.10')) { throw "dsa status does not tell about the update" }
 
       - name: Uninstall
         run: |
-          $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/x', 'dsa\target\installer\dsa-0.1.0.msi', '/qn', '/l*v', 'uninstall.log'
-          if ($p.ExitCode -ne 0) { Get-Content uninstall.log -Tail 80; throw "uninstall failed ($($p.ExitCode))" }
+          $p = Start-Process 'dsa\target\installer\setup-0.0.10.exe' -Wait -PassThru -ArgumentList '/uninstall', '/quiet', '/log', 'uninstall.log'
+          if ($p.ExitCode -ne 0) { Get-ChildItem uninstall*.log | ForEach-Object { Get-Content $_ -Tail 80 }; throw "uninstall failed ($($p.ExitCode))" }
           if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
-          if (Test-Path 'C:\Program Files\DSA\dsa.exe') { throw "the program is still there" }
-          if (Test-Path 'C:\ProgramData\DSA\images') { throw "the downloaded images are still there" }
-          if (-not (Test-Path 'C:\ProgramData\DSA\users')) { throw "each user's data must stay" }
+          if (Test-Path "$env:PROGRAM_DIR\dsa.exe") { throw "the program is still there" }
+          if (Test-Path "$env:DATA_DIR\images") { throw "the downloaded images are still there" }
+          if (Test-Path "$env:DATA_DIR\updates") { throw "the downloaded setup files are still there" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\DSA")) { throw "each user's Android folder must stay" }
 
-      - name: Keep the installer, the logs and the screenshot
+      # setup.exe without its screens, into folders named on the command line; then the
+      # package copied out of it.
+      - name: Install and uninstall quietly with setup.exe, and copy out the package
+        env:
+          BUNDLE_PROGRAM_DIR: 'C:\DSA Bundle\Program'
+          BUNDLE_DATA_DIR: 'C:\DSA Bundle\Data'
+        run: |
+          $p = Start-Process 'dsa\target\installer\setup-0.0.9.exe' -Wait -PassThru -ArgumentList '/quiet', '/norestart', '/log', "$PWD\bundle-install.log", "InstallFolder=`"$env:BUNDLE_PROGRAM_DIR`"", "DataFolder=`"$env:BUNDLE_DATA_DIR`""
+          if ($p.ExitCode -ne 0) { Get-Content bundle-install.log -Tail 80; throw "setup.exe /quiet failed ($($p.ExitCode))" }
+          $service = Get-Service DsaHost
+          if ($service.Status -ne 'Running') { throw "DsaHost is $($service.Status)" }
+          if (-not (Test-Path "$env:BUNDLE_PROGRAM_DIR\dsa.exe")) { throw "the program is not in the folder named on the command line" }
+          if (-not (Test-Path "$env:BUNDLE_DATA_DIR\dsa-hostd.json")) { throw "the configuration is not in the folder named on the command line" }
+          $out = & "$env:BUNDLE_PROGRAM_DIR\dsa.exe" status 2>&1
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) { throw "dsa status: $out" }
+
+          $p = Start-Process 'dsa\target\installer\setup-0.0.9.exe' -Wait -PassThru -ArgumentList '/quiet', '/uninstall', '/norestart', '/log', "$PWD\bundle-uninstall.log"
+          if ($p.ExitCode -ne 0) { Get-Content bundle-uninstall.log -Tail 80; throw "setup.exe /quiet /uninstall failed ($($p.ExitCode))" }
+          if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
+          if (Test-Path "$env:BUNDLE_PROGRAM_DIR\dsa.exe") { throw "the program is still there" }
+
+          # A release ships setup.exe only. /layout copies the bundle (its package is inside
+          # it), and wix burn extract takes the package out for msiexec.
+          $p = Start-Process 'dsa\target\installer\setup-0.0.9.exe' -Wait -PassThru -ArgumentList '/quiet', '/layout', "$PWD\layout", '/log', "$PWD\bundle-layout.log"
+          if ($p.ExitCode -ne 0) { Get-Content bundle-layout.log -Tail 80; throw "setup.exe /layout failed ($($p.ExitCode))" }
+          if (-not (Test-Path "layout\setup-0.0.9.exe")) { throw "setup.exe /layout did not copy the bundle" }
+          wix burn extract dsa\target\installer\setup-0.0.9.exe -o extracted
+          if ($LASTEXITCODE -ne 0) { throw "wix burn extract failed" }
+          Get-ChildItem -Recurse -File extracted | ForEach-Object { Write-Host $_.FullName }
+          # The engine keeps payloads under generated names: the package is a0 and its image
+          # cabinet a1 (the README says to rename them).
+          $head = [System.IO.File]::ReadAllBytes("$PWD\extracted\a0")[0..3]
+          if (($head -join ',') -ne '208,207,17,224') { throw "a0 is not the package (an MSI starts D0 CF 11 E0)" }
+          $head = [System.IO.File]::ReadAllBytes("$PWD\extracted\a1")[0..3]
+          if ([System.Text.Encoding]::ASCII.GetString($head) -ne 'MSCF') { throw "a1 is not the image cabinet" }
+
+      # setup.exe through its screens, the way a person uses it: Install, then Done; then
+      # Uninstall from the screen a second start shows. Pictures of each screen on the way.
+      - name: Install and uninstall through setup.exe's screens
+        run: |
+          . .github/scripts/installer/setup-ui.ps1
+          Set-AppTheme
+          $setup = Start-Process 'dsa\target\installer\setup-0.0.9.exe' -ArgumentList '/log', "$PWD\ui-install.log" -PassThru
+          $null = $setup.Handle
+          Invoke-SetupButton InstallButton
+          # Installing the stand-in package is quick, so the picture of the progress screen
+          # is taken when it can be; the result is what the test checks.
+          try {
+            Wait-SetupControl ProgressBar -Seconds 30 | Out-Null
+            Save-SetupScreen "$PWD\screens\light-progress.png"
+          } catch { Write-Host "no picture of the progress screen: $_" }
+          Wait-SetupControl DoneButton -Seconds 300 | Out-Null
+          Save-SetupScreen "$PWD\screens\light-done.png"
+          $title = Get-SetupText ResultTitle
+          if ($title -ne 'Installed') { throw "setup.exe ended on '$title'" }
+          Invoke-SetupButton DoneButton
+          $code = Wait-SetupExit $setup
+          if ($code -ne 0) { Get-Content ui-install.log -Tail 80; throw "setup.exe returned $code" }
+          if ((Get-Service DsaHost).Status -ne 'Running') { throw "DsaHost is not running" }
+
+          Set-AppTheme -Dark
+          $setup = Start-Process 'dsa\target\installer\setup-0.0.9.exe' -ArgumentList '/log', "$PWD\ui-uninstall.log" -PassThru
+          $null = $setup.Handle
+          Wait-SetupControl UninstallButton -Enabled | Out-Null
+          Save-SetupScreen "$PWD\screens\dark-maintenance.png"
+          Invoke-SetupButton UninstallButton
+          Wait-SetupControl DoneButton -Seconds 300 | Out-Null
+          Save-SetupScreen "$PWD\screens\dark-uninstalled.png"
+          $title = Get-SetupText ResultTitle
+          if ($title -ne 'Uninstalled') { throw "setup.exe ended on '$title'" }
+          Invoke-SetupButton DoneButton
+          $code = Wait-SetupExit $setup
+          Set-AppTheme
+          if ($code -ne 0) { Get-Content ui-uninstall.log -Tail 80; throw "setup.exe returned $code" }
+          if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
+
+      # The upload takes files from the workspace only, and not from hidden folders.
+      - name: Collect the service's and setup's logs
+        if: always()
+        run: |
+          New-Item -ItemType Directory -Force dsa\target\service-logs | Out-Null
+          Copy-Item "$env:DATA_DIR\logs\*" dsa\target\service-logs -ErrorAction SilentlyContinue
+
+      - name: Keep the installer, the logs and the pictures
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: installer
+          name: installer-windows-${{ matrix.version }}
           path: |
             dsa/target/installer/*.msi
             dsa/target/installer/*.cab
             dsa/target/installer/*.exe
             install.log
-            uninstall.log
+            uninstall*.log
+            bundle-*.log
+            ui-*.log
+            first-*.log
             setup-screen.png
+            screens/*.png
+            dsa/target/service-logs/

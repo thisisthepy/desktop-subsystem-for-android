@@ -1,14 +1,20 @@
 # Publishes the Android images: builds the guest kernel, makes each image in
 # dsa/guest/image/inputs.json with the project's keys, publishes each one as the GitHub
 # release android-<version>, and publishes the signed release list the service reads as
-# the release "images" (images.json and images.json.sig).
+# the release "images" (images.json and images.json.sig). With an installer version it
+# also publishes the installer as the release v<version>, and the signed program list the
+# service updates DSA itself from (program.json and program.json.sig, in "images" too).
 #
-# It runs only by hand. It needs two repository secrets:
-#   DSA_ANDROID_KEYS          the Android key set from dsa/guest/image/make-keys.sh, as
-#                             tar czf - -C <keys> . | base64 -w0
-#   DSA_RELEASE_SIGNING_KEY   the list's Ed25519 key from dsa-release keygen
-# The service trusts the list through the public half of the second one, which
+# It runs only by hand. It needs these repository secrets:
+#   DSA_ANDROID_KEYS_1, _2    the Android key set from dsa/guest/image/make-keys.sh, split
+#                             by dsa/guest/image/pack-keys.sh (a secret holds at most 48 KB)
+#   DSA_RELEASE_SIGNING_KEY   the lists' Ed25519 key from dsa-release keygen
+# The service trusts both lists through the public half of the second one, which
 # dsa-release public-key prints.
+#
+# With rebuild_images off it builds no kernel and no image: the installer takes the kernel
+# from the newest published image and the trust key from the published list, after checking
+# both. That is for a release that changes only the program.
 
 name: Image release
 
@@ -19,6 +25,16 @@ on:
         description: "Also publish the installer as this version (for example 0.1.0); empty for images only"
         required: false
         default: ""
+      rebuild_images:
+        description: "Build the kernel and the images again; off to publish only the installer with the published images"
+        type: boolean
+        required: false
+        default: true
+      replace_release:
+        description: "Replace an installer release of the same version that is already published (its assets and tag)"
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: release-image
@@ -30,6 +46,7 @@ permissions:
 jobs:
   kernel:
     name: Build the guest kernel (x86_64)
+    if: inputs.rebuild_images
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -42,7 +59,10 @@ jobs:
             build-essential flex bison bc dwarves libssl-dev libelf-dev cpio
 
       - name: Build
-        run: DSA_KERNEL_OUT="$PWD/.scratch/kernel-out" dsa/kernel/build.sh
+        run: |
+          DSA_KERNEL_OUT="$PWD/.scratch/kernel-out" dsa/kernel/build.sh
+          # build.sh names the kernel bzImage-<release>; the jobs below take it as bzImage.
+          mv .scratch/kernel-out/bzImage-* .scratch/kernel-out/bzImage
 
       - uses: actions/upload-artifact@v4
         with:
@@ -78,14 +98,10 @@ jobs:
 
       - name: Restore the Android keys
         env:
-          KEYS: ${{ secrets.DSA_ANDROID_KEYS }}
-        run: |
-          if [[ -z "$KEYS" ]]; then
-            echo "::error::The DSA_ANDROID_KEYS secret is not set; see the top of this workflow." >&2
-            exit 1
-          fi
-          mkdir -p .scratch/image-keys
-          base64 -d <<<"$KEYS" | tar xzf - -C .scratch/image-keys
+          DSA_ANDROID_KEYS_1: ${{ secrets.DSA_ANDROID_KEYS_1 }}
+          DSA_ANDROID_KEYS_2: ${{ secrets.DSA_ANDROID_KEYS_2 }}
+          DSA_ANDROID_KEYS_3: ${{ secrets.DSA_ANDROID_KEYS_3 }}
+        run: dsa/guest/image/unpack-keys.sh .scratch/image-keys
 
       - uses: actions/download-artifact@v4
         with:
@@ -140,9 +156,11 @@ jobs:
   list:
     name: Sign and publish the release list
     needs: image
+    if: inputs.rebuild_images
     runs-on: ubuntu-latest
     outputs:
       public_key: ${{ steps.sign.outputs.public_key }}
+      newest_major: ${{ steps.write.outputs.newest_major }}
     permissions:
       contents: write
     env:
@@ -157,11 +175,14 @@ jobs:
           path: entries
 
       - name: Write the list
+        id: write
         run: |
           jq -n --slurpfile inputs dsa/guest/image/inputs.json --slurpfile images <(jq -s . entries/*.json) \
             '{format: 1, supported_majors: ([$inputs[0].images[].android_major] | sort), images: $images[0]}' \
             > images.json
           cat images.json
+          # The installer's first screen names the newest Android the list supports.
+          echo "newest_major=$(jq '.supported_majors | max' images.json)" >> "$GITHUB_OUTPUT"
 
       - name: Sign and check the list
         id: sign
@@ -194,10 +215,67 @@ jobs:
               --notes "The signed list of Android images the Desktop Subsystem for Android service reads."
           fi
 
+  # Instead of kernel, image and list: what the installer needs, from the published release.
+  published:
+    name: Take the kernel and the trust key from the published images
+    if: ${{ !inputs.rebuild_images }}
+    runs-on: ubuntu-latest
+    outputs:
+      public_key: ${{ steps.list.outputs.public_key }}
+      newest_major: ${{ steps.list.outputs.newest_major }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the published list
+        id: list
+        working-directory: dsa
+        env:
+          SIGNING_KEY: ${{ secrets.DSA_RELEASE_SIGNING_KEY }}
+        run: |
+          if [[ -z "$SIGNING_KEY" ]]; then
+            echo "::error::The DSA_RELEASE_SIGNING_KEY secret is not set; see the top of this workflow." >&2
+            exit 1
+          fi
+          gh release download images --pattern 'images.json*' --dir ..
+          cargo build -q --release -p dsa-host-core --bin dsa-release
+          umask 077
+          key="$RUNNER_TEMP/release.key"
+          printf '%s\n' "$SIGNING_KEY" > "$key"
+          public="$(target/release/dsa-release public-key "$key")"
+          rm -f "$key"
+          target/release/dsa-release verify "$public" ../images.json
+          echo "public_key=$public" >> "$GITHUB_OUTPUT"
+          echo "newest_major=$(jq '.supported_majors | max' ../images.json)" >> "$GITHUB_OUTPUT"
+
+      # Every image carries the same kernel; the newest image's is taken and checked
+      # against the hash the signed list gives.
+      - name: Take the kernel
+        run: |
+          read -r url sha < <(jq -r '.images | max_by([.android_major, .build])
+            | .files[] | select(.name == "bzImage") | "\(.url) \(.sha256)"' images.json)
+          if [[ -z "$url" ]]; then
+            echo "::error::The newest published image has no bzImage." >&2
+            exit 1
+          fi
+          mkdir -p .scratch/kernel-out
+          curl -fsSL -o .scratch/kernel-out/bzImage "$url"
+          echo "$sha  .scratch/kernel-out/bzImage" | sha256sum -c -
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-kernel
+          path: .scratch/kernel-out/bzImage
+          if-no-files-found: error
+
   installer:
     name: Build and publish the installer (windows-latest)
-    if: inputs.installer_version != ''
-    needs: [kernel, list]
+    # After the list, or after published when the images are not rebuilt.
+    if: >-
+      ${{ !cancelled() && inputs.installer_version != '' &&
+          (needs.list.result == 'success' || needs.published.result == 'success') }}
+    needs: [kernel, list, published]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -223,13 +301,78 @@ jobs:
           dsa/host/platform/windows/installer/build.ps1 -Version ${{ inputs.installer_version }}
           -Kernel .scratch/kernel-out/bzImage
           -ListUrl https://github.com/${{ github.repository }}/releases/download/images/images.json
-          -TrustedKey ${{ needs.list.outputs.public_key }}
+          -TrustedKey ${{ needs.list.outputs.public_key || needs.published.outputs.public_key }}
+          -AndroidMajor ${{ needs.list.outputs.newest_major || needs.published.outputs.newest_major }}
+          -ProgramListUrl https://github.com/${{ github.repository }}/releases/download/images/program.json
 
       - name: Publish the installer
         run: |
           $version = '${{ inputs.installer_version }}'
-          $files = "dsa/target/installer/setup-$version.exe", "dsa/target/installer/dsa-$version.msi"
-          gh release create "v$version" @files --target $env:GITHUB_SHA `
-            --title "Desktop Subsystem for Android $version" `
-            --notes "Run setup-$version.exe. It installs the service and downloads the newest supported Android image."
+          # The asset says what it is, its version, and what it runs on. "win" names the
+          # system without the Microsoft mark, which no DSA file name carries.
+          $asset = "DSA-v$version-win-x64-setup.exe"
+          $out = New-Item -ItemType Directory -Force dsa\target\release-assets
+          Copy-Item "dsa/target/installer/setup-$version.exe" (Join-Path $out $asset)
+          $hash = (Get-FileHash (Join-Path $out $asset) -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -NoNewline -Encoding ascii (Join-Path $out SHA256SUMS.txt) "$hash  $asset`n"
+          # Only setup.exe: it carries the package (dsa-<version>.msi) inside, and
+          # wix burn extract takes it out for msiexec-based deployments.
+          $notes = @"
+          ## Install
+
+          Download **$asset** and run it. Setup installs the DSA service and the ``dsa`` command, and the service then downloads the newest supported Android image in the background.
+
+          - Needs 64-bit Windows 10 1803 or later, or Windows 11, with Virtual Machine Platform turned on.
+          - ``dsa status`` shows the download; ``dsa start --wait`` starts Android once it is in.
+          - SHA-256: ``$hash`` (also in SHA256SUMS.txt)
+
+          Android is a trademark of Google LLC.
+          "@
+          gh release view "v$version" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            if ('${{ inputs.replace_release }}' -ne 'true') {
+              throw "v$version is already published; run again with replace_release to replace it"
+            }
+            gh release delete "v$version" --yes --cleanup-tag
+            if ($LASTEXITCODE -ne 0) { throw "removing the published v$version failed" }
+          }
+          gh release create "v$version" (Join-Path $out $asset) (Join-Path $out SHA256SUMS.txt) --target $env:GITHUB_SHA `
+            --title "DSA v$version" --notes $notes --generate-notes
           if ($LASTEXITCODE -ne 0) { throw "publishing the installer failed" }
+
+      # The installed services read this list to update themselves to this version. It
+      # names the setup file as published above (and hashes that file), and is signed with the
+      # image list's key.
+      - name: Write, sign and check the program list
+        env:
+          SIGNING_KEY: ${{ secrets.DSA_RELEASE_SIGNING_KEY }}
+        run: |
+          if (-not $env:SIGNING_KEY) { throw "The DSA_RELEASE_SIGNING_KEY secret is not set; see the top of this workflow." }
+          $version = '${{ inputs.installer_version }}'
+          # The asset the step above published, under its release name.
+          $asset = "DSA-v$version-win-x64-setup.exe"
+          $url = "https://github.com/${{ github.repository }}/releases/download/v$version/$asset"
+          Push-Location dsa
+          cargo build -q --release -p dsa-host-core --bin dsa-release
+          if ($LASTEXITCODE -ne 0) { throw "building dsa-release failed" }
+          Pop-Location
+          $tool = "dsa\target\release\dsa-release.exe"
+          $list = & $tool program $version $url "dsa\target\release-assets\$asset"
+          if ($LASTEXITCODE -ne 0) { throw "writing the program list failed" }
+          ($list -join "`n") + "`n" | Set-Content -NoNewline -Encoding utf8NoBOM program.json
+          $key = Join-Path $env:RUNNER_TEMP "release.key"
+          Set-Content -NoNewline -Encoding ascii -Path $key -Value $env:SIGNING_KEY
+          try {
+            & $tool sign $key program.json
+            if ($LASTEXITCODE -ne 0) { throw "signing the program list failed" }
+            $public = & $tool public-key $key
+          } finally { Remove-Item -Force $key }
+          if ($public -ne '${{ needs.list.outputs.public_key || needs.published.outputs.public_key }}') { throw "the key that signed the program list is not the one the installer trusts" }
+          & $tool verify-program $public program.json
+          if ($LASTEXITCODE -ne 0) { throw "the program list does not verify" }
+          Get-Content program.json
+
+      - name: Publish the program list
+        run: |
+          gh release upload images program.json program.json.sig --clobber
+          if ($LASTEXITCODE -ne 0) { throw "publishing the program list failed" }

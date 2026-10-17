@@ -24,6 +24,8 @@ fn missing_files() -> AndroidVmConfig {
         data_disk: dir.join("data.vhdx"),
         socket_sids: Vec::new(),
         page_reporting_order: 9,
+        console_pipe: None,
+        image_version: None,
     }
 }
 
@@ -45,4 +47,41 @@ fn fr2_an_invalid_configuration_is_refused_before_hcs_is_called() {
     let mut launcher = AndroidVmLauncher::new("dsa-test-invalid", config);
     let error = launcher.start().unwrap_err();
     assert!(error.contains("at least one processor"), "{error}");
+}
+
+#[test]
+fn fr2_a_failed_start_keeps_a_console_log_and_frees_the_pipe_for_the_next_start() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("android-vm-console");
+    let _ = std::fs::remove_dir_all(&dir);
+    let log = dir.join("android-test.log");
+    let mut config = missing_files();
+    config.console_pipe = Some(format!(
+        r"\\.\pipe\dsa-console-test-launcher-{}",
+        std::process::id()
+    ));
+    config.image_version = Some("17.0.0-1".into());
+    let mut launcher =
+        AndroidVmLauncher::new("dsa-test-console", config).with_console_log(log.clone());
+
+    for attempt in 1..=2 {
+        launcher.start().expect_err("there is nothing to boot");
+        launcher
+            .stop(Duration::from_secs(5))
+            .expect("stopping what was left succeeds");
+        let report = launcher.diagnostics().expect("the console is reported");
+        assert!(
+            !report.contains("not kept"),
+            "attempt {attempt}: the console pipe was free: {report}"
+        );
+        assert!(report.contains(&log.display().to_string()), "{report}");
+        assert_eq!(launcher.exited(), None, "no VM is left to exit");
+    }
+    let text = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(
+        text.matches("==== DSA ").count(),
+        2,
+        "a header per boot: {text}"
+    );
+    assert!(text.contains("image 17.0.0-1"), "{text}");
+    assert!(text.contains("console=ttyS0,115200"), "{text}");
 }

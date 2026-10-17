@@ -1,5 +1,6 @@
-//! dsa-release: the project's side of image updates. It makes the signing key, describes
-//! image files for the release list, and signs the list.
+//! dsa-release: the project's side of updates. It makes the signing key, describes image
+//! files for the release list, writes the program list for a setup file, and signs both
+//! lists.
 //!
 //! ```text
 //! dsa-release keygen <secret.key>              writes a new key, prints its public half
@@ -9,8 +10,12 @@
 //! dsa-release image-entry <base-url> <image-dir>
 //!                                              the same, for a folder made by make-image.py:
 //!                                              its image.json and the files it names
+//! dsa-release program <version> <setup-url> <setup-file>
+//!                                              prints the program list for a setup file
 //! dsa-release sign <secret.key> <list.json>    writes <list.json>.sig
 //! dsa-release verify <public-key> <list.json>  checks <list.json>.sig and the list
+//! dsa-release verify-program <public-key> <program.json>
+//!                                              the same, for the program list
 //! ```
 //!
 //! The secret key is 32 bytes in hexadecimal. Keep it out of the repository; CI reads it
@@ -21,13 +26,16 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use dsa_host_core::update::manifest::{self, FileEntry, ImageEntry};
+use dsa_host_core::update::program::{self, ProgramManifest, SetupFile, Version};
 use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 
 const USAGE: &str = "usage: dsa-release keygen <secret.key> | public-key <secret.key> | \
                      entry <version> <major> <build> <base-url> <file>... | \
                      image-entry <base-url> <image-dir> | \
-                     sign <secret.key> <list.json> | verify <public-key> <list.json>";
+                     program <version> <setup-url> <setup-file> | \
+                     sign <secret.key> <list.json> | verify <public-key> <list.json> | \
+                     verify-program <public-key> <program.json>";
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -136,28 +144,61 @@ fn describe<'a>(
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .ok_or_else(|| format!("{file} has no file name"))?;
-        let mut reader = std::fs::File::open(path).map_err(|e| format!("opening {file}: {e}"))?;
-        let mut hash = Sha256::new();
-        let mut size = 0u64;
-        let mut buffer = vec![0u8; 1 << 20];
-        loop {
-            let n = reader
-                .read(&mut buffer)
-                .map_err(|e| format!("reading {file}: {e}"))?;
-            if n == 0 {
-                break;
-            }
-            hash.update(&buffer[..n]);
-            size += n as u64;
-        }
+        let (size, sha256) = measure(path)?;
         entries.push(FileEntry {
             url: format!("{}/{name}", base.trim_end_matches('/')),
             name,
             size,
-            sha256: hex(&hash.finalize()),
+            sha256,
         });
     }
     Ok(entries)
+}
+
+/// The size of the file at `path` and its SHA-256 in hexadecimal.
+fn measure(path: &Path) -> Result<(u64, String), String> {
+    let file = path.display().to_string();
+    let mut reader = std::fs::File::open(path).map_err(|e| format!("opening {file}: {e}"))?;
+    let mut hash = Sha256::new();
+    let mut size = 0u64;
+    let mut buffer = vec![0u8; 1 << 20];
+    loop {
+        let n = reader
+            .read(&mut buffer)
+            .map_err(|e| format!("reading {file}: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buffer[..n]);
+        size += n as u64;
+    }
+    Ok((size, hex(&hash.finalize())))
+}
+
+/// The program list offering `version`, installed by the setup file at `path`, which
+/// will be served at `url`.
+fn program_list(version: &str, url: &str, path: &str) -> Result<String, String> {
+    Version::parse(version)?;
+    let (size, sha256) = measure(Path::new(path))?;
+    let list = ProgramManifest {
+        format: program::FORMAT,
+        version: version.to_string(),
+        setup: SetupFile {
+            url: url.to_string(),
+            size,
+            sha256,
+        },
+    };
+    Ok(serde_json::to_string_pretty(&list).expect("a program list serialises"))
+}
+
+/// Reads `<list>` and `<list>.sig`.
+fn read_signed(list: &str) -> Result<(Vec<u8>, String), String> {
+    let bytes = std::fs::read(list).map_err(|e| format!("reading {list}: {e}"))?;
+    let sig_path = format!("{list}.sig");
+    let signature =
+        std::fs::read_to_string(&sig_path).map_err(|e| format!("reading {sig_path}: {e}"))?;
+    Ok((bytes, signature))
 }
 
 fn run(args: &[String]) -> Result<String, String> {
@@ -176,11 +217,18 @@ fn run(args: &[String]) -> Result<String, String> {
                 .map_err(|e| format!("writing {out}: {e}"))?;
             Ok(format!("wrote {out}"))
         }
+        [command, version, url, setup] if command == "program" => program_list(version, url, setup),
+        [command, public, list] if command == "verify-program" => {
+            let (bytes, signature) = read_signed(list)?;
+            let key = manifest::parse_key(public).map_err(|e| e.to_string())?;
+            let list = program::verify(&bytes, &signature, &[key]).map_err(|e| e.to_string())?;
+            Ok(format!(
+                "signed and valid: DSA {}, setup {} ({} bytes)",
+                list.version, list.setup.url, list.setup.size
+            ))
+        }
         [command, public, list] if command == "verify" => {
-            let bytes = std::fs::read(list).map_err(|e| format!("reading {list}: {e}"))?;
-            let sig_path = format!("{list}.sig");
-            let signature = std::fs::read_to_string(&sig_path)
-                .map_err(|e| format!("reading {sig_path}: {e}"))?;
+            let (bytes, signature) = read_signed(list)?;
             let key = manifest::parse_key(public).map_err(|e| e.to_string())?;
             let list = manifest::verify(&bytes, &signature, &[key]).map_err(|e| e.to_string())?;
             Ok(format!(
