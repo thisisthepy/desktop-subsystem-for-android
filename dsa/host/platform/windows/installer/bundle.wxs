@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  setup.exe: the DSA package behind this project's own setup screens (theme\).
+
+  Build variables (-d): Version, MsiPath.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+    <Bundle Name="Desktop Subsystem for Android"
+            Manufacturer="thisisthepy"
+            Version="$(Version)"
+            UpgradeCode="706723c3-776c-4ab2-8402-780943fda74c"
+            IconSourceFile="theme\logo.ico">
+        <BootstrapperApplication>
+            <bal:WixStandardBootstrapperApplication
+                Theme="hyperlinkLicense"
+                ThemeFile="theme\theme.xml"
+                LocalizationFile="theme\theme.wxl"
+                LogoFile="theme\logo.png"
+                LicenseUrl="https://www.apache.org/licenses/LICENSE-2.0"
+                SuppressOptionsUI="yes"
+                ShowVersion="yes" />
+        </BootstrapperApplication>
+        <Chain>
+            <MsiPackage SourceFile="$(MsiPath)" Visible="no" />
+        </Chain>
+    </Bundle>
+</Wix>
