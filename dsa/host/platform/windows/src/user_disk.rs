@@ -1,9 +1,11 @@
-//! Each user's data disk: a folder only the system and VMs may open, and a growing VHDX.
+//! Each user's Android disk, and the folder it is in.
 //!
-//! The service creates both the first time a user asks for Android. The folder's access
-//! list is protected (it inherits nothing), so other users cannot read someone's Android
-//! data, and it lets Hyper-V's virtual machine processes in, which is what a VM needs to
-//! open its disk.
+//! The service creates both the first time a user asks for Android. A disk in the user's
+//! own profile is protected by the profile, which admits only them, SYSTEM and
+//! administrators, and the VM is given access to the disk file alone when it starts. A
+//! disk in a shared `data_dir` gets a folder whose access list is protected (it inherits
+//! nothing), so other users cannot read someone's Android data, and which lets Hyper-V's
+//! virtual machine processes in.
 
 use std::io;
 use std::path::Path;
@@ -47,8 +49,8 @@ fn win32(code: u32, what: &str) -> Result<(), String> {
     }
 }
 
-/// Makes sure `disk` exists and its folder carries [`USER_FOLDER_SDDL`]. A new disk is a
-/// dynamic VHDX that may grow to `size_gb`; an existing one is left as it is.
+/// Makes sure `disk` exists. A new disk is a dynamic VHDX that may grow to `size_gb`; an
+/// existing one is left as it is.
 pub fn prepare_user_data_disk(disk: &Path, size_gb: u32) -> Result<(), String> {
     prepare_user_disk(disk, size_gb, None)
 }
@@ -63,15 +65,13 @@ pub const ANDROID_PARTITIONS: [&str; 5] = [
     "vbmeta_vendor_dlkm_a",
 ];
 
-/// Makes sure the user's disk exists, in a folder that carries [`USER_FOLDER_SDDL`]. A new
-/// disk is a copy of `template` (an image's `disk.vhdx`, holding Android and empty data
+/// Makes sure the user's disk exists. A new disk is a copy of `template` (an image's `disk.vhdx`, holding Android and empty data
 /// partitions) or, without one, an empty dynamic VHDX that may grow to `size_gb`.
 pub fn prepare_user_disk(disk: &Path, size_gb: u32, template: Option<&Path>) -> Result<(), String> {
     let folder = disk
         .parent()
         .ok_or_else(|| format!("{} has no folder", disk.display()))?;
     std::fs::create_dir_all(folder).map_err(|e| format!("creating {}: {e}", folder.display()))?;
-    protect_folder(folder)?;
     if disk.exists() {
         return Ok(());
     }
@@ -91,13 +91,18 @@ pub fn prepare_user_disk(disk: &Path, size_gb: u32, template: Option<&Path>) -> 
     }
 }
 
-/// Creates the folder of a user's disk with [`USER_FOLDER_SDDL`], without the disk.
-pub fn prepare_user_disk_folder(disk: &Path) -> Result<(), String> {
+/// Creates the folder of a user's disk, without the disk. With `protect`, for a folder in a
+/// shared `data_dir`, its access list becomes [`USER_FOLDER_SDDL`]; a folder in the user's
+/// profile keeps what it inherits from the profile.
+pub fn prepare_user_disk_folder(disk: &Path, protect: bool) -> Result<(), String> {
     let folder = disk
         .parent()
         .ok_or_else(|| format!("{} has no folder", disk.display()))?;
     std::fs::create_dir_all(folder).map_err(|e| format!("creating {}: {e}", folder.display()))?;
-    protect_folder(folder)
+    if protect {
+        protect_folder(folder)?;
+    }
+    Ok(())
 }
 
 /// The image version a user's disk holds Android from, recorded beside it.

@@ -54,6 +54,13 @@
                 <Text>#(loc.BrowseButton)</Text>
                 <BrowseDirectoryAction VariableName="InstallFolder" />
             </Button>
+            <Label X="24" Y="212" Width="-24" Height="20" FontId="4" DisablePrefix="yes">#(loc.OptionsDataLabel)</Label>
+            <Editbox Name="DataFolder" X="24" Y="236" Width="-128" Height="24" TabStop="yes" FontId="0" FileSystemAutoComplete="yes" />
+            <Button Name="DataBrowseButton" X="-24" Y="234" Width="96" Height="28" TabStop="yes" FontId="0">
+                <Text>#(loc.BrowseButton)</Text>
+                <BrowseDirectoryAction VariableName="DataFolder" />
+            </Button>
+            <Label X="24" Y="268" Width="-24" Height="20" FontId="4" DisablePrefix="yes">#(loc.OptionsDataNote)</Label>
             <Button Name="OptionsOkButton" X="-128" Y="-20" Width="96" Height="30" TabStop="yes" FontId="5">
                 <Text>#(loc.OkButton)</Text>
                 <ChangePageAction Page="Install" />
