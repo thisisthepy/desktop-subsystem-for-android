@@ -55,3 +55,23 @@ In `dsa/target/image/<version>/`:
 
 Change the build number and the two SHA-256 values in `inputs.json`. The Image test
 workflow makes and checks the image from it.
+
+## Releasing
+
+The Image release workflow (`.github/workflows/release-image.yml`, run by hand) makes
+every image in `inputs.json` with the project's keys and the kernel it builds, publishes
+each as the GitHub release `android-<version>`, and publishes the signed list the service
+reads as the release `images`. It needs two repository secrets:
+
+- `DSA_ANDROID_KEYS`: the key set, made once and kept, since every later image must be
+  signed with the same keys for an update to keep each user's data:
+
+  ```
+  dsa/guest/image/make-keys.sh .scratch/release-keys
+  tar czf - -C .scratch/release-keys . | base64 -w0
+  ```
+
+- `DSA_RELEASE_SIGNING_KEY`: the list's key, from `dsa-release keygen`.
+
+Keep a copy of both outside GitHub: a secret cannot be read back, and losing the Android
+keys means no image can update an existing install again.
