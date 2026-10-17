@@ -98,7 +98,9 @@ pub fn describe(status: &Status) -> String {
 
 /// Runs `invocation` against the service `connector` reaches. Returns what to print.
 pub fn run(invocation: &Invocation, connector: &mut dyn Connector) -> Result<String, String> {
-    let build = format!("dsa {}", env!("CARGO_PKG_VERSION"));
+    // The installer build sets DSA_VERSION to the release's version.
+    let version = option_env!("DSA_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+    let build = format!("dsa {version}");
     let mut client =
         HostApiClient::connect(connector, &build, Duration::from_secs(10)).map_err(|error| {
             match error {

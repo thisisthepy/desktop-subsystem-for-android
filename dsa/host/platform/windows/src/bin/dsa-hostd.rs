@@ -66,7 +66,7 @@ mod windows_host {
         "usage: dsa-hostd [serve | service] <config.json> | dsa-hostd remove-images <folder>";
 
     fn build() -> String {
-        format!("dsa-hostd {}", env!("CARGO_PKG_VERSION"))
+        format!("dsa-hostd {}", dsa_host_windows::VERSION)
     }
 
     fn read_config(path: &str) -> Result<HostConfig, String> {

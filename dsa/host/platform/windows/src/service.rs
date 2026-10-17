@@ -18,8 +18,7 @@ use std::time::{Duration, Instant};
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid};
 use dsa_host_core::session::Session;
-use dsa_host_core::update::manifest::ImageEntry;
-use dsa_host_core::update::service::{check_reporting, UpdateNotices, UpdatingAndroid};
+use dsa_host_core::update::service::{check_reporting, Download, UpdateNotices, UpdatingAndroid};
 use dsa_host_core::update::store::ImageStore;
 use dsa_transport::Listener;
 
@@ -49,22 +48,13 @@ pub fn create_user_android(
     updates: Option<&Updates>,
 ) -> Result<Arc<dyn UserAndroid>, String> {
     let user = config.user_vm(sid).map_err(|e| e.to_string())?;
-    let template_layout = updates.is_some_and(|u| {
-        u.store
-            .state()
-            .map(|s| {
-                config
-                    .image_files(Some(&u.store.image_dir(&s.current.version)))
-                    .disk_template
-                    .is_some()
-            })
-            .unwrap_or(false)
-    });
     prepare_user_disk_folder(&user.config.data_disk, !user.disk_in_profile)?;
-    // With a template the disk is copied from it when the VM first starts.
-    if !template_layout {
+    // With updates the disk is made when the VM first starts, from the image current then:
+    // before the first image is downloaded there is nothing to copy it from yet.
+    if updates.is_none() {
         prepare_user_data_disk(&user.config.data_disk, user.data_disk_size_gb)?;
     }
+    let disk_size_gb = user.data_disk_size_gb;
     let launcher = match updates {
         None => AndroidVmLauncher::new(&user.vm_name, user.config),
         Some(updates) => {
@@ -77,10 +67,11 @@ pub fn create_user_android(
                     let current = store.state().map_err(|e| e.to_string())?.current;
                     let files = config.image_files(Some(&store.image_dir(&current.version)));
                     let mut vm = base.clone();
-                    if let Some(template) = &files.disk_template {
+                    match &files.disk_template {
                         // A new user's disk is the template; an existing one gets this
                         // image's Android and keeps the user's data.
-                        bring_disk_to(&vm.data_disk, template, &current.version)?;
+                        Some(template) => bring_disk_to(&vm.data_disk, template, &current.version)?,
+                        None => prepare_user_data_disk(&vm.data_disk, disk_size_gb)?,
                     }
                     vm.kernel = files.kernel;
                     vm.initrd = files.initrd;
@@ -114,11 +105,11 @@ pub fn create_user_android(
 }
 
 /// Opens the update store when the configuration names one.
-fn open_updates(config: &HostConfig) -> Result<Option<Updates>, String> {
+fn open_updates(config: &HostConfig, build: &str) -> Result<Option<Updates>, String> {
     let (Some(root), Some(first)) = (&config.images_dir, &config.first_image) else {
         return Ok(None);
     };
-    let store = ImageStore::open(root, first).map_err(|e| e.to_string())?;
+    let store = ImageStore::open_as(root, first, build).map_err(|e| e.to_string())?;
     let boot_timeout = config
         .update
         .as_ref()
@@ -163,14 +154,20 @@ fn check_for_updates(config: HostConfig, updates: Updates, build: String, stop: 
             continue;
         }
         let waiting_for_first = no_image();
-        let mut announce = |image: &ImageEntry| {
-            let size: u64 = image.files.iter().map(|file| file.size).sum();
-            let notice = format!(
-                "downloading Android {} ({:.1} GB)",
-                image.version,
-                size as f64 / 1e9
-            );
-            eprintln!("{build}: {notice}");
+        // The notice changes with every whole percent; the log gets the start only.
+        let mut shown = None;
+        let mut announce = |download: &Download| {
+            let percent = (download.done as u128 * 100)
+                .checked_div(download.total as u128)
+                .unwrap_or(100);
+            if shown == Some(percent) {
+                return;
+            }
+            shown = Some(percent);
+            let notice = download.notice();
+            if download.done == 0 {
+                eprintln!("{build}: {notice}");
+            }
             updates.notices.set(notice);
         };
         match check_reporting(
@@ -218,7 +215,7 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
         config.pipe_name
     );
     let grace = Duration::from_secs(config.stop_timeout_secs + 15);
-    let updates = open_updates(&config)?;
+    let updates = open_updates(&config, build)?;
     if let Some(updates) = &updates {
         let (config, updates, build, stop) = (
             config.clone(),

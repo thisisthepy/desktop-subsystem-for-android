@@ -124,13 +124,19 @@ pub fn record_disk_image_version(disk: &Path, version: &str) -> Result<(), Strin
 
 /// Brings the user's disk to `version`: a new disk is copied from `template`; a disk that
 /// holds Android from another version gets the template's Android partitions, and keeps
-/// its misc, metadata and userdata partitions, which hold the user's data.
+/// its misc, metadata and userdata partitions, which hold the user's data. A disk that was
+/// never given Android and was never written to holds nothing, and is replaced by a copy.
 pub fn bring_disk_to(disk: &Path, template: &Path, version: &str) -> Result<(), String> {
+    let held = disk_image_version(disk);
+    if disk.exists() && held.is_none() && is_blank_disk(disk)? {
+        std::fs::remove_file(disk)
+            .map_err(|e| format!("replacing the empty {}: {e}", disk.display()))?;
+    }
     if !disk.exists() {
         prepare_user_disk(disk, 0, Some(template))?;
         return record_disk_image_version(disk, version);
     }
-    if disk_image_version(disk).as_deref() == Some(version) {
+    if held.as_deref() == Some(version) {
         return Ok(());
     }
     let from = AttachedDisk::attach(template, true)?;
@@ -153,6 +159,12 @@ pub fn bring_disk_to(disk: &Path, template: &Path, version: &str) -> Result<(), 
     drop(to);
     drop(from);
     record_disk_image_version(disk, version)
+}
+
+fn is_blank_disk(disk: &Path) -> Result<bool, String> {
+    let attached = AttachedDisk::attach(disk, true)?;
+    let mut device = attached.open(false)?;
+    crate::gpt::is_blank(&mut device).map_err(|e| format!("reading {}: {e}", disk.display()))
 }
 
 /// A VHDX attached to the host as a disk without a drive letter, detached on drop.

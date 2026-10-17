@@ -53,13 +53,13 @@ jobs:
       # would not admit, so the test build also admits authenticated users.
       - name: Build the package and setup.exe
         run: >
-          dsa/host/platform/windows/installer/build.ps1 -Version 0.1.0 -PlaceholderKernel
+          dsa/host/platform/windows/installer/build.ps1 -Version 0.0.9 -PlaceholderKernel
           -ImageDir .scratch\stand-in-image
           -PipeSddl "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)"
 
       - name: Install the package
         run: |
-          $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/i', 'dsa\target\installer\dsa-0.1.0.msi', '/qn', '/l*v', 'install.log', "INSTALLFOLDER=`"$env:PROGRAM_DIR`"", "DATAFOLDER=`"$env:DATA_DIR`""
+          $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/i', 'dsa\target\installer\dsa-0.0.9.msi', '/qn', '/l*v', 'install.log', "INSTALLFOLDER=`"$env:PROGRAM_DIR`"", "DATAFOLDER=`"$env:DATA_DIR`""
           if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 80; throw "install failed ($($p.ExitCode))" }
 
       - name: Check the service, the command and the access lists
@@ -73,7 +73,10 @@ jobs:
           Write-Host $acl
           if ($acl -notmatch 'S-1-5-83-0') { throw "the VMs cannot read the data folder" }
           if ($acl -match ';;;BU\)') { throw "users can open the service's data folder" }
-          Get-Content "$env:DATA_DIR\logs\dsa-hostd.log"
+          $log = Get-Content "$env:DATA_DIR\logs\dsa-hostd.log"
+          $log
+          # The programs carry the release's version, which differs from the crates' here.
+          if (-not ($log -match '^dsa-hostd 0\.0\.9:')) { throw "the service does not report the release's version" }
           # Asking for status made the service set up this user's Android, in their profile.
           if (-not (Test-Path "$env:LOCALAPPDATA\DSA")) { throw "no Android folder in the user's profile" }
 
@@ -92,7 +95,7 @@ jobs:
       - name: Show the first screen of setup.exe
         run: |
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-          $setup = Start-Process 'dsa\target\installer\setup-0.1.0.exe' -PassThru
+          $setup = Start-Process 'dsa\target\installer\setup-0.0.9.exe' -PassThru
           Start-Sleep -Seconds 8
           $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
           $bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
@@ -102,7 +105,7 @@ jobs:
 
       - name: Uninstall
         run: |
-          $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/x', 'dsa\target\installer\dsa-0.1.0.msi', '/qn', '/l*v', 'uninstall.log'
+          $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/x', 'dsa\target\installer\dsa-0.0.9.msi', '/qn', '/l*v', 'uninstall.log'
           if ($p.ExitCode -ne 0) { Get-Content uninstall.log -Tail 80; throw "uninstall failed ($($p.ExitCode))" }
           if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
           if (Test-Path "$env:PROGRAM_DIR\dsa.exe") { throw "the program is still there" }

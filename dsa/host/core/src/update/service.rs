@@ -41,14 +41,46 @@ pub fn check(
     check_reporting(store, fetch, list_url, keys, &mut |_| {})
 }
 
-/// [`check`], calling `downloading` with the image it is about to download. A download
-/// takes minutes, and the user can be told what is happening meanwhile.
+/// How far the download of an image has got.
+#[derive(Debug, Clone, Copy)]
+pub struct Download<'a> {
+    pub image: &'a ImageEntry,
+    /// Bytes of the image's files downloaded so far.
+    pub done: u64,
+    /// Bytes of all its files, as the release list gives them.
+    pub total: u64,
+}
+
+impl Download<'_> {
+    /// The download in words, for `dsa status`.
+    pub fn notice(&self) -> String {
+        let percent = (self.done as u128 * 100)
+            .checked_div(self.total as u128)
+            .unwrap_or(100);
+        format!(
+            "downloading Android {}: {percent}% ({} of {} GB)",
+            self.image.version,
+            gigabytes(self.done),
+            gigabytes(self.total)
+        )
+    }
+}
+
+/// Gigabytes with at most two decimals and no trailing zeros: 1.8, 0.45, 0.
+fn gigabytes(bytes: u64) -> String {
+    let text = format!("{:.2}", bytes as f64 / 1e9);
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// [`check`], calling `downloading` once before the download of a new image starts
+/// (`done` is 0) and again as it goes. A download takes minutes, and the user can be told
+/// what is happening meanwhile.
 pub fn check_reporting(
     store: &ImageStore,
     fetch: &dyn Fetch,
     list_url: &str,
     keys: &[VerifyingKey],
-    downloading: &mut dyn FnMut(&ImageEntry),
+    downloading: &mut dyn FnMut(&Download),
 ) -> Result<Option<String>, UpdateError> {
     let mut list = Vec::new();
     fetch
@@ -68,8 +100,19 @@ pub fn check_reporting(
         Decision::UpToDate => Ok(None),
         Decision::Unsupported(why) => Ok(Some(why)),
         Decision::Apply(image) => {
-            downloading(&image);
-            store.stage(&image, &manifest, fetch)?;
+            let total = image.files.iter().map(|file| file.size).sum();
+            downloading(&Download {
+                image: &image,
+                done: 0,
+                total,
+            });
+            store.stage_reporting(&image, &manifest, fetch, &mut |done| {
+                downloading(&Download {
+                    image: &image,
+                    done,
+                    total,
+                })
+            })?;
             Ok(Some(format!(
                 "Android {} is downloaded and will be used the next time Android starts",
                 image.version
@@ -209,8 +252,9 @@ impl UserAndroid for UpdatingAndroid {
                     failed.version, image.version
                 ),
                 Ok(Outcome::GaveUp { failed, reason }) => format!(
-                    "Android {} did not start ({reason}); no other image is installed, so the \
-                     service will download another image and Android can start once it has",
+                    "Android {} did not start ({reason}); no other image is installed. The \
+                     service downloads another image if there is one, and the next \
+                     version of DSA tries this one again",
                     failed.version
                 ),
                 Err(error) => error.to_string(),
