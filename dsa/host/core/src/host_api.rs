@@ -39,8 +39,15 @@ impl UserAndroid for Session {
     fn last_reason(&self) -> Option<String> {
         Session::last_reason(self).map(|reason| reason.to_string())
     }
+    /// On a stopped session, returns once it has moved on, so that what the caller reads
+    /// next is the start's progress or its failure, never the state from before it.
     fn start(&self) {
-        Session::start(self)
+        if Session::state(self) != SessionState::Stopped {
+            return Session::start(self);
+        }
+        let events = self.events();
+        Session::start(self);
+        let _ = events.recv_timeout(Duration::from_secs(5));
     }
     fn stop(&self) {
         Session::stop(self)

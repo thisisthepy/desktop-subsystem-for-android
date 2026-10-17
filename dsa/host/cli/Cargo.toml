@@ -1,0 +1,25 @@
+[package]
+name = "dsa-cli"
+version = "0.1.0"
+description = "dsa, the command line client of the local API"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "dsa"
+path = "src/main.rs"
+
+[dependencies]
+dsa-transport.workspace = true
+dsa-host-core.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+dsa-host-windows = { path = "../platform/windows" }
+
+[target.'cfg(unix)'.dependencies]
+dsa-host-unix = { path = "../platform/unix" }
+
+[dev-dependencies]
+dsa-host-core = { workspace = true, features = ["conformance"] }
