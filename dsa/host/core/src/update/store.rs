@@ -165,6 +165,18 @@ impl ImageStore {
         manifest: &Manifest,
         fetch: &dyn Fetch,
     ) -> Result<(), UpdateError> {
+        self.stage_reporting(image, manifest, fetch, &mut |_| {})
+    }
+
+    /// [`stage`](Self::stage), telling `progress` how many bytes of the image's files have
+    /// been downloaded so far, after every write.
+    pub fn stage_reporting(
+        &self,
+        image: &ImageEntry,
+        manifest: &Manifest,
+        fetch: &dyn Fetch,
+        progress: &mut dyn FnMut(u64),
+    ) -> Result<(), UpdateError> {
         let mut state = self.state()?;
         if state.on_trial {
             return Err(UpdateError::Refused(format!(
@@ -179,10 +191,14 @@ impl ImageStore {
             .join(format!(".staging-{}", image.version));
         let _ = fs::remove_dir_all(&staging);
         fs::create_dir_all(&staging).map_err(|e| store_error("creating", &staging, e))?;
-        let result = image
-            .files
-            .iter()
-            .try_for_each(|file| download(file, &staging, fetch));
+        let mut before = 0;
+        let result = image.files.iter().try_for_each(|file| {
+            download(file, &staging, fetch, &mut |written| {
+                progress(before + written)
+            })?;
+            before += file.size;
+            Ok(())
+        });
         if let Err(error) = result {
             let _ = fs::remove_dir_all(&staging);
             return Err(error);
@@ -245,14 +261,16 @@ impl ImageStore {
 }
 
 /// A writer that hashes and counts what passes through it.
-struct Hashing<W> {
+struct Hashing<'a, W> {
     inner: W,
     hash: Sha256,
     written: u64,
     limit: u64,
+    /// Told the bytes written so far, after every write.
+    progress: &'a mut dyn FnMut(u64),
 }
 
-impl<W: Write> Write for Hashing<W> {
+impl<W: Write> Write for Hashing<'_, W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.written + buf.len() as u64 > self.limit {
             return Err(io::Error::other("longer than the release list says"));
@@ -260,6 +278,7 @@ impl<W: Write> Write for Hashing<W> {
         let n = self.inner.write(buf)?;
         self.hash.update(&buf[..n]);
         self.written += n as u64;
+        (self.progress)(self.written);
         Ok(n)
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -271,6 +290,7 @@ fn download(
     file: &super::manifest::FileEntry,
     folder: &Path,
     fetch: &dyn Fetch,
+    progress: &mut dyn FnMut(u64),
 ) -> Result<(), UpdateError> {
     let path = folder.join(&file.name);
     let out = fs::File::create(&path).map_err(|e| store_error("creating", &path, e))?;
@@ -279,6 +299,7 @@ fn download(
         hash: Sha256::new(),
         written: 0,
         limit: file.size,
+        progress,
     };
     fetch
         .fetch(&file.url, &mut writer)

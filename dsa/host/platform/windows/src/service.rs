@@ -18,8 +18,7 @@ use std::time::{Duration, Instant};
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid};
 use dsa_host_core::session::Session;
-use dsa_host_core::update::manifest::ImageEntry;
-use dsa_host_core::update::service::{check_reporting, UpdateNotices, UpdatingAndroid};
+use dsa_host_core::update::service::{check_reporting, Download, UpdateNotices, UpdatingAndroid};
 use dsa_host_core::update::store::ImageStore;
 use dsa_transport::Listener;
 
@@ -155,14 +154,20 @@ fn check_for_updates(config: HostConfig, updates: Updates, build: String, stop: 
             continue;
         }
         let waiting_for_first = no_image();
-        let mut announce = |image: &ImageEntry| {
-            let size: u64 = image.files.iter().map(|file| file.size).sum();
-            let notice = format!(
-                "downloading Android {} ({:.1} GB)",
-                image.version,
-                size as f64 / 1e9
-            );
-            eprintln!("{build}: {notice}");
+        // The notice changes with every whole percent; the log gets the start only.
+        let mut shown = None;
+        let mut announce = |download: &Download| {
+            let percent = (download.done as u128 * 100)
+                .checked_div(download.total as u128)
+                .unwrap_or(100);
+            if shown == Some(percent) {
+                return;
+            }
+            shown = Some(percent);
+            let notice = download.notice();
+            if download.done == 0 {
+                eprintln!("{build}: {notice}");
+            }
             updates.notices.set(notice);
         };
         match check_reporting(
