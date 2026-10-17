@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use ed25519_dalek::VerifyingKey;
 
-use super::manifest;
+use super::manifest::{self, ImageEntry};
 use super::policy::{decide, Decision, InstalledImage};
 use super::store::{Fetch, ImageStore};
 use super::trial::{self, Boot, Outcome};
@@ -38,6 +38,18 @@ pub fn check(
     list_url: &str,
     keys: &[VerifyingKey],
 ) -> Result<Option<String>, UpdateError> {
+    check_reporting(store, fetch, list_url, keys, &mut |_| {})
+}
+
+/// [`check`], calling `downloading` with the image it is about to download. A download
+/// takes minutes, and the user can be told what is happening meanwhile.
+pub fn check_reporting(
+    store: &ImageStore,
+    fetch: &dyn Fetch,
+    list_url: &str,
+    keys: &[VerifyingKey],
+    downloading: &mut dyn FnMut(&ImageEntry),
+) -> Result<Option<String>, UpdateError> {
     let mut list = Vec::new();
     fetch
         .fetch(list_url, &mut list)
@@ -56,6 +68,7 @@ pub fn check(
         Decision::UpToDate => Ok(None),
         Decision::Unsupported(why) => Ok(Some(why)),
         Decision::Apply(image) => {
+            downloading(&image);
             store.stage(&image, &manifest, fetch)?;
             Ok(Some(format!(
                 "Android {} is downloaded and will be used the next time Android starts",
@@ -108,6 +121,19 @@ impl Boot for SessionBoot {
     }
 }
 
+const NO_IMAGE_YET: &str = "no Android image is installed yet; the service downloads one after \
+     installation, and `dsa status` says when it is ready. Start Android again then";
+
+impl UpdatingAndroid {
+    /// Whether the current image is only a name, with no files to boot from.
+    fn no_image_yet(&self) -> bool {
+        self.store
+            .state()
+            .map(|state| !self.store.has_image(&state.current.version))
+            .unwrap_or(false)
+    }
+}
+
 /// A user's Android in a service that updates its image. A start while a new image is on
 /// trial boots it on trial, and goes back to the previous image when it fails.
 pub struct UpdatingAndroid {
@@ -124,6 +150,9 @@ impl UserAndroid for UpdatingAndroid {
         self.session.state()
     }
     fn last_reason(&self) -> Option<String> {
+        if self.no_image_yet() {
+            return Some(NO_IMAGE_YET.into());
+        }
         UserAndroid::last_reason(&*self.session)
     }
     fn stop(&self) {
@@ -134,7 +163,17 @@ impl UserAndroid for UpdatingAndroid {
     }
 
     fn start(&self) {
-        let on_trial = self.store.state().map(|s| s.on_trial).unwrap_or(false);
+        if self.no_image_yet() {
+            return;
+        }
+        let state = self.store.state().ok();
+        let on_trial = state.as_ref().is_some_and(|s| s.on_trial);
+        // The first image since an installation without a bundled one has nothing before it.
+        let first = state.as_ref().is_some_and(|s| {
+            s.previous
+                .as_ref()
+                .is_none_or(|previous| !self.store.has_image(&previous.version))
+        });
         if self.session.state() != SessionState::Stopped
             || !on_trial
             || self.trial_running.swap(true, Ordering::SeqCst)
@@ -153,6 +192,10 @@ impl UserAndroid for UpdatingAndroid {
                 Ok(Outcome::Booted {
                     image,
                     confirmed: true,
+                }) if first => format!("Android {} is installed", image.version),
+                Ok(Outcome::Booted {
+                    image,
+                    confirmed: true,
                 }) => {
                     format!("Android was updated to {}", image.version)
                 }
@@ -164,6 +207,11 @@ impl UserAndroid for UpdatingAndroid {
                 }) => format!(
                     "Android {} did not start ({reason}), so Android {} is in use again",
                     failed.version, image.version
+                ),
+                Ok(Outcome::GaveUp { failed, reason }) => format!(
+                    "Android {} did not start ({reason}); no other image is installed, so the \
+                     service will download another image and Android can start once it has",
+                    failed.version
                 ),
                 Err(error) => error.to_string(),
             });

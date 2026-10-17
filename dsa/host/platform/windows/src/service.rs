@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid};
 use dsa_host_core::session::Session;
-use dsa_host_core::update::service::{check, UpdateNotices, UpdatingAndroid};
+use dsa_host_core::update::manifest::ImageEntry;
+use dsa_host_core::update::service::{check_reporting, UpdateNotices, UpdatingAndroid};
 use dsa_host_core::update::store::ImageStore;
 use dsa_transport::Listener;
 
@@ -133,7 +134,9 @@ fn open_updates(config: &HostConfig) -> Result<Option<Updates>, String> {
 }
 
 /// Checks the release list a minute after the service starts and then every
-/// `check_interval_hours`, until `stop` is set.
+/// `check_interval_hours`, until `stop` is set. Without an image to boot (an installation
+/// that bundled none), it checks at once and again every few minutes until one is in place,
+/// and tells the user what it is downloading.
 fn check_for_updates(config: HostConfig, updates: Updates, build: String, stop: Arc<AtomicBool>) {
     let Some(settings) = config.update.clone() else {
         return;
@@ -143,28 +146,68 @@ fn check_for_updates(config: HostConfig, updates: Updates, build: String, stop: 
         Err(error) => return eprintln!("{build}: not checking for updates: {error}"),
     };
     let interval = Duration::from_secs(settings.check_interval_hours.max(1) * 3600);
-    let mut next = Instant::now() + Duration::from_secs(60);
+    let no_image = || {
+        updates
+            .store
+            .state()
+            .map(|state| !updates.store.has_image(&state.current.version))
+            .unwrap_or(false)
+    };
+    let mut next = if no_image() {
+        Instant::now()
+    } else {
+        Instant::now() + Duration::from_secs(60)
+    };
     while !stop.load(Ordering::Relaxed) {
         if Instant::now() < next {
             thread::sleep(Duration::from_secs(1));
             continue;
         }
-        next = Instant::now() + interval;
-        match check(
+        let waiting_for_first = no_image();
+        let mut announce = |image: &ImageEntry| {
+            let size: u64 = image.files.iter().map(|file| file.size).sum();
+            let notice = format!(
+                "downloading Android {} ({:.1} GB)",
+                image.version,
+                size as f64 / 1e9
+            );
+            eprintln!("{build}: {notice}");
+            updates.notices.set(notice);
+        };
+        match check_reporting(
             &updates.store,
             &WinHttpFetch::default(),
             &settings.list_url,
             &keys,
+            &mut announce,
         ) {
             Ok(Some(notice)) => {
                 eprintln!("{build}: {notice}");
                 updates.notices.set(notice);
             }
             Ok(None) => {}
-            Err(error) => eprintln!("{build}: checking for updates: {error}"),
+            Err(error) => {
+                eprintln!("{build}: checking for updates: {error}");
+                if waiting_for_first {
+                    updates.notices.set(format!(
+                        "the Android image could not be downloaded yet ({error}); \
+                         the service tries again in {} minutes",
+                        FIRST_IMAGE_RETRY.as_secs() / 60
+                    ));
+                }
+            }
         }
+        next = Instant::now()
+            + if no_image() {
+                FIRST_IMAGE_RETRY
+            } else {
+                interval
+            };
     }
 }
+
+/// How soon the service tries again while it has no image to boot.
+const FIRST_IMAGE_RETRY: Duration = Duration::from_secs(300);
 
 /// Serves the local API until `stop` is set, then stops every user's VM.
 pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(), String> {
