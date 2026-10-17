@@ -98,6 +98,8 @@ jobs:
             $null = $setup.Handle
             Wait-SetupControl InstallButton -Enabled | Out-Null
             Save-SetupScreen "$PWD\screens\$theme-install.png"
+            $publisher = Get-SetupText HeroPublisher
+            if ($publisher -cne 'Thisisthepy') { throw "the first screen names the publisher '$publisher', not Thisisthepy" }
             if ($theme -eq 'light') { Copy-Item "screens\light-install.png" setup-screen.png }
             Invoke-SetupButton ChangeButton
             Wait-SetupControl ProgramFolderBox | Out-Null
@@ -130,6 +132,9 @@ jobs:
         run: |
           $service = Get-Service DsaHost
           if ($service.Status -ne 'Running') { throw "DsaHost is $($service.Status)" }
+          $entry = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+            Where-Object { $_.DisplayName -eq 'Desktop Subsystem for Android' } | Select-Object -First 1
+          if ($entry.Publisher -cne 'Thisisthepy') { throw "the package names its publisher '$($entry.Publisher)', not Thisisthepy" }
           $out = & "$env:PROGRAM_DIR\dsa.exe" status 2>&1
           Write-Host $out
           if ($LASTEXITCODE -ne 0 -or -not ($out -match '^Android: Stopped')) { throw "dsa status: $out" }
