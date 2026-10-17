@@ -133,9 +133,11 @@ def modify(source, dest):
                 text = data.decode()
                 for directory, config in FSTAB_DIRS.items():
                     if config == name:
-                        prefix = directory.split("/", 1)[1]
+                        # vendor/etc/... for the partition, first_stage_ramdisk/... for the ramdisk.
                         if name.startswith("META/vendor_boot"):
                             prefix = directory.split("RAMDISK/", 1)[1]
+                        else:
+                            prefix = directory.lower()
                         text += f"{prefix}fstab.dsa 0 0 644 capabilities=0x0\n"
                 data = text.encode()
             info.compress_type = zipfile.ZIP_STORED
