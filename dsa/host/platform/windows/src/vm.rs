@@ -37,9 +37,11 @@ pub struct AndroidVmConfig {
     /// Maximum guest memory in MiB. Rounded down to the 2 MiB granularity.
     pub memory_mb: u32,
     pub processors: u32,
-    /// The Android system image (VHDX), attached read only.
-    pub system_image: PathBuf,
-    /// The user data disk (VHDX), attached writable and allowed to stay sparse.
+    /// A separate Android system image (VHDX), attached read only. Images made from the
+    /// published AOSP builds have none: Android and the user's data share one disk.
+    pub system_image: Option<PathBuf>,
+    /// The user's disk (VHDX), attached writable and allowed to stay sparse. With no
+    /// separate system image it holds Android as well.
     pub data_disk: PathBuf,
     /// SIDs, besides SYSTEM, allowed to bind and connect Hyper-V sockets to this VM: the user
     /// the VM runs for.
@@ -88,11 +90,10 @@ pub(crate) fn is_sid(text: &str) -> bool {
 impl AndroidVmConfig {
     /// Checks the configuration and returns the memory size HCS will be given.
     fn validate(&self) -> Result<u32, ConfigError> {
-        let mut paths = vec![
-            ("kernel", &self.kernel),
-            ("system image", &self.system_image),
-            ("data disk", &self.data_disk),
-        ];
+        let mut paths = vec![("kernel", &self.kernel), ("data disk", &self.data_disk)];
+        if let Some(system) = &self.system_image {
+            paths.push(("system image", system));
+        }
         if let Some(initrd) = &self.initrd {
             paths.push(("initrd", initrd));
         }
@@ -160,6 +161,19 @@ impl AndroidVmConfig {
             kernel["InitRdPath"] = Value::String(path_string(initrd));
         }
         let sddl = self.socket_security_descriptor();
+        let data = json!({
+            "Type": "VirtualDisk",
+            "Path": path_string(&self.data_disk),
+            "ReadOnly": false,
+            "AlwaysAllowSparseFiles": true,
+        });
+        let attachments = match &self.system_image {
+            Some(system) => json!({
+                "0": { "Type": "VirtualDisk", "Path": path_string(system), "ReadOnly": true },
+                "1": data,
+            }),
+            None => json!({ "0": data }),
+        };
         Ok(json!({
             "Owner": self.owner,
             "SchemaVersion": { "Major": 2, "Minor": 3 },
@@ -182,19 +196,7 @@ impl AndroidVmConfig {
                 "Devices": {
                     "Scsi": {
                         "0": {
-                            "Attachments": {
-                                "0": {
-                                    "Type": "VirtualDisk",
-                                    "Path": path_string(&self.system_image),
-                                    "ReadOnly": true,
-                                },
-                                "1": {
-                                    "Type": "VirtualDisk",
-                                    "Path": path_string(&self.data_disk),
-                                    "ReadOnly": false,
-                                    "AlwaysAllowSparseFiles": true,
-                                },
-                            },
+                            "Attachments": attachments,
                         },
                     },
                     "HvSocket": {

@@ -16,7 +16,7 @@ fn config() -> AndroidVmConfig {
         kernel_cmdline: "androidboot.hardware=dsa".into(),
         memory_mb: 4097,
         processors: 4,
-        system_image: PathBuf::from(r"C:\Program Files\DSA\vm\system.vhdx"),
+        system_image: Some(PathBuf::from(r"C:\Program Files\DSA\vm\system.vhdx")),
         data_disk: PathBuf::from(r"C:\Users\me\AppData\Local\DSA\data.vhdx"),
         socket_sids: vec![USER_SID.into()],
         page_reporting_order: 5,
