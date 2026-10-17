@@ -1,222 +1,249 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The look of setup.exe, after WinUI with Android's colours: a light backdrop, the pages on
-     a white card with rounded corners, and Android green for the button that goes ahead.
-     make-theme.py draws background.png, the button images and the logo; the window and
-     button sizes here match the sizes it draws. The control names are the ones WiX's
-     standard bootstrapper application drives; the layout, colours and text are this
-     project's own.
+<!-- The look of setup.exe: a WinUI dialog with a brand panel. The Android navy panel on the
+     left holds the logo, the product name and the version; the white page on the right holds
+     the step; the light footer bar holds the buttons, right aligned, as in a WinUI
+     ContentDialog. Android green is the one accent: the button that goes ahead, the
+     progress bar, and the update button on the panel.
+
+     make-theme.py draws background.png and every image here, and its sizes match these:
+     the window is 736 x 440, the panel 256 wide, the footer starts at y 368. Page content
+     starts at x 296 (40 in from the panel) and stops 40 from the right edge. A button
+     control is 118 x 38: a 112 x 32 button with a 3 px margin that holds the focus ring.
+     Footer slots sit 24, 144 and 264 px from the right edge, measured to the visible button.
+
+     The type ramp is WinUI's in Segoe UI: 28 semibold for the step heading, 20 semibold for
+     the product name, 14 for body and buttons, 12 for small print. Segoe UI rather than
+     Segoe UI Variable, because GDI on Windows 10 has no Variable face and would fall back
+     to a different font.
 
      Fonts without a background draw their text straight onto the backdrop. Checkboxes,
      links and edit boxes are Windows controls that paint their own background, so their
-     fonts carry the card's white. -->
+     fonts carry the page's white. The control names are the ones WiX's standard
+     bootstrapper application drives. -->
 <Theme xmlns="http://wixtoolset.org/schemas/v4/thmutil" ImageFile="background.png">
-    <!-- 0 body, 1 title, 2 subtitle, 3 page heading, 4 small print, 5 accent button,
-         6 standard button, 7 small print on the card, 8 body on the card -->
-    <Font Id="0" Height="-14" Weight="400" Foreground="1A1A1A">Segoe UI</Font>
-    <Font Id="1" Height="-26" Weight="600" Foreground="073042">Segoe UI</Font>
-    <Font Id="2" Height="-14" Weight="400" Foreground="44515A">Segoe UI</Font>
-    <Font Id="3" Height="-20" Weight="600" Foreground="1A1A1A">Segoe UI</Font>
-    <Font Id="4" Height="-12" Weight="400" Foreground="5F6B73">Segoe UI</Font>
-    <Font Id="5" Height="-14" Weight="600" Foreground="073042">Segoe UI</Font>
-    <Font Id="6" Height="-14" Weight="400" Foreground="1A1A1A">Segoe UI</Font>
-    <Font Id="7" Height="-12" Weight="400" Foreground="5F6B73" Background="FFFFFF">Segoe UI</Font>
-    <Font Id="8" Height="-14" Weight="400" Foreground="1A1A1A" Background="FFFFFF">Segoe UI</Font>
+    <!-- On the page -->
+    <Font Id="Body" Height="-14" Weight="400" Foreground="1C2B33">Segoe UI</Font>
+    <Font Id="Heading" Height="-28" Weight="600" Foreground="073042">Segoe UI</Font>
+    <Font Id="Caption" Height="-12" Weight="400" Foreground="56656D">Segoe UI</Font>
+    <Font Id="BodyMuted" Height="-14" Weight="400" Foreground="56656D">Segoe UI</Font>
+    <Font Id="Mono" Height="-13" Weight="400" Foreground="1C2B33">Consolas</Font>
+    <!-- Windows controls on the page -->
+    <Font Id="CaptionControl" Height="-12" Weight="400" Foreground="56656D" Background="FFFFFF">Segoe UI</Font>
+    <Font Id="BodyControl" Height="-14" Weight="400" Foreground="1C2B33" Background="FFFFFF">Segoe UI</Font>
+    <!-- On the brand panel -->
+    <Font Id="PanelTitle" Height="-20" Weight="600" Foreground="FFFFFF">Segoe UI</Font>
+    <Font Id="PanelTagline" Height="-14" Weight="400" Foreground="B5CAD3">Segoe UI</Font>
+    <Font Id="PanelVersion" Height="-12" Weight="400" Foreground="8FA9B4">Segoe UI</Font>
+    <Font Id="PanelButton" Height="-14" Weight="600" Foreground="3DDC84">Segoe UI</Font>
+    <!-- Buttons: navy on the green accent, ink on the standard button -->
+    <Font Id="AccentButton" Height="-14" Weight="600" Foreground="073042">Segoe UI</Font>
+    <Font Id="Button" Height="-14" Weight="400" Foreground="1C2B33">Segoe UI</Font>
 
-    <Window Width="640" Height="440" HexStyle="100a0000" FontId="0" Caption="#(loc.Caption)" SourceX="0" SourceY="0">
-        <ImageControl X="32" Y="30" Width="56" Height="56" ImageFile="logo.png" Visible="yes" />
-        <Label X="104" Y="30" Width="-24" Height="36" FontId="1" Visible="yes" DisablePrefix="yes">#(loc.Title)</Label>
-        <Label X="104" Y="66" Width="-24" Height="22" FontId="2" Visible="yes" DisablePrefix="yes">#(loc.Subtitle)</Label>
+    <Window Width="736" Height="440" HexStyle="100a0000" FontId="Body" Caption="#(loc.Caption)" SourceX="0" SourceY="0">
+        <!-- The brand panel, on every page. -->
+        <ImageControl X="32" Y="32" Width="48" Height="48" ImageFile="logo.png" Visible="yes" />
+        <Label X="32" Y="104" Width="200" Height="56" FontId="PanelTitle" Visible="yes" DisablePrefix="yes">#(loc.Title)</Label>
+        <Label X="32" Y="168" Width="192" Height="60" FontId="PanelTagline" Visible="yes" DisablePrefix="yes">#(loc.Subtitle)</Label>
+        <Label X="32" Y="396" Width="192" Height="16" FontId="PanelVersion" DisablePrefix="yes" VisibleCondition="WixStdBAShowVersion">#(loc.Version)</Label>
 
         <Page Name="Help">
-            <Label X="48" Y="132" Width="-48" Height="28" FontId="3" DisablePrefix="yes">#(loc.HelpHeader)</Label>
-            <Label X="48" Y="168" Width="-48" Height="-80" FontId="4" DisablePrefix="yes">#(loc.HelpText)</Label>
-            <Button Name="HelpCloseButton" X="-24" Y="-16" Width="104" Height="32" TabStop="yes" FontId="5">
-                <ButtonImage ImageFile="button-primary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-primary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-primary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-primary-104-focus.png" />
+            <Label X="296" Y="40" Width="-40" Height="40" FontId="Heading" DisablePrefix="yes">#(loc.HelpHeader)</Label>
+            <Label X="296" Y="96" Width="-40" Height="-96" FontId="Mono" DisablePrefix="yes">#(loc.HelpText)</Label>
+            <Button Name="HelpCloseButton" X="-21" Y="-17" Width="118" Height="38" TabStop="yes" FontId="AccentButton">
+                <ButtonImage ImageFile="button-accent-normal.png" />
+                <ButtonHoverImage ImageFile="button-accent-hover.png" />
+                <ButtonSelectedImage ImageFile="button-accent-pressed.png" />
+                <ButtonFocusImage ImageFile="button-accent-focus.png" />
                 <Text>#(loc.CloseButton)</Text>
                 <CloseWindowAction />
             </Button>
         </Page>
         <Page Name="Loading">
-            <Label Name="CheckingForUpdatesLabel" X="48" Y="132" Width="-48" Height="28" FontId="3" DisablePrefix="yes" Visible="no" />
+            <Label Name="CheckingForUpdatesLabel" X="296" Y="40" Width="-40" Height="40" FontId="Heading" DisablePrefix="yes" Visible="no" />
         </Page>
         <Page Name="Install">
-            <Label X="48" Y="132" Width="-48" Height="28" FontId="3" DisablePrefix="yes">#(loc.InstallHeader)</Label>
-            <Label X="48" Y="168" Width="-48" Height="60" FontId="0" DisablePrefix="yes">#(loc.InstallText)</Label>
-            <Hypertext Name="EulaHyperlink" X="48" Y="240" Width="-48" Height="36" TabStop="yes" FontId="7" HideWhenDisabled="yes">#(loc.InstallLicenseLinkText)</Hypertext>
-            <Checkbox Name="EulaAcceptCheckbox" X="48" Y="330" Width="300" Height="20" TabStop="yes" FontId="7" HideWhenDisabled="yes">#(loc.InstallAcceptCheckbox)</Checkbox>
-            <Button Name="InstallUpdateButton" X="24" Y="-16" Width="200" Height="32" TabStop="yes" FontId="6" EnableCondition="WixStdBAUpdateAvailable" HideWhenDisabled="yes">
-                <ButtonImage ImageFile="button-secondary-200-normal.png" />
-                <ButtonHoverImage ImageFile="button-secondary-200-hover.png" />
-                <ButtonSelectedImage ImageFile="button-secondary-200-pressed.png" />
-                <ButtonFocusImage ImageFile="button-secondary-200-focus.png" />
+            <Label X="296" Y="40" Width="-40" Height="40" FontId="Heading" DisablePrefix="yes">#(loc.InstallHeader)</Label>
+            <Label X="296" Y="96" Width="-40" Height="64" FontId="Body" DisablePrefix="yes">#(loc.InstallText)</Label>
+            <Hypertext Name="EulaHyperlink" X="296" Y="180" Width="-40" Height="34" TabStop="yes" FontId="CaptionControl" HideWhenDisabled="yes">#(loc.InstallLicenseLinkText)</Hypertext>
+            <Checkbox Name="EulaAcceptCheckbox" X="296" Y="226" Width="-40" Height="22" TabStop="yes" FontId="BodyControl" HideWhenDisabled="yes">#(loc.InstallAcceptCheckbox)</Checkbox>
+            <Button Name="InstallUpdateButton" X="29" Y="329" Width="198" Height="38" TabStop="yes" FontId="PanelButton" EnableCondition="WixStdBAUpdateAvailable" HideWhenDisabled="yes">
+                <ButtonImage ImageFile="button-update-normal.png" />
+                <ButtonHoverImage ImageFile="button-update-hover.png" />
+                <ButtonSelectedImage ImageFile="button-update-pressed.png" />
+                <ButtonFocusImage ImageFile="button-update-focus.png" />
                 <Text>#(loc.UpdateButton)</Text>
             </Button>
-            <Button Name="OptionsButton" X="-248" Y="-16" Width="104" Height="32" TabStop="yes" FontId="6" VisibleCondition="NOT WixStdBASuppressOptionsUI">
-                <ButtonImage ImageFile="button-secondary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-secondary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-secondary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-secondary-104-focus.png" />
+            <Button Name="OptionsButton" X="-261" Y="-17" Width="118" Height="38" TabStop="yes" FontId="Button" VisibleCondition="NOT WixStdBASuppressOptionsUI">
+                <ButtonImage ImageFile="button-standard-normal.png" />
+                <ButtonHoverImage ImageFile="button-standard-hover.png" />
+                <ButtonSelectedImage ImageFile="button-standard-pressed.png" />
+                <ButtonFocusImage ImageFile="button-standard-focus.png" />
                 <Text>#(loc.OptionsButton)</Text>
                 <ChangePageAction Page="Options" />
             </Button>
-            <Button Name="InstallButton" X="-136" Y="-16" Width="104" Height="32" TabStop="yes" FontId="5">
-                <ButtonImage ImageFile="button-primary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-primary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-primary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-primary-104-focus.png" />
+            <Button Name="InstallButton" X="-141" Y="-17" Width="118" Height="38" TabStop="yes" FontId="AccentButton">
+                <ButtonImage ImageFile="button-accent-normal.png" />
+                <ButtonHoverImage ImageFile="button-accent-hover.png" />
+                <ButtonSelectedImage ImageFile="button-accent-pressed.png" />
+                <ButtonFocusImage ImageFile="button-accent-focus.png" />
                 <Text>#(loc.InstallButton)</Text>
             </Button>
-            <Button Name="InstallCancelButton" X="-24" Y="-16" Width="104" Height="32" TabStop="yes" FontId="6">
-                <ButtonImage ImageFile="button-secondary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-secondary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-secondary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-secondary-104-focus.png" />
+            <Button Name="InstallCancelButton" X="-21" Y="-17" Width="118" Height="38" TabStop="yes" FontId="Button">
+                <ButtonImage ImageFile="button-standard-normal.png" />
+                <ButtonHoverImage ImageFile="button-standard-hover.png" />
+                <ButtonSelectedImage ImageFile="button-standard-pressed.png" />
+                <ButtonFocusImage ImageFile="button-standard-focus.png" />
                 <Text>#(loc.CancelButton)</Text>
                 <CloseWindowAction />
             </Button>
         </Page>
         <Page Name="Options">
-            <Label X="48" Y="132" Width="-48" Height="28" FontId="3" DisablePrefix="yes">#(loc.OptionsHeader)</Label>
-            <Label X="48" Y="170" Width="-48" Height="20" FontId="4" DisablePrefix="yes">#(loc.OptionsLocationLabel)</Label>
-            <Editbox Name="InstallFolder" X="48" Y="192" Width="-160" Height="28" TabStop="yes" FontId="8" FileSystemAutoComplete="yes" />
-            <Button Name="BrowseButton" X="-48" Y="190" Width="104" Height="32" TabStop="yes" FontId="6">
-                <ButtonImage ImageFile="button-secondary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-secondary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-secondary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-secondary-104-focus.png" />
+            <Label X="296" Y="40" Width="-40" Height="40" FontId="Heading" DisablePrefix="yes">#(loc.OptionsHeader)</Label>
+            <Label X="296" Y="96" Width="-40" Height="20" FontId="Body" DisablePrefix="yes">#(loc.OptionsLocationLabel)</Label>
+            <Editbox Name="InstallFolder" X="296" Y="122" Width="-160" Height="28" TabStop="yes" FontId="BodyControl" FileSystemAutoComplete="yes" />
+            <Button Name="BrowseButton" X="-37" Y="117" Width="118" Height="38" TabStop="yes" FontId="Button">
+                <ButtonImage ImageFile="button-browse-normal.png" />
+                <ButtonHoverImage ImageFile="button-browse-hover.png" />
+                <ButtonSelectedImage ImageFile="button-browse-pressed.png" />
+                <ButtonFocusImage ImageFile="button-browse-focus.png" />
                 <Text>#(loc.BrowseButton)</Text>
                 <BrowseDirectoryAction VariableName="InstallFolder" />
             </Button>
-            <Label X="48" Y="236" Width="-48" Height="20" FontId="4" DisablePrefix="yes">#(loc.OptionsDataLabel)</Label>
-            <Editbox Name="DataFolder" X="48" Y="258" Width="-160" Height="28" TabStop="yes" FontId="8" FileSystemAutoComplete="yes" />
-            <Button Name="DataBrowseButton" X="-48" Y="256" Width="104" Height="32" TabStop="yes" FontId="6">
-                <ButtonImage ImageFile="button-secondary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-secondary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-secondary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-secondary-104-focus.png" />
+            <Label X="296" Y="172" Width="-40" Height="20" FontId="Body" DisablePrefix="yes">#(loc.OptionsDataLabel)</Label>
+            <Editbox Name="DataFolder" X="296" Y="198" Width="-160" Height="28" TabStop="yes" FontId="BodyControl" FileSystemAutoComplete="yes" />
+            <Button Name="DataBrowseButton" X="-37" Y="193" Width="118" Height="38" TabStop="yes" FontId="Button">
+                <ButtonImage ImageFile="button-browse-normal.png" />
+                <ButtonHoverImage ImageFile="button-browse-hover.png" />
+                <ButtonSelectedImage ImageFile="button-browse-pressed.png" />
+                <ButtonFocusImage ImageFile="button-browse-focus.png" />
                 <Text>#(loc.BrowseButton)</Text>
                 <BrowseDirectoryAction VariableName="DataFolder" />
             </Button>
-            <Label X="48" Y="300" Width="-48" Height="40" FontId="4" DisablePrefix="yes">#(loc.OptionsDataNote)</Label>
-            <Button Name="OptionsOkButton" X="-136" Y="-16" Width="104" Height="32" TabStop="yes" FontId="5">
-                <ButtonImage ImageFile="button-primary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-primary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-primary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-primary-104-focus.png" />
+            <Label X="296" Y="240" Width="-40" Height="34" FontId="Caption" DisablePrefix="yes">#(loc.OptionsDataNote)</Label>
+            <Button Name="OptionsOkButton" X="-141" Y="-17" Width="118" Height="38" TabStop="yes" FontId="AccentButton">
+                <ButtonImage ImageFile="button-accent-normal.png" />
+                <ButtonHoverImage ImageFile="button-accent-hover.png" />
+                <ButtonSelectedImage ImageFile="button-accent-pressed.png" />
+                <ButtonFocusImage ImageFile="button-accent-focus.png" />
                 <Text>#(loc.OkButton)</Text>
                 <ChangePageAction Page="Install" />
             </Button>
-            <Button Name="OptionsCancelButton" X="-24" Y="-16" Width="104" Height="32" TabStop="yes" FontId="6">
-                <ButtonImage ImageFile="button-secondary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-secondary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-secondary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-secondary-104-focus.png" />
+            <Button Name="OptionsCancelButton" X="-21" Y="-17" Width="118" Height="38" TabStop="yes" FontId="Button">
+                <ButtonImage ImageFile="button-standard-normal.png" />
+                <ButtonHoverImage ImageFile="button-standard-hover.png" />
+                <ButtonSelectedImage ImageFile="button-standard-pressed.png" />
+                <ButtonFocusImage ImageFile="button-standard-focus.png" />
                 <Text>#(loc.CancelButton)</Text>
                 <ChangePageAction Page="Install" Cancel="yes" />
             </Button>
         </Page>
         <Page Name="Progress">
-            <Label X="48" Y="132" Width="-48" Height="28" FontId="3" DisablePrefix="yes">#(loc.ProgressHeader)</Label>
-            <Label Name="OverallProgressPackageText" X="48" Y="176" Width="-48" Height="20" FontId="4" DisablePrefix="yes">#(loc.OverallProgressPackageText)</Label>
-            <Progressbar Name="OverallCalculatedProgressbar" X="48" Y="204" Width="-48" Height="6" />
-            <Button Name="ProgressCancelButton" X="-24" Y="-16" Width="104" Height="32" TabStop="yes" FontId="6">
-                <ButtonImage ImageFile="button-secondary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-secondary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-secondary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-secondary-104-focus.png" />
+            <Label X="296" Y="40" Width="-40" Height="40" FontId="Heading" DisablePrefix="yes">
+                <Text>#(loc.ProgressHeader)</Text>
+                <Text Condition="WixBundleAction = 4">#(loc.ProgressUninstallHeader)</Text>
+                <Text Condition="WixBundleAction = 8">#(loc.ProgressRepairHeader)</Text>
+            </Label>
+            <Label Name="OverallProgressPackageText" X="296" Y="96" Width="-40" Height="20" FontId="BodyMuted" DisablePrefix="yes">#(loc.OverallProgressPackageText)</Label>
+            <Progressbar Name="OverallCalculatedProgressbar" X="296" Y="128" Width="-40" Height="4">
+                <ProgressbarImage ImageFile="progressbar.png" />
+            </Progressbar>
+            <Button Name="ProgressCancelButton" X="-21" Y="-17" Width="118" Height="38" TabStop="yes" FontId="Button">
+                <ButtonImage ImageFile="button-standard-normal.png" />
+                <ButtonHoverImage ImageFile="button-standard-hover.png" />
+                <ButtonSelectedImage ImageFile="button-standard-pressed.png" />
+                <ButtonFocusImage ImageFile="button-standard-focus.png" />
                 <Text>#(loc.CancelButton)</Text>
             </Button>
         </Page>
         <Page Name="Modify">
-            <Label X="48" Y="132" Width="-48" Height="28" FontId="3" DisablePrefix="yes">#(loc.ModifyHeader)</Label>
-            <Label X="48" Y="168" Width="-48" Height="60" FontId="0" DisablePrefix="yes">#(loc.ModifyText)</Label>
-            <Button Name="ModifyUpdateButton" X="24" Y="-16" Width="200" Height="32" TabStop="yes" FontId="6" EnableCondition="WixStdBAUpdateAvailable" HideWhenDisabled="yes">
-                <ButtonImage ImageFile="button-secondary-200-normal.png" />
-                <ButtonHoverImage ImageFile="button-secondary-200-hover.png" />
-                <ButtonSelectedImage ImageFile="button-secondary-200-pressed.png" />
-                <ButtonFocusImage ImageFile="button-secondary-200-focus.png" />
+            <Label X="296" Y="40" Width="-40" Height="40" FontId="Heading" DisablePrefix="yes">#(loc.ModifyHeader)</Label>
+            <Label X="296" Y="96" Width="-40" Height="64" FontId="Body" DisablePrefix="yes">#(loc.ModifyText)</Label>
+            <Button Name="ModifyUpdateButton" X="29" Y="329" Width="198" Height="38" TabStop="yes" FontId="PanelButton" EnableCondition="WixStdBAUpdateAvailable" HideWhenDisabled="yes">
+                <ButtonImage ImageFile="button-update-normal.png" />
+                <ButtonHoverImage ImageFile="button-update-hover.png" />
+                <ButtonSelectedImage ImageFile="button-update-pressed.png" />
+                <ButtonFocusImage ImageFile="button-update-focus.png" />
                 <Text>#(loc.UpdateButton)</Text>
             </Button>
-            <Button Name="RepairButton" X="-248" Y="-16" Width="104" Height="32" TabStop="yes" FontId="6" HideWhenDisabled="yes">
-                <ButtonImage ImageFile="button-secondary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-secondary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-secondary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-secondary-104-focus.png" />
+            <Button Name="RepairButton" X="-261" Y="-17" Width="118" Height="38" TabStop="yes" FontId="Button" HideWhenDisabled="yes">
+                <ButtonImage ImageFile="button-standard-normal.png" />
+                <ButtonHoverImage ImageFile="button-standard-hover.png" />
+                <ButtonSelectedImage ImageFile="button-standard-pressed.png" />
+                <ButtonFocusImage ImageFile="button-standard-focus.png" />
                 <Text>#(loc.RepairButton)</Text>
             </Button>
-            <Button Name="UninstallButton" X="-136" Y="-16" Width="104" Height="32" TabStop="yes" FontId="5">
-                <ButtonImage ImageFile="button-primary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-primary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-primary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-primary-104-focus.png" />
+            <Button Name="UninstallButton" X="-141" Y="-17" Width="118" Height="38" TabStop="yes" FontId="AccentButton">
+                <ButtonImage ImageFile="button-accent-normal.png" />
+                <ButtonHoverImage ImageFile="button-accent-hover.png" />
+                <ButtonSelectedImage ImageFile="button-accent-pressed.png" />
+                <ButtonFocusImage ImageFile="button-accent-focus.png" />
                 <Text>#(loc.UninstallButton)</Text>
             </Button>
-            <Button Name="ModifyCancelButton" X="-24" Y="-16" Width="104" Height="32" TabStop="yes" FontId="6">
-                <ButtonImage ImageFile="button-secondary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-secondary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-secondary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-secondary-104-focus.png" />
+            <Button Name="ModifyCancelButton" X="-21" Y="-17" Width="118" Height="38" TabStop="yes" FontId="Button">
+                <ButtonImage ImageFile="button-standard-normal.png" />
+                <ButtonHoverImage ImageFile="button-standard-hover.png" />
+                <ButtonSelectedImage ImageFile="button-standard-pressed.png" />
+                <ButtonFocusImage ImageFile="button-standard-focus.png" />
                 <Text>#(loc.CancelButton)</Text>
                 <CloseWindowAction />
             </Button>
         </Page>
         <Page Name="Success">
-            <Label X="48" Y="132" Width="-48" Height="28" FontId="3" DisablePrefix="yes">
+            <ImageControl X="296" Y="40" Width="40" Height="40" ImageFile="status-success.png" />
+            <Label X="296" Y="96" Width="-40" Height="40" FontId="Heading" DisablePrefix="yes">
                 <Text>#(loc.SuccessHeader)</Text>
                 <Text Condition="WixBundleAction = 4">#(loc.SuccessUninstallHeader)</Text>
                 <Text Condition="WixBundleAction = 8">#(loc.SuccessRepairHeader)</Text>
             </Label>
-            <Label X="48" Y="168" Width="-48" Height="60" FontId="0" DisablePrefix="yes">
+            <Label X="296" Y="152" Width="-40" Height="64" FontId="Body" DisablePrefix="yes">
                 <Text>#(loc.SuccessText)</Text>
                 <Text Condition="WixBundleAction = 4">#(loc.SuccessUninstallText)</Text>
             </Label>
-            <Label X="48" Y="300" Width="-48" Height="40" FontId="4" DisablePrefix="yes" VisibleCondition="WixStdBARestartRequired">#(loc.RestartText)</Label>
-            <Button Name="LaunchButton" X="-136" Y="-16" Width="104" Height="32" TabStop="yes" FontId="5" HideWhenDisabled="yes">
-                <ButtonImage ImageFile="button-primary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-primary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-primary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-primary-104-focus.png" />
+            <Label X="296" Y="224" Width="-40" Height="40" FontId="Body" DisablePrefix="yes" VisibleCondition="WixStdBARestartRequired">#(loc.RestartText)</Label>
+            <Button Name="LaunchButton" X="-141" Y="-17" Width="118" Height="38" TabStop="yes" FontId="AccentButton" HideWhenDisabled="yes">
+                <ButtonImage ImageFile="button-accent-normal.png" />
+                <ButtonHoverImage ImageFile="button-accent-hover.png" />
+                <ButtonSelectedImage ImageFile="button-accent-pressed.png" />
+                <ButtonFocusImage ImageFile="button-accent-focus.png" />
                 <Text>#(loc.LaunchButton)</Text>
             </Button>
-            <Button Name="SuccessRestartButton" X="-136" Y="-16" Width="104" Height="32" TabStop="yes" FontId="5" HideWhenDisabled="yes">
-                <ButtonImage ImageFile="button-primary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-primary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-primary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-primary-104-focus.png" />
+            <Button Name="SuccessRestartButton" X="-141" Y="-17" Width="118" Height="38" TabStop="yes" FontId="AccentButton" HideWhenDisabled="yes">
+                <ButtonImage ImageFile="button-accent-normal.png" />
+                <ButtonHoverImage ImageFile="button-accent-hover.png" />
+                <ButtonSelectedImage ImageFile="button-accent-pressed.png" />
+                <ButtonFocusImage ImageFile="button-accent-focus.png" />
                 <Text>#(loc.RestartButton)</Text>
             </Button>
-            <Button Name="SuccessCloseButton" X="-24" Y="-16" Width="104" Height="32" TabStop="yes" FontId="6">
-                <ButtonImage ImageFile="button-secondary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-secondary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-secondary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-secondary-104-focus.png" />
+            <Button Name="SuccessCloseButton" X="-21" Y="-17" Width="118" Height="38" TabStop="yes" FontId="Button">
+                <ButtonImage ImageFile="button-standard-normal.png" />
+                <ButtonHoverImage ImageFile="button-standard-hover.png" />
+                <ButtonSelectedImage ImageFile="button-standard-pressed.png" />
+                <ButtonFocusImage ImageFile="button-standard-focus.png" />
                 <Text>#(loc.CloseButton)</Text>
                 <CloseWindowAction />
             </Button>
         </Page>
         <Page Name="Failure">
-            <Label X="48" Y="132" Width="-48" Height="28" FontId="3" DisablePrefix="yes">
+            <ImageControl X="296" Y="40" Width="40" Height="40" ImageFile="status-failure.png" />
+            <Label X="296" Y="96" Width="-40" Height="40" FontId="Heading" DisablePrefix="yes">
                 <Text>#(loc.FailureHeader)</Text>
                 <Text Condition="WixBundleAction = 4">#(loc.FailureUninstallHeader)</Text>
             </Label>
-            <Hypertext Name="FailureLogFileLink" X="48" Y="168" Width="-48" Height="36" FontId="7" TabStop="yes" HideWhenDisabled="yes">#(loc.FailureLogLinkText)</Hypertext>
-            <Hypertext Name="FailureMessageText" X="48" Y="210" Width="-48" Height="80" FontId="8" TabStop="yes" HideWhenDisabled="yes" />
-            <Label X="48" Y="300" Width="-48" Height="40" FontId="4" DisablePrefix="yes" VisibleCondition="WixStdBARestartRequired">#(loc.RestartText)</Label>
-            <Button Name="FailureRestartButton" X="-136" Y="-16" Width="104" Height="32" TabStop="yes" FontId="5" HideWhenDisabled="yes">
-                <ButtonImage ImageFile="button-primary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-primary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-primary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-primary-104-focus.png" />
+            <Hypertext Name="FailureLogFileLink" X="296" Y="152" Width="-40" Height="22" FontId="BodyControl" TabStop="yes" HideWhenDisabled="yes">#(loc.FailureLogLinkText)</Hypertext>
+            <Hypertext Name="FailureMessageText" X="296" Y="184" Width="-40" Height="112" FontId="BodyControl" TabStop="yes" HideWhenDisabled="yes" />
+            <Label X="296" Y="304" Width="-40" Height="40" FontId="Body" DisablePrefix="yes" VisibleCondition="WixStdBARestartRequired">#(loc.RestartText)</Label>
+            <Button Name="FailureRestartButton" X="-141" Y="-17" Width="118" Height="38" TabStop="yes" FontId="AccentButton" HideWhenDisabled="yes">
+                <ButtonImage ImageFile="button-accent-normal.png" />
+                <ButtonHoverImage ImageFile="button-accent-hover.png" />
+                <ButtonSelectedImage ImageFile="button-accent-pressed.png" />
+                <ButtonFocusImage ImageFile="button-accent-focus.png" />
                 <Text>#(loc.RestartButton)</Text>
             </Button>
-            <Button Name="FailureCloseButton" X="-24" Y="-16" Width="104" Height="32" TabStop="yes" FontId="6">
-                <ButtonImage ImageFile="button-secondary-104-normal.png" />
-                <ButtonHoverImage ImageFile="button-secondary-104-hover.png" />
-                <ButtonSelectedImage ImageFile="button-secondary-104-pressed.png" />
-                <ButtonFocusImage ImageFile="button-secondary-104-focus.png" />
+            <Button Name="FailureCloseButton" X="-21" Y="-17" Width="118" Height="38" TabStop="yes" FontId="Button">
+                <ButtonImage ImageFile="button-standard-normal.png" />
+                <ButtonHoverImage ImageFile="button-standard-hover.png" />
+                <ButtonSelectedImage ImageFile="button-standard-pressed.png" />
+                <ButtonFocusImage ImageFile="button-standard-focus.png" />
                 <Text>#(loc.CloseButton)</Text>
                 <CloseWindowAction />
             </Button>

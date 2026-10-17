@@ -24,20 +24,28 @@
                 LicenseUrl="https://www.apache.org/licenses/LICENSE-2.0"
                 SuppressOptionsUI="no"
                 ShowVersion="yes" />
-            <!-- The images theme.xml draws with, from make-theme.py. -->
-            <Payload SourceFile="theme\button-primary-104-focus.png" />
-            <Payload SourceFile="theme\button-primary-104-hover.png" />
-            <Payload SourceFile="theme\button-primary-104-normal.png" />
-            <Payload SourceFile="theme\button-primary-104-pressed.png" />
-            <Payload SourceFile="theme\button-secondary-104-focus.png" />
-            <Payload SourceFile="theme\button-secondary-104-hover.png" />
-            <Payload SourceFile="theme\button-secondary-104-normal.png" />
-            <Payload SourceFile="theme\button-secondary-104-pressed.png" />
-            <Payload SourceFile="theme\button-secondary-200-focus.png" />
-            <Payload SourceFile="theme\button-secondary-200-hover.png" />
-            <Payload SourceFile="theme\button-secondary-200-normal.png" />
-            <Payload SourceFile="theme\button-secondary-200-pressed.png" />
+            <!-- The images theme.xml draws with, from make-theme.py. logo.png comes in
+                 through LogoFile above. -->
             <Payload SourceFile="theme\background.png" />
+            <Payload SourceFile="theme\button-accent-focus.png" />
+            <Payload SourceFile="theme\button-accent-hover.png" />
+            <Payload SourceFile="theme\button-accent-normal.png" />
+            <Payload SourceFile="theme\button-accent-pressed.png" />
+            <Payload SourceFile="theme\button-browse-focus.png" />
+            <Payload SourceFile="theme\button-browse-hover.png" />
+            <Payload SourceFile="theme\button-browse-normal.png" />
+            <Payload SourceFile="theme\button-browse-pressed.png" />
+            <Payload SourceFile="theme\button-standard-focus.png" />
+            <Payload SourceFile="theme\button-standard-hover.png" />
+            <Payload SourceFile="theme\button-standard-normal.png" />
+            <Payload SourceFile="theme\button-standard-pressed.png" />
+            <Payload SourceFile="theme\button-update-focus.png" />
+            <Payload SourceFile="theme\button-update-hover.png" />
+            <Payload SourceFile="theme\button-update-normal.png" />
+            <Payload SourceFile="theme\button-update-pressed.png" />
+            <Payload SourceFile="theme\progressbar.png" />
+            <Payload SourceFile="theme\status-failure.png" />
+            <Payload SourceFile="theme\status-success.png" />
         </BootstrapperApplication>
         <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles64Folder]DSA" bal:Overridable="yes" />
         <Variable Name="DataFolder" Type="formatted" Value="[CommonAppDataFolder]DSA" bal:Overridable="yes" />

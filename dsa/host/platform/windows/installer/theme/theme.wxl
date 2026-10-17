@@ -2,8 +2,9 @@
 <!-- The text of setup.exe (English). -->
 <WixLocalization Culture="en-us" Language="1033" xmlns="http://wixtoolset.org/schemas/v4/wxl">
     <String Id="Caption" Value="Desktop Subsystem for Android™ Setup" />
-    <String Id="Title" Value="Desktop Subsystem for Android™" />
+    <String Id="Title" Value="Desktop Subsystem&#xA;for Android™" />
     <String Id="Subtitle" Value="Android apps in their own windows on your desktop" />
+    <String Id="Version" Value="Version [WixBundleVersion]" />
     <String Id="HelpHeader" Value="Setup help" />
     <String Id="HelpText" Value="/install | /repair | /uninstall | /layout [folder]&#xA;    installs, repairs, uninstalls or copies the setup files to a folder.&#xA;&#xA;/passive | /quiet&#xA;    shows only progress, or nothing at all.&#xA;&#xA;/norestart&#xA;    never restarts the computer.&#xA;&#xA;/log log.txt&#xA;    writes a log to the file." />
     <String Id="InstallHeader" Value="Ready to install" />
@@ -14,16 +15,18 @@
     <String Id="UpdateButton" Value="Update setup first" />
     <String Id="OptionsButton" Value="Options" />
     <String Id="OptionsHeader" Value="Options" />
-    <String Id="OptionsLocationLabel" Value="Program folder:" />
-    <String Id="OptionsDataLabel" Value="Folder for the Android images, settings and logs:" />
+    <String Id="OptionsLocationLabel" Value="Program folder" />
+    <String Id="OptionsDataLabel" Value="Folder for Android images, settings and logs" />
     <String Id="OptionsDataNote" Value="Each user's Android data is kept in their own profile, under AppData\Local\DSA." />
     <String Id="BrowseButton" Value="Browse..." />
     <String Id="OkButton" Value="OK" />
     <String Id="CancelButton" Value="Cancel" />
     <String Id="CloseButton" Value="Close" />
     <String Id="ProgressHeader" Value="Installing" />
+    <String Id="ProgressUninstallHeader" Value="Uninstalling" />
+    <String Id="ProgressRepairHeader" Value="Repairing" />
     <String Id="OverallProgressPackageText" Value="Preparing..." />
-    <String Id="ModifyHeader" Value="Desktop Subsystem for Android is installed" />
+    <String Id="ModifyHeader" Value="Repair or uninstall" />
     <String Id="ModifyText" Value="Repair puts back missing or damaged files. Uninstall removes the program and the downloaded Android images, and keeps each user's Android data." />
     <String Id="RepairButton" Value="Repair" />
     <String Id="UninstallButton" Value="Uninstall" />
