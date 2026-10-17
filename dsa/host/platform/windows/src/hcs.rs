@@ -88,6 +88,7 @@ type CreateComputeSystem = unsafe extern "system" fn(
 ) -> HRESULT;
 type SystemOperation = unsafe extern "system" fn(HCS_SYSTEM, HCS_OPERATION, PCWSTR) -> HRESULT;
 type CloseComputeSystem = unsafe extern "system" fn(HCS_SYSTEM);
+type GrantVmAccess = unsafe extern "system" fn(PCWSTR, PCWSTR) -> HRESULT;
 type SetComputeSystemCallback = unsafe extern "system" fn(
     HCS_SYSTEM,
     HCS_EVENT_OPTIONS,
@@ -107,6 +108,7 @@ struct Api {
     get_compute_system_properties: SystemOperation,
     close_compute_system: CloseComputeSystem,
     set_compute_system_callback: SetComputeSystemCallback,
+    grant_vm_access: GrantVmAccess,
 }
 
 fn wide(text: &str) -> Vec<u16> {
@@ -166,6 +168,7 @@ fn load() -> Result<Api, HcsError> {
             "HcsSetComputeSystemCallback",
             SetComputeSystemCallback
         ),
+        grant_vm_access: function!("HcsGrantVmAccess", GrantVmAccess),
     })
 }
 
@@ -385,4 +388,23 @@ impl Drop for ComputeSystem {
         // SAFETY: closed once.
         unsafe { (self.api.close_compute_system)(self.handle) };
     }
+}
+
+/// Lets the VM of compute system `id` open the file at `path`, by adding that VM's own
+/// account to the file's access list. A user's disk in their profile is closed to everyone
+/// else, VMs included, so the VM is given this one file and nothing around it, as WSL does
+/// for each distribution's disk.
+pub fn grant_vm_access(id: &str, path: &std::path::Path) -> Result<(), HcsError> {
+    let api = api()?;
+    let (id_w, path_w) = (wide(id), wide(&path.to_string_lossy()));
+    // SAFETY: two NUL-terminated strings.
+    let hresult = unsafe { (api.grant_vm_access)(id_w.as_ptr(), path_w.as_ptr()) };
+    if hresult < 0 {
+        return Err(HcsError::Call {
+            what: "HcsGrantVmAccess",
+            hresult,
+            detail: path.display().to_string(),
+        });
+    }
+    Ok(())
 }

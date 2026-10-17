@@ -60,10 +60,9 @@ pub fn create_user_android(
             })
             .unwrap_or(false)
     });
-    if template_layout {
-        // The disk is copied from the image's template when the VM first starts.
-        prepare_user_disk_folder(&user.config.data_disk)?;
-    } else {
+    prepare_user_disk_folder(&user.config.data_disk, !user.disk_in_profile)?;
+    // With a template the disk is copied from it when the VM first starts.
+    if !template_layout {
         prepare_user_data_disk(&user.config.data_disk, user.data_disk_size_gb)?;
     }
     let launcher = match updates {

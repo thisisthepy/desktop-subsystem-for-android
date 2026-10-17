@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use dsa_host_windows::host_config::HostConfig;
+use dsa_host_windows::host_config::{expand_locations, HostConfig};
 
 const MINIMAL: &str = r#"{
   "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
@@ -19,7 +19,7 @@ fn fr2_a_minimal_configuration_gets_working_defaults() {
     let session = config.session_config();
     assert_eq!(session.connect_timeout, Duration::from_secs(120));
     assert_eq!(session.stop_timeout, Duration::from_secs(30));
-    let vm = config.vm_config(Some("S-1-5-21-1-2-3-1001"));
+    let vm = config.vm_config(Some("S-1-5-21-1-2-3-1001")).unwrap();
     assert_eq!(vm.kernel, PathBuf::from(r"C:\Program Files\DSA\vm\bzImage"));
     assert_eq!(vm.memory_mb, 4096);
     assert_eq!(vm.page_reporting_order, 9);
@@ -32,7 +32,10 @@ fn fr2_a_user_named_in_the_file_wins_over_the_running_user() {
     let json = MINIMAL.replace("\n}", ",\n  \"user_sid\": \"S-1-5-21-9-9-9-1002\"\n}");
     let config = HostConfig::parse(&json).unwrap();
     assert_eq!(
-        config.vm_config(Some("S-1-5-21-1-2-3-1001")).socket_sids,
+        config
+            .vm_config(Some("S-1-5-21-1-2-3-1001"))
+            .unwrap()
+            .socket_sids,
         ["S-1-5-21-9-9-9-1002"]
     );
 }
@@ -58,6 +61,7 @@ fn fr2_the_example_configuration_is_valid() {
     let config = HostConfig::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
     config
         .vm_config(Some("S-1-5-21-1-2-3-1001"))
+        .unwrap()
         .to_hcs_document()
         .expect("the example describes a valid VM");
 }
@@ -83,6 +87,7 @@ fn pr5_each_user_gets_their_own_vm_data_disk_and_socket_access() {
     assert_ne!(alice.config.data_disk, bob.config.data_disk);
     assert_eq!(bob.config.socket_sids, ["S-1-5-21-1-2-3-1002"]);
     assert_eq!(alice.data_disk_size_gb, 64);
+    assert!(!alice.disk_in_profile);
     alice.config.to_hcs_document().expect("a valid VM");
 }
 
@@ -94,24 +99,61 @@ fn pr5_a_caller_that_is_not_a_sid_gets_no_vm() {
     }
 }
 
+/// Profiles as Windows would report them, for the tests.
+fn profiles(sid: &str) -> Result<PathBuf, String> {
+    match sid {
+        "S-1-5-21-1-2-3-1001" => Ok(PathBuf::from(r"C:\Users\alice\AppData\Local")),
+        "S-1-5-21-1-2-3-1002" => Ok(PathBuf::from(r"D:\Profiles\bob\Local")),
+        _ => Err(format!("Windows has no profile folder for {sid}")),
+    }
+}
+
+const PROFILES: &str = r#"{
+  "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
+  "system_image": "C:\\Program Files\\DSA\\vm\\system.vhdx"
+}"#;
+
 #[test]
-fn pr5_serving_users_needs_a_data_folder() {
-    let config = HostConfig::parse(MINIMAL).unwrap();
+fn pr5_each_users_disk_is_in_their_own_profile_without_a_data_folder() {
+    let config = HostConfig::parse(PROFILES).unwrap();
+    let alice = config
+        .user_vm_with("S-1-5-21-1-2-3-1001", &profiles)
+        .unwrap();
+    assert_eq!(
+        alice.config.data_disk,
+        PathBuf::from(r"C:\Users\alice\AppData\Local\DSA\android.vhdx")
+    );
+    assert!(alice.disk_in_profile);
+    let bob = config
+        .user_vm_with("S-1-5-21-1-2-3-1002", &profiles)
+        .unwrap();
+    assert_eq!(
+        bob.config.data_disk,
+        PathBuf::from(r"D:\Profiles\bob\Local\DSA\android.vhdx")
+    );
+    // A user Windows has no profile for gets no VM, and is told why.
     let error = config
-        .user_vm("S-1-5-21-1-2-3-1001")
+        .user_vm_with("S-1-5-21-1-2-3-1003", &profiles)
         .unwrap_err()
         .to_string();
-    assert!(error.contains("data_dir"), "{error}");
+    assert!(error.contains("no profile folder"), "{error}");
 }
 
 #[test]
-fn fr2_a_configuration_without_any_data_disk_is_reported() {
-    let json = r#"{"kernel": "C:\\k", "system_image": "C:\\s.vhdx"}"#;
-    let error = HostConfig::parse(json).unwrap_err().to_string();
-    assert!(
-        error.contains("data_disk") && error.contains("data_dir"),
-        "{error}"
+fn fr2_one_vm_by_hand_keeps_its_disk_in_the_users_profile_without_a_data_disk() {
+    let config = HostConfig::parse(PROFILES).unwrap();
+    let vm = config
+        .vm_config_with(Some("S-1-5-21-1-2-3-1001"), &profiles)
+        .unwrap();
+    assert_eq!(
+        vm.data_disk,
+        PathBuf::from(r"C:\Users\alice\AppData\Local\DSA\android.vhdx")
     );
+    let error = config
+        .vm_config_with(None, &profiles)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("user_sid"), "{error}");
 }
 
 #[test]
@@ -228,4 +270,29 @@ fn fr14_an_image_made_from_aosp_boots_from_one_disk_made_from_its_template() {
         .as_str()
         .unwrap()
         .ends_with("initrd.img"));
+}
+
+#[test]
+fn fr1_the_folders_chosen_at_installation_fill_in_the_configuration() {
+    let text = r#"{
+  "kernel": "{program}\\vm\\bzImage",
+  "images_dir": "{data}\\images",
+  "first_image": {"version": "none", "android_major": 0, "build": 0},
+  "log_file": "{data}\\logs\\dsa-hostd.log"
+}"#;
+    let expanded = expand_locations(
+        text,
+        &PathBuf::from(r"D:\Android Data\"),
+        &PathBuf::from(r"E:\Apps\DSA"),
+    );
+    let config = HostConfig::parse(&expanded).unwrap();
+    assert_eq!(config.kernel, PathBuf::from(r"E:\Apps\DSA\vm\bzImage"));
+    assert_eq!(
+        config.images_dir,
+        Some(PathBuf::from(r"D:\Android Data\images"))
+    );
+    assert_eq!(
+        config.log_file,
+        Some(PathBuf::from(r"D:\Android Data\logs\dsa-hostd.log"))
+    );
 }

@@ -5,7 +5,7 @@ use std::time::Duration;
 use dsa_host_core::session::GuestLauncher;
 
 use crate::guid::Guid;
-use crate::hcs::ComputeSystem;
+use crate::hcs::{grant_vm_access, ComputeSystem};
 use crate::vm::AndroidVmConfig;
 use crate::vm_listener::VmIdSlot;
 
@@ -66,12 +66,21 @@ impl GuestLauncher for AndroidVmLauncher {
         if self.system.is_some() {
             return Err("the Android VM is already running".into());
         }
-        let document = (self.config)()?
+        let config = (self.config)()?;
+        let document = config
             .to_hcs_document()
             .map_err(|e| e.to_string())?
             .to_string();
         let system =
             ComputeSystem::create(&self.id, &document, CALL_TIMEOUT).map_err(|e| e.to_string())?;
+        // The VM opens its disk when it starts. A disk in the user's profile admits only the
+        // user, SYSTEM and administrators, so the VM is let in to that one file first.
+        grant_vm_access(&self.id, &config.data_disk).map_err(|e| {
+            format!(
+                "the Android VM could not be given access to {}: {e}",
+                config.data_disk.display()
+            )
+        })?;
         // On any failure below the system is dropped, which closes the handle and so
         // removes the VM.
         system.start(CALL_TIMEOUT).map_err(|e| e.to_string())?;
