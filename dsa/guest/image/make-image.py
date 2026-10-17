@@ -263,7 +263,10 @@ def main():
         z.extractall(otatools)
     for f in (otatools / "bin").iterdir():
         f.chmod(0o755)
-    env = dict(os.environ, PATH=f"{otatools / 'bin'}:{os.environ['PATH']}")
+    # The tools unpack gigabytes into their temporary folder; keep it inside the work folder.
+    temp = work / "tmp"
+    temp.mkdir()
+    env = dict(os.environ, PATH=f"{otatools / 'bin'}:{os.environ['PATH']}", TMPDIR=str(temp))
 
     modified = work / "modified.zip"
     modify(target_files, modified)
