@@ -144,7 +144,7 @@ VM 안에서도 CPU 연산과 메모리 접근은 하드웨어 가상화로 거�
 
 ### D12. 공개는 develop에서 release를 거쳐 main으로 한 방향이다
 
-`develop`에서 작업한다. `develop`에 push하면 CI가 기획 문서(`PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, `docs/` 바로 아래 파일)와 `experiments/`를 뺀 `release` 브랜치를 만들고, `release`에서 `main`으로 가는 PR을 연다. 개발자가 그 PR을 머지한다. compose-rust의 방식과 스크립트를 그대로 가져왔다.
+`develop`에서 작업한다. `develop`에 push하면 CI가 기획 문서(`PROJECT.md`, `AGENTS.md`, `CLAUDE.md`, `docs/` 바로 아래 파일)를 뺀 `release` 브랜치를 만들고, `release`에서 `main`으로 가는 PR을 연다. 개발자가 그 PR을 머지한다. compose-rust의 방식과 스크립트를 그대로 가져왔다.
 
 저장소가 공개라면 `develop`은 누구나 볼 수 있다. 이 흐름은 기획 문서를 숨기는 장치가 아니라 `main`을 사용자용으로 깔끔하게 두는 장치다.
 

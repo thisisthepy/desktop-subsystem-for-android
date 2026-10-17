@@ -2,7 +2,7 @@
 #
 # `main` is protected, so nothing pushes to it directly. This workflow rebuilds the
 # `release` branch from develop with .github/scripts/release/sync-release.sh (which drops the internal
-# planning documents and the experiments/ folder) and opens a pull request from release into main. A human merges it.
+# planning documents) and opens a pull request from release into main. A human merges it.
 #
 # `main` is always an ancestor of `release`, so merging that pull request leaves main with
 # exactly the tree the script produced.
@@ -79,7 +79,7 @@ jobs:
             --title "Publish develop to main" \
             --body "Rebuilt from \`develop\` by \`.github/scripts/release/sync-release.sh\`.
 
-          The internal planning documents (\`PROJECT.md\`, \`AGENTS.md\`, \`docs/INTENT.md\`, \`docs/SPEC.md\`) and the \`experiments/\` folder are excluded; the source, \`README.md\` and \`docs/locales/\` are not.
+          The internal planning documents (\`PROJECT.md\`, \`AGENTS.md\`, and the files directly under \`docs/\`) are excluded; the source, \`README.md\` and \`docs/locales/\` are not.
 
           Merging this leaves \`main\` with exactly the tree the script produced."
           status=$?
