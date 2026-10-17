@@ -33,6 +33,8 @@ $stage = Join-Path $out "stage"
 Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $stage | Out-Null
 
+# The programs report this release's version, not their crates' own.
+$env:DSA_VERSION = $Version
 Push-Location $dsa
 try {
     cargo build --release -p dsa-host-windows --bin dsa-hostd -p dsa-cli --bin dsa
