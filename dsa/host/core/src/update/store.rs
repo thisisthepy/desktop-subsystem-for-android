@@ -98,6 +98,12 @@ impl ImageStore {
         self.root.join("images").join(version)
     }
 
+    /// Whether the image named `version` has its files here. An installer that bundles no
+    /// image records a first image by name only, and nothing can boot from that.
+    pub fn has_image(&self, version: &str) -> bool {
+        self.image_dir(version).is_dir()
+    }
+
     pub fn state(&self) -> Result<State, UpdateError> {
         let path = self.state_path();
         let text = fs::read(&path).map_err(|e| store_error("reading", &path, e))?;
