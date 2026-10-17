@@ -47,5 +47,9 @@ WiX 6 and later ask organisations that earn revenue to pay a maintenance fee and
 licence to build with it. WiX 5 is under the Microsoft Reciprocal License only.
 
 The setup screens are this project's own theme. Its control names are the ones WiX's
-standard bootstrapper application expects; the layout, colours, text and logo
-(`theme/make-logo.py`) are written here.
+standard bootstrapper application expects; the layout, colours, text and images are
+written here. The look follows WinUI with Android's colours: a light backdrop, the pages on a
+white card with rounded corners, and Android green for the button that goes ahead.
+`theme/make-theme.py` draws the backdrop, the button images and the logo
+(`uv run dsa/host/platform/windows/installer/theme/make-theme.py`); the logo uses Android's
+colours but no Android mark.
