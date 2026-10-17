@@ -142,6 +142,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       public_key: ${{ steps.sign.outputs.public_key }}
+      newest_major: ${{ steps.write.outputs.newest_major }}
     permissions:
       contents: write
     env:
@@ -156,11 +157,14 @@ jobs:
           path: entries
 
       - name: Write the list
+        id: write
         run: |
           jq -n --slurpfile inputs dsa/guest/image/inputs.json --slurpfile images <(jq -s . entries/*.json) \
             '{format: 1, supported_majors: ([$inputs[0].images[].android_major] | sort), images: $images[0]}' \
             > images.json
           cat images.json
+          # The installer's first screen names the newest Android the list supports.
+          echo "newest_major=$(jq '.supported_majors | max' images.json)" >> "$GITHUB_OUTPUT"
 
       - name: Sign and check the list
         id: sign
@@ -223,6 +227,7 @@ jobs:
           -Kernel .scratch/kernel-out/bzImage
           -ListUrl https://github.com/${{ github.repository }}/releases/download/images/images.json
           -TrustedKey ${{ needs.list.outputs.public_key }}
+          -AndroidMajor ${{ needs.list.outputs.newest_major }}
 
       - name: Publish the installer
         run: |
