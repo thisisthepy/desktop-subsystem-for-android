@@ -23,6 +23,13 @@ struct Guest {
     starts: usize,
     fail_start: Option<String>,
     fail_stop: Option<String>,
+    /// Set to make the guest end by itself, as a VM that crashes during boot does.
+    exited: Option<String>,
+    /// What the launcher tells about the boot when a start fails.
+    diagnostics: Option<String>,
+    /// How many times the session asked for the diagnostics, and whether the guest was
+    /// already stopped each time.
+    diagnostics_asked: Vec<bool>,
 }
 
 #[derive(Clone, Default)]
@@ -60,6 +67,17 @@ impl GuestLauncher for FakeLauncher {
             }
             thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    fn exited(&mut self) -> Option<String> {
+        self.0.lock().unwrap().exited.clone()
+    }
+
+    fn diagnostics(&mut self) -> Option<String> {
+        let mut guest = self.0.lock().unwrap();
+        let stopped = guest.processes == 0;
+        guest.diagnostics_asked.push(stopped);
+        guest.diagnostics.clone()
     }
 }
 
@@ -141,7 +159,7 @@ fn fr2_an_agent_that_never_connects_returns_the_session_to_stopped_with_the_caus
         ]
     );
     match seen[2].reason.clone() {
-        Some(StopReason::AgentDidNotConnect { waited }) => assert!(waited >= timeout),
+        Some(StopReason::AgentDidNotConnect { waited, .. }) => assert!(waited >= timeout),
         other => panic!("expected AgentDidNotConnect, got {other:?}"),
     }
     assert_eq!(session.last_reason(), seen[2].reason);
@@ -345,4 +363,97 @@ fn pr5_a_start_through_the_local_api_answers_after_the_session_has_moved() {
     assert!(UserAndroid::last_reason(&session)
         .unwrap()
         .contains("no kernel"));
+}
+
+#[test]
+fn fr2_a_start_that_times_out_reports_what_the_launcher_saw_of_the_boot() {
+    let launcher = FakeLauncher::default();
+    launcher.0.lock().unwrap().diagnostics =
+        Some("the guest's last console lines:\n  Kernel panic - not syncing: VFS".into());
+    let timeout = Duration::from_millis(200);
+    let (session, _connector) = session_with(launcher.clone(), timeout);
+    session.start();
+    assert!(session.wait_for(SessionState::Starting, WAIT));
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+
+    let reason = session.last_reason().expect("a reason");
+    match &reason {
+        StopReason::AgentDidNotConnect { diagnostics, .. } => assert_eq!(
+            diagnostics.as_deref(),
+            Some("the guest's last console lines:\n  Kernel panic - not syncing: VFS")
+        ),
+        other => panic!("expected AgentDidNotConnect, got {other:?}"),
+    }
+    let text = reason.to_string();
+    assert!(
+        text.starts_with("the agent did not connect to the control channel within"),
+        "{text}"
+    );
+    assert!(
+        text.ends_with("\nthe guest's last console lines:\n  Kernel panic - not syncing: VFS"),
+        "{text}"
+    );
+    assert_eq!(
+        launcher.0.lock().unwrap().diagnostics_asked,
+        [true],
+        "asked once, after the guest had stopped"
+    );
+}
+
+#[test]
+fn fr2_a_guest_that_exits_during_boot_ends_the_start_without_waiting_for_the_timeout() {
+    let launcher = FakeLauncher::default();
+    {
+        let mut guest = launcher.0.lock().unwrap();
+        guest.exited = Some("the guest exited during boot".into());
+        guest.diagnostics = Some("last line: init: reboot".into());
+    }
+    let (session, _connector) = session_with(launcher.clone(), Duration::from_secs(600));
+    let events = session.events();
+    let asked = std::time::Instant::now();
+    session.start();
+
+    let seen = next_states(&events, 3);
+    assert_eq!(
+        states(&seen),
+        [
+            SessionState::Starting,
+            SessionState::Stopping,
+            SessionState::Stopped
+        ]
+    );
+    assert!(
+        asked.elapsed() < WAIT,
+        "the start ended long before the connect timeout"
+    );
+    assert_eq!(
+        seen[2].reason,
+        Some(StopReason::GuestExited {
+            why: "the guest exited during boot".into(),
+            diagnostics: Some("last line: init: reboot".into()),
+        })
+    );
+    assert_eq!(
+        seen[2].reason.as_ref().unwrap().to_string(),
+        "the guest exited during boot\nlast line: init: reboot"
+    );
+    assert_eq!(
+        launcher.processes(),
+        0,
+        "what was left of the guest was stopped"
+    );
+}
+
+#[test]
+fn fr2_a_stop_on_request_does_not_ask_for_boot_diagnostics() {
+    let launcher = FakeLauncher::default();
+    launcher.0.lock().unwrap().diagnostics = Some("not wanted".into());
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let _agent = connect_agent(&mut connector);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(session.last_reason(), Some(StopReason::Requested));
+    assert!(launcher.0.lock().unwrap().diagnostics_asked.is_empty());
 }

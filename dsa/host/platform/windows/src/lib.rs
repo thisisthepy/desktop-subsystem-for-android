@@ -2,6 +2,9 @@
 //!
 //! - [`vm`]: the Android VM's configuration, as the HCS document that creates it.
 //! - [`hcs`] and [`android_vm`]: creating, starting and stopping that VM (Windows only).
+//! - [`console_log`]: the VM's serial console, kept in a log per user, and the end of it
+//!   that a failed start reports.
+//! - [`console_pipe`]: the named pipe that console arrives on (Windows only).
 //! - [`hvsocket`]: the control channel's transport, Hyper-V sockets (Windows only).
 //! - [`https`]: downloads for image updates, through WinHTTP (Windows only).
 //! - [`pipe`]: the local API over a named pipe (Windows only).
@@ -31,6 +34,9 @@ pub const VERSION: &str = match option_env!("DSA_VERSION") {
 pub mod account;
 #[cfg(windows)]
 pub mod android_vm;
+pub mod console_log;
+#[cfg(windows)]
+pub mod console_pipe;
 pub mod gpt;
 pub mod guid;
 #[cfg(windows)]

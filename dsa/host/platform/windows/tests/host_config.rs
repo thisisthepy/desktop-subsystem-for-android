@@ -359,3 +359,38 @@ fn fr15_without_a_program_folder_dsa_does_not_update_itself() {
     let error = HostConfig::parse(&no_dir).unwrap_err().to_string();
     assert!(error.contains("program_dir"), "{error}");
 }
+
+#[test]
+fn fr2_each_users_console_is_kept_in_the_service_log_folder() {
+    let config = HostConfig::parse(SELF_UPDATING).unwrap();
+    let alice = config
+        .user_vm_with("S-1-5-21-1-2-3-1001", &profiles)
+        .unwrap();
+    assert_eq!(
+        alice.console_log,
+        PathBuf::from(r"C:\ProgramData\DSA\logs\android-S-1-5-21-1-2-3-1001.log")
+    );
+    assert_eq!(
+        alice.config.console_pipe.as_deref(),
+        Some(r"\\.\pipe\dsa-console-dsa-android-S-1-5-21-1-2-3-1001")
+    );
+    assert_eq!(alice.config.image_version.as_deref(), Some("16.0.1"));
+    let bob = config
+        .user_vm_with("S-1-5-21-1-2-3-1002", &profiles)
+        .unwrap();
+    assert_ne!(alice.console_log, bob.console_log);
+    assert_ne!(alice.config.console_pipe, bob.config.console_pipe);
+}
+
+#[test]
+fn fr2_without_a_service_log_the_console_is_kept_beside_the_users_disk() {
+    let config = HostConfig::parse(PROFILES).unwrap();
+    let alice = config
+        .user_vm_with("S-1-5-21-1-2-3-1001", &profiles)
+        .unwrap();
+    assert_eq!(
+        alice.console_log,
+        PathBuf::from(r"C:\Users\alice\AppData\Local\DSA\android-S-1-5-21-1-2-3-1001.log")
+    );
+    assert_eq!(alice.config.image_version, None, "no versioned image");
+}

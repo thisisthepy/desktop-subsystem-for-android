@@ -49,8 +49,18 @@ pub enum StopReason {
     Requested,
     /// The launcher could not start the guest.
     GuestFailedToStart(String),
-    /// The agent did not connect within the configured time.
-    AgentDidNotConnect { waited: Duration },
+    /// The agent did not connect within the configured time. `diagnostics` is what the
+    /// launcher could tell about the guest's boot, such as the end of its console output.
+    AgentDidNotConnect {
+        waited: Duration,
+        diagnostics: Option<String>,
+    },
+    /// The guest ended by itself before the agent connected. `why` is the launcher's account
+    /// of it and `diagnostics` what it could tell about the boot.
+    GuestExited {
+        why: String,
+        diagnostics: Option<String>,
+    },
     /// The agent connected but the handshake refused it.
     HandshakeRejected(String),
     /// The host could not listen for the agent.
@@ -67,11 +77,21 @@ impl fmt::Display for StopReason {
         match self {
             StopReason::Requested => write!(f, "stopped on request"),
             StopReason::GuestFailedToStart(why) => write!(f, "the guest did not start: {why}"),
-            StopReason::AgentDidNotConnect { waited } => write!(
-                f,
-                "the agent did not connect to the control channel within {:.1} s",
-                waited.as_secs_f64()
-            ),
+            StopReason::AgentDidNotConnect {
+                waited,
+                diagnostics,
+            } => {
+                write!(
+                    f,
+                    "the agent did not connect to the control channel within {:.1} s",
+                    waited.as_secs_f64()
+                )?;
+                write_diagnostics(f, diagnostics)
+            }
+            StopReason::GuestExited { why, diagnostics } => {
+                write!(f, "{why}")?;
+                write_diagnostics(f, diagnostics)
+            }
             StopReason::HandshakeRejected(why) => {
                 write!(f, "the agent's connection was refused: {why}")
             }
@@ -81,6 +101,14 @@ impl fmt::Display for StopReason {
             StopReason::ChannelLost(why) => write!(f, "the control channel was lost: {why}"),
             StopReason::StopFailed(why) => write!(f, "the guest did not stop: {why}"),
         }
+    }
+}
+
+/// Puts a launcher's diagnostics on the lines after a reason, so they can be copied whole.
+fn write_diagnostics(f: &mut fmt::Formatter<'_>, diagnostics: &Option<String>) -> fmt::Result {
+    match diagnostics.as_deref().map(str::trim) {
+        Some(text) if !text.is_empty() => write!(f, "\n{text}"),
+        _ => Ok(()),
     }
 }
 
@@ -101,6 +129,20 @@ pub trait GuestLauncher: Send + 'static {
     /// Stops the container. Returns `Ok` only once every process in it has ended, and an
     /// error if that did not happen within `timeout`.
     fn stop(&mut self, timeout: Duration) -> Result<(), String>;
+
+    /// Whether the guest has ended by itself since it was started, as a sentence saying so.
+    /// The session asks while it waits for the agent, so a guest that dies during boot ends
+    /// the start at once instead of after the whole connect timeout. It must not block.
+    fn exited(&mut self) -> Option<String> {
+        None
+    }
+
+    /// What the launcher can tell about the last boot, for a start that failed: for example
+    /// the last lines the guest printed and where the rest is kept. The session asks after
+    /// the guest has been stopped and puts the answer in the reason it reports.
+    fn diagnostics(&mut self) -> Option<String> {
+        None
+    }
 }
 
 /// Checks a new control channel connection before the session trusts it.
@@ -429,10 +471,17 @@ impl Worker {
                     }
                 }
             }
+            if let Some(why) = self.launcher.exited() {
+                self.stop_failed_start(|diagnostics| StopReason::GuestExited { why, diagnostics });
+                return;
+            }
             let now = Instant::now();
             if now >= deadline {
                 let waited = now - started;
-                self.stop(StopReason::AgentDidNotConnect { waited });
+                self.stop_failed_start(|diagnostics| StopReason::AgentDidNotConnect {
+                    waited,
+                    diagnostics,
+                });
                 return;
             }
             match self.listener.accept((deadline - now).min(POLL * 5)) {
@@ -517,12 +566,26 @@ impl Worker {
     }
 
     fn stop(&mut self, reason: StopReason) {
+        self.stop_with(|_| reason);
+    }
+
+    /// Stops a guest whose start failed, and reports `reason` with the launcher's
+    /// diagnostics. They are asked for once the guest is gone, so they cover all of its
+    /// output.
+    fn stop_failed_start(&mut self, reason: impl FnOnce(Option<String>) -> StopReason) {
+        self.stop_with(|launcher| reason(launcher.diagnostics()));
+    }
+
+    fn stop_with(&mut self, reason: impl FnOnce(&mut dyn GuestLauncher) -> StopReason) {
         self.shared.set(SessionState::Stopping, None);
         if let Some(mut connection) = self.connection.take() {
             connection.close();
         }
         match self.launcher.stop(self.config.stop_timeout) {
-            Ok(()) => self.shared.set(SessionState::Stopped, Some(reason)),
+            Ok(()) => {
+                let reason = reason(self.launcher.as_mut());
+                self.shared.set(SessionState::Stopped, Some(reason))
+            }
             Err(why) => self
                 .shared
                 .set(SessionState::Stopping, Some(StopReason::StopFailed(why))),
