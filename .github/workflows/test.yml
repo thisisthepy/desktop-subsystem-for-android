@@ -1,9 +1,9 @@
 # The fast quality gate. Runs on every pull request, whatever its base.
 #
-# There is no code under dsa/ yet, so this runs the repository checks only: the
-# planning documents are present on develop, no em dashes, README files do not link
-# documents that main does not have, and the release sync script behaves.
-# Build and test jobs for each part join this workflow as that part lands.
+# The repository checks (the planning documents are present on develop, no em dashes,
+# README files do not link documents that main does not have, the release sync script
+# behaves) and the Rust workspace under dsa/. Build and test jobs for each further part
+# join this workflow as that part lands.
 
 name: Test
 
@@ -35,3 +35,88 @@ jobs:
           git config --global user.email "ci@example.invalid"
           git config --global user.name "CI"
           ./scripts/check.sh
+
+  rust:
+    name: Test the Rust code (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: dsa
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # On Windows this includes the transport suite over real Hyper-V sockets (host to
+      # host through the loopback partition).
+      - name: Run the tests
+        run: cargo test --workspace
+
+      # Registers dsa-hostd as a real Windows service, reaches it through its named pipe and
+      # stops it. The runner's account is an administrator, which this needs.
+      - name: Run the service test as an installed Windows service
+        if: runner.os == 'Windows'
+        env:
+          DSA_SERVICE_TESTS: "1"
+        run: cargo test -p dsa-host-windows --test service --test user_disk_update -- --nocapture
+
+      # The guest transport's suite over real vsock needs the loopback transport, which
+      # the runner's kernel ships as a module.
+      - name: Run the vsock tests over vsock loopback
+        if: runner.os == 'Linux'
+        run: |
+          sudo modprobe vsock_loopback
+          cargo test -p dsa-guest-transport -p dsa-guest-channeld --features vsock-loopback-tests
+
+  unix-socket:
+    name: Test the local API and dsa over Unix sockets (macos-latest)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: dsa
+    steps:
+      - uses: actions/checkout@v4
+
+      # Linux runs this in the job above; macOS reads the peer's user another way.
+      - name: Run the tests
+        run: cargo test --no-fail-fast -p dsa-transport -p dsa-host-unix -p dsa-cli
+
+  protocol:
+    name: Check the generated protocol code (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # protoc and the runtimes must be the same version as the checked-in generated code
+      # (3.21, the version Ubuntu 24.04 ships).
+      - name: Install protoc and the protobuf runtimes
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            protobuf-compiler libprotobuf-dev libprotobuf-java default-jdk-headless g++
+          protoc --version
+
+      - name: Regenerate and compare with what is checked in
+        working-directory: dsa
+        run: |
+          PROTOC="$(command -v protoc)" cargo run -p dsa-protocol-codegen
+          if [[ -n "$(git status --porcelain -- protocol)" ]]; then
+            git status --short -- protocol
+            git diff -- protocol | head -200
+            echo "::error::the generated protocol code does not match control.proto or host_api.proto; run dsa-protocol-codegen and commit the result"
+            exit 1
+          fi
+
+      - name: Check the Java codec against the vectors
+        run: dsa/protocol/java/test.sh
+
+      - name: Check the C++ codec against the vectors
+        run: dsa/protocol/cpp/test.sh

@@ -1,0 +1,15 @@
+[package]
+name = "dsa-protocol"
+version = "0.1.0"
+description = "The control protocol's and the local API's generated Rust types and handshakes"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+dsa-transport.workspace = true
+prost.workspace = true
+
+[dev-dependencies]
+dsa-protocol-schema.workspace = true
