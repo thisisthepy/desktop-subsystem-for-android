@@ -26,6 +26,11 @@ jobs:
     defaults:
       run:
         shell: pwsh
+    # Somewhere other than the defaults, with spaces, so that the folders chosen at
+    # installation are known to reach the service.
+    env:
+      PROGRAM_DIR: 'C:\DSA Test\Program'
+      DATA_DIR: 'C:\DSA Test\Data'
     steps:
       - uses: actions/checkout@v4
 
@@ -54,29 +59,31 @@ jobs:
 
       - name: Install the package
         run: |
-          $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/i', 'dsa\target\installer\dsa-0.1.0.msi', '/qn', '/l*v', 'install.log'
+          $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/i', 'dsa\target\installer\dsa-0.1.0.msi', '/qn', '/l*v', 'install.log', "INSTALLFOLDER=`"$env:PROGRAM_DIR`"", "DATAFOLDER=`"$env:DATA_DIR`""
           if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 80; throw "install failed ($($p.ExitCode))" }
 
       - name: Check the service, the command and the access lists
         run: |
           $service = Get-Service DsaHost
           if ($service.Status -ne 'Running') { throw "DsaHost is $($service.Status)" }
-          $out = & 'C:\Program Files\DSA\dsa.exe' status 2>&1
+          $out = & "$env:PROGRAM_DIR\dsa.exe" status 2>&1
           Write-Host $out
           if ($LASTEXITCODE -ne 0 -or -not ($out -match '^Android: Stopped')) { throw "dsa status: $out" }
-          $acl = (Get-Acl 'C:\ProgramData\DSA').Sddl
+          $acl = (Get-Acl $env:DATA_DIR).Sddl
           Write-Host $acl
           if ($acl -notmatch 'S-1-5-83-0') { throw "the VMs cannot read the data folder" }
           if ($acl -match ';;;BU\)') { throw "users can open the service's data folder" }
-          Get-Content 'C:\ProgramData\DSA\logs\dsa-hostd.log'
+          Get-Content "$env:DATA_DIR\logs\dsa-hostd.log"
+          # Asking for status made the service set up this user's Android, in their profile.
+          if (-not (Test-Path "$env:LOCALAPPDATA\DSA")) { throw "no Android folder in the user's profile" }
 
       - name: Check the first image and the configuration that names it
         run: |
-          $image = 'C:\ProgramData\DSA\images\images\17.0.0-1'
+          $image = "$env:DATA_DIR\images\images\17.0.0-1"
           foreach ($name in 'image.json', 'disk.vhdx', 'initrd.img', 'bzImage') {
             if (-not (Test-Path "$image\$name")) { throw "the first image has no $name" }
           }
-          $config = Get-Content -Raw 'C:\ProgramData\DSA\dsa-hostd.json' | ConvertFrom-Json
+          $config = Get-Content -Raw "$env:DATA_DIR\dsa-hostd.json" | ConvertFrom-Json
           Write-Host ($config | ConvertTo-Json -Depth 5)
           if ($config.first_image.version -ne '17.0.0-1' -or $config.first_image.android_major -ne 17) {
             throw "the configuration does not name the first image"
@@ -98,9 +105,9 @@ jobs:
           $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/x', 'dsa\target\installer\dsa-0.1.0.msi', '/qn', '/l*v', 'uninstall.log'
           if ($p.ExitCode -ne 0) { Get-Content uninstall.log -Tail 80; throw "uninstall failed ($($p.ExitCode))" }
           if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
-          if (Test-Path 'C:\Program Files\DSA\dsa.exe') { throw "the program is still there" }
-          if (Test-Path 'C:\ProgramData\DSA\images') { throw "the downloaded images are still there" }
-          if (-not (Test-Path 'C:\ProgramData\DSA\users')) { throw "each user's data must stay" }
+          if (Test-Path "$env:PROGRAM_DIR\dsa.exe") { throw "the program is still there" }
+          if (Test-Path "$env:DATA_DIR\images") { throw "the downloaded images are still there" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\DSA")) { throw "each user's Android folder must stay" }
 
       - name: Keep the installer, the logs and the screenshot
         if: always()

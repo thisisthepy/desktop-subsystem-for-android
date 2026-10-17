@@ -3,6 +3,10 @@
   setup.exe: the DSA package behind this project's own setup screens (theme\).
 
   Build variables (-d): Version, MsiPath.
+
+  Options lets the user choose where the program goes (InstallFolder) and where the
+  service keeps its configuration, logs and Android images (DataFolder). Each user's
+  Android disk is in their own profile, under %LOCALAPPDATA%\DSA, whatever is chosen.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
@@ -18,11 +22,16 @@
                 LocalizationFile="theme\theme.wxl"
                 LogoFile="theme\logo.png"
                 LicenseUrl="https://www.apache.org/licenses/LICENSE-2.0"
-                SuppressOptionsUI="yes"
+                SuppressOptionsUI="no"
                 ShowVersion="yes" />
         </BootstrapperApplication>
+        <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles64Folder]DSA" bal:Overridable="yes" />
+        <Variable Name="DataFolder" Type="formatted" Value="[CommonAppDataFolder]DSA" bal:Overridable="yes" />
         <Chain>
-            <MsiPackage SourceFile="$(MsiPath)" Visible="no" />
+            <MsiPackage SourceFile="$(MsiPath)" Visible="no">
+                <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
+                <MsiProperty Name="DATAFOLDER" Value="[DataFolder]" />
+            </MsiPackage>
         </Chain>
     </Bundle>
 </Wix>
