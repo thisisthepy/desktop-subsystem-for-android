@@ -3,9 +3,9 @@
 # release android-<version>, and publishes the signed release list the service reads as
 # the release "images" (images.json and images.json.sig).
 #
-# It runs only by hand. It needs two repository secrets:
-#   DSA_ANDROID_KEYS          the Android key set from dsa/guest/image/make-keys.sh, as
-#                             tar czf - -C <keys> . | base64 -w0
+# It runs only by hand. It needs these repository secrets:
+#   DSA_ANDROID_KEYS_1, _2    the Android key set from dsa/guest/image/make-keys.sh, split
+#                             by dsa/guest/image/pack-keys.sh (a secret holds at most 48 KB)
 #   DSA_RELEASE_SIGNING_KEY   the list's Ed25519 key from dsa-release keygen
 # The service trusts the list through the public half of the second one, which
 # dsa-release public-key prints.
@@ -81,14 +81,10 @@ jobs:
 
       - name: Restore the Android keys
         env:
-          KEYS: ${{ secrets.DSA_ANDROID_KEYS }}
-        run: |
-          if [[ -z "$KEYS" ]]; then
-            echo "::error::The DSA_ANDROID_KEYS secret is not set; see the top of this workflow." >&2
-            exit 1
-          fi
-          mkdir -p .scratch/image-keys
-          base64 -d <<<"$KEYS" | tar xzf - -C .scratch/image-keys
+          DSA_ANDROID_KEYS_1: ${{ secrets.DSA_ANDROID_KEYS_1 }}
+          DSA_ANDROID_KEYS_2: ${{ secrets.DSA_ANDROID_KEYS_2 }}
+          DSA_ANDROID_KEYS_3: ${{ secrets.DSA_ANDROID_KEYS_3 }}
+        run: dsa/guest/image/unpack-keys.sh .scratch/image-keys
 
       - uses: actions/download-artifact@v4
         with:
