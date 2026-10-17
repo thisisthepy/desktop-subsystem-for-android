@@ -7,7 +7,8 @@ a build tool that is not shipped with DSA.
 ```
 dotnet tool install --global wix --version 5.0.2
 pwsh dsa/host/platform/windows/installer/build.ps1 -Version 0.1.0 -Kernel bzImage `
-    -ListUrl https://.../images.json -TrustedKey <public key>
+    -ListUrl https://.../images.json -TrustedKey <public key> `
+    -ProgramListUrl https://.../program.json
 ```
 
 The results land in `dsa/target/installer/`.
@@ -22,7 +23,13 @@ The results land in `dsa/target/installer/`.
   (`C:\Program Files\DSA` by default) and the folder for the configuration, logs and
   Android images (`C:\ProgramData\DSA` by default). The configuration names them as
   `{program}` and `{data}`, and the service fills them in when it reads it. With the MSI
-  alone they are the `INSTALLFOLDER` and `DATAFOLDER` properties.
+  alone they are the `INSTALLFOLDER` and `DATAFOLDER` properties. The package records
+  both under `HKLM\SOFTWARE\thisisthepy\DSA`, and a later version keeps them.
+- With `-ProgramListUrl`, lets the service update DSA itself: it checks the signed
+  program list, downloads a newer `setup.exe` into `C:\ProgramData\DSA\updates`, and runs
+  it quietly once no user's Android is running (or at once on `dsa update`). Setup logs to
+  `C:\ProgramData\DSA\logs\setup-<version>.log`. `"program": false` in the `update`
+  section of the configuration turns it off.
 - Keeps each user's Android disk in their own profile, as
   `%LOCALAPPDATA%\DSA\android.vhdx`, the way WSL keeps each user's distributions. The
   service creates it the first time that user starts Android, and gives the VM access to
@@ -38,8 +45,8 @@ The results land in `dsa/target/installer/`.
   only.
 - Stops with a message saying how to turn on Virtual Machine Platform when it is off. It
   never turns the feature on by itself.
-- Uninstalling removes the program, the service and the downloaded images, and keeps each
-  user's Android disk in their profile.
+- Uninstalling removes the program, the service, the downloaded images and setup files,
+  and keeps each user's Android disk in their profile.
 
 ## Why WiX 5
 

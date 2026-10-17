@@ -1,7 +1,8 @@
 # Builds the Windows installer and checks it on a real Windows machine: installs the
-# package, checks the service and the dsa command, shows setup.exe's first screen, and
-# uninstalls. The kernel and the Android image are built elsewhere, so the package here
-# carries a placeholder kernel and a small stand-in image laid out like a real one.
+# package, checks the service and the dsa command, shows setup.exe's first screen, lets
+# the service update DSA to a newer version from a signed program list, and uninstalls.
+# The kernel and the Android image are built elsewhere, so the package here carries a
+# placeholder kernel and a small stand-in image laid out like a real one.
 
 name: Installer test
 
@@ -49,6 +50,20 @@ jobs:
              files = @{ "disk.vhdx" = @{}; "initrd.img" = @{}; "bzImage" = @{} } } |
             ConvertTo-Json -Depth 4 | Set-Content -Path "$dir\image.json"
 
+      # The lists the installed service reads are files in this folder, signed with a key
+      # made for this run.
+      - name: Make a signing key and a folder for the lists
+        run: |
+          Push-Location dsa
+          cargo build -q --release -p dsa-host-core --bin dsa-release
+          if ($LASTEXITCODE -ne 0) { throw "building dsa-release failed" }
+          Pop-Location
+          $mirror = (New-Item -ItemType Directory -Force .scratch\update-mirror).FullName
+          $public = & dsa\target\release\dsa-release.exe keygen "$mirror\..\test-release.key"
+          if ($LASTEXITCODE -ne 0) { throw "making the key failed" }
+          "MIRROR=$mirror" >> $env:GITHUB_ENV
+          "TEST_PUBLIC_KEY=$public" >> $env:GITHUB_ENV
+
       # The runner's account is not an interactive user, which the default pipe access
       # would not admit, so the test build also admits authenticated users.
       - name: Build the package and setup.exe
@@ -56,6 +71,8 @@ jobs:
           dsa/host/platform/windows/installer/build.ps1 -Version 0.0.9 -PlaceholderKernel
           -ImageDir .scratch\stand-in-image
           -PipeSddl "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)"
+          -ListUrl "$env:MIRROR\images.json" -TrustedKey $env:TEST_PUBLIC_KEY
+          -ProgramListUrl "$env:MIRROR\program.json"
 
       - name: Install the package
         run: |
@@ -91,6 +108,12 @@ jobs:
           if ($config.first_image.version -ne '17.0.0-1' -or $config.first_image.android_major -ne 17) {
             throw "the configuration does not name the first image"
           }
+          if ($config.update.program_list_url -ne "$env:MIRROR\program.json") {
+            throw "the configuration does not name the program list"
+          }
+          if ($config.update.program_dir -ne '{data}\updates') {
+            throw "the configuration does not name the folder for setup files"
+          }
 
       - name: Show the first screen of setup.exe
         run: |
@@ -103,13 +126,61 @@ jobs:
           $bitmap.Save("$PWD\setup-screen.png")
           Stop-Process -Id $setup.Id -Force -ErrorAction SilentlyContinue
 
+      # The same package as a newer version, offered by a signed program list. dsa update
+      # makes the installed service download it, run its setup.exe and restart as it. The
+      # list is staged beside the mirror and put in place just before dsa update, so the
+      # service's own first check (a minute after it started) cannot find it first.
+      - name: Build version 0.0.10 and offer it in the program list
+        run: |
+          dsa/host/platform/windows/installer/build.ps1 -Version 0.0.10 -PlaceholderKernel `
+            -ImageDir .scratch\stand-in-image `
+            -PipeSddl "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)" `
+            -ListUrl "$env:MIRROR\images.json" -TrustedKey $env:TEST_PUBLIC_KEY `
+            -ProgramListUrl "$env:MIRROR\program.json"
+          $setup = "$env:MIRROR\setup-0.0.10.exe"
+          Copy-Item dsa\target\installer\setup-0.0.10.exe $setup
+          $tool = "dsa\target\release\dsa-release.exe"
+          $staged = (New-Item -ItemType Directory -Force .scratch\update-staged).FullName
+          $list = & $tool program 0.0.10 $setup $setup
+          if ($LASTEXITCODE -ne 0) { throw "writing the program list failed" }
+          ($list -join "`n") + "`n" | Set-Content -NoNewline -Encoding utf8NoBOM "$staged\program.json"
+          & $tool sign "$env:MIRROR\..\test-release.key" "$staged\program.json"
+          if ($LASTEXITCODE -ne 0) { throw "signing the program list failed" }
+          & $tool verify-program $env:TEST_PUBLIC_KEY "$staged\program.json"
+          if ($LASTEXITCODE -ne 0) { throw "the program list does not verify" }
+          Get-Content "$staged\program.json"
+
+      - name: Update DSA to 0.0.10 with dsa update
+        run: |
+          Copy-Item .scratch\update-staged\program.json, .scratch\update-staged\program.json.sig $env:MIRROR
+          $out = & "$env:PROGRAM_DIR\dsa.exe" update --wait --timeout 600 2>&1
+          $code = $LASTEXITCODE
+          $out
+          Get-Content "$env:DATA_DIR\logs\dsa-hostd.log" -Tail 40
+          if ($code -ne 0) { throw "dsa update failed ($code)" }
+          if (-not ($out -match 'Update: DSA was updated to 0\.0\.10')) { throw "the user was not told about the update" }
+          $service = Get-Service DsaHost
+          if ($service.Status -ne 'Running') { throw "DsaHost is $($service.Status) after the update" }
+          $log = Get-Content "$env:DATA_DIR\logs\dsa-hostd.log"
+          if (-not ($log -match '^dsa-hostd 0\.0\.10:')) { throw "the service did not restart as 0.0.10" }
+          # The upgrade stayed in the folders chosen at installation.
+          $path = (Get-CimInstance Win32_Service -Filter "Name='DsaHost'").PathName
+          Write-Host $path
+          if (-not $path.StartsWith("`"$env:PROGRAM_DIR\")) { throw "the service moved to $path" }
+          if (-not (Test-Path "$env:DATA_DIR\logs\setup-0.0.10.log")) { throw "setup left no log where the service said" }
+          if (Test-Path "$env:DATA_DIR\updates\0.0.10") { throw "the setup file was not removed after the update" }
+          $status = & "$env:PROGRAM_DIR\dsa.exe" status 2>&1
+          $status
+          if (-not ($status -match 'Update: DSA was updated to 0\.0\.10')) { throw "dsa status does not tell about the update" }
+
       - name: Uninstall
         run: |
-          $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/x', 'dsa\target\installer\dsa-0.0.9.msi', '/qn', '/l*v', 'uninstall.log'
-          if ($p.ExitCode -ne 0) { Get-Content uninstall.log -Tail 80; throw "uninstall failed ($($p.ExitCode))" }
+          $p = Start-Process 'dsa\target\installer\setup-0.0.10.exe' -Wait -PassThru -ArgumentList '/uninstall', '/quiet', '/log', 'uninstall.log'
+          if ($p.ExitCode -ne 0) { Get-ChildItem uninstall*.log | ForEach-Object { Get-Content $_ -Tail 80 }; throw "uninstall failed ($($p.ExitCode))" }
           if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
           if (Test-Path "$env:PROGRAM_DIR\dsa.exe") { throw "the program is still there" }
           if (Test-Path "$env:DATA_DIR\images") { throw "the downloaded images are still there" }
+          if (Test-Path "$env:DATA_DIR\updates") { throw "the downloaded setup files are still there" }
           if (-not (Test-Path "$env:LOCALAPPDATA\DSA")) { throw "each user's Android folder must stay" }
 
       - name: Keep the installer, the logs and the screenshot
@@ -122,5 +193,6 @@ jobs:
             dsa/target/installer/*.cab
             dsa/target/installer/*.exe
             install.log
-            uninstall.log
+            uninstall*.log
             setup-screen.png
+            C:\DSA Test\Data\logs\*.log

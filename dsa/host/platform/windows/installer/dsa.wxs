@@ -11,7 +11,8 @@
 
   INSTALLFOLDER (the program) and DATAFOLDER (configuration, logs and images) can be set
   on the command line or from setup.exe's Options. The configuration names them as
-  {program} and {data}, which the service fills in.
+  {program} and {data}, which the service fills in. The package records both, and a later
+  version installed over it (as the service does when it updates DSA) keeps them.
 
   Build variables (-d): Version, SourceDir (the built binaries and dsa-hostd.json), and,
   when an image is bundled, ImageDir and ImageVersion, plus ImageManifest when the image
@@ -40,6 +41,16 @@
                 <FileSearch Name="vmcompute.exe" />
             </DirectorySearch>
         </Property>
+        <!-- The folders an earlier installation chose. setup.exe always passes folders, its
+             defaults when nobody chose others, so these win: an upgrade, run by the service
+             without anyone to choose, stays where DSA is and finds its data. -->
+        <Property Id="INSTALLFOLDER">
+            <RegistrySearch Id="InstalledProgramFolder" Root="HKLM" Key="SOFTWARE\thisisthepy\DSA" Name="InstallFolder" Type="raw" Bitness="always64" />
+        </Property>
+        <Property Id="DATAFOLDER">
+            <RegistrySearch Id="InstalledDataFolder" Root="HKLM" Key="SOFTWARE\thisisthepy\DSA" Name="DataFolder" Type="raw" Bitness="always64" />
+        </Property>
+
         <Launch Condition="Installed OR VMCOMPUTE"
                 Message="Desktop Subsystem for Android needs the Windows feature Virtual Machine Platform. Turn it on in Settings, System, Optional features, More Windows features (or run: dism /online /enable-feature /featurename:VirtualMachinePlatform /all), restart, and run setup again." />
 
@@ -89,6 +100,11 @@
                 <CreateFolder>
                     <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;S-1-5-83-0)" />
                 </CreateFolder>
+            </Component>
+            <!-- Where both folders are, for the next version to install into. -->
+            <Component Id="InstalledFolders" Guid="5e6764b9-ac6a-419f-ad0e-f69724d05a5a">
+                <RegistryValue Root="HKLM" Key="SOFTWARE\thisisthepy\DSA" Name="InstallFolder" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\thisisthepy\DSA" Name="DataFolder" Type="string" Value="[DATAFOLDER]" />
             </Component>
             <!-- Folders alone cannot have a generated GUID, so these two have fixed ones. -->
             <Component Id="LogFolder" Directory="LOGFOLDER" Guid="3881831f-c7d6-4709-9747-1f68e230d7e4">
