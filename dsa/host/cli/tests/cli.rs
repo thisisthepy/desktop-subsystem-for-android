@@ -174,3 +174,17 @@ fn pr5_a_wrong_command_line_is_a_usage_error() {
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr(&output).contains("usage"));
 }
+
+#[test]
+fn fr14_dsa_shows_news_about_an_update_on_its_own_line() {
+    use dsa_host_core::host_api::Status;
+    let line = dsa_cli::describe(&Status {
+        state: SessionState::Active,
+        last_reason: None,
+        update_notice: Some("Android was updated to 16.0.3".into()),
+    });
+    assert_eq!(
+        line,
+        "Android: Active\nUpdate: Android was updated to 16.0.3"
+    );
+}

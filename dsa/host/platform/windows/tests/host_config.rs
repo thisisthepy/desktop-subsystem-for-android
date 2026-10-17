@@ -120,3 +120,66 @@ fn pr5_the_pipe_defaults_to_dsa_host() {
     assert_eq!(config.pipe_name, "dsa-host");
     assert_eq!(config.pipe_sddl, None);
 }
+
+const UPDATING: &str = r#"{
+  "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
+  "images_dir": "C:\\ProgramData\\DSA\\images",
+  "first_image": {"version": "16.0.1", "android_major": 16, "build": 1},
+  "data_dir": "C:\\ProgramData\\DSA\\users",
+  "update": {
+    "list_url": "https://example.invalid/dsa/images.json",
+    "trusted_keys": ["17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce"]
+  }
+}"#;
+
+#[test]
+fn fr14_an_updating_configuration_gets_working_defaults() {
+    let config = HostConfig::parse(UPDATING).unwrap();
+    let update = config.update.as_ref().unwrap();
+    assert_eq!(update.check_interval_hours, 24);
+    assert_eq!(update.boot_timeout_secs, 300);
+    assert_eq!(update.keys().unwrap().len(), 1);
+    assert_eq!(config.first_image.as_ref().unwrap().version, "16.0.1");
+}
+
+#[test]
+fn fr14_the_vm_boots_the_image_folder_it_is_given() {
+    let config = HostConfig::parse(UPDATING).unwrap();
+    let dir =
+        PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("image-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (kernel, system) = config.image_files(Some(&dir));
+    assert_eq!(system, dir.join("system.vhdx"));
+    assert_eq!(
+        kernel,
+        PathBuf::from(r"C:\Program Files\DSA\vm\bzImage"),
+        "no kernel in the image"
+    );
+    std::fs::write(dir.join("bzImage"), b"kernel").unwrap();
+    assert_eq!(
+        config.image_files(Some(&dir)).0,
+        dir.join("bzImage"),
+        "the image's own kernel"
+    );
+}
+
+#[test]
+fn fr14_an_untrusted_key_or_a_missing_first_image_is_reported() {
+    let bad_key = UPDATING.replace("17cb79fb", "zzcb79fb");
+    let error = HostConfig::parse(&bad_key).unwrap_err().to_string();
+    assert!(error.contains("key"), "{error}");
+    let no_first = UPDATING.replace(
+        r#"  "first_image": {"version": "16.0.1", "android_major": 16, "build": 1},
+"#,
+        "",
+    );
+    let error = HostConfig::parse(&no_first).unwrap_err().to_string();
+    assert!(error.contains("first_image"), "{error}");
+    let neither = r#"{"kernel": "C:\\k", "data_dir": "C:\\d"}"#;
+    let error = HostConfig::parse(neither).unwrap_err().to_string();
+    assert!(
+        error.contains("system_image") && error.contains("images_dir"),
+        "{error}"
+    );
+}

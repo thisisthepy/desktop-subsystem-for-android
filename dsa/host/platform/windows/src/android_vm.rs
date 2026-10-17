@@ -19,9 +19,12 @@ const TERMINATE_GRACE: Duration = Duration::from_secs(10);
 /// Stopping first asks the guest to shut down, and stops the VM outright if it has not
 /// exited within the stop timeout. Either way every guest process has ended once `stop`
 /// returns `Ok`, because the VM itself is gone.
+/// Supplies the VM's configuration each time it starts.
+pub type ConfigSource = Box<dyn FnMut() -> Result<AndroidVmConfig, String> + Send>;
+
 pub struct AndroidVmLauncher {
     id: String,
-    config: AndroidVmConfig,
+    config: ConfigSource,
     system: Option<ComputeSystem>,
     vm_id: VmIdSlot,
 }
@@ -29,6 +32,12 @@ pub struct AndroidVmLauncher {
 impl AndroidVmLauncher {
     /// `id` names the compute system in HCS; it must be unique on the machine.
     pub fn new(id: &str, config: AndroidVmConfig) -> AndroidVmLauncher {
+        AndroidVmLauncher::with_source(id, Box::new(move || Ok(config.clone())))
+    }
+
+    /// Like [`new`](Self::new), but asks `config` for the configuration at every start, so
+    /// that a VM started after an update boots the image current then.
+    pub fn with_source(id: &str, config: ConfigSource) -> AndroidVmLauncher {
         AndroidVmLauncher {
             id: id.to_string(),
             config,
@@ -57,8 +66,7 @@ impl GuestLauncher for AndroidVmLauncher {
         if self.system.is_some() {
             return Err("the Android VM is already running".into());
         }
-        let document = self
-            .config
+        let document = (self.config)()?
             .to_hcs_document()
             .map_err(|e| e.to_string())?
             .to_string();

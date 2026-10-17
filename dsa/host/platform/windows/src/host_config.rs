@@ -16,6 +16,10 @@
 //! its data on a disk in its own folder under `data_dir`, and lets only that user (and
 //! SYSTEM) use its Hyper-V sockets. `data_disk` names a single disk instead, for running
 //! one VM by hand.
+//!
+//! With `images_dir`, the Android image comes from the update store there instead of
+//! `system_image`: `first_image` names the image the installer put in it, and `update`
+//! says where the signed release list is and which keys may sign it.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -23,6 +27,10 @@ use std::time::Duration;
 
 use dsa_host_core::session::SessionConfig;
 use serde::Deserialize;
+
+use dsa_host_core::update::manifest;
+use dsa_host_core::update::policy::InstalledImage;
+use ed25519_dalek::VerifyingKey;
 
 use crate::vm::{is_sid, AndroidVmConfig};
 
@@ -86,7 +94,19 @@ pub struct HostConfig {
     pub memory_mb: u32,
     #[serde(default = "default_processors")]
     pub processors: u32,
-    pub system_image: PathBuf,
+    /// The Android system image, when updates are not used.
+    #[serde(default)]
+    pub system_image: Option<PathBuf>,
+    /// The update store: `<images_dir>\images\<version>\system.vhdx`, and the
+    /// image's own `bzImage` when it has one.
+    #[serde(default)]
+    pub images_dir: Option<PathBuf>,
+    /// The image the installer put in `images_dir`.
+    #[serde(default)]
+    pub first_image: Option<InstalledImage>,
+    /// Where to look for new images.
+    #[serde(default)]
+    pub update: Option<UpdateSettings>,
     /// One data disk, for running a single VM by hand.
     #[serde(default)]
     pub data_disk: Option<PathBuf>,
@@ -124,6 +144,37 @@ pub struct HostConfig {
     pub stop_timeout_secs: u64,
 }
 
+fn default_check_interval_hours() -> u64 {
+    24
+}
+fn default_boot_timeout_secs() -> u64 {
+    300
+}
+
+/// Where new images are published and who may sign them.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateSettings {
+    /// The signed release list. Its signature is at the same URL plus `.sig`.
+    pub list_url: String,
+    /// Public keys, 32 bytes in hexadecimal, any of which may sign the list.
+    pub trusted_keys: Vec<String>,
+    #[serde(default = "default_check_interval_hours")]
+    pub check_interval_hours: u64,
+    /// How long a new image may take to finish its first boot before it is undone.
+    #[serde(default = "default_boot_timeout_secs")]
+    pub boot_timeout_secs: u64,
+}
+
+impl UpdateSettings {
+    pub fn keys(&self) -> Result<Vec<VerifyingKey>, HostConfigError> {
+        self.trusted_keys
+            .iter()
+            .map(|key| manifest::parse_key(key).map_err(|e| HostConfigError(e.to_string())))
+            .collect()
+    }
+}
+
 /// Why a configuration file could not be used.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostConfigError(pub String);
@@ -141,10 +192,33 @@ impl HostConfig {
     pub fn parse(json: &str) -> Result<HostConfig, HostConfigError> {
         let config: HostConfig =
             serde_json::from_str(json).map_err(|e| HostConfigError(e.to_string()))?;
+        match (
+            &config.system_image,
+            &config.images_dir,
+            &config.first_image,
+        ) {
+            (None, None, _) => {
+                return Err(HostConfigError(
+                    "name either system_image or images_dir (with updates)".into(),
+                ))
+            }
+            (_, Some(_), None) => {
+                return Err(HostConfigError(
+                    "images_dir needs first_image, the image the installer put there".into(),
+                ))
+            }
+            _ => {}
+        }
         if config.data_disk.is_none() && config.data_dir.is_none() {
             return Err(HostConfigError(
                 "name either data_disk (one VM) or data_dir (one VM per user)".into(),
             ));
+        }
+        if let Some(update) = &config.update {
+            if config.images_dir.is_none() {
+                return Err(HostConfigError("update needs images_dir".into()));
+            }
+            update.keys()?;
         }
         Ok(config)
     }
@@ -185,6 +259,33 @@ impl HostConfig {
         })
     }
 
+    /// The kernel and system image to boot from `image_dir`, an image folder of the update
+    /// store. The image's own `bzImage` wins over `kernel`. Without a folder, the first image
+    /// or `system_image`.
+    pub fn image_files(&self, image_dir: Option<&std::path::Path>) -> (PathBuf, PathBuf) {
+        let dir = image_dir.map(std::path::Path::to_path_buf).or_else(|| {
+            match (&self.system_image, &self.images_dir, &self.first_image) {
+                (None, Some(root), Some(first)) => Some(root.join("images").join(&first.version)),
+                _ => None,
+            }
+        });
+        match dir {
+            Some(dir) => {
+                let own_kernel = dir.join("bzImage");
+                let kernel = if own_kernel.exists() {
+                    own_kernel
+                } else {
+                    self.kernel.clone()
+                };
+                (kernel, dir.join("system.vhdx"))
+            }
+            None => (
+                self.kernel.clone(),
+                self.system_image.clone().unwrap_or_default(),
+            ),
+        }
+    }
+
     fn base_vm_config(
         &self,
         vm_name: &str,
@@ -193,12 +294,12 @@ impl HostConfig {
     ) -> AndroidVmConfig {
         AndroidVmConfig {
             owner: format!("DSA ({vm_name})"),
-            kernel: self.kernel.clone(),
+            kernel: self.image_files(None).0,
             initrd: self.initrd.clone(),
             kernel_cmdline: self.kernel_cmdline.clone(),
             memory_mb: self.memory_mb,
             processors: self.processors,
-            system_image: self.system_image.clone(),
+            system_image: self.image_files(None).1,
             data_disk,
             socket_sids,
             page_reporting_order: self.page_reporting_order,
