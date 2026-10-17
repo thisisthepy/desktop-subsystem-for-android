@@ -22,8 +22,8 @@ from Microsoft's kernel small enough to read in one file.
 ## What the fragment adds
 
 - **Binder and binderfs, built in.** Built in, binder uses the kernel's internal symbols
-  directly, which an out-of-tree module on the stock WSL kernel cannot (see
-  `experiments/wsl-binder-module/` on `develop`).
+  directly. An out-of-tree module on the stock WSL kernel cannot: the driver needs about a
+  dozen kernel symbols that the WSL kernel does not export to modules.
 - **What Android's userspace expects:** wake locks, dma-buf heaps for graphics buffers,
   utilisation clamps, uinput and evdev, file-based encryption and fs-verity, erofs and f2fs,
   dm-crypt, quotas, and the eBPF and netfilter pieces netd uses.

@@ -22,6 +22,8 @@ guest are platform neutral so Linux and macOS hosts can follow.
     clients, and the image configuration.
   - `dsa/kernel/`: the guest kernel configuration (binder built in) and its build.
 - `docs/INTENT.md`: why the project exists, decisions (D1 to D13), rejected alternatives.
+- `docs/RESEARCH.md`: the investigations behind decisions: what was checked, how, and what
+  was found.
 - `docs/SPEC.md`: requirements (`FR-*`, `NFR-*`, `PR-*`) with acceptance criteria.
 - `PROJECT.md`: scope, milestones (M0 to M9), open questions.
 
@@ -58,9 +60,9 @@ created by the first change that puts real code in it.
 
 `develop` is where work happens. `release` and `main` are produced from it by
 `.github/scripts/release/sync-release.sh`, which strips `PROJECT.md`, `AGENTS.md`,
-`CLAUDE.md` if present, everything directly under `docs/`, and the whole `experiments/`
-folder. A file on `main` must therefore never depend on something under `experiments/`; a
-comment may name it only as being on `develop`.
+`CLAUDE.md` if present, and everything directly under `docs/`. A file on `main` must
+therefore never depend on those documents; a comment may name them only as being on
+`develop`.
 
 1. **Publishing is one way: develop to release to main.** A push to `develop` runs "Release
    sync", which rebuilds `release` and opens a pull request from `release` into `main`. A
@@ -109,8 +111,9 @@ Job names are English sentence case and say briefly what the job does. Matrix jo
 2. Where inside:
    - worktrees: `.claude/worktrees/<name>/` (ignored by git);
    - throwaway work, probes and downloads: `.scratch/<name>/` (ignored by git);
-   - experiments worth keeping: `experiments/<name>/`, committed (on `develop` only; it is
-     not published to `main`);
+   - what an experiment found: a section in `docs/RESEARCH.md` (on `develop` only), with
+     the versions checked, the method, the results and the decision. The probe itself stays
+     in `.scratch/` and is not committed;
    - build outputs: `target/`, `build/` and `out/`, where the tools already put them.
 3. Upstream projects (AOSP, gfxstream, the WSL kernel, Waydroid) are not vendored. A
    script fetches the pinned revision into `.scratch/` and applies the patches this
@@ -129,7 +132,7 @@ Job names are English sentence case and say briefly what the job does. Matrix jo
    Propose it first: what it is, why it is needed, and why no existing directory can hold
    it. Then wait for the answer.
 2. The approved root entries are:
-   - folders: `.github/`, `dsa/`, `docs/`, `experiments/`, `scripts/`;
+   - folders: `.github/`, `dsa/`, `docs/`, `scripts/`;
    - files: `.gitignore`, `CHANGELOG.md`, `LICENSE`, `README.md`, `AGENTS.md`, `PROJECT.md`.
 
    A workspace manifest (`Cargo.toml`, `Cargo.lock`) is not approved yet. Rust crates keep
@@ -197,7 +200,8 @@ side effect of an unrelated edit. The rules below come on top of it.
    words and en dashes in numeric ranges are fine. `scripts/tests/no-em-dash.test.sh` checks
    it.
 2. Language: `README.md` is English, with its translation in `docs/locales/README_ko.md`.
-   The internal planning documents (`PROJECT.md`, `docs/INTENT.md`, `docs/SPEC.md`) are
+   The internal planning documents (`PROJECT.md`, `docs/INTENT.md`, `docs/SPEC.md`,
+   `docs/RESEARCH.md`) are
    Korean. Code, code comments, scripts and this file are English.
 3. **README files never link the planning documents.** They are stripped from `main`, so the
    link would point at nothing for most readers.
@@ -274,8 +278,8 @@ Never introduce anything that violates these. If a task seems to require it, sto
   the host, and a host compositor that owns one native window per task. Control messages go
   over the control channel, never over adb.
 - **Graphics (D4).** Every app's OpenGL ES driver is ANGLE. Vulkan runs on the host through
-  remoting. The dxg path is research and lives in `experiments/` until the owner decides
-  otherwise.
+  remoting. The dxg path is research, recorded in `docs/RESEARCH.md`, until the owner
+  decides otherwise.
 - **The boundary is the HAL (D5).** The kernel, ART and the framework stay in the guest.
   Devices move to the host as HAL services over RPC Binder. Never forward system calls.
 - **The host is the shell (D6).** No launcher, no SystemUI, no keyboard app in the guest
