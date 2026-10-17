@@ -10,6 +10,7 @@ members = [
     "host/core",
     "host/platform/windows",
     "host/platform/unix",
+    "host/cli",
     "guest/transport",
 ]
 
