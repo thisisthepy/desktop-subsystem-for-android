@@ -1,0 +1,45 @@
+{
+  "comment": "The published AOSP build inputs each guest image is made from, pinned by build number and SHA-256. Change a build number (and the hashes) to move to a newer build.",
+  "images": [
+    {
+      "android_major": 17,
+      "version": "17.0.0-16373615",
+      "branch": "aosp-android-latest-release",
+      "target": "aosp_cf_x86_64_only_phone-userdebug",
+      "build_id": "16373615",
+      "security_patch": "2026-06-05",
+      "files": {
+        "target_files": {
+          "name": "aosp_cf_x86_64_only_phone-target_files-16373615.zip",
+          "size": 2324666307,
+          "sha256": "ffe4e9a4cd34d055a1538ff3ed9fd478a74d96b068408a87bf3754d619d3d056"
+        },
+        "otatools": {
+          "name": "otatools.zip",
+          "size": 531408470,
+          "sha256": "516df2cce1758bb2d0a1b6eae2f5536b2598548a7e466227984bedaa580f9c79"
+        }
+      }
+    },
+    {
+      "android_major": 16,
+      "version": "16.0.0-15581820",
+      "branch": "aosp-android-latest-release",
+      "target": "aosp_cf_x86_64_only_phone-userdebug",
+      "build_id": "15581820",
+      "security_patch": "2025-12-05",
+      "files": {
+        "target_files": {
+          "name": "aosp_cf_x86_64_only_phone-target_files-15581820.zip",
+          "size": 2177803334,
+          "sha256": "6b6f2f5fe17137061c45a9c429d3f5985f21a5496485949190bec225ac7beb2a"
+        },
+        "otatools": {
+          "name": "otatools.zip",
+          "size": 502530087,
+          "sha256": "b5beaa6d8d50edbc4220f6751ddafe4a1b0d2ef8e7decad19c23277428015389"
+        }
+      }
+    }
+  ]
+}
