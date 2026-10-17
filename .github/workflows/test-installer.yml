@@ -157,7 +157,14 @@ jobs:
           $code = $LASTEXITCODE
           $out
           Get-Content "$env:DATA_DIR\logs\dsa-hostd.log" -Tail 40
-          if ($code -ne 0) { throw "dsa update failed ($code)" }
+          if ($code -ne 0) {
+            Get-Service DsaHost | Format-List Name, Status
+            Get-ChildItem "$env:DATA_DIR\logs" | Format-Table Name, Length, LastWriteTime
+            Get-ChildItem "$env:DATA_DIR\logs\setup-*.log" | ForEach-Object { "== $($_.Name)"; Get-Content $_ -Tail 60 }
+            Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'MsiInstaller' } -MaxEvents 10 -ErrorAction SilentlyContinue |
+              Format-List TimeCreated, Id, Message
+            throw "dsa update failed ($code)"
+          }
           if (-not ($out -match 'Update: DSA was updated to 0\.0\.10')) { throw "the user was not told about the update" }
           $service = Get-Service DsaHost
           if ($service.Status -ne 'Running') { throw "DsaHost is $($service.Status) after the update" }
@@ -183,6 +190,13 @@ jobs:
           if (Test-Path "$env:DATA_DIR\updates") { throw "the downloaded setup files are still there" }
           if (-not (Test-Path "$env:LOCALAPPDATA\DSA")) { throw "each user's Android folder must stay" }
 
+      # The upload takes files from the workspace only.
+      - name: Collect the service's and setup's logs
+        if: always()
+        run: |
+          New-Item -ItemType Directory -Force .scratch\service-logs | Out-Null
+          Copy-Item "$env:DATA_DIR\logs\*" .scratch\service-logs -ErrorAction SilentlyContinue
+
       - name: Keep the installer, the logs and the screenshot
         if: always()
         uses: actions/upload-artifact@v4
@@ -195,4 +209,4 @@ jobs:
             install.log
             uninstall*.log
             setup-screen.png
-            C:\DSA Test\Data\logs\*.log
+            .scratch/service-logs/
