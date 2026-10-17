@@ -25,6 +25,25 @@ fn invalid(why: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, why.into())
 }
 
+/// How much of the start of a disk [`is_blank`] reads: the partition table, or the
+/// superblock of a file system written straight onto the disk, is well within it.
+const BLANK_PROBE: usize = 1 << 20;
+
+/// Whether nothing was ever written to the start of `disk`: no partition table and no file
+/// system. A disk created before any image was there to copy is blank, and holds no data.
+pub fn is_blank(disk: &mut (impl Read + Seek)) -> io::Result<bool> {
+    let mut start = vec![0u8; BLANK_PROBE];
+    disk.seek(SeekFrom::Start(0))?;
+    let mut read = 0;
+    while read < start.len() {
+        match disk.read(&mut start[read..])? {
+            0 => break,
+            n => read += n,
+        }
+    }
+    Ok(start[..read].iter().all(|&b| b == 0))
+}
+
 /// Reads the partition table of `disk`.
 pub fn partitions(disk: &mut (impl Read + Seek)) -> io::Result<Vec<Partition>> {
     let mut header = [0u8; SECTOR as usize];
