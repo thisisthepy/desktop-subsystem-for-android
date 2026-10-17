@@ -1,0 +1,15 @@
+[package]
+name = "dsa-transport"
+version = "0.1.0"
+description = "The control channel's transport: framing, the connection traits and the in-memory fake"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+# The transport conformance suite, for the crates that implement a real transport.
+conformance = []
+
+[dev-dependencies]
+dsa-transport = { path = ".", features = ["conformance"] }
