@@ -616,6 +616,16 @@ impl ProgramUpdates {
         ));
     }
 
+    /// Removes setup files no longer needed. The one setup ran from cannot be removed by
+    /// the service that setup started while setup is still ending, so it goes on a later
+    /// round.
+    fn remove_leftovers(&self) {
+        let _busy = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        if let Ok(state) = self.state() {
+            self.remove_downloads(state.pending.as_ref().map(|p| p.version.as_str()));
+        }
+    }
+
     /// Checks at `timing` and installs a downloaded update whenever no Android is
     /// running, until `stop` is set.
     pub fn run(&self, stop: &AtomicBool, timing: Timing) {
@@ -640,6 +650,7 @@ impl ProgramUpdates {
                 next_check = Instant::now() + timing.check_interval;
             }
             if now >= next_install {
+                self.remove_leftovers();
                 if let Err(error) = self.install_when_idle() {
                     self.log(&error.to_string());
                 }

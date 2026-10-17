@@ -659,3 +659,44 @@ fn fr15_a_newer_list_replaces_an_older_download() {
     );
     assert_eq!(h.downloads(), vec!["0.1.2".to_string()]);
 }
+
+#[test]
+fn fr15_a_setup_file_still_in_use_after_the_update_is_removed_later() {
+    let h = Harness::new();
+    h.fetch
+        .publish(&list_of("0.1.1", b"setup"), b"setup", &project_key());
+    let (old, _) = h.service("0.1.0");
+    old.install_now().unwrap();
+    drop(old);
+    let (new, status) = h.service("0.1.1");
+    assert_eq!(
+        status.notices.get().as_deref(),
+        Some("DSA was updated to 0.1.1")
+    );
+    // Setup was still running from its file when the new service started, so the file
+    // could not go then; the next round of the service removes it.
+    let leftover = h.root.join("updates").join("0.1.1");
+    std::fs::create_dir_all(&leftover).unwrap();
+    std::fs::write(leftover.join("setup-0.1.1.exe"), b"setup").unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let runner = {
+        let (new, stop) = (Arc::clone(&new), Arc::clone(&stop));
+        thread::spawn(move || {
+            new.run(
+                &stop,
+                Timing {
+                    first_check: Duration::from_secs(3600),
+                    check_interval: Duration::from_secs(3600),
+                    retry: Duration::from_millis(20),
+                },
+            )
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while leftover.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+    stop.store(true, Ordering::Relaxed);
+    runner.join().unwrap();
+    assert!(!leftover.exists(), "the leftover setup file is removed");
+}

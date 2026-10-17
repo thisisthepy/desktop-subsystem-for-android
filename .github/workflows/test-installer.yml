@@ -220,6 +220,10 @@ jobs:
           Write-Host $path
           if (-not $path.StartsWith("`"$env:PROGRAM_DIR\")) { throw "the service moved to $path" }
           if (-not (Test-Path "$env:DATA_DIR\logs\setup-0.0.10.log")) { throw "setup left no log where the service said" }
+          # setup.exe is still ending when the new service starts, so the file it ran from
+          # goes on the service's next round, a minute later.
+          $deadline = (Get-Date).AddMinutes(3)
+          while ((Test-Path "$env:DATA_DIR\updates\0.0.10") -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 5 }
           if (Test-Path "$env:DATA_DIR\updates\0.0.10") { throw "the setup file was not removed after the update" }
           if ((Get-Content -Raw $configPath | ConvertFrom-Json).update.check_interval_hours -ne 48) {
             throw "the upgrade replaced the edited configuration"
