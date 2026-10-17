@@ -30,6 +30,11 @@ on:
         type: boolean
         required: false
         default: true
+      replace_release:
+        description: "Replace an installer release of the same version that is already published (its assets and tag)"
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: release-image
@@ -303,11 +308,36 @@ jobs:
       - name: Publish the installer
         run: |
           $version = '${{ inputs.installer_version }}'
+          # The asset says what it is, its version, and what it runs on. "win" names the
+          # system without the Microsoft mark, which no DSA file name carries.
+          $asset = "DSA-v$version-win-x64-setup.exe"
+          $out = New-Item -ItemType Directory -Force dsa\target\release-assets
+          Copy-Item "dsa/target/installer/setup-$version.exe" (Join-Path $out $asset)
+          $hash = (Get-FileHash (Join-Path $out $asset) -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -NoNewline -Encoding ascii (Join-Path $out SHA256SUMS.txt) "$hash  $asset`n"
           # Only setup.exe: it carries the package (dsa-<version>.msi) inside, and
           # wix burn extract takes it out for msiexec-based deployments.
-          gh release create "v$version" "dsa/target/installer/setup-$version.exe" --target $env:GITHUB_SHA `
-            --title "Desktop Subsystem for Android $version" `
-            --notes "Run setup-$version.exe. It installs the service and downloads the newest supported Android image."
+          $notes = @"
+          ## Install
+
+          Download **$asset** and run it. Setup installs the DSA service and the ``dsa`` command, and the service then downloads the newest supported Android image in the background.
+
+          - Needs 64-bit Windows 10 1803 or later, or Windows 11, with Virtual Machine Platform turned on.
+          - ``dsa status`` shows the download; ``dsa start --wait`` starts Android once it is in.
+          - SHA-256: ``$hash`` (also in SHA256SUMS.txt)
+
+          Android is a trademark of Google LLC.
+          "@
+          gh release view "v$version" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            if ('${{ inputs.replace_release }}' -ne 'true') {
+              throw "v$version is already published; run again with replace_release to replace it"
+            }
+            gh release delete "v$version" --yes --cleanup-tag
+            if ($LASTEXITCODE -ne 0) { throw "removing the published v$version failed" }
+          }
+          gh release create "v$version" (Join-Path $out $asset) (Join-Path $out SHA256SUMS.txt) --target $env:GITHUB_SHA `
+            --title "DSA v$version" --notes $notes --generate-notes
           if ($LASTEXITCODE -ne 0) { throw "publishing the installer failed" }
 
       # The installed services read this list to update themselves to this version. It
