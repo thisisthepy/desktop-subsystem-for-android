@@ -4,8 +4,8 @@ Guidance for working in this repository.
 
 ## Project
 
-Desktop Subsystem for Android (DSA) runs Android in an LXC container inside the WSL2 VM and
-shows each Android task as a real desktop window. Windows comes first; the protocol and the
+Desktop Subsystem for Android (DSA) runs Android in a dedicated lightweight VM and shows
+each Android task as a real desktop window. Windows comes first; the protocol and the
 guest are platform neutral so Linux and macOS hosts can follow.
 
 - `dsa/`: all code. Nothing that builds lives outside it.
@@ -13,14 +13,14 @@ guest are platform neutral so Linux and macOS hosts can follow.
     generator for every language that speaks them.
   - `dsa/host/core/`: the platform-neutral host (Rust): sessions, the app registry, the
     lifecycle policy.
-  - `dsa/host/platform/windows/`: the Windows host: WSL launch, hvsocket, the Win32 and
-    DirectComposition compositor, TSF, shell integration. `unix/` holds what the Linux
-    and macOS hosts share (the local API over Unix sockets); the rest of those hosts is
-    planned.
+  - `dsa/host/platform/windows/`: the Windows host: the Android VM (HCS), hvsocket, the
+    Win32 and DirectComposition compositor, TSF, shell integration. `unix/` holds what the
+    Linux and macOS hosts share (the local API over Unix sockets); the rest of those hosts
+    is planned.
   - `dsa/graphics/`: the Vulkan remoting path (C++), starting from gfxstream.
   - `dsa/guest/`: the Android side: the agent (a system app), the hwcomposer, the HAL
     clients, and the image configuration.
-  - `dsa/kernel/`: the WSL kernel module configuration and its build.
+  - `dsa/kernel/`: the guest kernel configuration (binder built in) and its build.
 - `docs/INTENT.md`: why the project exists, decisions (D1 to D13), rejected alternatives.
 - `docs/SPEC.md`: requirements (`FR-*`, `NFR-*`, `PR-*`) with acceptance criteria.
 - `PROJECT.md`: scope, milestones (M0 to M9), open questions.
@@ -95,7 +95,7 @@ Workflow files and names, in `.github/workflows/`:
 - `release-sync.yml`, "Release sync": develop to main sync; its script is
   `.github/scripts/release/sync-release.sh`.
 - `test-<target>.yml`, "<Target> test": a special check for one target, such as
-  `test-kernel.yml` for the WSL kernel modules.
+  `test-kernel.yml` for the guest kernel.
 
 Job names are English sentence case and say briefly what the job does. Matrix jobs read
 "<what> (<os>, <version>)". The same role keeps the same name across repos.
@@ -147,7 +147,7 @@ Job names are English sentence case and say briefly what the job does. Matrix jo
 These bind the agent and whoever dispatches it equally.
 
 1. **A background agent never runs the heavy builds.** Not the Android system image, not the
-   WSL kernel, not gfxstream. Those builds take tens of minutes to hours, use most of the
+   guest kernel, not gfxstream. Those builds take tens of minutes to hours, use most of the
    machine's cores and memory, and several running at once take the machine down. Do not
    write such a build command into a task prompt. When a build or a test run is needed, one
    temporary builder agent does it, one at a time, in its own worktree, and edits no code
@@ -264,10 +264,12 @@ Never introduce anything that violates these. If a task seems to require it, sto
 
 ## Architecture rules
 
-- **Container, not a VM of our own (D1).** Android runs in an LXC container on the WSL2
-  kernel. Do not add a second VM.
-- **Kernel features ship as modules (D2).** Never require a user to build a kernel. Do not
-  depend on ashmem; use memfd.
+- **A dedicated VM, not the user's WSL (D1).** Android runs in its own lightweight VM, created
+  through HCS with WSL's memory return settings. Never change the user's `.wslconfig`, WSL
+  kernel or WSL distributions. A WSL container is only a later, second backend.
+- **The project ships the kernel (D2).** The guest kernel has binder built in and ships with
+  DSA. Never require a user to build or replace a kernel. Do not look up unexported kernel
+  symbols at run time. Do not depend on ashmem; use memfd.
 - **Display path (D3).** Freeform tasks, a custom hwcomposer that hands each task's layers to
   the host, and a host compositor that owns one native window per task. Control messages go
   over the control channel, never over adb.

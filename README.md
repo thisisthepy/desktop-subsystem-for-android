@@ -6,8 +6,8 @@
 
 **Android apps as real desktop windows, on an open-source stack.**
 
-*Android runs in a container inside the WSL2 VM. Each app gets its own native window, Start
-menu entry and notifications.*
+*Android runs in a lightweight VM of its own. Each app gets its own native window, Start menu
+entry and notifications.*
 
 > DSA is an independent open-source project. It is not affiliated with, endorsed by or
 > sponsored by Microsoft or Google. Android is a trademark of Google LLC. Windows is a
@@ -32,8 +32,8 @@ background.
 
 | Part | Approach | Status |
 |---|---|---|
-| Android | An LXC container on the WSL2 kernel, not a second VM | planned |
-| Kernel | binder ships as a WSL kernel module; no kernel build for users | planned |
+| Android | A lightweight VM of its own, created with the same Windows API as WSL and booting straight into Android. Your WSL setup is left untouched | planned |
+| Kernel | DSA ships the VM's kernel with binder built in; no kernel build for users | planned |
 | Windows | A custom hwcomposer hands each Android task to a host compositor, which owns one Win32 window per task. No WSLg, no RDP | planned |
 | Graphics | Every app's OpenGL ES runs through ANGLE on Vulkan, and Vulkan runs on the host GPU through remoting (starting from gfxstream) | planned |
 | Devices | Video codecs, audio and power move to the host as HAL services; the Android framework stays in the guest | planned |
@@ -42,7 +42,7 @@ background.
 | Widgets | Android widgets on the Windows desktop | planned |
 
 ```
-[Container in the WSL VM]                       [Windows host: DSA service]
+[Android VM]                                    [Windows host: DSA service]
  app → SurfaceFlinger
    → hwcomposer ─── window control, input ───── compositor: one Win32 window per task
    → ANGLE → Vulkan ─── Vulkan remoting ───────→ host Vulkan
