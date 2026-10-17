@@ -325,3 +325,24 @@ fn fr2_dropping_an_active_session_stops_the_guest() {
     drop(session);
     assert_eq!(launcher.processes(), 0);
 }
+
+#[test]
+fn pr5_a_start_through_the_local_api_answers_after_the_session_has_moved() {
+    use dsa_host_core::host_api::UserAndroid;
+    let launcher = FakeLauncher::default();
+    launcher.0.lock().unwrap().fail_start = Some("no kernel".into());
+    let (session, _connector) = session_with(launcher, WAIT);
+    // A failed start that happened before the answer shows in the answer, so a client
+    // never mistakes the state before the start for its result.
+    UserAndroid::start(&session);
+    let state = session.state();
+    let reason = UserAndroid::last_reason(&session).unwrap_or_default();
+    assert!(
+        state != SessionState::Stopped || reason.contains("no kernel"),
+        "the answer shows the state from before the start: {state}, {reason:?}"
+    );
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert!(UserAndroid::last_reason(&session)
+        .unwrap()
+        .contains("no kernel"));
+}

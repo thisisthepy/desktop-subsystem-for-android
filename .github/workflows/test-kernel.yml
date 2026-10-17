@@ -1,0 +1,76 @@
+# Builds the guest kernel: the WSL kernel source at the tag in dsa/kernel/wsl-kernel.tag,
+# configured with Microsoft/config-wsl plus dsa/kernel/android.config.
+#
+# The build takes tens of minutes, so it runs when the kernel inputs change, by hand, and
+# once a week to notice a newer WSL kernel tag.
+
+name: Kernel test
+
+on:
+  pull_request:
+    paths:
+      - "dsa/kernel/**"
+      - ".github/workflows/test-kernel.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "A WSL kernel tag to build instead of the pinned one, to try a newer tag"
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 3 * * 1"
+
+concurrency:
+  group: kernel-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the guest kernel (x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential flex bison bc dwarves libssl-dev libelf-dev cpio
+
+      - name: Use the requested tag
+        if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
+        run: echo "${{ inputs.tag }}" > dsa/kernel/wsl-kernel.tag
+
+      - name: Configure and check the fragment
+        run: dsa/kernel/build.sh --config-only
+
+      - name: Build
+        run: dsa/kernel/build.sh
+
+      - name: Upload the kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-kernel-x86_64
+          path: .scratch/kernel/*/out/
+          if-no-files-found: error
+
+  newer-tag:
+    name: Check for a newer WSL kernel tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare the pinned tag with the newest one
+        run: |
+          pinned="$(tr -d '[:space:]' < dsa/kernel/wsl-kernel.tag)"
+          newest="$(git ls-remote --tags https://github.com/microsoft/WSL2-Linux-Kernel 'linux-msft-wsl-*' \
+            | sed -E 's#.*refs/tags/##; s#\^\{\}$##' | sort -uV | tail -1)"
+          echo "pinned: $pinned"
+          echo "newest: $newest"
+          if [[ "$pinned" != "$newest" ]]; then
+            echo "::warning::A newer WSL kernel tag exists: $newest (pinned: $pinned). Run this workflow with tag=$newest, then update dsa/kernel/wsl-kernel.tag."
+          fi

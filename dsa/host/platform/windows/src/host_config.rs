@@ -1,0 +1,356 @@
+//! The host's configuration file: where the Android VM's files are and how it runs.
+//!
+//! JSON, read by `dsa-hostd`. Unknown keys are an error, so a misspelt setting is reported
+//! rather than silently ignored.
+//!
+//! ```json
+//! {
+//!   "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
+//!   "system_image": "C:\\Program Files\\DSA\\vm\\system.vhdx",
+//!   "data_dir": "C:\\ProgramData\\DSA\\users",
+//!   "memory_mb": 4096
+//! }
+//! ```
+//!
+//! The service runs one VM per user. Each user's VM is named after the user's SID, keeps
+//! its data on a disk in its own folder under `data_dir`, and lets only that user (and
+//! SYSTEM) use its Hyper-V sockets. `data_disk` names a single disk instead, for running
+//! one VM by hand.
+//!
+//! With `images_dir`, the Android image comes from the update store there instead of
+//! `system_image`: `first_image` names the image the installer put in it, and `update`
+//! says where the signed release list is and which keys may sign it.
+
+use std::fmt;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use dsa_host_core::session::SessionConfig;
+use serde::Deserialize;
+
+use dsa_host_core::update::manifest;
+use dsa_host_core::update::policy::InstalledImage;
+use ed25519_dalek::VerifyingKey;
+
+use crate::vm::{is_sid, AndroidVmConfig};
+
+/// `<dir>\<sid>\data.vhdx`. Built as text so it is a Windows path on every platform the
+/// tests run on.
+fn user_data_disk(dir: &std::path::Path, sid: &str) -> PathBuf {
+    let dir = dir.to_string_lossy();
+    PathBuf::from(format!("{}\\{sid}\\data.vhdx", dir.trim_end_matches('\\')))
+}
+
+/// What a VM boots from one image.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageFiles {
+    pub kernel: PathBuf,
+    pub initrd: Option<PathBuf>,
+    pub kernel_cmdline: String,
+    /// A separate, read-only system disk (older images).
+    pub system_image: Option<PathBuf>,
+    /// The template a user's Android disk is made from (images with `image.json`).
+    pub disk_template: Option<PathBuf>,
+}
+
+/// One user's VM: its HCS name, its configuration and how large its data disk may grow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserVm {
+    pub vm_name: String,
+    pub config: AndroidVmConfig,
+    pub data_disk_size_gb: u32,
+}
+
+fn default_vm_name() -> String {
+    "dsa-android".into()
+}
+fn default_memory_mb() -> u32 {
+    4096
+}
+fn default_processors() -> u32 {
+    4
+}
+fn default_page_reporting_order() -> u8 {
+    9
+}
+fn default_control_port() -> u32 {
+    5000
+}
+fn default_connect_timeout_secs() -> u64 {
+    120
+}
+fn default_stop_timeout_secs() -> u64 {
+    30
+}
+fn default_data_disk_size_gb() -> u32 {
+    64
+}
+fn default_pipe_name() -> String {
+    "dsa-host".into()
+}
+
+/// The host's settings, as written in the configuration file.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostConfig {
+    /// The VM's name in HCS. Must be unique on the machine.
+    #[serde(default = "default_vm_name")]
+    pub vm_name: String,
+    pub kernel: PathBuf,
+    #[serde(default)]
+    pub initrd: Option<PathBuf>,
+    /// Extra kernel command line for the Android image.
+    #[serde(default)]
+    pub kernel_cmdline: String,
+    #[serde(default = "default_memory_mb")]
+    pub memory_mb: u32,
+    #[serde(default = "default_processors")]
+    pub processors: u32,
+    /// The Android system image, when updates are not used.
+    #[serde(default)]
+    pub system_image: Option<PathBuf>,
+    /// The update store: `<images_dir>\images\<version>\system.vhdx`, and the
+    /// image's own `bzImage` when it has one.
+    #[serde(default)]
+    pub images_dir: Option<PathBuf>,
+    /// The image the installer put in `images_dir`.
+    #[serde(default)]
+    pub first_image: Option<InstalledImage>,
+    /// Where to look for new images.
+    #[serde(default)]
+    pub update: Option<UpdateSettings>,
+    /// One data disk, for running a single VM by hand.
+    #[serde(default)]
+    pub data_disk: Option<PathBuf>,
+    /// The folder holding each user's data disk, as `<data_dir>\<SID>\data.vhdx`.
+    #[serde(default)]
+    pub data_dir: Option<PathBuf>,
+    /// The size a new user's data disk may grow to. It starts empty and grows as used.
+    #[serde(default = "default_data_disk_size_gb")]
+    pub data_disk_size_gb: u32,
+    /// The local API's named pipe, `\\.\pipe\<pipe_name>`.
+    #[serde(default = "default_pipe_name")]
+    pub pipe_name: String,
+    /// Who may open the pipe, as SDDL. When absent, SYSTEM and interactively signed-in
+    /// users. The service acts on each caller's own VM either way.
+    #[serde(default)]
+    pub pipe_sddl: Option<String>,
+    /// Where the service writes its log. A service has no console, so without this its
+    /// messages are lost.
+    #[serde(default)]
+    pub log_file: Option<PathBuf>,
+    /// The user allowed to use the VM's Hyper-V sockets besides SYSTEM. When absent, the
+    /// user running `dsa-hostd`.
+    #[serde(default)]
+    pub user_sid: Option<String>,
+    /// Free page reporting granularity as a page order: 9 (2 MiB) works on every Windows
+    /// build; 5 (128 KiB) returns memory more finely on recent builds.
+    #[serde(default = "default_page_reporting_order")]
+    pub page_reporting_order: u8,
+    /// The vsock port the guest's channel daemon connects to.
+    #[serde(default = "default_control_port")]
+    pub control_port: u32,
+    #[serde(default = "default_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
+    #[serde(default = "default_stop_timeout_secs")]
+    pub stop_timeout_secs: u64,
+}
+
+fn default_check_interval_hours() -> u64 {
+    24
+}
+fn default_boot_timeout_secs() -> u64 {
+    300
+}
+
+/// Where new images are published and who may sign them.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateSettings {
+    /// The signed release list. Its signature is at the same URL plus `.sig`.
+    pub list_url: String,
+    /// Public keys, 32 bytes in hexadecimal, any of which may sign the list.
+    pub trusted_keys: Vec<String>,
+    #[serde(default = "default_check_interval_hours")]
+    pub check_interval_hours: u64,
+    /// How long a new image may take to finish its first boot before it is undone.
+    #[serde(default = "default_boot_timeout_secs")]
+    pub boot_timeout_secs: u64,
+}
+
+impl UpdateSettings {
+    pub fn keys(&self) -> Result<Vec<VerifyingKey>, HostConfigError> {
+        self.trusted_keys
+            .iter()
+            .map(|key| manifest::parse_key(key).map_err(|e| HostConfigError(e.to_string())))
+            .collect()
+    }
+}
+
+/// Why a configuration file could not be used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostConfigError(pub String);
+
+impl fmt::Display for HostConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "the host configuration is not usable: {}", self.0)
+    }
+}
+
+impl std::error::Error for HostConfigError {}
+
+impl HostConfig {
+    /// Parses the configuration file's contents.
+    pub fn parse(json: &str) -> Result<HostConfig, HostConfigError> {
+        let config: HostConfig =
+            serde_json::from_str(json).map_err(|e| HostConfigError(e.to_string()))?;
+        match (
+            &config.system_image,
+            &config.images_dir,
+            &config.first_image,
+        ) {
+            (None, None, _) => {
+                return Err(HostConfigError(
+                    "name either system_image or images_dir (with updates)".into(),
+                ))
+            }
+            (_, Some(_), None) => {
+                return Err(HostConfigError(
+                    "images_dir needs first_image, the image the installer put there".into(),
+                ))
+            }
+            _ => {}
+        }
+        if config.data_disk.is_none() && config.data_dir.is_none() {
+            return Err(HostConfigError(
+                "name either data_disk (one VM) or data_dir (one VM per user)".into(),
+            ));
+        }
+        if let Some(update) = &config.update {
+            if config.images_dir.is_none() {
+                return Err(HostConfigError("update needs images_dir".into()));
+            }
+            update.keys()?;
+        }
+        Ok(config)
+    }
+
+    /// The VM configuration for running one VM by hand. `fallback_sid` is used when the file
+    /// names no user.
+    pub fn vm_config(&self, fallback_sid: Option<&str>) -> AndroidVmConfig {
+        let user = self.user_sid.as_deref().or(fallback_sid);
+        let socket_sids = user.map(|sid| vec![sid.to_string()]).unwrap_or_default();
+        let data_disk = match (&self.data_disk, &self.data_dir, user) {
+            (Some(disk), _, _) => disk.clone(),
+            (None, Some(dir), Some(sid)) => user_data_disk(dir, sid),
+            (None, Some(dir), None) => dir.join("data.vhdx"),
+            (None, None, _) => unreachable!("parse requires data_disk or data_dir"),
+        };
+        self.base_vm_config(&self.vm_name, data_disk, socket_sids)
+    }
+
+    /// The VM of the user with SID `sid`, as the service runs it.
+    pub fn user_vm(&self, sid: &str) -> Result<UserVm, HostConfigError> {
+        // The SID becomes part of a path and a VM name, so only a well-formed one is used.
+        if !is_sid(sid) {
+            return Err(HostConfigError(format!(
+                "{sid:?} is not a Windows SID, so no VM is made for it"
+            )));
+        }
+        let dir = self.data_dir.as_ref().ok_or_else(|| {
+            HostConfigError(
+                "serving users needs data_dir, the folder for each user's data disk".into(),
+            )
+        })?;
+        let vm_name = format!("{}-{sid}", self.vm_name);
+        let config = self.base_vm_config(&vm_name, user_data_disk(dir, sid), vec![sid.into()]);
+        Ok(UserVm {
+            vm_name,
+            config,
+            data_disk_size_gb: self.data_disk_size_gb,
+        })
+    }
+
+    /// What to boot from `image_dir`, an image folder of the update store. Without a
+    /// folder, the first image's folder, or `system_image` when updates are not used.
+    ///
+    /// An image made from the published AOSP builds carries `image.json`, `initrd.img` and
+    /// `disk.vhdx`, the template of a user's Android disk; its kernel command line comes from
+    /// `image.json`. An older image carries `system.vhdx`, attached beside the user's disk.
+    /// The image's own `bzImage` wins over `kernel` either way.
+    pub fn image_files(&self, image_dir: Option<&std::path::Path>) -> ImageFiles {
+        let dir = image_dir.map(std::path::Path::to_path_buf).or_else(|| {
+            match (&self.system_image, &self.images_dir, &self.first_image) {
+                (None, Some(root), Some(first)) => Some(root.join("images").join(&first.version)),
+                _ => None,
+            }
+        });
+        let Some(dir) = dir else {
+            return ImageFiles {
+                kernel: self.kernel.clone(),
+                initrd: self.initrd.clone(),
+                kernel_cmdline: self.kernel_cmdline.clone(),
+                system_image: self.system_image.clone(),
+                disk_template: None,
+            };
+        };
+        let own_kernel = dir.join("bzImage");
+        let kernel = if own_kernel.exists() {
+            own_kernel
+        } else {
+            self.kernel.clone()
+        };
+        let manifest = std::fs::read_to_string(dir.join("image.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+        match manifest {
+            Some(manifest) => {
+                let image_cmdline = manifest["kernel_cmdline"].as_str().unwrap_or_default();
+                ImageFiles {
+                    kernel,
+                    initrd: Some(dir.join("initrd.img")),
+                    kernel_cmdline: format!("{image_cmdline} {}", self.kernel_cmdline)
+                        .trim()
+                        .to_string(),
+                    system_image: None,
+                    disk_template: Some(dir.join("disk.vhdx")),
+                }
+            }
+            None => ImageFiles {
+                kernel,
+                initrd: self.initrd.clone(),
+                kernel_cmdline: self.kernel_cmdline.clone(),
+                system_image: Some(dir.join("system.vhdx")),
+                disk_template: None,
+            },
+        }
+    }
+
+    fn base_vm_config(
+        &self,
+        vm_name: &str,
+        data_disk: PathBuf,
+        socket_sids: Vec<String>,
+    ) -> AndroidVmConfig {
+        let files = self.image_files(None);
+        AndroidVmConfig {
+            owner: format!("DSA ({vm_name})"),
+            kernel: files.kernel,
+            initrd: files.initrd,
+            kernel_cmdline: files.kernel_cmdline,
+            memory_mb: self.memory_mb,
+            processors: self.processors,
+            system_image: files.system_image,
+            data_disk,
+            socket_sids,
+            page_reporting_order: self.page_reporting_order,
+        }
+    }
+
+    pub fn session_config(&self) -> SessionConfig {
+        SessionConfig {
+            connect_timeout: Duration::from_secs(self.connect_timeout_secs),
+            stop_timeout: Duration::from_secs(self.stop_timeout_secs),
+        }
+    }
+}

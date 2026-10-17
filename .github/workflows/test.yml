@@ -60,13 +60,34 @@ jobs:
       - name: Run the tests
         run: cargo test --workspace
 
+      # Registers dsa-hostd as a real Windows service, reaches it through its named pipe and
+      # stops it. The runner's account is an administrator, which this needs.
+      - name: Run the service test as an installed Windows service
+        if: runner.os == 'Windows'
+        env:
+          DSA_SERVICE_TESTS: "1"
+        run: cargo test -p dsa-host-windows --test service --test user_disk_update -- --nocapture
+
       # The guest transport's suite over real vsock needs the loopback transport, which
       # the runner's kernel ships as a module.
       - name: Run the vsock tests over vsock loopback
         if: runner.os == 'Linux'
         run: |
           sudo modprobe vsock_loopback
-          cargo test -p dsa-guest-transport --features vsock-loopback-tests
+          cargo test -p dsa-guest-transport -p dsa-guest-channeld --features vsock-loopback-tests
+
+  unix-socket:
+    name: Test the local API and dsa over Unix sockets (macos-latest)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: dsa
+    steps:
+      - uses: actions/checkout@v4
+
+      # Linux runs this in the job above; macOS reads the peer's user another way.
+      - name: Run the tests
+        run: cargo test --no-fail-fast -p dsa-transport -p dsa-host-unix -p dsa-cli
 
   protocol:
     name: Check the generated protocol code (ubuntu-latest)
@@ -90,7 +111,7 @@ jobs:
           if [[ -n "$(git status --porcelain -- protocol)" ]]; then
             git status --short -- protocol
             git diff -- protocol | head -200
-            echo "::error::the generated protocol code does not match control.proto; run dsa-protocol-codegen and commit the result"
+            echo "::error::the generated protocol code does not match control.proto or host_api.proto; run dsa-protocol-codegen and commit the result"
             exit 1
           fi
 

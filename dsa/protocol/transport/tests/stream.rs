@@ -125,3 +125,49 @@ fn pr1_end_of_stream_inside_a_frame_is_reported_as_closed() {
         Err(TransportError::Closed)
     );
 }
+
+/// A socket whose peer has gone and that refuses read timeouts, as macOS does once both
+/// directions are shut down. It still holds one frame that arrived before.
+struct ShutDownSocket {
+    buffered: io::Cursor<Vec<u8>>,
+}
+
+impl Read for ShutDownSocket {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.buffered.read(buf)
+    }
+}
+
+impl Write for ShutDownSocket {
+    fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+        Err(io::ErrorKind::BrokenPipe.into())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl StreamSocket for ShutDownSocket {
+    fn set_read_timeout(&mut self, _: Option<Duration>) -> io::Result<()> {
+        // What EINVAL maps to on macOS.
+        Err(io::ErrorKind::InvalidInput.into())
+    }
+    fn shutdown(&mut self) {}
+}
+
+#[test]
+fn pr1_a_socket_that_refuses_timeouts_after_the_peer_left_still_reports_closed() {
+    let mut wire = 3u32.to_le_bytes().to_vec();
+    wire.extend_from_slice(b"end");
+    let mut connection = FramedConnection::new(ShutDownSocket {
+        buffered: io::Cursor::new(wire),
+    });
+    assert_eq!(
+        connection.recv(Some(Duration::from_secs(1))).unwrap(),
+        b"end"
+    );
+    assert_eq!(
+        connection.recv(Some(Duration::from_secs(1))),
+        Err(TransportError::Closed)
+    );
+}

@@ -10,9 +10,30 @@ publish.workspace = true
 [dependencies]
 dsa-transport.workspace = true
 dsa-host-core.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ed25519-dalek = "2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinSock"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinHttp",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_Storage_Vhd",
+    "Win32_System_HostComputeSystem",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Pipes",
+    "Win32_System_Services",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 dsa-transport = { workspace = true, features = ["conformance"] }
+dsa-protocol.workspace = true
+dsa-host-core = { workspace = true, features = ["conformance"] }
+sha2 = "0.11"

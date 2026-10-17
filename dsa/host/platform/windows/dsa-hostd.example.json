@@ -1,0 +1,15 @@
+{
+  "vm_name": "dsa-android",
+  "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
+  "system_image": "C:\\Program Files\\DSA\\vm\\system.vhdx",
+  "data_dir": "C:\\ProgramData\\DSA\\users",
+  "data_disk_size_gb": 64,
+  "pipe_name": "dsa-host",
+  "kernel_cmdline": "",
+  "memory_mb": 4096,
+  "processors": 4,
+  "page_reporting_order": 9,
+  "control_port": 5000,
+  "connect_timeout_secs": 120,
+  "stop_timeout_secs": 30
+}

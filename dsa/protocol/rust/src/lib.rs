@@ -1,5 +1,5 @@
 //! The control protocol in Rust: the generated message types, the frame codec and the
-//! connection handshake.
+//! connection handshake. [`host_api`] holds the same for the local API.
 //!
 //! The message types come from `dsa/protocol/control.proto` through
 //! `dsa-protocol-codegen`; nothing in [`control`] is written by hand. Every frame on the
@@ -19,6 +19,7 @@ mod schema {
 }
 
 pub mod handshake;
+pub mod host_api;
 
 pub use schema::{SCHEMA_HASH, SCHEMA_HASH_HEX};
 
@@ -48,4 +49,9 @@ pub fn encode(envelope: &Envelope) -> Vec<u8> {
 /// Decodes one frame. Malformed input is an error, never a panic.
 pub fn decode(frame: &[u8]) -> Result<Envelope, DecodeError> {
     Envelope::decode(frame).map_err(|error| DecodeError(error.to_string()))
+}
+
+/// Lower-case hexadecimal of a hash, for error messages.
+pub(crate) fn handshake_hex(hash: &[u8]) -> String {
+    hash.iter().map(|b| format!("{b:02x}")).collect()
 }
