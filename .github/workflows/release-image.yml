@@ -232,8 +232,9 @@ jobs:
       - name: Publish the installer
         run: |
           $version = '${{ inputs.installer_version }}'
-          $files = "dsa/target/installer/setup-$version.exe", "dsa/target/installer/dsa-$version.msi"
-          gh release create "v$version" @files --target $env:GITHUB_SHA `
+          # Only setup.exe: it carries the package (dsa-<version>.msi) inside, and
+          # setup.exe /layout <folder> takes it out for msiexec-based deployments.
+          gh release create "v$version" "dsa/target/installer/setup-$version.exe" --target $env:GITHUB_SHA `
             --title "Desktop Subsystem for Android $version" `
             --notes "Run setup-$version.exe. It installs the service and downloads the newest supported Android image."
           if ($LASTEXITCODE -ne 0) { throw "publishing the installer failed" }
