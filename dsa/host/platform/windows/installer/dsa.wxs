@@ -26,7 +26,13 @@
              UpgradeCode="5c08f90f-6eaa-402b-992b-6069634c45e8"
              Scope="perMachine"
              Compressed="yes">
-        <MajorUpgrade DowngradeErrorMessage="A newer Desktop Subsystem for Android is already installed." />
+        <!-- The new version installs over the old one before the old one is removed, so the
+             files both have stay. Removing the old one first would also remove the
+             configuration after costing had decided to keep it, and leave none. An edited
+             configuration is kept and an unedited one replaced, by Windows Installer's rule
+             for files without a version. -->
+        <MajorUpgrade Schedule="afterInstallExecute"
+                      DowngradeErrorMessage="A newer Desktop Subsystem for Android is already installed." />
         <Media Id="1" Cabinet="dsa.cab" EmbedCab="yes" />
         <?ifdef ImageVersion ?>
         <!-- An MSI holds at most 2 GB and an image comes close to that, so the image's
@@ -95,7 +101,7 @@
         <!-- The service's own folder: SYSTEM and Administrators only, and read access for
              Hyper-V's virtual machines (S-1-5-83-0), which open the images from it. -->
         <ComponentGroup Id="Data" Directory="DATAFOLDER">
-            <Component Id="Config" Guid="*" NeverOverwrite="yes">
+            <Component Id="Config" Guid="*">
                 <File Id="Config" Source="$(SourceDir)\dsa-hostd.json" KeyPath="yes" />
                 <CreateFolder>
                     <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;S-1-5-83-0)" />

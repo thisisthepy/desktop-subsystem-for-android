@@ -152,6 +152,11 @@ jobs:
 
       - name: Update DSA to 0.0.10 with dsa update
         run: |
+          # An edited configuration must survive the upgrade.
+          $configPath = "$env:DATA_DIR\dsa-hostd.json"
+          $edited = Get-Content -Raw $configPath | ConvertFrom-Json
+          $edited.update | Add-Member -NotePropertyName check_interval_hours -NotePropertyValue 48
+          $edited | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM $configPath
           Copy-Item .scratch\update-staged\program.json, .scratch\update-staged\program.json.sig $env:MIRROR
           $out = & "$env:PROGRAM_DIR\dsa.exe" update --wait --timeout 600 2>&1
           $code = $LASTEXITCODE
@@ -167,7 +172,7 @@ jobs:
             }
             sc.exe qc DsaHost
             Get-ItemProperty HKLM:\SOFTWARE\thisisthepy\DSA -ErrorAction SilentlyContinue
-            Get-ChildItem "C:\ProgramData\DSA", "C:\Program Files\DSA", "$env:PROGRAM_DIR" -ErrorAction SilentlyContinue | Format-Table FullName, Length
+            Get-ChildItem "C:\ProgramData\DSA", "C:\Program Files\DSA", "$env:PROGRAM_DIR", "$env:DATA_DIR" -ErrorAction SilentlyContinue | Format-Table FullName, Length
             Get-Content "C:\ProgramData\DSA\logs\dsa-hostd.log" -ErrorAction SilentlyContinue
             Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager' } -MaxEvents 15 -ErrorAction SilentlyContinue |
               Format-List TimeCreated, Id, Message
@@ -186,6 +191,9 @@ jobs:
           if (-not $path.StartsWith("`"$env:PROGRAM_DIR\")) { throw "the service moved to $path" }
           if (-not (Test-Path "$env:DATA_DIR\logs\setup-0.0.10.log")) { throw "setup left no log where the service said" }
           if (Test-Path "$env:DATA_DIR\updates\0.0.10") { throw "the setup file was not removed after the update" }
+          if ((Get-Content -Raw $configPath | ConvertFrom-Json).update.check_interval_hours -ne 48) {
+            throw "the upgrade replaced the edited configuration"
+          }
           $status = & "$env:PROGRAM_DIR\dsa.exe" status 2>&1
           $status
           if (-not ($status -match 'Update: DSA was updated to 0\.0\.10')) { throw "dsa status does not tell about the update" }
