@@ -153,11 +153,15 @@ jobs:
           if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
           if (Test-Path "$env:BUNDLE_PROGRAM_DIR\dsa.exe") { throw "the program is still there" }
 
-          # A release ships setup.exe only; /layout takes the package out of it for msiexec.
+          # A release ships setup.exe only. /layout copies the bundle (its package is inside
+          # it), and wix burn extract takes the package out for msiexec.
           $p = Start-Process 'dsa\target\installer\setup-0.0.9.exe' -Wait -PassThru -ArgumentList '/quiet', '/layout', "$PWD\layout", '/log', "$PWD\bundle-layout.log"
           if ($p.ExitCode -ne 0) { Get-Content bundle-layout.log -Tail 80; throw "setup.exe /layout failed ($($p.ExitCode))" }
-          Get-ChildItem -Recurse layout | ForEach-Object { Write-Host $_.FullName }
-          if (-not (Test-Path "layout\dsa-0.0.9.msi")) { throw "setup.exe /layout did not copy out the package" }
+          if (-not (Test-Path "layout\setup-0.0.9.exe")) { throw "setup.exe /layout did not copy the bundle" }
+          wix burn extract dsa\target\installer\setup-0.0.9.exe -o extracted
+          if ($LASTEXITCODE -ne 0) { throw "wix burn extract failed" }
+          Get-ChildItem -Recurse -File extracted | ForEach-Object { Write-Host $_.FullName }
+          if (-not (Get-ChildItem -Recurse -File extracted -Filter 'dsa-0.0.9.msi')) { throw "setup.exe does not carry the package" }
 
       # setup.exe through its screens, the way a person uses it: Install, then Done; then
       # Uninstall from the screen a second start shows. Pictures of each screen on the way.

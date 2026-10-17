@@ -13,8 +13,9 @@ pwsh dsa/host/platform/windows/installer/build.ps1 -Version 0.1.0 -Kernel bzImag
 The results land in `dsa/target/installer/`.
 
 A release ships `setup.exe` only. The package (`dsa-<version>.msi`, and `image.cab` when
-it carries an image) is inside it: `setup.exe /layout <folder>` copies them out, and that
-MSI is what deployments with `msiexec` use.
+it carries an image) is inside it, and that MSI is what deployments with `msiexec` use.
+WiX's `wix burn extract setup-<version>.exe -o <folder>` takes it out. (`setup.exe /layout`
+copies only `setup.exe` itself, because the package is embedded in it.)
 
 ## What the package does
 
