@@ -9,6 +9,8 @@ members = [
     "protocol/rust",
     "host/core",
     "host/platform/windows",
+    "host/platform/unix",
+    "host/cli",
     "guest/transport",
     "guest/channeld",
 ]

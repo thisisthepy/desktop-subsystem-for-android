@@ -17,6 +17,7 @@ use std::fmt;
 use std::io;
 use std::time::Duration;
 
+pub mod local;
 pub mod memory;
 pub mod stream;
 
