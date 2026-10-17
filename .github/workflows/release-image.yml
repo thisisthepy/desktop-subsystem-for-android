@@ -350,7 +350,7 @@ jobs:
           if (-not $env:SIGNING_KEY) { throw "The DSA_RELEASE_SIGNING_KEY secret is not set; see the top of this workflow." }
           $version = '${{ inputs.installer_version }}'
           # The asset the step above published, under its release name.
-          $asset = "DSA-$version-win-x64-setup.exe"
+          $asset = "DSA-v$version-win-x64-setup.exe"
           $url = "https://github.com/${{ github.repository }}/releases/download/v$version/$asset"
           Push-Location dsa
           cargo build -q --release -p dsa-host-core --bin dsa-release
