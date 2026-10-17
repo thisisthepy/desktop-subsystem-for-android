@@ -84,11 +84,14 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     })
 }
 
-/// One line describing `status`.
+/// A line describing `status`, and a second one when there is news about an update.
 pub fn describe(status: &Status) -> String {
     let mut line = format!("Android: {}", status.state);
     if let Some(reason) = &status.last_reason {
         let _ = write!(line, " (last stopped: {reason})");
+    }
+    if let Some(notice) = &status.update_notice {
+        let _ = write!(line, "\nUpdate: {notice}");
     }
     line
 }

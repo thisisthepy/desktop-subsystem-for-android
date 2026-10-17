@@ -48,6 +48,11 @@ pub struct Status {
     /// on. Empty when it has not stopped yet.
     #[prost(string, tag = "2")]
     pub last_reason: ::prost::alloc::string::String,
+    /// News about the Android image, for the user: an update downloaded and waiting for the
+    /// next start, an update applied, or one that did not start and was undone. Empty when
+    /// there is nothing to tell.
+    #[prost(string, tag = "3")]
+    pub update_notice: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Error {

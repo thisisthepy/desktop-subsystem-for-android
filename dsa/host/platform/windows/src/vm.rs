@@ -78,7 +78,7 @@ fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn is_sid(text: &str) -> bool {
+pub(crate) fn is_sid(text: &str) -> bool {
     text.starts_with("S-1-")
         && text[4..]
             .split('-')

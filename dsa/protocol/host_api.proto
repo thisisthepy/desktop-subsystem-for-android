@@ -92,6 +92,10 @@ message Status {
   // Why the session last stopped, or why stopping it went wrong, in words a person can act
   // on. Empty when it has not stopped yet.
   string last_reason = 2;
+  // News about the Android image, for the user: an update downloaded and waiting for the
+  // next start, an update applied, or one that did not start and was undone. Empty when
+  // there is nothing to tell.
+  string update_notice = 3;
 }
 
 // What went wrong with a request.

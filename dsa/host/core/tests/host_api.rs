@@ -82,3 +82,49 @@ fn pr5_a_user_the_factory_refuses_is_retried_on_the_next_request() {
     assert!(per_user.android("alice").is_err());
     assert!(per_user.android("alice").is_ok());
 }
+
+#[test]
+fn fr2_stopping_the_service_stops_every_users_android() {
+    let per_user = PerUser::new(|_: &str| Ok(Arc::new(FakeAndroid::new()) as Arc<dyn UserAndroid>));
+    let alice = per_user.android("alice").unwrap();
+    let bob = per_user.android("bob").unwrap();
+    alice.start();
+    bob.start();
+    let not_stopped = per_user.stop_all(Duration::from_secs(5));
+    assert!(not_stopped.is_empty(), "{not_stopped:?}");
+    assert_eq!(alice.state(), SessionState::Stopped);
+    assert_eq!(bob.state(), SessionState::Stopped);
+}
+
+/// An Android with news about an update.
+struct Notifying;
+
+impl UserAndroid for Notifying {
+    fn state(&self) -> SessionState {
+        SessionState::Stopped
+    }
+    fn last_reason(&self) -> Option<String> {
+        None
+    }
+    fn start(&self) {}
+    fn stop(&self) {}
+    fn update_notice(&self) -> Option<String> {
+        Some("Android 16.0.3 is downloaded and will be used at the next start".into())
+    }
+}
+
+#[test]
+fn fr14_the_user_is_told_about_an_update_through_the_local_api() {
+    let (listener, mut connector) = local::pair();
+    let androids = Arc::new(PerUser::new(|_: &str| {
+        Ok(Arc::new(Notifying) as Arc<dyn UserAndroid>)
+    }));
+    let _service = RunningService::start(Box::new(listener), androids);
+    let mut client = HostApiClient::connect(&mut connector, "test", WAIT).unwrap();
+    let status = client.status().unwrap();
+    assert_eq!(
+        status.update_notice.as_deref(),
+        Some("Android 16.0.3 is downloaded and will be used at the next start")
+    );
+    assert_eq!(status.last_reason, None);
+}

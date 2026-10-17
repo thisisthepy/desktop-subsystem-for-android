@@ -224,8 +224,10 @@ dependencies = [
  "dsa-host-core",
  "dsa-protocol",
  "dsa-transport",
+ "ed25519-dalek",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "windows-sys",
 ]
 

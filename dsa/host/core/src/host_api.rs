@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dsa_protocol::host_api::types::{
     self, envelope::Body, request, response, Envelope, ErrorCode, Request, Response, Role,
@@ -30,6 +30,10 @@ pub trait UserAndroid: Send + Sync {
     fn last_reason(&self) -> Option<String>;
     fn start(&self);
     fn stop(&self);
+    /// News about the Android image for the user, if there is any.
+    fn update_notice(&self) -> Option<String> {
+        None
+    }
 }
 
 impl UserAndroid for Session {
@@ -75,6 +79,35 @@ where
         PerUser {
             create,
             androids: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl<F> PerUser<F> {
+    /// Stops every user's Android and waits at most `timeout` for all of them. Returns the
+    /// users whose Android had not stopped by then, with its state.
+    pub fn stop_all(&self, timeout: Duration) -> Vec<(String, SessionState)> {
+        let androids: Vec<(String, Arc<dyn UserAndroid>)> = self
+            .androids
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .map(|(user, android)| (user.clone(), Arc::clone(android)))
+            .collect();
+        for (_, android) in &androids {
+            android.stop();
+        }
+        let deadline = Instant::now() + timeout;
+        loop {
+            let running: Vec<(String, SessionState)> = androids
+                .iter()
+                .map(|(user, android)| (user.clone(), android.state()))
+                .filter(|(_, state)| *state != SessionState::Stopped)
+                .collect();
+            if running.is_empty() || Instant::now() >= deadline {
+                return running;
+            }
+            thread::sleep(Duration::from_millis(50));
         }
     }
 }
@@ -216,6 +249,7 @@ impl HostApiService {
                     response::Body::Status(types::Status {
                         state: to_wire(android.state()) as i32,
                         last_reason: android.last_reason().unwrap_or_default(),
+                        update_notice: android.update_notice().unwrap_or_default(),
                     })
                 }
             },
@@ -239,6 +273,8 @@ fn error(code: ErrorCode, detail: String) -> response::Body {
 pub struct Status {
     pub state: SessionState,
     pub last_reason: Option<String>,
+    /// News about the Android image, such as an update waiting for the next start.
+    pub update_notice: Option<String>,
 }
 
 /// Why a local API call failed.
@@ -342,6 +378,7 @@ impl HostApiClient {
                     ClientError::Malformed(format!("unknown session state {}", status.state))
                 })?,
                 last_reason: Some(status.last_reason).filter(|reason| !reason.is_empty()),
+                update_notice: Some(status.update_notice).filter(|notice| !notice.is_empty()),
             }),
             Some(response::Body::Error(error)) => Err(ClientError::Service {
                 code: ErrorCode::try_from(error.code).unwrap_or(ErrorCode::Unspecified),
