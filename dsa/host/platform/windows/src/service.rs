@@ -16,7 +16,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::handshake::ControlHandshake;
-use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid};
+use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid, UserAndroids};
 use dsa_host_core::session::Session;
 use dsa_host_core::update::service::{check_reporting, Download, UpdateNotices, UpdatingAndroid};
 use dsa_host_core::update::store::ImageStore;
