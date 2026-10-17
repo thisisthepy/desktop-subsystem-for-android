@@ -4,9 +4,10 @@
 
   It installs dsa-hostd as the DsaHost service (SYSTEM, started automatically), the dsa
   command on the system PATH, the service's configuration, the guest kernel and, when the
-  build has one, the first Android image. Uninstalling removes all of that and the Android
-  images the service downloaded since. Each user's Android disk is in their own profile
-  (%LOCALAPPDATA%\DSA), so it is not part of the package and stays.
+  build has one, the first Android image. Uninstalling removes all of that, the Android
+  images the service downloaded since, and the setup files it downloaded to update DSA.
+  Each user's Android disk is in their own profile (%LOCALAPPDATA%\DSA), so it is not
+  part of the package and stays.
 
   INSTALLFOLDER (the program) and DATAFOLDER (configuration, logs and images) can be set
   on the command line or from setup.exe's Options. The configuration names them as
@@ -133,16 +134,25 @@
         </ComponentGroup>
         <?endif?>
 
-        <!-- The images the service downloaded are not files of this package, so the service
-             removes them itself; each user's Android disk, in their profile, stays. -->
+        <!-- The images and setup files the service downloaded are not files of this package,
+             so the service removes them itself; each user's Android disk, in their profile,
+             stays. An upgrade keeps them: the new version goes on with the same images, and
+             reads what the update it came from left in the updates folder. -->
         <CustomAction Id="RemoveImages"
                       FileRef="HostdExe"
                       ExeCommand="remove-images &quot;[IMAGESFOLDER]&quot;"
                       Execute="deferred"
                       Impersonate="no"
                       Return="ignore" />
+        <CustomAction Id="RemoveUpdates"
+                      FileRef="HostdExe"
+                      ExeCommand="remove-updates &quot;[DATAFOLDER]updates&quot;"
+                      Execute="deferred"
+                      Impersonate="no"
+                      Return="ignore" />
         <InstallExecuteSequence>
             <Custom Action="RemoveImages" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+            <Custom Action="RemoveUpdates" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
         </InstallExecuteSequence>
 
         <Feature Id="Main" Title="Desktop Subsystem for Android" Level="1">
