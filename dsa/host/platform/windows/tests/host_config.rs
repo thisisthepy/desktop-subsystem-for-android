@@ -149,16 +149,17 @@ fn fr14_the_vm_boots_the_image_folder_it_is_given() {
         PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("image-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let (kernel, system) = config.image_files(Some(&dir));
-    assert_eq!(system, dir.join("system.vhdx"));
+    let files = config.image_files(Some(&dir));
+    assert_eq!(files.system_image, Some(dir.join("system.vhdx")));
+    assert_eq!(files.disk_template, None);
     assert_eq!(
-        kernel,
+        files.kernel,
         PathBuf::from(r"C:\Program Files\DSA\vm\bzImage"),
         "no kernel in the image"
     );
     std::fs::write(dir.join("bzImage"), b"kernel").unwrap();
     assert_eq!(
-        config.image_files(Some(&dir)).0,
+        config.image_files(Some(&dir)).kernel,
         dir.join("bzImage"),
         "the image's own kernel"
     );
@@ -182,4 +183,49 @@ fn fr14_an_untrusted_key_or_a_missing_first_image_is_reported() {
         error.contains("system_image") && error.contains("images_dir"),
         "{error}"
     );
+}
+
+#[test]
+fn fr14_an_image_made_from_aosp_boots_from_one_disk_made_from_its_template() {
+    let config = HostConfig::parse(UPDATING).unwrap();
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("aosp-image-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("image.json"),
+        r#"{"version": "17.0.0-16373615", "kernel_cmdline": "androidboot.boot_part_uuid=6b1ad5ad androidboot.fstab_suffix=dsa"}"#,
+    )
+    .unwrap();
+    let files = config.image_files(Some(&dir));
+    assert_eq!(files.system_image, None, "no separate system disk");
+    assert_eq!(files.disk_template, Some(dir.join("disk.vhdx")));
+    assert_eq!(files.initrd, Some(dir.join("initrd.img")));
+    assert_eq!(
+        files.kernel_cmdline,
+        "androidboot.boot_part_uuid=6b1ad5ad androidboot.fstab_suffix=dsa"
+    );
+
+    let user = config.user_vm("S-1-5-21-1-2-3-1001").unwrap();
+    let mut vm = user.config.clone();
+    vm.system_image = files.system_image;
+    vm.initrd = files.initrd;
+    vm.kernel_cmdline = files.kernel_cmdline;
+    let document = vm.to_hcs_document().unwrap();
+    let attachments = &document["VirtualMachine"]["Devices"]["Scsi"]["0"]["Attachments"];
+    assert_eq!(
+        attachments.as_object().unwrap().len(),
+        1,
+        "only the user's disk"
+    );
+    assert_eq!(attachments["0"]["ReadOnly"], false);
+    let kernel = &document["VirtualMachine"]["Chipset"]["LinuxKernelDirect"];
+    assert!(kernel["KernelCmdLine"]
+        .as_str()
+        .unwrap()
+        .contains("androidboot.fstab_suffix=dsa"));
+    assert!(kernel["InitRdPath"]
+        .as_str()
+        .unwrap()
+        .ends_with("initrd.img"));
 }

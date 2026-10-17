@@ -28,7 +28,7 @@ use crate::host_config::HostConfig;
 use crate::https::WinHttpFetch;
 use crate::hvsocket::HvSocketListener;
 use crate::pipe::{NamedPipeListener, DEFAULT_PIPE_SDDL};
-use crate::user_disk::prepare_user_data_disk;
+use crate::user_disk::{bring_disk_to, prepare_user_data_disk, prepare_user_disk_folder};
 use crate::vm_listener::VmBoundListener;
 
 /// What the service shares between users when it updates the image.
@@ -48,7 +48,23 @@ pub fn create_user_android(
     updates: Option<&Updates>,
 ) -> Result<Arc<dyn UserAndroid>, String> {
     let user = config.user_vm(sid).map_err(|e| e.to_string())?;
-    prepare_user_data_disk(&user.config.data_disk, user.data_disk_size_gb)?;
+    let template_layout = updates.is_some_and(|u| {
+        u.store
+            .state()
+            .map(|s| {
+                config
+                    .image_files(Some(&u.store.image_dir(&s.current.version)))
+                    .disk_template
+                    .is_some()
+            })
+            .unwrap_or(false)
+    });
+    if template_layout {
+        // The disk is copied from the image's template when the VM first starts.
+        prepare_user_disk_folder(&user.config.data_disk)?;
+    } else {
+        prepare_user_data_disk(&user.config.data_disk, user.data_disk_size_gb)?;
+    }
     let launcher = match updates {
         None => AndroidVmLauncher::new(&user.vm_name, user.config),
         Some(updates) => {
@@ -59,11 +75,17 @@ pub fn create_user_android(
                 &user.vm_name,
                 Box::new(move || {
                     let current = store.state().map_err(|e| e.to_string())?.current;
-                    let (kernel, system_image) =
-                        config.image_files(Some(&store.image_dir(&current.version)));
+                    let files = config.image_files(Some(&store.image_dir(&current.version)));
                     let mut vm = base.clone();
-                    vm.kernel = kernel;
-                    vm.system_image = system_image;
+                    if let Some(template) = &files.disk_template {
+                        // A new user's disk is the template; an existing one gets this
+                        // image's Android and keeps the user's data.
+                        bring_disk_to(&vm.data_disk, template, &current.version)?;
+                    }
+                    vm.kernel = files.kernel;
+                    vm.initrd = files.initrd;
+                    vm.kernel_cmdline = files.kernel_cmdline;
+                    vm.system_image = files.system_image;
                     Ok(vm)
                 }),
             )

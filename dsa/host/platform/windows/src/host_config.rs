@@ -41,6 +41,18 @@ fn user_data_disk(dir: &std::path::Path, sid: &str) -> PathBuf {
     PathBuf::from(format!("{}\\{sid}\\data.vhdx", dir.trim_end_matches('\\')))
 }
 
+/// What a VM boots from one image.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageFiles {
+    pub kernel: PathBuf,
+    pub initrd: Option<PathBuf>,
+    pub kernel_cmdline: String,
+    /// A separate, read-only system disk (older images).
+    pub system_image: Option<PathBuf>,
+    /// The template a user's Android disk is made from (images with `image.json`).
+    pub disk_template: Option<PathBuf>,
+}
+
 /// One user's VM: its HCS name, its configuration and how large its data disk may grow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserVm {
@@ -259,30 +271,58 @@ impl HostConfig {
         })
     }
 
-    /// The kernel and system image to boot from `image_dir`, an image folder of the update
-    /// store. The image's own `bzImage` wins over `kernel`. Without a folder, the first image
-    /// or `system_image`.
-    pub fn image_files(&self, image_dir: Option<&std::path::Path>) -> (PathBuf, PathBuf) {
+    /// What to boot from `image_dir`, an image folder of the update store. Without a
+    /// folder, the first image's folder, or `system_image` when updates are not used.
+    ///
+    /// An image made from the published AOSP builds carries `image.json`, `initrd.img` and
+    /// `disk.vhdx`, the template of a user's Android disk; its kernel command line comes from
+    /// `image.json`. An older image carries `system.vhdx`, attached beside the user's disk.
+    /// The image's own `bzImage` wins over `kernel` either way.
+    pub fn image_files(&self, image_dir: Option<&std::path::Path>) -> ImageFiles {
         let dir = image_dir.map(std::path::Path::to_path_buf).or_else(|| {
             match (&self.system_image, &self.images_dir, &self.first_image) {
                 (None, Some(root), Some(first)) => Some(root.join("images").join(&first.version)),
                 _ => None,
             }
         });
-        match dir {
-            Some(dir) => {
-                let own_kernel = dir.join("bzImage");
-                let kernel = if own_kernel.exists() {
-                    own_kernel
-                } else {
-                    self.kernel.clone()
-                };
-                (kernel, dir.join("system.vhdx"))
+        let Some(dir) = dir else {
+            return ImageFiles {
+                kernel: self.kernel.clone(),
+                initrd: self.initrd.clone(),
+                kernel_cmdline: self.kernel_cmdline.clone(),
+                system_image: self.system_image.clone(),
+                disk_template: None,
+            };
+        };
+        let own_kernel = dir.join("bzImage");
+        let kernel = if own_kernel.exists() {
+            own_kernel
+        } else {
+            self.kernel.clone()
+        };
+        let manifest = std::fs::read_to_string(dir.join("image.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+        match manifest {
+            Some(manifest) => {
+                let image_cmdline = manifest["kernel_cmdline"].as_str().unwrap_or_default();
+                ImageFiles {
+                    kernel,
+                    initrd: Some(dir.join("initrd.img")),
+                    kernel_cmdline: format!("{image_cmdline} {}", self.kernel_cmdline)
+                        .trim()
+                        .to_string(),
+                    system_image: None,
+                    disk_template: Some(dir.join("disk.vhdx")),
+                }
             }
-            None => (
-                self.kernel.clone(),
-                self.system_image.clone().unwrap_or_default(),
-            ),
+            None => ImageFiles {
+                kernel,
+                initrd: self.initrd.clone(),
+                kernel_cmdline: self.kernel_cmdline.clone(),
+                system_image: Some(dir.join("system.vhdx")),
+                disk_template: None,
+            },
         }
     }
 
@@ -292,14 +332,15 @@ impl HostConfig {
         data_disk: PathBuf,
         socket_sids: Vec<String>,
     ) -> AndroidVmConfig {
+        let files = self.image_files(None);
         AndroidVmConfig {
             owner: format!("DSA ({vm_name})"),
-            kernel: self.image_files(None).0,
-            initrd: self.initrd.clone(),
-            kernel_cmdline: self.kernel_cmdline.clone(),
+            kernel: files.kernel,
+            initrd: files.initrd,
+            kernel_cmdline: files.kernel_cmdline,
             memory_mb: self.memory_mb,
             processors: self.processors,
-            system_image: self.image_files(None).1,
+            system_image: files.system_image,
             data_disk,
             socket_sids,
             page_reporting_order: self.page_reporting_order,

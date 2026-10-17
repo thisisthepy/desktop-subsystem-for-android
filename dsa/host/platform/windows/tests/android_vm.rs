@@ -20,7 +20,7 @@ fn missing_files() -> AndroidVmConfig {
         kernel_cmdline: String::new(),
         memory_mb: 1024,
         processors: 1,
-        system_image: dir.join("system.vhdx"),
+        system_image: Some(dir.join("system.vhdx")),
         data_disk: dir.join("data.vhdx"),
         socket_sids: Vec::new(),
         page_reporting_order: 9,
