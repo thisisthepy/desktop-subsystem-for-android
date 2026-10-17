@@ -161,7 +161,12 @@ jobs:
           wix burn extract dsa\target\installer\setup-0.0.9.exe -o extracted
           if ($LASTEXITCODE -ne 0) { throw "wix burn extract failed" }
           Get-ChildItem -Recurse -File extracted | ForEach-Object { Write-Host $_.FullName }
-          if (-not (Get-ChildItem -Recurse -File extracted -Filter 'dsa-0.0.9.msi')) { throw "setup.exe does not carry the package" }
+          # The engine keeps payloads under generated names: the package is a0 and its image
+          # cabinet a1 (the README says to rename them).
+          $head = [System.IO.File]::ReadAllBytes("$PWD\extracted\a0")[0..3]
+          if (($head -join ',') -ne '208,207,17,224') { throw "a0 is not the package (an MSI starts D0 CF 11 E0)" }
+          $head = [System.IO.File]::ReadAllBytes("$PWD\extracted\a1")[0..3]
+          if ([System.Text.Encoding]::ASCII.GetString($head) -ne 'MSCF') { throw "a1 is not the image cabinet" }
 
       # setup.exe through its screens, the way a person uses it: Install, then Done; then
       # Uninstall from the screen a second start shows. Pictures of each screen on the way.

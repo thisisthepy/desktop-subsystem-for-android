@@ -14,7 +14,9 @@ The results land in `dsa/target/installer/`.
 
 A release ships `setup.exe` only. The package (`dsa-<version>.msi`, and `image.cab` when
 it carries an image) is inside it, and that MSI is what deployments with `msiexec` use.
-WiX's `wix burn extract setup-<version>.exe -o <folder>` takes it out. (`setup.exe /layout`
+WiX's `wix burn extract setup-<version>.exe -o <folder>` takes it out, under the names the
+engine keeps inside: `a0` is the package and `a1`, when there is one, the image cabinet.
+Rename them to `dsa-<version>.msi` and `image.cab` side by side. (`setup.exe /layout`
 copies only `setup.exe` itself, because the package is embedded in it.)
 
 ## What the package does
