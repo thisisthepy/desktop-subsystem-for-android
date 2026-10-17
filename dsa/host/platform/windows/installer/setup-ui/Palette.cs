@@ -75,26 +75,33 @@ namespace Dsa.Setup
         public static void ApplyBackdrop(IntPtr handle, bool dark)
         {
             int value = dark ? 1 : 0;
-            DwmSetWindowAttribute(handle, DwmwaUseImmersiveDarkMode, ref value, sizeof(int));
+            int darkResult = DwmSetWindowAttribute(handle, DwmwaUseImmersiveDarkMode, ref value, sizeof(int));
             if (!HasMica)
             {
+                BackdropResult = string.Format("dark frame 0x{0:X8}", darkResult);
                 return;
             }
 
             value = DwmwcpRound;
-            DwmSetWindowAttribute(handle, DwmwaWindowCornerPreference, ref value, sizeof(int));
+            int cornerResult = DwmSetWindowAttribute(handle, DwmwaWindowCornerPreference, ref value, sizeof(int));
+            int micaResult;
             if (Build >= 22621)
             {
                 value = DwmsbtMainWindow;
-                DwmSetWindowAttribute(handle, DwmwaSystembackdropType, ref value, sizeof(int));
+                micaResult = DwmSetWindowAttribute(handle, DwmwaSystembackdropType, ref value, sizeof(int));
             }
             else
             {
                 // Windows 11 21H2 knew Mica only by this older, undocumented attribute.
                 value = 1;
-                DwmSetWindowAttribute(handle, DwmwaMicaEffect, ref value, sizeof(int));
+                micaResult = DwmSetWindowAttribute(handle, DwmwaMicaEffect, ref value, sizeof(int));
             }
+
+            BackdropResult = string.Format("dark frame 0x{0:X8}, rounded corners 0x{1:X8}, Mica 0x{2:X8}", darkResult, cornerResult, micaResult);
         }
+
+        /// <summary>What the window manager answered to the last backdrop request, for the log.</summary>
+        public static string BackdropResult { get; private set; } = "not asked";
 
         // The tokens of the approved design. Translucent fills sit on Mica, or on the solid
         // background where there is no Mica.
