@@ -192,6 +192,23 @@ fn fr14_dsa_shows_news_about_an_update_on_its_own_line() {
 }
 
 #[test]
+fn fr2_dsa_shows_the_guest_console_of_a_failed_start_below_the_status_line() {
+    use dsa_host_core::host_api::Status;
+    let line = dsa_cli::describe(&Status {
+        state: SessionState::Stopped,
+        last_reason: Some(
+            "the Android VM exited during boot\nlast console lines:\n  Kernel panic".into(),
+        ),
+        update_notice: None,
+    });
+    assert_eq!(
+        line,
+        "Android: Stopped (last stopped: the Android VM exited during boot)\n\
+         last console lines:\n  Kernel panic"
+    );
+}
+
+#[test]
 fn fr15_dsa_update_is_parsed() {
     let invocation = parse(&args("update --wait --timeout 300")).unwrap();
     assert_eq!(invocation.command, Cmd::Update);

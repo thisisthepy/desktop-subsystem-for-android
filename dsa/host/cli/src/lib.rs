@@ -97,10 +97,21 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
 }
 
 /// A line describing `status`, and one more for each piece of news about an update.
+///
+/// A reason's first line goes in the status line. Any further lines (the end of the guest's
+/// console, after a failed start) follow it as they are, so they can be copied whole.
 pub fn describe(status: &Status) -> String {
     let mut line = format!("Android: {}", status.state);
     if let Some(reason) = &status.last_reason {
-        let _ = write!(line, " (last stopped: {reason})");
+        let mut lines = reason.lines();
+        let _ = write!(
+            line,
+            " (last stopped: {})",
+            lines.next().unwrap_or_default()
+        );
+        for detail in lines {
+            let _ = write!(line, "\n{detail}");
+        }
     }
     for notice in status
         .update_notice
