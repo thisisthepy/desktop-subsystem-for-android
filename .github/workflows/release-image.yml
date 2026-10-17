@@ -11,6 +11,10 @@
 #   DSA_RELEASE_SIGNING_KEY   the lists' Ed25519 key from dsa-release keygen
 # The service trusts both lists through the public half of the second one, which
 # dsa-release public-key prints.
+#
+# With rebuild_images off it builds no kernel and no image: the installer takes the kernel
+# from the newest published image and the trust key from the published list, after checking
+# both. That is for a release that changes only the program.
 
 name: Image release
 
@@ -21,6 +25,11 @@ on:
         description: "Also publish the installer as this version (for example 0.1.0); empty for images only"
         required: false
         default: ""
+      rebuild_images:
+        description: "Build the kernel and the images again; off to publish only the installer with the published images"
+        type: boolean
+        required: false
+        default: true
 
 concurrency:
   group: release-image
@@ -32,6 +41,7 @@ permissions:
 jobs:
   kernel:
     name: Build the guest kernel (x86_64)
+    if: inputs.rebuild_images
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -141,9 +151,11 @@ jobs:
   list:
     name: Sign and publish the release list
     needs: image
+    if: inputs.rebuild_images
     runs-on: ubuntu-latest
     outputs:
       public_key: ${{ steps.sign.outputs.public_key }}
+      newest_major: ${{ steps.write.outputs.newest_major }}
     permissions:
       contents: write
     env:
@@ -158,11 +170,14 @@ jobs:
           path: entries
 
       - name: Write the list
+        id: write
         run: |
           jq -n --slurpfile inputs dsa/guest/image/inputs.json --slurpfile images <(jq -s . entries/*.json) \
             '{format: 1, supported_majors: ([$inputs[0].images[].android_major] | sort), images: $images[0]}' \
             > images.json
           cat images.json
+          # The installer's first screen names the newest Android the list supports.
+          echo "newest_major=$(jq '.supported_majors | max' images.json)" >> "$GITHUB_OUTPUT"
 
       - name: Sign and check the list
         id: sign
@@ -195,10 +210,67 @@ jobs:
               --notes "The signed list of Android images the Desktop Subsystem for Android service reads."
           fi
 
+  # Instead of kernel, image and list: what the installer needs, from the published release.
+  published:
+    name: Take the kernel and the trust key from the published images
+    if: ${{ !inputs.rebuild_images }}
+    runs-on: ubuntu-latest
+    outputs:
+      public_key: ${{ steps.list.outputs.public_key }}
+      newest_major: ${{ steps.list.outputs.newest_major }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the published list
+        id: list
+        working-directory: dsa
+        env:
+          SIGNING_KEY: ${{ secrets.DSA_RELEASE_SIGNING_KEY }}
+        run: |
+          if [[ -z "$SIGNING_KEY" ]]; then
+            echo "::error::The DSA_RELEASE_SIGNING_KEY secret is not set; see the top of this workflow." >&2
+            exit 1
+          fi
+          gh release download images --pattern 'images.json*' --dir ..
+          cargo build -q --release -p dsa-host-core --bin dsa-release
+          umask 077
+          key="$RUNNER_TEMP/release.key"
+          printf '%s\n' "$SIGNING_KEY" > "$key"
+          public="$(target/release/dsa-release public-key "$key")"
+          rm -f "$key"
+          target/release/dsa-release verify "$public" ../images.json
+          echo "public_key=$public" >> "$GITHUB_OUTPUT"
+          echo "newest_major=$(jq '.supported_majors | max' ../images.json)" >> "$GITHUB_OUTPUT"
+
+      # Every image carries the same kernel; the newest image's is taken and checked
+      # against the hash the signed list gives.
+      - name: Take the kernel
+        run: |
+          read -r url sha < <(jq -r '.images | max_by([.android_major, .build])
+            | .files[] | select(.name == "bzImage") | "\(.url) \(.sha256)"' images.json)
+          if [[ -z "$url" ]]; then
+            echo "::error::The newest published image has no bzImage." >&2
+            exit 1
+          fi
+          mkdir -p .scratch/kernel-out
+          curl -fsSL -o .scratch/kernel-out/bzImage "$url"
+          echo "$sha  .scratch/kernel-out/bzImage" | sha256sum -c -
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-kernel
+          path: .scratch/kernel-out/bzImage
+          if-no-files-found: error
+
   installer:
     name: Build and publish the installer (windows-latest)
-    if: inputs.installer_version != ''
-    needs: [kernel, list]
+    # After the list, or after published when the images are not rebuilt.
+    if: >-
+      ${{ !cancelled() && inputs.installer_version != '' &&
+          (needs.list.result == 'success' || needs.published.result == 'success') }}
+    needs: [kernel, list, published]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -224,14 +296,16 @@ jobs:
           dsa/host/platform/windows/installer/build.ps1 -Version ${{ inputs.installer_version }}
           -Kernel .scratch/kernel-out/bzImage
           -ListUrl https://github.com/${{ github.repository }}/releases/download/images/images.json
-          -TrustedKey ${{ needs.list.outputs.public_key }}
+          -TrustedKey ${{ needs.list.outputs.public_key || needs.published.outputs.public_key }}
+          -AndroidMajor ${{ needs.list.outputs.newest_major || needs.published.outputs.newest_major }}
           -ProgramListUrl https://github.com/${{ github.repository }}/releases/download/images/program.json
 
       - name: Publish the installer
         run: |
           $version = '${{ inputs.installer_version }}'
-          $files = "dsa/target/installer/setup-$version.exe", "dsa/target/installer/dsa-$version.msi"
-          gh release create "v$version" @files --target $env:GITHUB_SHA `
+          # Only setup.exe: it carries the package (dsa-<version>.msi) inside, and
+          # wix burn extract takes it out for msiexec-based deployments.
+          gh release create "v$version" "dsa/target/installer/setup-$version.exe" --target $env:GITHUB_SHA `
             --title "Desktop Subsystem for Android $version" `
             --notes "Run setup-$version.exe. It installs the service and downloads the newest supported Android image."
           if ($LASTEXITCODE -ne 0) { throw "publishing the installer failed" }
@@ -261,7 +335,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "signing the program list failed" }
             $public = & $tool public-key $key
           } finally { Remove-Item -Force $key }
-          if ($public -ne '${{ needs.list.outputs.public_key }}') { throw "the key that signed the program list is not the one the installer trusts" }
+          if ($public -ne '${{ needs.list.outputs.public_key || needs.published.outputs.public_key }}') { throw "the key that signed the program list is not the one the installer trusts" }
           & $tool verify-program $public program.json
           if ($LASTEXITCODE -ne 0) { throw "the program list does not verify" }
           Get-Content program.json

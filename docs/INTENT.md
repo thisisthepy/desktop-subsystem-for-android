@@ -190,13 +190,14 @@ VM이나 컨테이너를 만드는 일은 대부분 높은 권한이 필요하�
 
 - 검토한 대안: COM. Windows 표준이고 WSL이 쓰지만 Rust에서 다루기 복잡하고 코드가 많다. localhost TCP. 네트워크에 노출되고 권한을 운영체제가 강제하지 못한다. macOS의 XPC. 플랫폼 표준이지만 유닉스 소켓을 쓰면 Linux와 코드 경로가 하나다.
 
-### D16. Windows 설치 파일은 MSI이고, 브랜드 테마를 입힌 setup.exe로 감싼다
+### D16. Windows 설치 파일은 MSI이고, 우리 화면을 가진 setup.exe로 감싼다
 
 - 설치 본체는 WiX로 만든 MSI다. SYSTEM 서비스 등록과 제거를 MSI가 직접 하고, 회사 배포 도구(Intune, GPO)에서 그대로 쓸 수 있다. WiX는 빌드 도구라 우리 라이선스에 영향이 없다.
-- 사용자가 실행하는 것은 WiX Burn으로 만든 setup.exe다. Burn의 기본 부트스트래퍼에 우리 테마(XML 레이아웃, 이미지, 색, 글꼴)를 입혀 기본 WiX 화면보다 보기 좋게 만든다. .NET 같은 추가 런타임이 필요 없다.
+- 사용자가 실행하는 것은 WiX Burn으로 만든 setup.exe다. 화면은 Burn의 관리 코드 부트스트래퍼로, Windows에 내장된 .NET Framework 4.7.2 위의 WPF로 만든다. Windows 10 1803 이후와 Windows 11에는 이 런타임이 들어 있어서 사용자가 따로 받을 것이 없다.
+- 기본 부트스트래퍼에 테마를 입히는 방식은 쓰지 않는다. 컨트롤이 옛 Win32 모양이고 Mica, 둥근 모서리, 다크 모드, 직접 그린 타이틀바를 쓸 수 없어 Windows 11의 Fluent 화면을 만들 수 없다.
 - 가상 머신 플랫폼이 꺼져 있으면 설치 화면이 무엇을 켜야 하는지 알려 준다(SPEC FR-1). 설치 파일이 몰래 켜지는 않는다.
 - 동반 앱의 UI 프레임워크(PROJECT Q6)가 정해지면 설치 화면도 그 프레임워크로 옮길 수 있다.
-- 검토한 대안: MSIX. 서명이 필수이고 SYSTEM 서비스를 넣는 데 제약이 크다. Inno Setup. 단순하지만 MSI가 아니라 회사 배포 도구와 맞지 않는다. Advanced Installer, InstallShield. 상용이라 공개 CI에서 재현할 수 없다. .NET(WPF) 부트스트래퍼. 화면은 자유롭지만 .NET 런타임이 필요하다.
+- 검토한 대안: MSIX. 서명이 필수이고 SYSTEM 서비스를 넣는 데 제약이 크다. Inno Setup. 단순하지만 MSI가 아니라 회사 배포 도구와 맞지 않는다. Advanced Installer, InstallShield. 상용이라 공개 CI에서 재현할 수 없다. WinUI 3 화면. Windows App SDK 런타임을 따로 설치해야 한다. C++ Win32로 직접 그리기. 런타임은 필요 없지만 컨트롤을 모두 손으로 그려야 해 코드가 크게 늘어난다.
 
 ### D17. Waydroid의 이미지와 도구에 기대지 않는다
 

@@ -1,0 +1,8 @@
+<Project>
+  <!-- Build outputs go to dsa\target\setup-ui, beside the other build outputs, not into
+       this folder. (The intermediate folder must be set before the SDK is imported.) -->
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)..\..\..\..\..\target\setup-ui\obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)..\..\..\..\..\target\setup-ui\bin\</BaseOutputPath>
+  </PropertyGroup>
+</Project>
