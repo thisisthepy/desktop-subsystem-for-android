@@ -4,6 +4,9 @@
 resolver = "2"
 members = [
     "protocol/transport",
+    "protocol/schema",
+    "protocol/codegen",
+    "protocol/rust",
     "host/core",
     "host/platform/windows",
     "guest/transport",
@@ -12,9 +15,12 @@ members = [
 [workspace.package]
 edition = "2021"
 license = "Apache-2.0"
-rust-version = "1.80"
+rust-version = "1.85"
 publish = false
 
 [workspace.dependencies]
 dsa-transport = { path = "protocol/transport" }
+dsa-protocol-schema = { path = "protocol/schema" }
+dsa-protocol = { path = "protocol/rust" }
 dsa-host-core = { path = "host/core" }
+prost = "0.14"
