@@ -302,7 +302,7 @@ jobs:
           $version = '${{ inputs.installer_version }}'
           # The asset says what it is, its version, and what it runs on. "win" names the
           # system without the Microsoft mark, which no DSA file name carries.
-          $asset = "DSA-$version-win-x64-setup.exe"
+          $asset = "DSA-v$version-win-x64-setup.exe"
           $out = New-Item -ItemType Directory -Force dsa\target\release-assets
           Copy-Item "dsa/target/installer/setup-$version.exe" (Join-Path $out $asset)
           $hash = (Get-FileHash (Join-Path $out $asset) -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -321,5 +321,5 @@ jobs:
           Android is a trademark of Google LLC.
           "@
           gh release create "v$version" (Join-Path $out $asset) (Join-Path $out SHA256SUMS.txt) --target $env:GITHUB_SHA `
-            --title "DSA $version" --notes $notes --generate-notes
+            --title "DSA v$version" --notes $notes --generate-notes
           if ($LASTEXITCODE -ne 0) { throw "publishing the installer failed" }
