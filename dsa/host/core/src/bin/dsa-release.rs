@@ -6,6 +6,9 @@
 //! dsa-release public-key <secret.key>          prints the public half of a key
 //! dsa-release entry <version> <major> <build> <base-url> <file>...
 //!                                              prints one image entry for the list
+//! dsa-release image-entry <base-url> <image-dir>
+//!                                              the same, for a folder made by make-image.py:
+//!                                              its image.json and the files it names
 //! dsa-release sign <secret.key> <list.json>    writes <list.json>.sig
 //! dsa-release verify <public-key> <list.json>  checks <list.json>.sig and the list
 //! ```
@@ -23,6 +26,7 @@ use sha2::{Digest, Sha256};
 
 const USAGE: &str = "usage: dsa-release keygen <secret.key> | public-key <secret.key> | \
                      entry <version> <major> <build> <base-url> <file>... | \
+                     image-entry <base-url> <image-dir> | \
                      sign <secret.key> <list.json> | verify <public-key> <list.json>";
 
 fn hex(bytes: &[u8]) -> String {
@@ -63,9 +67,71 @@ fn entry(args: &[String]) -> Result<String, String> {
     if files.is_empty() {
         return Err("name at least one image file".into());
     }
+    let image = ImageEntry {
+        version: version.clone(),
+        android_major: major
+            .parse()
+            .map_err(|_| format!("{major:?} is not a major version"))?,
+        build: build
+            .parse()
+            .map_err(|_| format!("{build:?} is not a build number"))?,
+        files: describe(base, files.iter().map(Path::new))?,
+    };
+    Ok(serde_json::to_string_pretty(&image).expect("an entry serialises"))
+}
+
+/// An entry for an image folder: the version and build come from its `image.json`, and
+/// the files are `image.json` and every file it names. Anything else in the folder, such
+/// as the signed build inputs, is not part of the image.
+fn image_entry(base: &str, dir: &str) -> Result<String, String> {
+    let dir = Path::new(dir);
+    let manifest_path = dir.join("image.json");
+    let text = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("reading {}: {e}", manifest_path.display()))?;
+    let manifest: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("{} is not JSON: {e}", manifest_path.display()))?;
+    let field = |name: &str| {
+        manifest
+            .get(name)
+            .ok_or_else(|| format!("{} has no {name}", manifest_path.display()))
+    };
+    let version = field("version")?
+        .as_str()
+        .ok_or("the version in image.json is not text")?
+        .to_string();
+    let android_major = field("android_major")?
+        .as_u64()
+        .and_then(|m| u32::try_from(m).ok())
+        .ok_or("android_major in image.json is not a number")?;
+    let build = field("build")?
+        .as_u64()
+        .ok_or("build in image.json is not a number")?;
+    let mut names: Vec<String> = field("files")?
+        .as_object()
+        .ok_or("files in image.json is not an object")?
+        .keys()
+        .cloned()
+        .collect();
+    names.push("image.json".into());
+    names.sort();
+    let paths: Vec<_> = names.iter().map(|n| dir.join(n)).collect();
+    let image = ImageEntry {
+        version,
+        android_major,
+        build,
+        files: describe(base, paths.iter().map(|p| p.as_path()))?,
+    };
+    Ok(serde_json::to_string_pretty(&image).expect("an entry serialises"))
+}
+
+/// The list's description of each file: its name, where it will be served, size and hash.
+fn describe<'a>(
+    base: &str,
+    files: impl Iterator<Item = &'a Path>,
+) -> Result<Vec<FileEntry>, String> {
     let mut entries = Vec::new();
-    for file in files {
-        let path = Path::new(file);
+    for path in files {
+        let file = path.display().to_string();
         let name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -91,17 +157,7 @@ fn entry(args: &[String]) -> Result<String, String> {
             sha256: hex(&hash.finalize()),
         });
     }
-    let image = ImageEntry {
-        version: version.clone(),
-        android_major: major
-            .parse()
-            .map_err(|_| format!("{major:?} is not a major version"))?,
-        build: build
-            .parse()
-            .map_err(|_| format!("{build:?} is not a build number"))?,
-        files: entries,
-    };
-    Ok(serde_json::to_string_pretty(&image).expect("an entry serialises"))
+    Ok(entries)
 }
 
 fn run(args: &[String]) -> Result<String, String> {
@@ -111,6 +167,7 @@ fn run(args: &[String]) -> Result<String, String> {
             Ok(hex(read_key(key)?.verifying_key().as_bytes()))
         }
         [command, rest @ ..] if command == "entry" => entry(rest),
+        [command, base, dir] if command == "image-entry" => image_entry(base, dir),
         [command, key, list] if command == "sign" => {
             let bytes = std::fs::read(list).map_err(|e| format!("reading {list}: {e}"))?;
             let signature = hex(&read_key(key)?.sign(&bytes).to_bytes());

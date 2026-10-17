@@ -8,7 +8,9 @@
   images the service downloaded since, and keeps each user's Android data.
 
   Build variables (-d): Version, SourceDir (the built binaries and dsa-hostd.json), and,
-  when an image is bundled, ImageDir and ImageVersion.
+  when an image is bundled, ImageDir and ImageVersion, plus ImageManifest when the image
+  is one make-image.py made (image.json, initrd.img, disk.vhdx) and ImageKernel when it
+  carries its own bzImage.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
     <Package Name="Desktop Subsystem for Android"
@@ -18,7 +20,12 @@
              Scope="perMachine"
              Compressed="yes">
         <MajorUpgrade DowngradeErrorMessage="A newer Desktop Subsystem for Android is already installed." />
-        <MediaTemplate EmbedCab="yes" MaximumUncompressedMediaSize="2000" />
+        <Media Id="1" Cabinet="dsa.cab" EmbedCab="yes" />
+        <?ifdef ImageVersion ?>
+        <!-- An MSI holds at most 2 GB and an image comes close to that, so the image's
+             cabinet sits beside the package. setup.exe carries it inside. -->
+        <Media Id="2" Cabinet="image.cab" EmbedCab="no" CompressionLevel="high" />
+        <?endif?>
 
         <!-- Virtual Machine Platform brings vmcompute.exe. Without it no VM can run, so setup
              stops and says how to turn the feature on; it never turns it on by itself. -->
@@ -98,9 +105,26 @@
 
         <?ifdef ImageVersion ?>
         <ComponentGroup Id="FirstImage" Directory="FIRSTIMAGEFOLDER">
-            <Component Id="FirstImage" Guid="*">
-                <File Id="FirstImage" Source="$(ImageDir)\system.vhdx" KeyPath="yes" />
+            <?ifdef ImageManifest ?>
+            <Component Id="FirstImageManifest" Guid="*">
+                <File Id="FirstImageManifest" Source="$(ImageDir)\image.json" KeyPath="yes" DiskId="2" />
             </Component>
+            <Component Id="FirstImageDisk" Guid="*">
+                <File Id="FirstImageDisk" Source="$(ImageDir)\disk.vhdx" KeyPath="yes" DiskId="2" />
+            </Component>
+            <Component Id="FirstImageInitrd" Guid="*">
+                <File Id="FirstImageInitrd" Source="$(ImageDir)\initrd.img" KeyPath="yes" DiskId="2" />
+            </Component>
+            <?ifdef ImageKernel ?>
+            <Component Id="FirstImageKernel" Guid="*">
+                <File Id="FirstImageKernel" Source="$(ImageDir)\bzImage" KeyPath="yes" DiskId="2" />
+            </Component>
+            <?endif?>
+            <?else?>
+            <Component Id="FirstImage" Guid="*">
+                <File Id="FirstImage" Source="$(ImageDir)\system.vhdx" KeyPath="yes" DiskId="2" />
+            </Component>
+            <?endif?>
         </ComponentGroup>
         <?endif?>
 

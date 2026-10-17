@@ -19,8 +19,11 @@ The results land in `dsa/target/installer/`.
 - Writes the service's configuration to `C:\ProgramData\DSA\dsa-hostd.json`. A later
   install keeps an edited file.
 - Puts the guest kernel in `C:\Program Files\DSA\vm\` and, when built with `-ImageDir`,
-  the first Android image in the update store. Without an image the service downloads the
-  newest supported one from `-ListUrl`.
+  the first Android image in the update store. `-ImageDir` names a folder made by
+  `dsa/guest/image/make-image.py`, and the image's version comes from its `image.json`.
+  Without an image the service downloads the newest supported one from `-ListUrl`.
+- Keeps the image in `image.cab` beside the MSI, because an MSI holds at most 2 GB.
+  `setup.exe` carries both.
 - Lets Hyper-V's virtual machines (`S-1-5-83-0`) read the kernel and the images, which a VM
   needs to boot from them. `C:\ProgramData\DSA` is otherwise for SYSTEM and Administrators
   only.
