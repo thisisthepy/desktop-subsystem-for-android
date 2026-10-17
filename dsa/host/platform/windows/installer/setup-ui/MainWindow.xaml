@@ -59,7 +59,7 @@
                 </Image>
                 <StackPanel Margin="16,0,0,0" VerticalAlignment="Center">
                     <TextBlock x:Name="HeroTitle" Style="{StaticResource Subtitle}" />
-                    <TextBlock x:Name="HeroPublisher" Style="{StaticResource Caption}" />
+                    <TextBlock x:Name="HeroPublisher" Style="{StaticResource Caption}" AutomationProperties.AutomationId="HeroPublisher" />
                     <StackPanel x:Name="Chips" Orientation="Horizontal" Margin="0,8,0,0">
                         <Border Style="{StaticResource Chip}">
                             <TextBlock x:Name="VersionChip" Style="{StaticResource Caption}" TextWrapping="NoWrap" />

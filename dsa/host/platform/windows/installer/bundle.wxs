@@ -18,7 +18,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
     <Bundle Name="Desktop Subsystem for Android"
-            Manufacturer="thisisthepy"
+            Manufacturer="Thisisthepy"
             Version="$(Version)"
             UpgradeCode="706723c3-776c-4ab2-8402-780943fda74c"
             IconSourceFile="setup-ui\assets\logo.ico">
