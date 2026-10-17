@@ -1,0 +1,139 @@
+// The local API between the DSA service and the apps in a user's session.
+//
+// The service does what needs privileges (starting the Android VM); the apps (the start
+// menu entries, the compositor, the settings screen, the command line tool) ask it over
+// this API. This file is the only definition of its messages; the codecs are generated
+// from it (see README.md).
+//
+// The caller's identity is the user the operating system reports for the connection.
+// Nothing in these messages names a user, so a client cannot claim to be someone else, and
+// every request acts on the caller's own Android only.
+//
+// The same rules as control.proto keep the handshake readable across versions: Envelope
+// fields 1 to 3, and every field of Hello, HelloAccepted, HelloRejected and RejectReason,
+// keep their numbers and types forever.
+
+syntax = "proto3";
+
+package dsa.hostapi.v1;
+
+option java_package = "io.github.thisisthepy.dsa.hostapi.v1";
+option java_multiple_files = true;
+option optimize_for = LITE_RUNTIME;
+
+// The protocol version. CURRENT goes up when the meaning of existing messages changes.
+enum ProtocolVersion {
+  PROTOCOL_VERSION_UNSPECIFIED = 0;
+  PROTOCOL_VERSION_CURRENT = 1;
+}
+
+// Which end of the connection a peer is.
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_SERVICE = 1;
+  ROLE_CLIENT = 2;
+}
+
+// The first frame on a new connection, sent by the client.
+message Hello {
+  uint32 protocol_version = 1;
+  // SHA-256 of the normalised definition the sender was generated from (32 bytes).
+  bytes schema_hash = 2;
+  Role role = 3;
+  // Free text naming the sender's build, for error reports only.
+  string build = 4;
+}
+
+// The service's answer when the client's Hello matches.
+message HelloAccepted {
+  Hello service = 1;
+}
+
+// Why the service refused a connection.
+enum RejectReason {
+  REJECT_REASON_UNSPECIFIED = 0;
+  REJECT_REASON_PROTOCOL_VERSION_MISMATCH = 1;
+  REJECT_REASON_SCHEMA_HASH_MISMATCH = 2;
+  REJECT_REASON_UNEXPECTED_ROLE = 3;
+  REJECT_REASON_MALFORMED_HELLO = 4;
+}
+
+// The service's answer when it refuses the client. It closes the connection after it.
+message HelloRejected {
+  RejectReason reason = 1;
+  // A sentence a person can act on, naming both sides' values.
+  string detail = 2;
+  Hello service = 3;
+}
+
+// Where the caller's Android is in its life.
+enum SessionState {
+  SESSION_STATE_UNSPECIFIED = 0;
+  SESSION_STATE_STOPPED = 1;
+  SESSION_STATE_STARTING = 2;
+  SESSION_STATE_ACTIVE = 3;
+  SESSION_STATE_DOZING = 4;
+  SESSION_STATE_FROZEN = 5;
+  SESSION_STATE_STOPPING = 6;
+}
+
+// Asks for the state of the caller's Android.
+message GetStatus {}
+
+// Starts the caller's Android. Returns at once; the state moves on its own.
+message StartSession {}
+
+// Stops the caller's Android. Returns at once; the state moves on its own.
+message StopSession {}
+
+// The caller's Android as the service sees it.
+message Status {
+  SessionState state = 1;
+  // Why the session last stopped, or why stopping it went wrong, in words a person can act
+  // on. Empty when it has not stopped yet.
+  string last_reason = 2;
+}
+
+// What went wrong with a request.
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  // The request named nothing the service understands.
+  ERROR_CODE_UNKNOWN_REQUEST = 1;
+  // The service could not provide an Android for this user.
+  ERROR_CODE_UNAVAILABLE = 2;
+}
+
+message Error {
+  ErrorCode code = 1;
+  string detail = 2;
+}
+
+// A request from the client. The service answers each with one Response carrying the same
+// id, in the order the requests arrived.
+message Request {
+  uint64 id = 1;
+  oneof body {
+    GetStatus get_status = 2;
+    StartSession start_session = 3;
+    StopSession stop_session = 4;
+  }
+}
+
+message Response {
+  uint64 id = 1;
+  oneof body {
+    Status status = 2;
+    Error error = 3;
+  }
+}
+
+// The one message type on the wire. Each frame carries exactly one.
+message Envelope {
+  oneof body {
+    Hello hello = 1;
+    HelloAccepted hello_accepted = 2;
+    HelloRejected hello_rejected = 3;
+    Request request = 4;
+    Response response = 5;
+  }
+}
