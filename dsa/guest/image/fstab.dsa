@@ -1,0 +1,23 @@
+# The guest's mount table on Hyper-V. Every partition is on the user's one Android disk,
+# which first-stage init finds by the super partition's UUID (androidboot.boot_part_uuid),
+# so /dev/block/by-name links exist for all of them.
+system /system erofs ro wait,logical,first_stage_mount,slotselect,avb=vbmeta_system,avb_keys=/avb
+system /system ext4 noatime,ro,errors=panic wait,logical,first_stage_mount,slotselect,avb=vbmeta_system,avb_keys=/avb
+system_ext /system_ext erofs ro wait,logical,first_stage_mount,slotselect,avb=vbmeta_system,nofail
+system_ext /system_ext ext4 noatime,ro,errors=panic wait,logical,first_stage_mount,slotselect,avb=vbmeta_system,nofail
+product /product erofs ro wait,logical,first_stage_mount,slotselect,avb,nofail
+product /product ext4 noatime,ro,errors=panic wait,logical,first_stage_mount,slotselect,avb,nofail
+vendor /vendor erofs ro wait,logical,first_stage_mount,slotselect,avb=vbmeta
+vendor /vendor ext4 noatime,ro,errors=panic wait,logical,first_stage_mount,slotselect,avb=vbmeta
+odm /odm erofs ro wait,logical,first_stage_mount,slotselect,avb,nofail
+odm /odm ext4 noatime,ro,errors=panic wait,logical,first_stage_mount,slotselect,avb,nofail
+system_dlkm /system_dlkm erofs ro wait,logical,first_stage_mount,slotselect,avb=vbmeta_system_dlkm,avb_keys=/avb,nofail
+system_dlkm /system_dlkm ext4 noatime,ro,errors=panic wait,logical,first_stage_mount,slotselect,avb=vbmeta_system_dlkm,avb_keys=/avb,nofail
+vendor_dlkm /vendor_dlkm erofs ro wait,logical,first_stage_mount,slotselect,avb=vbmeta_vendor_dlkm,nofail
+vendor_dlkm /vendor_dlkm ext4 noatime,ro,errors=panic wait,logical,first_stage_mount,slotselect,avb=vbmeta_vendor_dlkm,nofail
+odm_dlkm /odm_dlkm erofs ro wait,logical,first_stage_mount,slotselect,avb,nofail
+odm_dlkm /odm_dlkm ext4 noatime,ro,errors=panic wait,logical,first_stage_mount,slotselect,avb,nofail
+/dev/block/by-name/metadata /metadata ext4 nodev,noatime,nosuid wait,check,formattable,first_stage_mount
+/dev/block/by-name/misc /misc emmc defaults defaults
+/dev/block/by-name/userdata /data ext4 nodev,noatime,nosuid,errors=panic latemount,wait,check,quota,formattable,keydirectory=/metadata/vold/metadata_encryption,checkpoint=block,fileencryption=aes-256-xts:aes-256-hctr2
+/dev/block/zram0 none swap defaults zramsize=50%

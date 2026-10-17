@@ -1,0 +1,62 @@
+# Makes the guest images from the pinned AOSP build inputs (dsa/guest/image/inputs.json)
+# and checks them: the shell apps are gone, the build is not debuggable, nothing is signed
+# with AOSP's test keys, and the user disk template and ramdisk match image.json. Each run
+# signs with a throwaway key set; a release signs with the project's keys.
+
+name: Image test
+
+on:
+  pull_request:
+    paths:
+      - "dsa/guest/image/**"
+      - ".github/workflows/test-image.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: test-image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: Make and check the guest image (ubuntu-latest, Android ${{ matrix.android }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        android: [17, 16]
+    steps:
+      - uses: actions/checkout@v4
+
+      # The inputs and the images take about 20 GB; the runner has less free by default.
+      - name: Make room
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Install the disk tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gdisk qemu-utils
+
+      - name: Fetch the pinned inputs
+        run: dsa/guest/image/fetch.sh ${{ matrix.android }}
+
+      - name: Make a throwaway key set
+        run: dsa/guest/image/make-keys.sh .scratch/image-keys
+
+      - name: Make the image
+        run: python3 dsa/guest/image/make-image.py --major ${{ matrix.android }} --keys .scratch/image-keys
+
+      - name: Check the image
+        run: python3 dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
+
+      - name: Keep the ramdisk and the manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-android-${{ matrix.android }}
+          path: |
+            dsa/target/image/*/image.json
+            dsa/target/image/*/initrd.img
