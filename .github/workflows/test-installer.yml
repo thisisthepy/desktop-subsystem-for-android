@@ -1,7 +1,8 @@
-# Builds the Windows installer and checks it on a real Windows machine: installs the
-# package, checks the service and the dsa command, shows setup.exe's first screen, and
-# uninstalls. The kernel and the Android image are built elsewhere, so the package here
-# carries a placeholder kernel and a small stand-in image laid out like a real one.
+# Builds the Windows installer and checks it on a real Windows machine: takes pictures of
+# setup.exe's screens, installs the package, checks the service and the dsa command, and
+# uninstalls; then does the same through setup.exe, quietly and through its screens. The
+# kernel and the Android image are built elsewhere, so the package here carries a
+# placeholder kernel and a small stand-in image laid out like a real one.
 
 name: Installer test
 
@@ -54,8 +55,37 @@ jobs:
       - name: Build the package and setup.exe
         run: >
           dsa/host/platform/windows/installer/build.ps1 -Version 0.1.0 -PlaceholderKernel
-          -ImageDir .scratch\stand-in-image
+          -ImageDir .scratch\stand-in-image -AndroidMajor 17
           -PipeSddl "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)"
+
+      # Nothing is installed yet, so setup.exe opens on its first screen. Pictures of it in
+      # the light and the dark theme, of Change, and of the command line help.
+      - name: Take pictures of setup.exe's first screens
+        run: |
+          . .github/scripts/installer/setup-ui.ps1
+          New-Item -ItemType Directory -Force screens | Out-Null
+          foreach ($theme in 'light', 'dark') {
+            Set-AppTheme -Dark:($theme -eq 'dark')
+            $setup = Start-Process 'dsa\target\installer\setup-0.1.0.exe' -PassThru
+            $null = $setup.Handle
+            Wait-SetupControl InstallButton -Enabled | Out-Null
+            Save-SetupScreen "$PWD\screens\$theme-install.png"
+            if ($theme -eq 'light') { Copy-Item "screens\light-install.png" setup-screen.png }
+            Invoke-SetupButton ChangeButton
+            Wait-SetupControl ProgramFolderBox | Out-Null
+            Save-SetupScreen "$PWD\screens\$theme-change.png"
+            Invoke-SetupButton CancelButton
+            Invoke-SetupButton CancelButton
+            $code = Wait-SetupExit $setup
+            if ($code -ne 1602) { throw "closing setup.exe from its first screen returned $code, not 1602" }
+          }
+          Set-AppTheme
+          $setup = Start-Process 'dsa\target\installer\setup-0.1.0.exe' -ArgumentList '/?' -PassThru
+          $null = $setup.Handle
+          Wait-SetupControl CloseButton -Enabled | Out-Null
+          Save-SetupScreen "$PWD\screens\light-help.png"
+          Invoke-SetupButton CloseButton
+          Wait-SetupExit $setup | Out-Null
 
       - name: Install the package
         run: |
@@ -89,17 +119,6 @@ jobs:
             throw "the configuration does not name the first image"
           }
 
-      - name: Show the first screen of setup.exe
-        run: |
-          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-          $setup = Start-Process 'dsa\target\installer\setup-0.1.0.exe' -PassThru
-          Start-Sleep -Seconds 8
-          $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bitmap = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
-          [System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
-          $bitmap.Save("$PWD\setup-screen.png")
-          Stop-Process -Id $setup.Id -Force -ErrorAction SilentlyContinue
-
       - name: Uninstall
         run: |
           $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/x', 'dsa\target\installer\dsa-0.1.0.msi', '/qn', '/l*v', 'uninstall.log'
@@ -109,7 +128,68 @@ jobs:
           if (Test-Path "$env:DATA_DIR\images") { throw "the downloaded images are still there" }
           if (-not (Test-Path "$env:LOCALAPPDATA\DSA")) { throw "each user's Android folder must stay" }
 
-      - name: Keep the installer, the logs and the screenshot
+      # setup.exe without its screens, into folders named on the command line.
+      - name: Install and uninstall quietly with setup.exe
+        env:
+          BUNDLE_PROGRAM_DIR: 'C:\DSA Bundle\Program'
+          BUNDLE_DATA_DIR: 'C:\DSA Bundle\Data'
+        run: |
+          $p = Start-Process 'dsa\target\installer\setup-0.1.0.exe' -Wait -PassThru -ArgumentList '/quiet', '/norestart', '/log', "$PWD\bundle-install.log", "InstallFolder=`"$env:BUNDLE_PROGRAM_DIR`"", "DataFolder=`"$env:BUNDLE_DATA_DIR`""
+          if ($p.ExitCode -ne 0) { Get-Content bundle-install.log -Tail 80; throw "setup.exe /quiet failed ($($p.ExitCode))" }
+          $service = Get-Service DsaHost
+          if ($service.Status -ne 'Running') { throw "DsaHost is $($service.Status)" }
+          if (-not (Test-Path "$env:BUNDLE_PROGRAM_DIR\dsa.exe")) { throw "the program is not in the folder named on the command line" }
+          if (-not (Test-Path "$env:BUNDLE_DATA_DIR\dsa-hostd.json")) { throw "the configuration is not in the folder named on the command line" }
+          $out = & "$env:BUNDLE_PROGRAM_DIR\dsa.exe" status 2>&1
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) { throw "dsa status: $out" }
+
+          $p = Start-Process 'dsa\target\installer\setup-0.1.0.exe' -Wait -PassThru -ArgumentList '/quiet', '/uninstall', '/norestart', '/log', "$PWD\bundle-uninstall.log"
+          if ($p.ExitCode -ne 0) { Get-Content bundle-uninstall.log -Tail 80; throw "setup.exe /quiet /uninstall failed ($($p.ExitCode))" }
+          if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
+          if (Test-Path "$env:BUNDLE_PROGRAM_DIR\dsa.exe") { throw "the program is still there" }
+
+      # setup.exe through its screens, the way a person uses it: Install, then Done; then
+      # Uninstall from the screen a second start shows. Pictures of each screen on the way.
+      - name: Install and uninstall through setup.exe's screens
+        run: |
+          . .github/scripts/installer/setup-ui.ps1
+          Set-AppTheme
+          $setup = Start-Process 'dsa\target\installer\setup-0.1.0.exe' -ArgumentList '/log', "$PWD\ui-install.log" -PassThru
+          $null = $setup.Handle
+          Invoke-SetupButton InstallButton
+          # Installing the stand-in package is quick, so the picture of the progress screen
+          # is taken when it can be; the result is what the test checks.
+          try {
+            Wait-SetupControl ProgressBar -Seconds 30 | Out-Null
+            Save-SetupScreen "$PWD\screens\light-progress.png"
+          } catch { Write-Host "no picture of the progress screen: $_" }
+          Wait-SetupControl DoneButton -Seconds 300 | Out-Null
+          Save-SetupScreen "$PWD\screens\light-done.png"
+          $title = Get-SetupText ResultTitle
+          if ($title -ne 'Installed') { throw "setup.exe ended on '$title'" }
+          Invoke-SetupButton DoneButton
+          $code = Wait-SetupExit $setup
+          if ($code -ne 0) { Get-Content ui-install.log -Tail 80; throw "setup.exe returned $code" }
+          if ((Get-Service DsaHost).Status -ne 'Running') { throw "DsaHost is not running" }
+
+          Set-AppTheme -Dark
+          $setup = Start-Process 'dsa\target\installer\setup-0.1.0.exe' -ArgumentList '/log', "$PWD\ui-uninstall.log" -PassThru
+          $null = $setup.Handle
+          Wait-SetupControl UninstallButton -Enabled | Out-Null
+          Save-SetupScreen "$PWD\screens\dark-maintenance.png"
+          Invoke-SetupButton UninstallButton
+          Wait-SetupControl DoneButton -Seconds 300 | Out-Null
+          Save-SetupScreen "$PWD\screens\dark-uninstalled.png"
+          $title = Get-SetupText ResultTitle
+          if ($title -ne 'Uninstalled') { throw "setup.exe ended on '$title'" }
+          Invoke-SetupButton DoneButton
+          $code = Wait-SetupExit $setup
+          Set-AppTheme
+          if ($code -ne 0) { Get-Content ui-uninstall.log -Tail 80; throw "setup.exe returned $code" }
+          if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
+
+      - name: Keep the installer, the logs and the pictures
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -120,4 +200,7 @@ jobs:
             dsa/target/installer/*.exe
             install.log
             uninstall.log
+            bundle-*.log
+            ui-*.log
             setup-screen.png
+            screens/*.png
