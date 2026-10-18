@@ -3,15 +3,18 @@
     uv run dsa/guest/image/check-image.py dsa/target/image/17.0.0-16373615 .scratch/image-keys
 
 It fails when the shell apps are still there, when the build is still debuggable, when an
-app is not signed with one of the keys in the key folder, or when the files do not match
-image.json.
+app is not signed with one of the keys in the key folder, when the files do not match
+image.json, or when the ramdisk lacks the directories and links Android's first stage
+init needs.
 
 The signatures are read from the apps themselves. sign_target_files_apks copies
 META/apkcerts.txt over unchanged, so that file still names AOSP's keys after signing.
 """
 
 import base64
+import gzip
 import io
+import stat
 
 import hashlib
 import json
@@ -72,6 +75,43 @@ if info.get("format") != "vhdx":
 print(f"disk.vhdx: {info['virtual-size'] >> 30} GiB virtual, {info.get('actual-size', 0) >> 20} MiB on disk")
 if "androidboot.boot_part_uuid=" not in manifest["kernel_cmdline"]:
     problems.append("the kernel command line does not name the disk")
+
+def ramdisk_entries(data):
+    """Name to mode of every entry in a ramdisk of gzip'd newc cpio archives."""
+    entries = {}
+    archive = gzip.decompress(data)  # every gzip member, one after another
+    at = 0
+    while at + 110 <= len(archive):
+        header = archive[at:at + 110]
+        if header[:6] not in (b"070701", b"070702"):
+            # Padding after an archive's trailer; the next archive, if any, follows it.
+            following = archive.find(b"0707", at)
+            if following < 0:
+                break
+            at = following
+            continue
+        mode = int(header[14:22], 16)
+        size = int(header[54:62], 16)
+        name_size = int(header[94:102], 16)
+        name = archive[at + 110:at + 110 + name_size - 1].decode()
+        at = (at + 110 + name_size + 3) & ~3
+        at = (at + size + 3) & ~3
+        if name == "TRAILER!!!":
+            continue  # the next archive follows
+        entries[name.lstrip("./")] = mode
+    return entries
+
+
+entries = ramdisk_entries((image / "initrd.img").read_bytes())
+# First stage init mounts onto these and fails without them.
+mount_points = ["dev", "proc", "sys", "mnt", "debug_ramdisk", "second_stage_resources", "metadata"]
+missing = [d for d in mount_points if not stat.S_ISDIR(entries.get(d, 0))]
+if missing:
+    problems.append(f"the ramdisk has no {', '.join(missing)} directories, which first stage init mounts onto")
+links = sum(1 for mode in entries.values() if stat.S_ISLNK(mode))
+print(f"initrd.img: {len(entries)} entries, {links} symbolic links")
+if links == 0:
+    problems.append("the ramdisk has no symbolic links; they were written as plain files")
 
 for p in problems:
     print("problem:", p)
