@@ -2,7 +2,9 @@
 
 use std::io::{Cursor, Seek, SeekFrom, Write};
 
-use dsa_host_windows::gpt::{copy_partitions, is_blank, partitions, SECTOR};
+use dsa_host_windows::gpt::{
+    copy_partitions, fits, is_blank, partition_is_blank, partitions, SECTOR,
+};
 
 /// A disk image with a GPT holding `parts` (name, sectors), laid out one after another
 /// from sector 2048, each filled with `fill`.
@@ -117,4 +119,30 @@ fn fr14_a_disk_nothing_was_written_to_is_blank_and_one_with_a_table_is_not() {
     formatted.get_mut()[1024 + 56..1024 + 58].copy_from_slice(&[0x53, 0xef]);
     assert!(!is_blank(&mut formatted).unwrap());
     assert!(!is_blank(&mut disk(&[("misc", 2048)], 0)).unwrap());
+}
+
+#[test]
+fn fr14_a_disk_without_a_partition_the_new_image_has_does_not_fit_it() {
+    let old = &LAYOUT;
+    let new = [
+        ("misc", 8),
+        ("metadata", 64),
+        ("vbmeta_a", 8),
+        ("boot_a", 64),
+        ("super", 4096),
+        ("userdata", 1024),
+    ];
+    let names = ["super", "vbmeta_a", "boot_a"];
+    assert!(!fits(&mut disk(&new, 0), &mut disk(old, 0), &names).unwrap());
+    assert!(fits(&mut disk(&new, 0), &mut disk(&new, 0), &names).unwrap());
+    assert!(fits(&mut disk(old, 0), &mut disk(&new, 0), &names).unwrap());
+}
+
+#[test]
+fn fr14_a_partition_android_never_wrote_to_is_blank() {
+    let mut d = disk(&LAYOUT, 0);
+    assert!(partition_is_blank(&mut d, "userdata").unwrap());
+    let mut written = disk(&LAYOUT, 0x5a);
+    assert!(!partition_is_blank(&mut written, "userdata").unwrap());
+    assert!(partition_is_blank(&mut d, "nonexistent").is_err());
 }
