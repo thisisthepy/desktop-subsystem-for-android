@@ -121,6 +121,23 @@ pub fn check_reporting(
     }
 }
 
+/// When the image check runs next. A check scheduled while an image was in place stands,
+/// unless none is left now (the first image failed its first boot): then waiting for the
+/// regular interval would leave the user with no Android for that long, so it runs now if
+/// it was due later than `retry`.
+pub fn next_image_check(
+    scheduled: Instant,
+    now: Instant,
+    has_image: bool,
+    retry: Duration,
+) -> Instant {
+    if !has_image && scheduled > now + retry {
+        now
+    } else {
+        scheduled
+    }
+}
+
 /// Boots a session as [`trial::start`] needs it. The session's launcher reads the current
 /// image from the store itself, so the image folder passed in is not used here.
 pub struct SessionBoot(pub Arc<Session>);

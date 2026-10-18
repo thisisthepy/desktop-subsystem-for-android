@@ -26,7 +26,9 @@ use dsa_host_core::session::Session;
 use dsa_host_core::update::program_service::{
     ProgramStatus, ProgramUpdates, Timing, WithProgramStatus,
 };
-use dsa_host_core::update::service::{check_reporting, Download, UpdateNotices, UpdatingAndroid};
+use dsa_host_core::update::service::{
+    check_reporting, next_image_check, Download, UpdateNotices, UpdatingAndroid,
+};
 use dsa_host_core::update::store::ImageStore;
 use dsa_transport::Listener;
 
@@ -161,6 +163,7 @@ fn check_for_updates(config: HostConfig, updates: Updates, build: String, stop: 
         Instant::now() + Duration::from_secs(60)
     };
     while !stop.load(Ordering::Relaxed) {
+        next = next_image_check(next, Instant::now(), !no_image(), FIRST_IMAGE_RETRY);
         if Instant::now() < next {
             thread::sleep(Duration::from_secs(1));
             continue;
