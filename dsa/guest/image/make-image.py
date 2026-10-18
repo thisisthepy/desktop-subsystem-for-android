@@ -15,7 +15,8 @@ It takes the pinned target_files and otatools (fetch.sh downloads them) and:
 The results go to dsa/target/image/<version>/:
 
 - disk.vhdx: a new user's Android disk (dynamic, so it holds only what is written): the
-  super partition with Android itself, its verified boot data, and empty misc, metadata
+  super partition with Android itself, its verified boot data (the vbmeta images, and the
+  boot images verified boot checks: boot, init_boot, vendor_boot), and empty misc, metadata
   and userdata partitions that Android formats on first boot;
 - initrd.img: the vendor and generic ramdisks, which the VM boots with DSA's kernel;
 - image.json: the version, the kernel command line the VM needs, and the files' SHA-256.
@@ -52,7 +53,25 @@ SMALL_PARTITIONS = [
     ("vbmeta_system_a", 1 << 20),
     ("vbmeta_system_dlkm_a", 1 << 20),
     ("vbmeta_vendor_dlkm_a", 1 << 20),
+    # Verified boot reads these: the top-level vbmeta chains to boot and init_boot and
+    # holds the hash of vendor_boot, so without them first stage init cannot set up
+    # verity and does not mount /system. The VM boots DSA's kernel and initrd, not these.
+    # The sizes leave room for later builds, because a user's disk keeps its layout.
+    ("boot_a", 96 << 20),
+    ("init_boot_a", 32 << 20),
+    ("vendor_boot_a", 96 << 20),
 ]
+
+# What is written to each partition, from the signed build's IMAGES/.
+PARTITION_IMAGES = {
+    "vbmeta_a": "vbmeta.img",
+    "vbmeta_system_a": "vbmeta_system.img",
+    "vbmeta_system_dlkm_a": "vbmeta_system_dlkm.img",
+    "vbmeta_vendor_dlkm_a": "vbmeta_vendor_dlkm.img",
+    "boot_a": "boot.img",
+    "init_boot_a": "init_boot.img",
+    "vendor_boot_a": "vendor_boot.img",
+}
 
 USER_PROPS = {
     "ro.debuggable": "0",
@@ -222,6 +241,21 @@ def ramdisk(signed, otatools, work, out):
     out.write_bytes(b"".join(parts))
 
 
+def verified_boot_partitions(vbmeta, otatools):
+    """The partitions verified boot reads from the disk itself: those the top-level vbmeta
+    chains to or holds a whole-partition hash of. Hashtree partitions live in super."""
+    info = subprocess.run([sys.executable, otatools / "bin/avbtool", "info_image", "--image", vbmeta],
+                          check=True, capture_output=True, text=True).stdout
+    names, kind = [], None
+    for line in info.splitlines():
+        line = line.strip()
+        if line.endswith("descriptor:"):
+            kind = line
+        elif line.startswith("Partition Name:") and kind in ("Chain Partition descriptor:", "Hash descriptor:"):
+            names.append(line.split(":", 1)[1].strip())
+    return names
+
+
 def disk(images, otatools, work, out):
     """Lays the images out on a new user's disk and converts it to a dynamic VHDX."""
     super_raw = work / "super.raw"
@@ -236,6 +270,10 @@ def disk(images, otatools, work, out):
     raw.unlink(missing_ok=True)
     with open(raw, "wb") as f:
         f.truncate(DISK_SIZE)
+    on_disk = {name for name, _ in SMALL_PARTITIONS}
+    missing = [n for n in verified_boot_partitions(images / "vbmeta.img", otatools) if f"{n}_a" not in on_disk]
+    if missing:
+        sys.exit(f"verified boot reads {', '.join(missing)}, which the disk layout has no partition for")
     sgdisk = shutil.which("sgdisk") or str(otatools / "bin/sgdisk")
     cmd = [sgdisk, "--clear"]
     number = 1
@@ -253,9 +291,13 @@ def disk(images, otatools, work, out):
         if m:
             starts[m.group(4)] = int(m.group(2)) * 512
     print(layout)
-    for name, image in [("super", super_raw), ("vbmeta_a", images / "vbmeta.img"), ("vbmeta_system_a", images / "vbmeta_system.img"), ("vbmeta_system_dlkm_a", images / "vbmeta_system_dlkm.img"), ("vbmeta_vendor_dlkm_a", images / "vbmeta_vendor_dlkm.img")]:
+    sizes = dict(SMALL_PARTITIONS)
+    writes = [("super", super_raw)] + [(name, images / file) for name, file in PARTITION_IMAGES.items()]
+    for name, image in writes:
         if not image.exists():
             continue
+        if name in sizes and image.stat().st_size > sizes[name]:
+            sys.exit(f"{image.name} is {image.stat().st_size} bytes, more than the {name} partition holds")
         run("dd", f"if={image}", f"of={raw}", "bs=1M", f"seek={starts[name]}", "oflag=seek_bytes", "conv=notrunc,sparse", "status=none")
     super_raw.unlink()
     out.unlink(missing_ok=True)
@@ -304,7 +346,7 @@ def main():
     images = work / "images"
     with zipfile.ZipFile(signed) as z:
         for name in z.namelist():
-            if name.startswith("IMAGES/") and (name.endswith("super.img") or "/vbmeta" in name):
+            if name.startswith("IMAGES/") and name[len("IMAGES/"):] in {"super.img", *PARTITION_IMAGES.values()}:
                 z.extract(name, work)
     (work / "IMAGES").rename(images)
     if not (images / "super.img").exists():
