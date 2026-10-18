@@ -250,14 +250,27 @@ def verified_boot_partitions(vbmeta, otatools):
     if result.returncode != 0:
         sys.exit(f"avbtool could not read {vbmeta.name}: {result.stderr.strip()}")
     info = result.stdout
-    names, kind = [], None
+    found, kind = [], None
     for line in info.splitlines():
         line = line.strip()
         if line.endswith("descriptor:"):
             kind = line
         elif line.startswith("Partition Name:") and kind in ("Chain Partition descriptor:", "Hash descriptor:"):
-            names.append(line.split(":", 1)[1].strip())
-    return names
+            found.append((kind.split()[0].lower(), line.split(":", 1)[1].strip()))
+    return found
+
+
+def unlisted_chained_partitions(found, fstab):
+    """The chained partitions outside the vbmeta ones that the mount table does not list for
+    first stage mount. First stage init creates by-name links only for the partitions it
+    is told it needs, so verified boot cannot read the vbmeta of an unlisted one."""
+    listed = set()
+    for line in fstab.splitlines():
+        fields = line.split()
+        if len(fields) >= 5 and not line.startswith("#") and "first_stage_mount" in fields[4].split(","):
+            listed.add(fields[0].rsplit("/", 1)[-1])
+    return [name for kind, name in found
+            if kind == "chain" and not name.startswith("vbmeta") and name not in listed]
 
 
 def disk(images, otatools, work, out):
@@ -275,9 +288,13 @@ def disk(images, otatools, work, out):
     with open(raw, "wb") as f:
         f.truncate(DISK_SIZE)
     on_disk = {name for name, _ in SMALL_PARTITIONS}
-    missing = [n for n in verified_boot_partitions(images / "vbmeta.img", otatools) if f"{n}_a" not in on_disk]
+    found = verified_boot_partitions(images / "vbmeta.img", otatools)
+    missing = [n for _, n in found if f"{n}_a" not in on_disk]
     if missing:
         sys.exit(f"verified boot reads {', '.join(missing)}, which the disk layout has no partition for")
+    unlisted = unlisted_chained_partitions(found, (HERE / "fstab.dsa").read_text())
+    if unlisted:
+        sys.exit(f"verified boot reads {', '.join(unlisted)}, which fstab.dsa does not list for first stage mount")
     sgdisk = shutil.which("sgdisk") or str(otatools / "bin/sgdisk")
     cmd = [sgdisk, "--clear"]
     number = 1
