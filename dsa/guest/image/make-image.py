@@ -28,6 +28,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -180,6 +181,30 @@ def key_arguments(target_files, keys):
     return args
 
 
+def extract_tree(z, prefix, dest):
+    """Writes the entries under prefix to dest as the tree they describe.
+
+    zipfile.extract would turn symbolic links into files holding their target, and the
+    ramdisk would lose its empty directories (proc, sys, dev...), which first stage init
+    mounts onto: without them it stops and the kernel panics.
+    """
+    shutil.rmtree(dest, ignore_errors=True)
+    dest.mkdir(parents=True)
+    for info in z.infolist():
+        if not info.filename.startswith(prefix) or info.filename == prefix:
+            continue
+        path = dest / info.filename[len(prefix):]
+        mode = info.external_attr >> 16
+        if info.filename.endswith("/"):
+            path.mkdir(parents=True, exist_ok=True)
+        elif stat.S_ISLNK(mode):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            os.symlink(z.read(info).decode(), path)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(z.read(info))
+
+
 def ramdisk(signed, otatools, work, out):
     """The vendor ramdisk followed by the generic one, as one gzip'd initrd."""
     parts = []
@@ -187,10 +212,8 @@ def ramdisk(signed, otatools, work, out):
         for prefix, config in [("VENDOR_BOOT/RAMDISK/", "META/vendor_boot_filesystem_config.txt"), ("INIT_BOOT/RAMDISK/", "META/init_boot_filesystem_config.txt")]:
             root = work / prefix.split("/")[0].lower()
             shutil.rmtree(root, ignore_errors=True)
-            for name in z.namelist():
-                if name.startswith(prefix) and not name.endswith("/"):
-                    z.extract(name, work / "extract")
             src = work / "extract" / prefix
+            extract_tree(z, prefix, src)
             src.mkdir(parents=True, exist_ok=True)
             cfg = work / f"{root.name}.fs_config"
             cfg.write_bytes(z.read(config))
