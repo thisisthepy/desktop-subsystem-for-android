@@ -244,8 +244,12 @@ def ramdisk(signed, otatools, work, out):
 def verified_boot_partitions(vbmeta, otatools):
     """The partitions verified boot reads from the disk itself: those the top-level vbmeta
     chains to or holds a whole-partition hash of. Hashtree partitions live in super."""
-    info = subprocess.run([sys.executable, otatools / "bin/avbtool", "info_image", "--image", vbmeta],
-                          check=True, capture_output=True, text=True).stdout
+    # avbtool is a native launcher in otatools, run as it is.
+    result = subprocess.run([otatools / "bin/avbtool", "info_image", "--image", vbmeta],
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        sys.exit(f"avbtool could not read {vbmeta.name}: {result.stderr.strip()}")
+    info = result.stdout
     names, kind = [], None
     for line in info.splitlines():
         line = line.strip()
