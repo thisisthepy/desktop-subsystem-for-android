@@ -86,6 +86,36 @@ pub fn partitions(disk: &mut (impl Read + Seek)) -> io::Result<Vec<Partition>> {
     Ok(found)
 }
 
+/// Whether `to` can take the partitions named in `names` from `from`: every one of them on
+/// `from` is on `to` too, at least as large.
+pub fn fits(
+    from: &mut (impl Read + Seek),
+    to: &mut (impl Read + Seek),
+    names: &[&str],
+) -> io::Result<bool> {
+    let source = partitions(from)?;
+    let target = partitions(to)?;
+    Ok(names
+        .iter()
+        .all(|name| match source.iter().find(|p| p.name == *name) {
+            None => true,
+            Some(src) => target.iter().any(|p| p.name == *name && p.len >= src.len),
+        }))
+}
+
+/// Whether nothing was ever written to the start of the partition `name`: Android formats
+/// userdata on its first boot, so a blank one means Android never ran from this disk.
+pub fn partition_is_blank(disk: &mut (impl Read + Seek), name: &str) -> io::Result<bool> {
+    let part = partitions(disk)?
+        .into_iter()
+        .find(|p| p.name == name)
+        .ok_or_else(|| invalid(format!("the disk has no {name} partition")))?;
+    let mut start = vec![0u8; part.len.min(BLANK_PROBE as u64) as usize];
+    disk.seek(SeekFrom::Start(part.start))?;
+    disk.read_exact(&mut start)?;
+    Ok(start.iter().all(|&b| b == 0))
+}
+
 /// Copies the partitions named in `names` from `from` to `to`, which must both have them,
 /// with the destination's at least as large. Copies in whole megabytes, aligned, as raw
 /// disk devices need, and zeroes what is left of a larger destination partition.

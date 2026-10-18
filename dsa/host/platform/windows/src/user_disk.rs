@@ -57,12 +57,15 @@ pub fn prepare_user_data_disk(disk: &Path, size_gb: u32) -> Result<(), String> {
 
 /// The partitions of a user's Android disk that hold Android itself. They come from the
 /// image; every other partition holds the user's data.
-pub const ANDROID_PARTITIONS: [&str; 5] = [
+pub const ANDROID_PARTITIONS: [&str; 8] = [
     "super",
     "vbmeta_a",
     "vbmeta_system_a",
     "vbmeta_system_dlkm_a",
     "vbmeta_vendor_dlkm_a",
+    "boot_a",
+    "init_boot_a",
+    "vendor_boot_a",
 ];
 
 /// Makes sure the user's disk exists. A new disk is a copy of `template` (an image's `disk.vhdx`, holding Android and empty data
@@ -152,6 +155,30 @@ pub fn bring_disk_to(disk: &Path, template: &Path, version: &str) -> Result<(), 
             .filter(|n| have.iter().any(|p| p.name == *n))
             .collect()
     };
+    let fits = crate::gpt::fits(&mut source, &mut target, &names)
+        .map_err(|e| format!("reading {}: {e}", disk.display()))?;
+    if !fits {
+        // The image's disk has a partition this one lacks (a newer layout). A disk Android
+        // never booted from holds no data, so it becomes a copy of the new template; one
+        // with data cannot be relaid without losing it.
+        let unused = crate::gpt::partition_is_blank(&mut target, "userdata")
+            .map_err(|e| format!("reading {}: {e}", disk.display()))?;
+        if !unused {
+            return Err(format!(
+                "Android {version} needs a disk layout that {} does not have, and the disk \
+                 holds Android data, so it is left as it is",
+                disk.display()
+            ));
+        }
+        drop(target);
+        drop(source);
+        drop(to);
+        drop(from);
+        std::fs::remove_file(disk)
+            .map_err(|e| format!("replacing the unused {}: {e}", disk.display()))?;
+        prepare_user_disk(disk, 0, Some(template))?;
+        return record_disk_image_version(disk, version);
+    }
     crate::gpt::copy_partitions(&mut source, &mut target, &names)
         .map_err(|e| format!("writing Android {version} into {}: {e}", disk.display()))?;
     drop(target);
