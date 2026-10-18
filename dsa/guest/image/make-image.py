@@ -329,8 +329,10 @@ def main():
     manifest = {
         "version": spec["version"],
         "android_major": spec["android_major"],
-        "build": int(spec["build_id"]),
-        "source": {"branch": spec["branch"], "target": spec["target"], "build_id": spec["build_id"], "security_patch": spec["security_patch"]},
+        # Orders images of one Android version: a new AOSP build, or a new revision of
+        # DSA's image of the same build (a fix to how the image is made), is newer.
+        "build": int(spec["build_id"]) * 100 + spec.get("revision", 1),
+        "source": {"branch": spec["branch"], "target": spec["target"], "build_id": spec["build_id"], "revision": spec.get("revision", 1), "security_patch": spec["security_patch"]},
         "kernel_cmdline": cmdline,
         "files": {name: {"size": (out / name).stat().st_size, "sha256": sha256(out / name)} for name in files},
     }

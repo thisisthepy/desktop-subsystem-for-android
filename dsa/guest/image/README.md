@@ -57,6 +57,11 @@ In `dsa/target/image/<version>/`:
 Change the build number and the two SHA-256 values in `inputs.json`. The Image test
 workflow makes and checks the image from it.
 
+To publish a remade image of the same build, after a fix to how images are made, raise
+`revision` and the version's suffix (`17.0.0-16373615-2`). The image's `build`, which
+orders images of one Android version, is the build number times 100 plus the revision, so
+the service treats the remade image as newer and moves to it.
+
 ## Releasing
 
 The Image release workflow (`.github/workflows/release-image.yml`, run by hand) makes
