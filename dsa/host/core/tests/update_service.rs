@@ -14,7 +14,7 @@ use dsa_host_core::session::{GuestLauncher, Session, SessionConfig, SessionState
 use dsa_host_core::update::manifest::{self, FileEntry, ImageEntry, Manifest, FORMAT};
 use dsa_host_core::update::policy::InstalledImage;
 use dsa_host_core::update::service::{
-    check, check_reporting, Download, UpdateNotices, UpdatingAndroid,
+    check, check_reporting, next_image_check, Download, UpdateNotices, UpdatingAndroid,
 };
 use dsa_host_core::update::store::{Fetch, ImageStore};
 use dsa_host_core::update::UpdateError;
@@ -463,4 +463,19 @@ fn fr14_a_first_image_that_does_not_boot_is_given_up_without_booting_the_placeho
     .unwrap();
     assert!(next.unwrap_or_default().contains("16.0.1"));
     done.store(true, Ordering::Relaxed);
+}
+
+#[test]
+fn fr14_losing_the_only_image_brings_the_next_check_forward() {
+    let now = Instant::now();
+    let retry = Duration::from_secs(300);
+    let tomorrow = now + Duration::from_secs(24 * 3600);
+    // The check was scheduled a day out while an image was in place; the image then failed
+    // its first boot and none is left, so the check comes now.
+    assert_eq!(next_image_check(tomorrow, now, false, retry), now);
+    // With an image, the schedule stands.
+    assert_eq!(next_image_check(tomorrow, now, true, retry), tomorrow);
+    // A check already due within the retry stands too.
+    let soon = now + Duration::from_secs(60);
+    assert_eq!(next_image_check(soon, now, false, retry), soon);
 }
