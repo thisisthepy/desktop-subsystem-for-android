@@ -11,6 +11,12 @@ on:
       - "dsa/guest/image/**"
       - ".github/workflows/test-image.yml"
   workflow_dispatch:
+    inputs:
+      keep_disk:
+        description: "Keep each generated disk.vhdx as an artifact for a local boot check"
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: test-image-${{ github.event.pull_request.number || github.ref }}
@@ -60,3 +66,11 @@ jobs:
           path: |
             dsa/target/image/*/image.json
             dsa/target/image/*/initrd.img
+
+      - name: Keep the guest disk
+        if: inputs.keep_disk
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-disk-android-${{ matrix.android }}
+          path: dsa/target/image/*/disk.vhdx
+          if-no-files-found: error
