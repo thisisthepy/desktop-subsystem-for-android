@@ -3,10 +3,11 @@
 # First stage init creates /dev/block/by-name links only for the partitions listed here
 # with first_stage_mount.
 # Not mounted in a normal boot (recoveryonly), but listed so that first stage init creates
-# their by-name links: verified boot reads boot's and init_boot's vbmeta from them.
+# their by-name links: verified boot reads boot's and init_boot's vbmeta from them, and
+# reads vendor_boot to verify its hash.
 /dev/block/by-name/boot /boot emmc defaults recoveryonly,slotselect,first_stage_mount,avb=boot
 /dev/block/by-name/init_boot /init_boot emmc defaults recoveryonly,slotselect,first_stage_mount,avb=init_boot
-/dev/block/by-name/vendor_boot /vendor_boot emmc defaults recoveryonly,slotselect
+/dev/block/by-name/vendor_boot /vendor_boot emmc defaults recoveryonly,slotselect,first_stage_mount
 system /system erofs ro wait,logical,first_stage_mount,slotselect,avb=vbmeta_system,avb_keys=/avb
 system /system ext4 noatime,ro,errors=panic wait,logical,first_stage_mount,slotselect,avb=vbmeta_system,avb_keys=/avb
 system_ext /system_ext erofs ro wait,logical,first_stage_mount,slotselect,avb=vbmeta_system,nofail

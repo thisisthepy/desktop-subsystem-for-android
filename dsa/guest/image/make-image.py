@@ -94,6 +94,62 @@ def sha256(path):
     return h.hexdigest()
 
 
+def is_wsl_windows_mount(parts):
+    """Whether resolved path parts name a WSL mount of a Windows drive."""
+    return len(parts) >= 3 and parts[1] == "mnt"
+
+
+def use_windows_sparse_file(path, windows=None, wsl_distro=None):
+    """Whether `path` is on Windows' NTFS, where WSL ftruncate allocates the whole file."""
+    windows = os.name == "nt" if windows is None else windows
+    wsl_distro = os.environ.get("WSL_DISTRO_NAME") if wsl_distro is None else wsl_distro
+    return windows or (bool(wsl_distro) and is_wsl_windows_mount(path.resolve().parts))
+
+
+def windows_path(path):
+    """The Windows spelling of `path`, from either Windows or WSL."""
+    if os.name == "nt":
+        return str(path.resolve())
+    return subprocess.run(
+        ["wslpath", "-w", path], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def make_raw_disk(path, size):
+    """Makes a zero-filled virtual disk without reserving its full size on NTFS."""
+    path.unlink(missing_ok=True)
+    if use_windows_sparse_file(path):
+        path_text = windows_path(path).replace("'", "''")
+        command = (
+            f"$path = '{path_text}'; New-Item -ItemType File -Force -Path $path | Out-Null; "
+            f"fsutil sparse setflag $path; fsutil file seteof $path {size}"
+        )
+        run("powershell.exe", "-NoProfile", "-Command", command)
+    else:
+        with open(path, "wb") as f:
+            f.truncate(size)
+
+
+def materialize_backup_gpt(path):
+    """Writes the backup GPT through Windows on a Windows sparse file.
+
+    DrvFs can leave the final sparse range unallocated after `sgdisk` writes the backup
+    GPT. qemu-img then converts it as zeroes, and the guest loses GPT partition names.
+    A GPT with 128 128-byte entries has a 32-sector entry array and one header sector.
+    """
+    if not use_windows_sparse_file(path):
+        return
+    path_text = windows_path(path).replace("'", "''")
+    command = (
+        f"$path = '{path_text}'; $stream = [System.IO.File]::Open($path, 'Open', 'ReadWrite', 'None'); "
+        "try { $bytes = New-Object byte[] 16896; $start = $stream.Length - $bytes.Length; "
+        "$stream.Position = $start; $read = $stream.Read($bytes, 0, $bytes.Length); "
+        "if ($read -ne $bytes.Length) { throw 'the raw disk has no complete backup GPT' }; "
+        "$stream.Position = $start; $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }"
+    )
+    run("powershell.exe", "-NoProfile", "-Command", command)
+
+
 def removed(name):
     """Whether a target_files member belongs to an app the guest must not have."""
     return any(f"/{app}/" in name for app in REMOVED_APPS)
@@ -260,17 +316,19 @@ def verified_boot_partitions(vbmeta, otatools):
     return found
 
 
-def unlisted_chained_partitions(found, fstab):
-    """The chained partitions outside the vbmeta ones that the mount table does not list for
-    first stage mount. First stage init creates by-name links only for the partitions it
-    is told it needs, so verified boot cannot read the vbmeta of an unlisted one."""
+def unlisted_verified_boot_partitions(found, fstab):
+    """The verified boot partitions outside vbmeta that lack a first-stage fstab entry.
+
+    First-stage init creates by-name links only for partitions it is told it needs. AVB
+    reads both chained vbmeta images and partitions a hash descriptor covers, so either
+    kind without an entry makes verification fail before /system can mount.
+    """
     listed = set()
     for line in fstab.splitlines():
         fields = line.split()
         if len(fields) >= 5 and not line.startswith("#") and "first_stage_mount" in fields[4].split(","):
             listed.add(fields[0].rsplit("/", 1)[-1])
-    return [name for kind, name in found
-            if kind == "chain" and not name.startswith("vbmeta") and name not in listed]
+    return [name for _, name in found if not name.startswith("vbmeta") and name not in listed]
 
 
 def disk(images, otatools, work, out):
@@ -284,15 +342,13 @@ def disk(images, otatools, work, out):
     else:
         shutil.copy(super_img, super_raw)
     raw = work / "disk.raw"
-    raw.unlink(missing_ok=True)
-    with open(raw, "wb") as f:
-        f.truncate(DISK_SIZE)
+    make_raw_disk(raw, DISK_SIZE)
     on_disk = {name for name, _ in SMALL_PARTITIONS}
     found = verified_boot_partitions(images / "vbmeta.img", otatools)
     missing = [n for _, n in found if f"{n}_a" not in on_disk]
     if missing:
         sys.exit(f"verified boot reads {', '.join(missing)}, which the disk layout has no partition for")
-    unlisted = unlisted_chained_partitions(found, (HERE / "fstab.dsa").read_text())
+    unlisted = unlisted_verified_boot_partitions(found, (HERE / "fstab.dsa").read_text())
     if unlisted:
         sys.exit(f"verified boot reads {', '.join(unlisted)}, which fstab.dsa does not list for first stage mount")
     sgdisk = shutil.which("sgdisk") or str(otatools / "bin/sgdisk")
@@ -305,6 +361,7 @@ def disk(images, otatools, work, out):
     number += 1
     cmd += [f"--new={number}:0:0", f"--change-name={number}:userdata", str(raw)]
     run(*cmd)
+    materialize_backup_gpt(raw)
     layout = subprocess.run([sgdisk, "--print", raw], check=True, capture_output=True, text=True).stdout
     starts = {}
     for line in layout.splitlines():
@@ -322,7 +379,7 @@ def disk(images, otatools, work, out):
         run("dd", f"if={image}", f"of={raw}", "bs=1M", f"seek={starts[name]}", "oflag=seek_bytes", "conv=notrunc,sparse", "status=none")
     super_raw.unlink()
     out.unlink(missing_ok=True)
-    run(shutil.which("qemu-img") or "qemu-img", "convert", "-f", "raw", "-O", "vhdx", "-o", "subformat=dynamic", raw, out)
+    run(shutil.which("qemu-img") or "qemu-img", "convert", "-f", "raw", "-O", "vhdx", "-o", "subformat=dynamic", "-S", "4k", raw, out)
     raw.unlink()
 
 
