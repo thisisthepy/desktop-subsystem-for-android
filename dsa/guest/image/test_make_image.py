@@ -1,7 +1,9 @@
 """Regression tests for the guest image layout helpers."""
 
 import importlib.util
+import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,6 +33,15 @@ class ImageLayoutTests(unittest.TestCase):
             make_image.materialize_backup_gpt(Path("disk.raw"))
         self.assertEqual(run.call_args.args[:3], ("powershell.exe", "-NoProfile", "-Command"))
         self.assertIn("16896", run.call_args.args[3])
+
+    def test_fr1_vendor_boot_is_signed_after_its_ramdisk_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "target-files.zip"
+            with zipfile.ZipFile(target, "w") as archive:
+                archive.writestr("META/apkcerts.txt", "")
+                archive.writestr("META/apexkeys.txt", "")
+            args = make_image.key_arguments(target, "keys")
+        self.assertIn("--avb_vendor_boot_key", args)
 
 
 if __name__ == "__main__":

@@ -248,7 +248,7 @@ def key_arguments(target_files, keys):
         args += ["-e", f"{fields['name']}={keys}/apexcontainer"]
         args += ["--extra_apex_payload_key", f"{fields['name']}={keys}/apex.pem"]
     avb = f"{keys}/avb.pem"
-    for part in ["vbmeta", "vbmeta_system", "vbmeta_vendor", "boot", "init_boot"]:
+    for part in ["vbmeta", "vbmeta_system", "vbmeta_vendor", "boot", "init_boot", "vendor_boot"]:
         args += [f"--avb_{part}_key", avb, f"--avb_{part}_algorithm", "SHA256_RSA4096"]
     for part in ["vbmeta_system_dlkm", "vbmeta_vendor_dlkm"]:
         args += ["--avb_extra_custom_image_key", f"{part}={avb}"]
