@@ -41,7 +41,8 @@ class ImageLayoutTests(unittest.TestCase):
                 archive.writestr("META/apkcerts.txt", "")
                 archive.writestr("META/apexkeys.txt", "")
             args = make_image.key_arguments(target, "keys")
-        self.assertIn("--avb_vendor_boot_key", args)
+        self.assertIn("--avb_extra_custom_image_key", args)
+        self.assertIn("vendor_boot=keys/avb.pem", args)
 
 
 if __name__ == "__main__":
