@@ -320,15 +320,15 @@ def unlisted_verified_boot_partitions(found, fstab):
     """The verified boot partitions outside vbmeta that lack a first-stage fstab entry.
 
     First-stage init creates by-name links only for partitions it is told it needs. AVB
-    reads both chained vbmeta images and partitions a hash descriptor covers, so either
-    kind without an entry makes verification fail before /system can mount.
+    reads partitions a hash descriptor covers, so an omitted entry makes verification fail
+    before /system can mount. Chained vbmeta images are resolved by the AVB loader.
     """
     listed = set()
     for line in fstab.splitlines():
         fields = line.split()
         if len(fields) >= 5 and not line.startswith("#") and "first_stage_mount" in fields[4].split(","):
             listed.add(fields[0].rsplit("/", 1)[-1])
-    return [name for _, name in found if name not in listed]
+    return [name for kind, name in found if kind != "chain" and name not in listed]
 
 
 def disk(images, otatools, work, out):

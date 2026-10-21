@@ -12,13 +12,13 @@ SPEC.loader.exec_module(make_image)
 
 
 class ImageLayoutTests(unittest.TestCase):
-    def test_fr1_verified_boot_partition_needs_a_first_stage_entry(self):
-        found = [("chain", "vbmeta_system"), ("chain", "boot"), ("chain", "init_boot"), ("hash", "vendor_boot")]
+    def test_fr1_verified_hash_partition_needs_a_first_stage_entry(self):
+        found = [("chain", "boot"), ("chain", "init_boot"), ("hash", "vendor_boot")]
         fstab = """\\
 /dev/block/by-name/boot /boot emmc defaults recoveryonly,slotselect,first_stage_mount,avb=boot
 /dev/block/by-name/init_boot /init_boot emmc defaults recoveryonly,slotselect,first_stage_mount,avb=init_boot
 """
-        self.assertEqual(make_image.unlisted_verified_boot_partitions(found, fstab), ["vbmeta_system", "vendor_boot"])
+        self.assertEqual(make_image.unlisted_verified_boot_partitions(found, fstab), ["vendor_boot"])
 
     def test_fr1_windows_backed_wsl_uses_a_sparse_raw_disk(self):
         self.assertTrue(make_image.is_wsl_windows_mount(("/", "mnt", "c", "dsa", "disk.raw")))
