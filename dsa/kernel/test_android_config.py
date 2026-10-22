@@ -12,6 +12,10 @@ class AndroidKernelConfigTests(unittest.TestCase):
         config = CONFIG.read_text()
         self.assertIn('CONFIG_ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder"', config)
 
+    def test_fr1_fbe_file_name_encryption_supports_aes_hctr2(self):
+        config = CONFIG.read_text()
+        self.assertIn("CONFIG_CRYPTO_HCTR2=y", config)
+
 
 if __name__ == "__main__":
     unittest.main()
