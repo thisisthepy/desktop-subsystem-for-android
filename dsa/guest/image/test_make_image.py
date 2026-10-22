@@ -81,6 +81,12 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertIn("--avb_extra_custom_image_key", args)
         self.assertIn("vendor_boot=keys/avb.pem", args)
 
+    def test_fr1_userdata_keeps_fbe_without_metadata_encryption(self):
+        fstab = Path(__file__).with_name("fstab.dsa").read_text()
+        userdata = next(line for line in fstab.splitlines() if " /data " in line)
+        self.assertIn("fileencryption=aes-256-xts:aes-256-hctr2", userdata)
+        self.assertNotIn("keydirectory=", userdata)
+
 
 if __name__ == "__main__":
     unittest.main()

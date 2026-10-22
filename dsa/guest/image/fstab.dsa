@@ -30,5 +30,5 @@ odm_dlkm /odm_dlkm erofs ro wait,logical,first_stage_mount,slotselect,avb,nofail
 odm_dlkm /odm_dlkm ext4 noatime,ro,errors=panic wait,logical,first_stage_mount,slotselect,avb,nofail
 /dev/block/by-name/metadata /metadata ext4 nodev,noatime,nosuid wait,check,formattable,first_stage_mount
 /dev/block/by-name/misc /misc emmc defaults defaults
-/dev/block/by-name/userdata /data ext4 nodev,noatime,nosuid,errors=panic latemount,wait,check,quota,formattable,keydirectory=/metadata/vold/metadata_encryption,checkpoint=block,fileencryption=aes-256-xts:aes-256-hctr2
+/dev/block/by-name/userdata /data ext4 nodev,noatime,nosuid,errors=panic latemount,wait,check,quota,formattable,checkpoint=block,fileencryption=aes-256-xts:aes-256-hctr2
 /dev/block/zram0 none swap defaults zramsize=50%
