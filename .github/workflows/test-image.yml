@@ -37,12 +37,13 @@ permissions:
 jobs:
   image:
     name: Make and check the guest image (ubuntu-latest, Android ${{ matrix.android }})
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.android == 'all' || inputs.android == matrix.android }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        android: ["17", "16"]
+        # Pull requests cover both supported releases. A manual boot investigation
+        # builds one release first, unless an explicit compatibility run asks for all.
+        android: ${{ fromJSON(github.event_name == 'workflow_dispatch' && (inputs.android == 'all' && '["17", "16"]' || format('["{0}"]', inputs.android)) || '["17", "16"]') }}
     steps:
       - uses: actions/checkout@v4
 
