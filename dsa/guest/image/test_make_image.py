@@ -14,6 +14,18 @@ SPEC.loader.exec_module(make_image)
 
 
 class ImageLayoutTests(unittest.TestCase):
+    def test_fr1_hyperv_partition_names_cover_the_gpt_ranges(self):
+        layout = {
+            "misc": (1 << 20, 1 << 20),
+            "vbmeta_a": (66 << 20, 1 << 20),
+            "super": (100 << 20, 1536 << 20),
+        }
+        self.assertEqual(
+            make_image.command_line_partitions(layout),
+            "blkdevparts=sda:1048576@1048576(misc),1048576@69206016(vbmeta_a),"
+            "1610612736@104857600(super)",
+        )
+
     def test_fr1_verified_hash_partition_needs_a_first_stage_entry(self):
         found = [("chain", "boot"), ("chain", "init_boot"), ("hash", "vendor_boot")]
         fstab = """\\

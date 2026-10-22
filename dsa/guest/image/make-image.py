@@ -150,6 +150,20 @@ def materialize_backup_gpt(path):
     run("powershell.exe", "-NoProfile", "-Command", command)
 
 
+def command_line_partitions(partitions):
+    """Returns the Hyper-V SCSI layout that restores GPT names in early Android init.
+
+    Hyper-V's virtual SCSI controller exposes the GPT partition devices but omits their
+    PARTNAME uevent property. The kernel's command-line partition parser supplies those
+    names before first-stage init starts. Every range comes from the GPT we just wrote, so
+    an AOSP super image changing size does not change the mapping by assumption.
+    """
+    entries = []
+    for name, (offset, size) in partitions.items():
+        entries.append(f"{size}@{offset}({name})")
+    return "blkdevparts=sda:" + ",".join(entries)
+
+
 def removed(name):
     """Whether a target_files member belongs to an app the guest must not have."""
     return any(f"/{app}/" in name for app in REMOVED_APPS)
@@ -363,11 +377,12 @@ def disk(images, otatools, work, out):
     run(*cmd)
     materialize_backup_gpt(raw)
     layout = subprocess.run([sgdisk, "--print", raw], check=True, capture_output=True, text=True).stdout
-    starts = {}
+    partitions = {}
     for line in layout.splitlines():
         m = re.match(r"\s*(\d+)\s+(\d+)\s+(\d+)\s+\S+\s+\S+\s+\S+\s+(\S+)", line)
         if m:
-            starts[m.group(4)] = int(m.group(2)) * 512
+            first, last = int(m.group(2)), int(m.group(3))
+            partitions[m.group(4)] = (first * 512, (last - first + 1) * 512)
     print(layout)
     sizes = dict(SMALL_PARTITIONS)
     writes = [("super", super_raw)] + [(name, images / file) for name, file in PARTITION_IMAGES.items()]
@@ -376,11 +391,12 @@ def disk(images, otatools, work, out):
             continue
         if name in sizes and image.stat().st_size > sizes[name]:
             sys.exit(f"{image.name} is {image.stat().st_size} bytes, more than the {name} partition holds")
-        run("dd", f"if={image}", f"of={raw}", "bs=1M", f"seek={starts[name]}", "oflag=seek_bytes", "conv=notrunc,sparse", "status=none")
+        run("dd", f"if={image}", f"of={raw}", "bs=1M", f"seek={partitions[name][0]}", "oflag=seek_bytes", "conv=notrunc,sparse", "status=none")
     super_raw.unlink()
     out.unlink(missing_ok=True)
     run(shutil.which("qemu-img") or "qemu-img", "convert", "-f", "raw", "-O", "vhdx", "-o", "subformat=dynamic", "-S", "4k", raw, out)
     raw.unlink()
+    return command_line_partitions(partitions)
 
 
 def main():
@@ -431,7 +447,7 @@ def main():
         run(otatools / "bin/build_super_image", "-p", otatools, signed, images / "super.img", env=env)
 
     ramdisk(signed, otatools, work, out / "initrd.img")
-    disk(images, otatools, work, out / "disk.vhdx")
+    partition_cmdline = disk(images, otatools, work, out / "disk.vhdx")
     files = ["disk.vhdx", "initrd.img"]
     (out / "bzImage").unlink(missing_ok=True)
     if args.kernel:
@@ -440,7 +456,7 @@ def main():
 
     cmdline = " ".join([
         "console=ttyS0", "printk.devkmsg=on", "audit=1", "panic=-1", "8250.nr_uarts=1",
-        "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init",
+        "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init", partition_cmdline,
         f"androidboot.boot_part_uuid={SUPER_UUID}", "androidboot.fstab_suffix=dsa",
         "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",
         "androidboot.hardware=cutf_cvm", "androidboot.verifiedbootstate=orange",
