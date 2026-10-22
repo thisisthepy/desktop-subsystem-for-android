@@ -24,8 +24,9 @@ metadata its virtual SCSI uevents omit.
 ## What the fragment adds
 
 - **Binder and binderfs, built in.** Built in, binder uses the kernel's internal symbols
-  directly. An out-of-tree module on the stock WSL kernel cannot: the driver needs about a
-  dozen kernel symbols that the WSL kernel does not export to modules.
+  directly and creates `/dev/binder`, `/dev/hwbinder` and `/dev/vndbinder` for Android's
+  early services. An out-of-tree module on the stock WSL kernel cannot: the driver needs
+  about a dozen kernel symbols that the WSL kernel does not export to modules.
 - **What Android's userspace expects:** wake locks, dma-buf heaps for graphics buffers,
   utilisation clamps, uinput and evdev, file-based encryption and fs-verity, erofs and f2fs,
   dm-crypt, quotas, and the eBPF and netfilter pieces netd uses.
