@@ -14,6 +14,12 @@ SPEC.loader.exec_module(make_image)
 
 
 class ImageLayoutTests(unittest.TestCase):
+    def test_fr1_avb_footer_partitions_match_the_signed_aosp_layout(self):
+        sizes = dict(make_image.SMALL_PARTITIONS)
+        self.assertEqual(sizes["boot_a"], 64 << 20)
+        self.assertEqual(sizes["init_boot_a"], 8 << 20)
+        self.assertEqual(sizes["vendor_boot_a"], 64 << 20)
+
     def test_fr1_hyperv_partition_names_cover_the_gpt_ranges(self):
         layout = {
             "misc": (1 << 20, 1 << 20),

@@ -57,10 +57,11 @@ SMALL_PARTITIONS = [
     # Verified boot reads these: the top-level vbmeta chains to boot and init_boot and
     # holds the hash of vendor_boot, so without them first stage init cannot set up
     # verity and does not mount /system. The VM boots DSA's kernel and initrd, not these.
-    # The sizes leave room for later builds, because a user's disk keeps its layout.
-    ("boot_a", 96 << 20),
-    ("init_boot_a", 32 << 20),
-    ("vendor_boot_a", 96 << 20),
+    # AVB finds the footer at the end of each partition, so these must match
+    # the partition sizes used when sign_target_files_apks signs the images.
+    ("boot_a", 64 << 20),
+    ("init_boot_a", 8 << 20),
+    ("vendor_boot_a", 64 << 20),
 ]
 
 # What is written to each partition, from the signed build's IMAGES/.
