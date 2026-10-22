@@ -82,6 +82,15 @@ USER_PROPS = {
     "ro.force.debuggable": "0",
 }
 
+# Cuttlefish ships selectable secure and non-secure implementations of these
+# vendor APEX modules. Its launcher passes this choice in bootconfig. DSA does
+# not run that launcher, so select the implementation that needs no Cuttlefish
+# remote service before apexd scans the vendor APEX directory.
+VENDOR_APEX_BOOTCONFIG = {
+    "com.android.hardware.gatekeeper": "com.android.hardware.gatekeeper.nonsecure",
+    "com.android.hardware.keymint": "com.android.hardware.keymint.rust_nonsecure",
+}
+
 
 def run(*cmd, **kw):
     print("+", " ".join(str(c) for c in cmd), flush=True)
@@ -405,6 +414,20 @@ def disk(images, otatools, work, out):
     return command_line_partitions(partitions, {"misc": MISC_UUID})
 
 
+def kernel_cmdline(partition_cmdline):
+    """Returns the kernel command line shared by every DSA guest image."""
+    return " ".join([
+        "console=ttyS0", "printk.devkmsg=on", "audit=1", "panic=-1", "8250.nr_uarts=1",
+        "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init", partition_cmdline,
+        f"androidboot.boot_part_uuid={MISC_UUID}", "androidboot.fstab_suffix=dsa",
+        "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",
+        "androidboot.hardware=cutf_cvm", "androidboot.verifiedbootstate=orange",
+        "androidboot.vbmeta.device_state=unlocked",
+        *(f"androidboot.vendor.apex.{module}={apex}"
+          for module, apex in VENDOR_APEX_BOOTCONFIG.items()),
+    ])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--major", type=int, required=True)
@@ -460,14 +483,7 @@ def main():
         shutil.copy(args.kernel, out / "bzImage")
         files.append("bzImage")
 
-    cmdline = " ".join([
-        "console=ttyS0", "printk.devkmsg=on", "audit=1", "panic=-1", "8250.nr_uarts=1",
-        "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init", partition_cmdline,
-        f"androidboot.boot_part_uuid={MISC_UUID}", "androidboot.fstab_suffix=dsa",
-        "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",
-        "androidboot.hardware=cutf_cvm", "androidboot.verifiedbootstate=orange",
-        "androidboot.vbmeta.device_state=unlocked",
-    ])
+    cmdline = kernel_cmdline(partition_cmdline)
     manifest = {
         "version": spec["version"],
         "android_major": spec["android_major"],
