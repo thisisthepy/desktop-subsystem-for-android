@@ -82,13 +82,14 @@ USER_PROPS = {
     "ro.force.debuggable": "0",
 }
 
-# Cuttlefish ships selectable secure and non-secure implementations of these
-# vendor APEX modules. Its launcher passes this choice in bootconfig. DSA does
-# not run that launcher, so select the implementation that needs no Cuttlefish
-# remote service before apexd scans the vendor APEX directory.
+# Cuttlefish ships selectable vendor APEX implementations. Its launcher passes
+# the selections in bootconfig. DSA does not run that launcher, so choose the
+# implementations that can start without Cuttlefish remote services before
+# apexd scans the vendor APEX directory.
 VENDOR_APEX_BOOTCONFIG = {
     "com.android.hardware.gatekeeper": "com.android.hardware.gatekeeper.nonsecure",
     "com.android.hardware.keymint": "com.android.hardware.keymint.rust_nonsecure",
+    "com.android.hardware.graphics.composer": "com.android.hardware.graphics.composer.ranchu",
 }
 
 

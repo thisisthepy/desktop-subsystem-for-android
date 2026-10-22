@@ -14,7 +14,7 @@ SPEC.loader.exec_module(make_image)
 
 
 class ImageLayoutTests(unittest.TestCase):
-    def test_fr1_selects_nonsecure_vendor_apexes_without_the_cuttlefish_launcher(self):
+    def test_fr1_selects_vendor_apexes_without_the_cuttlefish_launcher(self):
         cmdline = make_image.kernel_cmdline("blkdevparts=sda:1@0(misc)")
         self.assertIn(
             "androidboot.vendor.apex.com.android.hardware.gatekeeper=com.android.hardware.gatekeeper.nonsecure",
@@ -22,6 +22,10 @@ class ImageLayoutTests(unittest.TestCase):
         )
         self.assertIn(
             "androidboot.vendor.apex.com.android.hardware.keymint=com.android.hardware.keymint.rust_nonsecure",
+            cmdline,
+        )
+        self.assertIn(
+            "androidboot.vendor.apex.com.android.hardware.graphics.composer=com.android.hardware.graphics.composer.ranchu",
             cmdline,
         )
 
