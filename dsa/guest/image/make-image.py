@@ -345,7 +345,7 @@ def unlisted_verified_boot_partitions(found, fstab):
         fields = line.split()
         if len(fields) >= 5 and not line.startswith("#") and "first_stage_mount" in fields[4].split(","):
             listed.add(fields[0].rsplit("/", 1)[-1])
-    return [name for kind, name in found if kind != "chain" and name not in listed]
+    return [name for _, name in found if name not in listed]
 
 
 def disk(images, otatools, work, out):
