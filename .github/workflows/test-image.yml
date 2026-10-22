@@ -17,6 +17,15 @@ on:
         type: boolean
         required: false
         default: false
+      android:
+        description: "Android release to make. Use all for the compatibility run."
+        type: choice
+        required: false
+        default: "17"
+        options:
+          - "17"
+          - "16"
+          - all
 
 concurrency:
   group: test-image-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
@@ -28,11 +37,12 @@ permissions:
 jobs:
   image:
     name: Make and check the guest image (ubuntu-latest, Android ${{ matrix.android }})
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.android == 'all' || inputs.android == matrix.android }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        android: [17, 16]
+        android: ["17", "16"]
     steps:
       - uses: actions/checkout@v4
 
