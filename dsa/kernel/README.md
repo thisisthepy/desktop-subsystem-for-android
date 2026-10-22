@@ -7,6 +7,7 @@ kernel, and the user's WSL kernel is not touched.
 |---|---|
 | `wsl-kernel.tag` | The WSL kernel tag the source comes from |
 | `android.config` | The options merged on top of that tag's `Microsoft/config-wsl` |
+| `patches/` | Small patches applied to the pinned source before configuration |
 | `build.sh` | Fetches the source into `.scratch/`, merges the configuration, checks it and builds `bzImage` |
 
 ## Why the WSL kernel
@@ -16,8 +17,9 @@ The WSL kernel is already tuned for this kind of VM: it carries the Hyper-V driv
 the configuration Microsoft maintains for a lightweight Linux VM on Windows. Android's
 needs come on top as one fragment, so following a new WSL tag is a one-line change.
 
-The source is used unmodified. Only the configuration differs, which keeps the difference
-from Microsoft's kernel small enough to read in one file.
+The source is configured from Microsoft's baseline. A small checked-in patch extends the
+command-line partition parser so Hyper-V can provide Android the partition UUID and name
+metadata its virtual SCSI uevents omit.
 
 ## What the fragment adds
 

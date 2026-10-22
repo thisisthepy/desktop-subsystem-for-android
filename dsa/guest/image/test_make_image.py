@@ -21,8 +21,8 @@ class ImageLayoutTests(unittest.TestCase):
             "super": (100 << 20, 1536 << 20),
         }
         self.assertEqual(
-            make_image.command_line_partitions(layout),
-            "blkdevparts=sda:1048576@1048576(misc),1048576@69206016(vbmeta_a),"
+            make_image.command_line_partitions(layout, {"misc": make_image.MISC_UUID}),
+            "blkdevparts=sda:1048576@1048576(misc:811d3bbb-a7ff-437a-857f-f54af996b190),1048576@69206016(vbmeta_a),"
             "1610612736@104857600(super)",
         )
 

@@ -45,6 +45,7 @@ REMOVED_APPS = ["Launcher3QuickStep", "SystemUI", "LatinIME"]
 # The user's disk. The super partition's UUID is how first-stage init finds the disk, so it
 # is fixed and passed on the kernel command line.
 SUPER_UUID = "6b1ad5ad-0d5a-4dd3-9a6b-5a0a1d5a5a17"
+MISC_UUID = "811d3bbb-a7ff-437a-857f-f54af996b190"
 DISK_SIZE = 64 << 30
 SMALL_PARTITIONS = [
     ("misc", 1 << 20),
@@ -150,7 +151,7 @@ def materialize_backup_gpt(path):
     run("powershell.exe", "-NoProfile", "-Command", command)
 
 
-def command_line_partitions(partitions):
+def command_line_partitions(partitions, uuids=None):
     """Returns the Hyper-V SCSI layout that restores GPT names in early Android init.
 
     Hyper-V's virtual SCSI controller exposes the GPT partition devices but omits their
@@ -159,8 +160,10 @@ def command_line_partitions(partitions):
     an AOSP super image changing size does not change the mapping by assumption.
     """
     entries = []
+    uuids = {} if uuids is None else uuids
     for name, (offset, size) in partitions.items():
-        entries.append(f"{size}@{offset}({name})")
+        identifier = f"{name}:{uuids[name]}" if name in uuids else name
+        entries.append(f"{size}@{offset}({identifier})")
     return "blkdevparts=sda:" + ",".join(entries)
 
 
@@ -370,6 +373,8 @@ def disk(images, otatools, work, out):
     number = 1
     for name, size in SMALL_PARTITIONS:
         cmd += [f"--new={number}:0:+{size // 1024}K", f"--change-name={number}:{name}"]
+        if name == "misc":
+            cmd += [f"--partition-guid={number}:{MISC_UUID}"]
         number += 1
     cmd += [f"--new={number}:0:+{super_raw.stat().st_size // 1024}K", f"--change-name={number}:super", f"--partition-guid={number}:{SUPER_UUID}"]
     number += 1
@@ -396,7 +401,7 @@ def disk(images, otatools, work, out):
     out.unlink(missing_ok=True)
     run(shutil.which("qemu-img") or "qemu-img", "convert", "-f", "raw", "-O", "vhdx", "-o", "subformat=dynamic", "-S", "4k", raw, out)
     raw.unlink()
-    return command_line_partitions(partitions)
+    return command_line_partitions(partitions, {"misc": MISC_UUID})
 
 
 def main():
@@ -457,7 +462,7 @@ def main():
     cmdline = " ".join([
         "console=ttyS0", "printk.devkmsg=on", "audit=1", "panic=-1", "8250.nr_uarts=1",
         "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init", partition_cmdline,
-        f"androidboot.boot_part_uuid={SUPER_UUID}", "androidboot.fstab_suffix=dsa",
+        f"androidboot.boot_part_uuid={MISC_UUID}", "androidboot.fstab_suffix=dsa",
         "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",
         "androidboot.hardware=cutf_cvm", "androidboot.verifiedbootstate=orange",
         "androidboot.vbmeta.device_state=unlocked",
