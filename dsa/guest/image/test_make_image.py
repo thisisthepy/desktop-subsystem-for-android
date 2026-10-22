@@ -28,6 +28,10 @@ class ImageLayoutTests(unittest.TestCase):
             "androidboot.vendor.apex.com.android.hardware.graphics.composer=com.android.hardware.graphics.composer.ranchu",
             cmdline,
         )
+        self.assertIn(
+            "androidboot.vendor.apex.com.google.emulated.camera.provider.hal=com.google.emulated.camera.provider.hal",
+            cmdline,
+        )
 
     def test_fr1_avb_footer_partitions_match_the_signed_aosp_layout(self):
         sizes = dict(make_image.SMALL_PARTITIONS)

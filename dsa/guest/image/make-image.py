@@ -90,6 +90,7 @@ VENDOR_APEX_BOOTCONFIG = {
     "com.android.hardware.gatekeeper": "com.android.hardware.gatekeeper.nonsecure",
     "com.android.hardware.keymint": "com.android.hardware.keymint.rust_nonsecure",
     "com.android.hardware.graphics.composer": "com.android.hardware.graphics.composer.ranchu",
+    "com.google.emulated.camera.provider.hal": "com.google.emulated.camera.provider.hal",
 }
 
 
