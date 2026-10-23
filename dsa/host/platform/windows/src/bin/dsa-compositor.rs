@@ -5,16 +5,23 @@
 //! cleanly on sign-out.
 #![windows_subsystem = "windows"]
 
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+#[cfg(not(windows))]
+fn main() -> std::process::ExitCode {
+    eprintln!("dsa-compositor runs on Windows only");
+    std::process::ExitCode::FAILURE
+}
 
-use dsa_host_windows::compositor::adapter::GfxstreamAdapter;
-use dsa_host_windows::compositor::log::{default_log_file, CompositorLogger};
-use dsa_host_windows::compositor::shutdown::SignOutListener;
-use dsa_host_windows::compositor::single_instance::SingleInstanceMutex;
-use dsa_host_windows::compositor::{Compositor, CompositorConfig};
-
+#[cfg(windows)]
 fn main() {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    use dsa_host_windows::compositor::adapter::GfxstreamAdapter;
+    use dsa_host_windows::compositor::log::{default_log_file, CompositorLogger};
+    use dsa_host_windows::compositor::shutdown::SignOutListener;
+    use dsa_host_windows::compositor::single_instance::SingleInstanceMutex;
+    use dsa_host_windows::compositor::{Compositor, CompositorConfig};
+
     let log_file = default_log_file();
     let logger = CompositorLogger::open(&log_file).ok().map(Arc::new);
 
