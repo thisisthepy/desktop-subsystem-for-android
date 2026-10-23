@@ -92,7 +92,7 @@
                                 ErrorControl="normal"
                                 Account="LocalSystem"
                                 Arguments="service &quot;[DATAFOLDER]dsa-hostd.json&quot;">
-                    <PermissionEx Sddl="D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;SU)(A;;LCRPLORC;;;IU)(A;;LCRPLORC;;;AU)" />
+                    <PermissionEx Sddl="D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;SU)(A;;CCLCRPLORC;;;IU)(A;;CCLCRPLORC;;;AU)" />
                     <util:ServiceConfig
                         FirstFailureActionType="restart"
                         SecondFailureActionType="restart"

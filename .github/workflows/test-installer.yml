@@ -202,8 +202,8 @@ jobs:
           [System.IO.File]::WriteAllText($tempInf, $cfg, [System.Text.Encoding]::ASCII)
           secedit /configure /db $tempSdb /cfg $tempInf /areas USER_RIGHTS | Out-Null
 
-          $password = ConvertTo-SecureString "Dsa_Str0ng!P@ssw0rd#2026" -AsPlainText -Force
-          New-LocalUser -Name "DsaTestStdUser" -Password $password -FullName "DSA Standard Test User" -Description "Standard test user"
+          net accounts /minpwlen:0
+          net user StdTestUser "Z9#kL$2mQ!vP8*wX" /add
           try {
             # Stop the service as administrator first
             Stop-Service DsaHost
@@ -212,7 +212,7 @@ jobs:
 
             # Standard user can start the stopped service
             $startAction = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c sc.exe start DsaHost > C:\dsa_test_start.log 2>&1"
-            $startTask = Register-ScheduledTask -TaskName "DsaTestStartTask" -Action $startAction -User "DsaTestStdUser" -Password "Dsa_Str0ng!P@ssw0rd#2026" -Force
+            $startTask = Register-ScheduledTask -TaskName "DsaTestStartTask" -Action $startAction -User "StdTestUser" -Password "Z9#kL$2mQ!vP8*wX" -Force
             Start-ScheduledTask -TaskName "DsaTestStartTask"
             $deadline = (Get-Date).AddSeconds(30)
             while ((Get-Service DsaHost).Status -ne 'Running' -and (Get-Date) -lt $deadline) {
@@ -226,7 +226,7 @@ jobs:
 
             # Standard user cannot stop the running service
             $stopAction = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c sc.exe stop DsaHost > C:\dsa_test_stop.log 2>&1"
-            $stopTask = Register-ScheduledTask -TaskName "DsaTestStopTask" -Action $stopAction -User "DsaTestStdUser" -Password "Dsa_Str0ng!P@ssw0rd#2026" -Force
+            $stopTask = Register-ScheduledTask -TaskName "DsaTestStopTask" -Action $stopAction -User "StdTestUser" -Password "Z9#kL$2mQ!vP8*wX" -Force
             Start-ScheduledTask -TaskName "DsaTestStopTask"
             Start-Sleep -Seconds 3
             $stopOut = Get-Content C:\dsa_test_stop.log -Raw -ErrorAction SilentlyContinue
@@ -241,7 +241,7 @@ jobs:
           } finally {
             Unregister-ScheduledTask -TaskName "DsaTestStartTask" -Confirm:$false -ErrorAction SilentlyContinue
             Unregister-ScheduledTask -TaskName "DsaTestStopTask" -Confirm:$false -ErrorAction SilentlyContinue
-            Remove-LocalUser -Name "DsaTestStdUser" -ErrorAction SilentlyContinue
+            net user StdTestUser /delete -ErrorAction SilentlyContinue
             Remove-Item "C:\dsa_test_start.log", "C:\dsa_test_stop.log", $tempInf, $tempSdb -ErrorAction SilentlyContinue
           }
 
