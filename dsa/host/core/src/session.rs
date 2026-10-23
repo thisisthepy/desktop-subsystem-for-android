@@ -363,6 +363,7 @@ struct Worker {
     config: SessionConfig,
     shared: Arc<Shared>,
     commands: Receiver<Command>,
+    #[allow(dead_code)]
     incoming: Arc<Mutex<Option<Sender<Vec<u8>>>>>,
     connection: Option<Box<dyn Connection>>,
     shutting_down: bool,
@@ -548,14 +549,23 @@ impl Worker {
                 return;
             };
             match connection.recv(Some(POLL)) {
-                Ok(frame) => {
-                    let mut incoming = self.incoming.lock().unwrap_or_else(|e| e.into_inner());
-                    if let Some(reader) = incoming.as_ref() {
-                        if reader.send(frame).is_err() {
-                            *incoming = None;
+                Ok(frame) => match dsa_protocol::decode(&frame) {
+                    Ok(envelope) => match envelope.body {
+                        Some(dsa_protocol::control::envelope::Body::Hello(_))
+                        | Some(dsa_protocol::control::envelope::Body::HelloAccepted(_))
+                        | Some(dsa_protocol::control::envelope::Body::HelloRejected(_)) => {
+                            eprintln!(
+                                "control channel: dropping unexpected handshake message on active session"
+                            );
                         }
+                        None => {
+                            eprintln!("control channel: dropping message with unknown body");
+                        }
+                    },
+                    Err(error) => {
+                        eprintln!("control channel: dropping malformed frame: {error}");
                     }
-                }
+                },
                 Err(TransportError::Timeout) => {}
                 Err(error) => {
                     self.stop(StopReason::ChannelLost(error.to_string()));
