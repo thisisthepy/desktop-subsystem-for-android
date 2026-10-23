@@ -41,6 +41,38 @@ pub enum Command {
     Update,
 }
 
+/// What can start a host service or ensure it is running.
+pub trait ServiceStarter: Send + Sync {
+    /// Starts the service if it is not already running, waiting until it enters the
+    /// running state or its local transport is available.
+    fn start_service(&self) -> Result<(), String>;
+}
+
+#[cfg(windows)]
+impl ServiceStarter for dsa_host_windows::scm::WindowsServiceStarter {
+    fn start_service(&self) -> Result<(), String> {
+        self.start()
+    }
+}
+
+/// The default service starter for this platform, when using the standard endpoint.
+pub fn default_starter(endpoint: Option<&str>) -> Option<Box<dyn ServiceStarter>> {
+    if endpoint.is_some() {
+        return None;
+    }
+    #[cfg(windows)]
+    {
+        Some(Box::new(dsa_host_windows::scm::WindowsServiceStarter::new(
+            "DsaHost",
+            Duration::from_secs(30),
+        )))
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
 /// How long the service may take to answer `dsa update`: it may download the setup file
 /// first.
 const UPDATE_ANSWER_TIMEOUT: Duration = Duration::from_secs(15 * 60);
@@ -129,13 +161,42 @@ fn build() -> String {
     format!("dsa {version}")
 }
 
-fn connect(connector: &mut dyn Connector, timeout: Duration) -> Result<HostApiClient, String> {
-    HostApiClient::connect(connector, &build(), timeout).map_err(|error| match error {
-        ClientError::Connect(_) => format!(
+fn connect(
+    connector: &mut dyn Connector,
+    starter: Option<&dyn ServiceStarter>,
+    can_start: bool,
+    timeout: Duration,
+) -> Result<HostApiClient, String> {
+    match HostApiClient::connect(connector, &build(), timeout) {
+        Ok(client) => Ok(client),
+        Err(ClientError::Connect(why)) if can_start && starter.is_some() => {
+            let starter = starter.unwrap();
+            match starter.start_service() {
+                Ok(()) => {
+                    let deadline = Instant::now() + Duration::from_secs(10);
+                    while Instant::now() < deadline {
+                        match HostApiClient::connect(connector, &build(), Duration::from_secs(1)) {
+                            Ok(client) => return Ok(client),
+                            Err(ClientError::Connect(_)) => {
+                                thread::sleep(Duration::from_millis(100));
+                            }
+                            Err(other) => return Err(other.to_string()),
+                        }
+                    }
+                    Err(format!(
+                        "cannot reach the DSA service ({why}): the service started, but its transport did not become ready"
+                    ))
+                }
+                Err(start_err) => Err(format!(
+                    "cannot reach the DSA service ({why}): starting the service failed: {start_err}"
+                )),
+            }
+        }
+        Err(ClientError::Connect(error)) => Err(format!(
             "cannot reach the DSA service ({error}); check that it is installed and running"
-        ),
-        other => other.to_string(),
-    })
+        )),
+        Err(other) => Err(other.to_string()),
+    }
 }
 
 /// `dsa update`: asks the service to install the newest version now and, with `--wait`,
@@ -156,7 +217,7 @@ fn update(
     let mut went_away = false;
     let mut last = None;
     loop {
-        match connect(connector, Duration::from_secs(2))
+        match connect(connector, None, false, Duration::from_secs(2))
             .and_then(|mut client| client.status().map_err(|e| e.to_string()))
         {
             Ok(status) if went_away => {
@@ -184,7 +245,19 @@ fn update(
 
 /// Runs `invocation` against the service `connector` reaches. Returns what to print.
 pub fn run(invocation: &Invocation, connector: &mut dyn Connector) -> Result<String, String> {
-    let mut client = connect(connector, Duration::from_secs(10))?;
+    let starter = default_starter(invocation.endpoint.as_deref());
+    run_with_starter(invocation, connector, starter.as_deref())
+}
+
+/// Runs `invocation` against the service `connector` reaches, using `starter` to start it
+/// if stopped.
+pub fn run_with_starter(
+    invocation: &Invocation,
+    connector: &mut dyn Connector,
+    starter: Option<&dyn ServiceStarter>,
+) -> Result<String, String> {
+    let can_start = invocation.command != Command::Stop;
+    let mut client = connect(connector, starter, can_start, Duration::from_secs(10))?;
     let status = match invocation.command {
         Command::Status => client.status(),
         Command::Start => client.start(),
