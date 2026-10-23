@@ -75,6 +75,8 @@ if info.get("format") != "vhdx":
 print(f"disk.vhdx: {info['virtual-size'] >> 30} GiB virtual, {info.get('actual-size', 0) >> 20} MiB on disk")
 if "androidboot.boot_part_uuid=" not in manifest["kernel_cmdline"]:
     problems.append("the kernel command line does not name the disk")
+if "blkdevparts=sda:" not in manifest["kernel_cmdline"]:
+    problems.append("the kernel command line does not restore Hyper-V GPT partition names")
 
 def ramdisk_entries(data):
     """Name to mode of every entry in a ramdisk of gzip'd newc cpio archives."""
