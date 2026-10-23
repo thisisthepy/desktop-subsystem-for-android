@@ -25,6 +25,7 @@ class HostGraphicsBuildTests(unittest.TestCase):
         self.assertIn("add_library(flatbuffers INTERFACE)", cmake)
         self.assertIn("add_library(libdrm_headers INTERFACE)", cmake)
         self.assertIn("add_library(gfxstream_egl_headers INTERFACE)", cmake)
+        self.assertIn("emugl_config_stub.cpp", cmake)
         self.assertIn("add_custom_target(dist_host_gfxstream", cmake)
 
     def test_pr3_host_fetch_script_pins_upstream_and_dependencies(self):

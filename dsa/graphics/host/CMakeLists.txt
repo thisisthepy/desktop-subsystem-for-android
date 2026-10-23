@@ -80,6 +80,11 @@ set(VIRGL_RENDERER_UNSTABLE_APIS ON CACHE BOOL "" FORCE)
 
 add_subdirectory("${GFXSTREAM_DIR}" gfxstream_build EXCLUDE_FROM_ALL)
 
+# Stub emulator symbol missing in standalone Windows host build
+if(TARGET gfxstream_backend_static)
+    target_sources(gfxstream_backend_static PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/emugl_config_stub.cpp")
+endif()
+
 # Suppress warning escalation to error for compiler variations
 set(SUPPRESS_FLAGS -Wno-error -Wno-c++98-compat -Wno-c++98-compat-pedantic)
 
