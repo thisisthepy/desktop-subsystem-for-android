@@ -34,6 +34,10 @@ pub trait UserAndroid: Send + Sync {
     fn update_notice(&self) -> Option<String> {
         None
     }
+    /// The runtime ID of the VM (such as a GUID on Windows), if running.
+    fn vm_id(&self) -> Option<String> {
+        None
+    }
 }
 
 impl UserAndroid for Session {
@@ -55,6 +59,9 @@ impl UserAndroid for Session {
     }
     fn stop(&self) {
         Session::stop(self)
+    }
+    fn vm_id(&self) -> Option<String> {
+        Session::vm_id(self)
     }
 }
 
@@ -220,9 +227,15 @@ impl HostApiService {
             match listener.accept(Duration::from_millis(200)) {
                 Ok((connection, peer)) => {
                     let service = Arc::clone(&self);
-                    let spawned = thread::Builder::new()
-                        .name("dsa-host-api".into())
-                        .spawn(move || service.serve_connection(connection, peer));
+                    let spawned =
+                        thread::Builder::new()
+                            .name("dsa-host-api".into())
+                            .spawn(move || {
+                                let _ =
+                                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                        service.serve_connection(connection, peer);
+                                    }));
+                            });
                     if let Err(error) = spawned {
                         eprintln!("local API: could not start a connection thread: {error}");
                     }
@@ -286,6 +299,12 @@ impl HostApiService {
                     .into(),
             ),
             Some(request::Body::UpdateProgram(_)) => self.update_program(peer),
+            Some(request::Body::GetVmId(_)) => match self.androids.android(&peer.user) {
+                Err(why) => error(ErrorCode::Unavailable, why),
+                Ok(android) => response::Body::VmId(types::VmId {
+                    vm_id: android.vm_id().unwrap_or_default(),
+                }),
+            },
             Some(body) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => {
@@ -294,6 +313,7 @@ impl HostApiService {
                         request::Body::StartSession(_) => android.start(),
                         request::Body::StopSession(_) => android.stop(),
                         request::Body::UpdateProgram(_) => unreachable!("answered above"),
+                        request::Body::GetVmId(_) => unreachable!("answered above"),
                     }
                     response::Body::Status(types::Status {
                         state: to_wire(android.state()) as i32,
@@ -426,6 +446,14 @@ impl HostApiClient {
             _ => Err(ClientError::Malformed(
                 "expected the answer to an update request".into(),
             )),
+        }
+    }
+
+    /// Asks for the runtime ID of the caller's Android VM, if running.
+    pub fn vm_id(&mut self) -> Result<Option<String>, ClientError> {
+        match self.exchange(request::Body::GetVmId(types::GetVmId {}), self.timeout)? {
+            response::Body::VmId(vm_id) => Ok(Some(vm_id.vm_id).filter(|id| !id.is_empty())),
+            _ => Err(ClientError::Malformed("expected a vm_id response".into())),
         }
     }
 

@@ -439,3 +439,45 @@ processors=4
         "the user's .wslconfig must remain byte-identical"
     );
 }
+
+#[test]
+fn fr14_an_image_with_two_disks_attaches_system_image_and_data_disk() {
+    let config = HostConfig::parse(UPDATING).unwrap();
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("aosp-two-disk-image-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("image.json"),
+        r#"{"version": "17.0.0-16373615", "kernel_cmdline": "androidboot.boot_devices=vmbus androidboot.fstab_suffix=dsa", "files": {"system.vhdx": {}, "data.vhdx": {}}}"#,
+    )
+    .unwrap();
+    let files = config.image_files(Some(&dir));
+    assert_eq!(files.system_image, Some(dir.join("system.vhdx")));
+    assert_eq!(files.disk_template, Some(dir.join("data.vhdx")));
+    assert_eq!(files.initrd, Some(dir.join("initrd.img")));
+    assert_eq!(
+        files.kernel_cmdline,
+        "androidboot.boot_devices=vmbus androidboot.fstab_suffix=dsa"
+    );
+
+    let user = config.user_vm("S-1-5-21-1-2-3-1001").unwrap();
+    let mut vm = user.config.clone();
+    vm.system_image = files.system_image;
+    vm.initrd = files.initrd;
+    vm.kernel_cmdline = files.kernel_cmdline;
+    let document = vm.to_hcs_document().unwrap();
+    let attachments = &document["VirtualMachine"]["Devices"]["Scsi"]["0"]["Attachments"];
+    assert_eq!(
+        attachments.as_object().unwrap().len(),
+        2,
+        "both system and data disks"
+    );
+    assert_eq!(attachments["0"]["ReadOnly"], true);
+    assert_eq!(attachments["1"]["ReadOnly"], false);
+    let kernel = &document["VirtualMachine"]["Chipset"]["LinuxKernelDirect"];
+    assert!(kernel["KernelCmdLine"]
+        .as_str()
+        .unwrap()
+        .contains("androidboot.boot_devices=vmbus"));
+}

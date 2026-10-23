@@ -230,28 +230,54 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
         config.pipe_name
     );
     let grace = Duration::from_secs(config.stop_timeout_secs + 15);
-    let updates = open_updates(&config, build)?;
+    let updates = match open_updates(&config, build) {
+        Ok(updates) => updates,
+        Err(error) => {
+            eprintln!("{build}: image updates disabled: {error}");
+            None
+        }
+    };
     if let Some(updates) = &updates {
-        let (config, updates, build, stop) = (
+        let (config, updates, worker_build, stop) = (
             config.clone(),
             updates.clone(),
             build.to_string(),
             Arc::clone(&stop),
         );
-        thread::Builder::new()
+        if let Err(error) = thread::Builder::new()
             .name("dsa-updates".into())
-            .spawn(move || check_for_updates(config, updates, build, stop))
-            .map_err(|e| format!("starting the update check: {e}"))?;
+            .spawn(move || check_for_updates(config, updates, worker_build, stop))
+        {
+            eprintln!("{build}: starting the update check failed: {error}");
+        }
     }
-    let program = config
-        .program_settings(crate::VERSION)
-        .map_err(|e| e.to_string())?;
+    let program = match config.program_settings(crate::VERSION) {
+        Ok(program) => program,
+        Err(error) => {
+            eprintln!("{build}: program updates disabled: {error}");
+            None
+        }
+    };
     let program_status = Arc::new(ProgramStatus::default());
     let factory_config = config.clone();
     let factory_build = build.to_string();
     let factory_status = program.as_ref().map(|_| Arc::clone(&program_status));
     let androids = Arc::new(PerUser::new(move |sid: &str| {
-        let android = create_user_android(&factory_config, &factory_build, sid, updates.as_ref());
+        let android = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            create_user_android(&factory_config, &factory_build, sid, updates.as_ref())
+        })) {
+            Ok(res) => res,
+            Err(payload) => {
+                let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                    (*s).to_string()
+                } else if let Some(s) = payload.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic".to_string()
+                };
+                Err(format!("setting up Android for {sid} panicked: {msg}"))
+            }
+        };
         if let Err(why) = &android {
             eprintln!("{factory_build}: no Android for {sid}: {why}");
         }
@@ -283,7 +309,7 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
         );
         service = service.with_program_updates(updates.clone());
         let stop = Arc::clone(&stop);
-        thread::Builder::new()
+        if let Err(error) = thread::Builder::new()
             .name("dsa-program-updates".into())
             .spawn(move || {
                 updates.run(
@@ -295,7 +321,9 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
                     },
                 )
             })
-            .map_err(|e| format!("starting the program update check: {e}"))?;
+        {
+            eprintln!("{build}: starting the program update check failed: {error}");
+        }
     }
     let service = Arc::new(service);
     service.serve(Box::new(listener), stop);

@@ -87,6 +87,22 @@ if [[ ! -d "$system_logging_dir/.git" ]]; then
 fi
 git -C "$system_logging_dir" sparse-checkout set liblog/include
 
+# Shallow dependencies required to build the host gfxstream renderer:
+aemu_dir="$scratch_dir/aemu"
+aemu_revision="3ff20aed307f55bc4ae865373d07bf76c9efa43c"
+if [[ ! -d "$aemu_dir/.git" ]]; then
+    git clone https://android.googlesource.com/platform/hardware/google/aemu "$aemu_dir"
+fi
+git -C "$aemu_dir" fetch --no-tags origin "$aemu_revision"
+git -C "$aemu_dir" checkout --detach "$aemu_revision"
+git -C "$aemu_dir" reset --hard "$aemu_revision"
+
+angle_dir="$scratch_dir/angle"
+if [[ ! -d "$angle_dir/.git" ]]; then
+    git clone --depth=1 --filter=blob:none --sparse https://android.googlesource.com/platform/external/angle "$angle_dir"
+fi
+git -C "$angle_dir" sparse-checkout set include
+
 # Generate Vulkan headers if generator script is present
 gen_dir="$scratch_dir/gen"
 mkdir -p "$gen_dir"

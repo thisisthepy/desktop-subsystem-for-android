@@ -1,6 +1,7 @@
 """Regression tests for the guest image layout helpers."""
 
 import importlib.util
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -16,6 +17,8 @@ SPEC.loader.exec_module(make_image)
 class ImageLayoutTests(unittest.TestCase):
     def test_fr1_selects_vendor_apexes_without_the_cuttlefish_launcher(self):
         cmdline = make_image.kernel_cmdline("blkdevparts=sda:1@0(misc)")
+        self.assertIn("androidboot.boot_devices=vmbus", cmdline)
+        self.assertNotIn("androidboot.boot_part_uuid", cmdline)
         self.assertIn(
             "androidboot.vendor.apex.com.android.hardware.gatekeeper=com.android.hardware.gatekeeper.nonsecure",
             cmdline,
@@ -114,6 +117,143 @@ class ImageLayoutTests(unittest.TestCase):
                 archive.writestr("SYSTEM/build.prop", b"ro.debuggable=1\n")
             with self.assertRaisesRegex(ValueError, "does not contain"):
                 make_image.modify(source, root / "modified.zip", graphics_library=replacement)
+
+    def test_pr3_graphics_vsock_sepolicy_fragment_is_applied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            plat_cil = (
+                "(typeattribute appdomain)\n"
+                "(type surfaceflinger)\n"
+                "(typeattribute hal_graphics_allocator_server)\n"
+                "(typeattribute hal_graphics_composer_server)\n"
+                "(type bootanim)\n"
+                "(neverallow appdomain self (vsock_socket (create connect bind listen accept)))\n"
+            )
+            mapping_cil = "(typeattributeset appdomain (untrusted_app))\n"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", plat_cil)
+                archive.writestr("SYSTEM/etc/selinux/mapping/35.0.cil", mapping_cil)
+                archive.writestr("VENDOR/etc/selinux/plat_sepolicy_vers.txt", "35.0\n")
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy_and_mapping.sha256", "old-hash\n")
+                archive.writestr("VENDOR/etc/selinux/precompiled_sepolicy.plat_sepolicy_and_mapping.sha256", "old-hash\n")
+                archive.writestr("VENDOR/etc/selinux/precompiled_sepolicy", b"old-precompiled-policy")
+                archive.writestr("SYSTEM/build.prop", "ro.debuggable=1\n")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+            with zipfile.ZipFile(modified) as archive:
+                new_cil = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+                self.assertIn(
+                    "(allow appdomain self (vsock_socket (create connect read write getattr setopt getopt shutdown)))",
+                    new_cil,
+                )
+                self.assertIn(
+                    "(allow surfaceflinger self (vsock_socket (create connect read write getattr setopt getopt shutdown)))",
+                    new_cil,
+                )
+                # Verify neverallow was narrowed
+                neverallow_rule = next(l for l in new_cil.splitlines() if l.startswith("(neverallow"))
+                self.assertEqual(neverallow_rule, "(neverallow appdomain self (vsock_socket (bind listen accept)))")
+
+                # Verify SHA-256 hash was updated
+                expected_hash = make_image.compute_plat_sepolicy_sha256(
+                    new_cil.encode(), mapping_cil.encode()
+                )
+                self.assertEqual(
+                    archive.read("SYSTEM/etc/selinux/plat_sepolicy_and_mapping.sha256").decode(),
+                    expected_hash,
+                )
+                self.assertEqual(
+                    archive.read("VENDOR/etc/selinux/precompiled_sepolicy.plat_sepolicy_and_mapping.sha256").decode(),
+                    expected_hash,
+                )
+                # When otatools is not supplied, precompiled_sepolicy is removed so the device compiles at boot
+                self.assertNotIn("VENDOR/etc/selinux/precompiled_sepolicy", archive.namelist())
+
+    def test_pr3_neverallow_is_narrowed_only_for_vsock_socket(self):
+        cil = (
+            "(neverallow all_untrusted_apps base_typeattr_1 (vsock_socket (ioctl read write create getattr "
+            "setattr lock relabelfrom relabelto append map bind connect listen accept getopt setopt shutdown "
+            "recvfrom sendto name_bind)))\n"
+        )
+        narrowed = make_image.narrow_vsock_neverallows(cil)
+        # Sockets cannot be bound or listened on, so those remain forbidden
+        self.assertIn("bind", narrowed)
+        self.assertIn("listen", narrowed)
+        self.assertIn("accept", narrowed)
+        self.assertIn("ioctl", narrowed)
+        # Client operations are no longer forbidden
+        for perm in ["create", "connect", "setopt", "shutdown", "read", "write", "getattr", "getopt"]:
+            self.assertNotIn(f" {perm} ", narrowed)
+            self.assertFalse(narrowed.endswith(f" {perm})))\n"))
+        self.assertTrue(narrowed.startswith("(neverallow all_untrusted_apps base_typeattr_1 (vsock_socket ("))
+
+    def test_pr3_policy_outside_vsock_socket_is_unchanged(self):
+        cil = (
+            "(typeattribute appdomain)\n"
+            "(typeattribute all_untrusted_apps)\n"
+            "(allow appdomain app_data_file (file (read write)))\n"
+            "(neverallow all_untrusted_apps file_type (file (mounton)))\n"
+            "(neverallow domain file_type (blk_file (read write)))\n"
+            "(neverallow all_untrusted_apps base_typeattr_1 (vsock_socket (create connect bind)))\n"
+        )
+        narrowed = make_image.narrow_vsock_neverallows(cil)
+        self.assertIn("(typeattribute appdomain)\n", narrowed)
+        self.assertIn("(typeattribute all_untrusted_apps)\n", narrowed)
+        self.assertIn("(allow appdomain app_data_file (file (read write)))\n", narrowed)
+        self.assertIn("(neverallow all_untrusted_apps file_type (file (mounton)))\n", narrowed)
+        self.assertIn("(neverallow domain file_type (blk_file (read write)))\n", narrowed)
+        self.assertIn("(neverallow all_untrusted_apps base_typeattr_1 (vsock_socket (bind)))\n", narrowed)
+
+
+    def test_pr3_precompiled_sepolicy_is_recompiled_when_secilc_is_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            otatools = root / "otatools"
+            bin_dir = otatools / "bin"
+            bin_dir.mkdir(parents=True)
+            secilc = bin_dir / "secilc"
+            # Fake secilc executable script that writes a binary policy
+            secilc.write_text("#!/bin/sh\nexit 0\n")
+            secilc.chmod(0o755)
+
+            source = root / "target-files.zip"
+            plat_cil = "(typeattribute appdomain)\n"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", plat_cil)
+                archive.writestr("SYSTEM/etc/selinux/mapping/35.0.cil", "")
+                archive.writestr("VENDOR/etc/selinux/plat_sepolicy_vers.txt", "35.0\n")
+                archive.writestr("VENDOR/etc/selinux/precompiled_sepolicy", b"old-policy")
+                archive.writestr("SYSTEM/build.prop", "ro.debuggable=1\n")
+
+            modified = root / "modified.zip"
+            with patch("subprocess.run") as mock_run:
+                def fake_run(cmd, *a, **kw):
+                    # Write dummy output to -o argument
+                    out_idx = cmd.index("-o") + 1
+                    Path(cmd[out_idx]).write_bytes(b"recompiled-sepolicy-binary")
+                    return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+                mock_run.side_effect = fake_run
+                make_image.modify(source, modified, otatools=otatools)
+
+            with zipfile.ZipFile(modified) as archive:
+                self.assertIn("VENDOR/etc/selinux/precompiled_sepolicy", archive.namelist())
+                self.assertEqual(
+                    archive.read("VENDOR/etc/selinux/precompiled_sepolicy"),
+                    b"recompiled-sepolicy-binary",
+                )
+
+
+    def test_fr1_two_disk_layout_separates_system_and_data_partitions(self):
+        system_partitions = [name for name, _ in make_image.SYSTEM_SMALL_PARTITIONS]
+        self.assertIn("misc", system_partitions)
+        self.assertIn("vbmeta_a", system_partitions)
+        self.assertIn("boot_a", system_partitions)
+        self.assertNotIn("metadata", system_partitions)
+        self.assertNotIn("userdata", system_partitions)
+
+        data_partitions = [name for name, _ in make_image.DATA_PARTITIONS]
+        self.assertEqual(data_partitions, ["metadata", "userdata"])
 
 
 if __name__ == "__main__":

@@ -33,10 +33,14 @@ pub const VERSION: &str = match option_env!("DSA_VERSION") {
 pub mod account;
 #[cfg(windows)]
 pub mod android_vm;
+#[cfg(windows)]
+pub mod compositor;
 pub mod console_log;
 #[cfg(windows)]
 pub mod console_pipe;
 pub mod gpt;
+#[cfg(windows)]
+pub mod guest_communication_services;
 pub mod guid;
 #[cfg(windows)]
 pub mod hcs;

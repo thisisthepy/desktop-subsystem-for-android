@@ -703,4 +703,7 @@ impl UserAndroid for WithProgramStatus {
             .collect();
         (!notices.is_empty()).then(|| notices.join("\n"))
     }
+    fn vm_id(&self) -> Option<String> {
+        self.android.vm_id()
+    }
 }

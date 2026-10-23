@@ -142,6 +142,9 @@ pub fn bring_disk_to(disk: &Path, template: &Path, version: &str) -> Result<(), 
     if held.as_deref() == Some(version) {
         return Ok(());
     }
+    if template.file_name().and_then(|n| n.to_str()) == Some("data.vhdx") {
+        return record_disk_image_version(disk, version);
+    }
     let from = AttachedDisk::attach(template, true)?;
     let to = AttachedDisk::attach(disk, false)?;
     let mut source = from.open(false)?;

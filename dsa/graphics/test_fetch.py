@@ -10,7 +10,7 @@ FETCH = HERE / "fetch.sh"
 
 class GfxstreamFetchTests(unittest.TestCase):
     def test_pr3_fetches_the_pinned_upstream_revision_before_applying_dsa_patches(self):
-        script = FETCH.read_text()
+        script = FETCH.read_text(encoding="utf-8")
         self.assertIn("d047a57228332d995d36600792fa9ccc26cf8ae6", script)
         self.assertIn(
             "https://android.googlesource.com/platform/hardware/google/gfxstream",
@@ -27,7 +27,7 @@ class GfxstreamFetchTests(unittest.TestCase):
         self.assertIn("git -C \"$mesa_dir\" reset --hard \"$mesa_revision\"", script)
 
     def test_pr3_fetches_shallow_guest_dependencies(self):
-        script = FETCH.read_text()
+        script = FETCH.read_text(encoding="utf-8")
         self.assertIn("https://android.googlesource.com/platform/external/mesa3d", script)
         self.assertIn("https://android.googlesource.com/platform/external/minigbm", script)
         self.assertIn("https://android.googlesource.com/platform/hardware/libhardware", script)
@@ -37,7 +37,12 @@ class GfxstreamFetchTests(unittest.TestCase):
         self.assertIn("src/vulkan", script)
         self.assertIn("cros_gralloc", script)
 
+    def test_pr3_fetches_host_dependencies(self):
+        script = FETCH.read_text(encoding="utf-8")
+        self.assertIn("https://android.googlesource.com/platform/hardware/google/aemu", script)
+        self.assertIn("3ff20aed307f55bc4ae865373d07bf76c9efa43c", script)
+        self.assertIn("https://android.googlesource.com/platform/external/angle", script)
+
 
 if __name__ == "__main__":
     unittest.main()
-

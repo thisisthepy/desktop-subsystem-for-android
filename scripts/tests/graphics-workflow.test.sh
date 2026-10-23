@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks that the graphics CI compiles the patched guest transport with the Android NDK
-# and CMake, verifying its ELF architecture and exported symbols.
+# and CMake, and builds the host graphics renderer on Windows.
 set -euo pipefail
 
 workflow="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/test-graphics.yml"
@@ -14,3 +14,8 @@ grep -Fq 'HvSocketStream' "$workflow"
 grep -Fq 'vulkan.ranchu.so' "$workflow"
 grep -Fq 'vk_icdGetInstanceProcAddr' "$workflow"
 grep -Fq 'HMI' "$workflow"
+grep -Fq 'Build the host graphics renderer (windows)' "$workflow"
+grep -Fq 'dsa/graphics/host/build.ps1' "$workflow"
+grep -Fq 'test_host_renderer.py' "$workflow"
+grep -Fq 'host-gfxstream-windows' "$workflow"
+grep -Fq 'gfxstream_backend.dll' "$workflow"

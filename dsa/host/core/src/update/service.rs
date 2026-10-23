@@ -221,6 +221,9 @@ impl UserAndroid for UpdatingAndroid {
     fn update_notice(&self) -> Option<String> {
         self.notices.get()
     }
+    fn vm_id(&self) -> Option<String> {
+        UserAndroid::vm_id(&*self.session)
+    }
 
     fn start(&self) {
         if self.no_image_yet() {

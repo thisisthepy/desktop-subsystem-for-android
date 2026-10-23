@@ -47,9 +47,8 @@ REMOVED_APPS = ["Launcher3QuickStep", "SystemUI", "LatinIME"]
 SUPER_UUID = "6b1ad5ad-0d5a-4dd3-9a6b-5a0a1d5a5a17"
 MISC_UUID = "811d3bbb-a7ff-437a-857f-f54af996b190"
 DISK_SIZE = 64 << 30
-SMALL_PARTITIONS = [
+SYSTEM_SMALL_PARTITIONS = [
     ("misc", 1 << 20),
-    ("metadata", 64 << 20),
     ("vbmeta_a", 1 << 20),
     ("vbmeta_system_a", 1 << 20),
     ("vbmeta_system_dlkm_a", 1 << 20),
@@ -62,6 +61,12 @@ SMALL_PARTITIONS = [
     ("boot_a", 64 << 20),
     ("init_boot_a", 8 << 20),
     ("vendor_boot_a", 64 << 20),
+]
+SMALL_PARTITIONS = SYSTEM_SMALL_PARTITIONS
+
+DATA_PARTITIONS = [
+    ("metadata", 64 << 20),
+    ("userdata", 0),
 ]
 
 # What is written to each partition, from the signed build's IMAGES/.
@@ -217,7 +222,142 @@ FSTAB_DIRS = {
 GFXSTREAM_LIBRARY = "VENDOR/lib64/libOpenglSystemCommon.so"
 
 
-def modify(source, dest, graphics_library=None):
+# Minimal socket permissions needed by guest gfxstream client connections.
+GFXSTREAM_ALLOWED_PERMS = {
+    "create", "connect", "read", "write", "getattr", "setopt", "getopt", "shutdown"
+}
+SEPOLICY_FRAGMENT = HERE / "sepolicy/graphics-vsock.cil"
+
+
+def narrow_vsock_neverallows(text):
+    """Narrows neverallow rules on vsock_socket so apps can connect to host graphics."""
+    pattern = re.compile(
+        r"\(neverallow\s+([^\s()]+)\s+([^\s()]+)\s+\(\s*vsock_socket\s*\(([^)]*)\)\)\)"
+    )
+
+    def replace(m):
+        src, tgt, perms_str = m.group(1), m.group(2), m.group(3)
+        perms = [p for p in perms_str.split() if p not in GFXSTREAM_ALLOWED_PERMS]
+        if not perms:
+            return ""
+        return f"(neverallow {src} {tgt} (vsock_socket ({' '.join(perms)})))"
+
+    narrowed = pattern.sub(replace, text)
+
+    cps_pattern = re.compile(
+        r"\(classpermissionset\s+([^\s()]+)\s+\(\s*vsock_socket\s*\(([^)]*)\)\)\)"
+    )
+
+    def replace_cps(m):
+        name, perms_str = m.group(1), m.group(2)
+        perms = [p for p in perms_str.split() if p not in GFXSTREAM_ALLOWED_PERMS]
+        if not perms:
+            return ""
+        return f"(classpermissionset {name} (vsock_socket ({' '.join(perms)})))"
+
+    narrowed = cps_pattern.sub(replace_cps, narrowed)
+    return re.sub(r"\n{3,}", "\n\n", narrowed)
+
+
+def patch_plat_sepolicy(plat_sepolicy_text, fragment_text):
+    """Narrows neverallows on vsock_socket and appends the graphics vsock policy rules."""
+    narrowed = narrow_vsock_neverallows(plat_sepolicy_text)
+    rules = []
+    for line in fragment_text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(";"):
+            continue
+        m = re.match(r"\(allow\s+([^\s()]+)", line)
+        if m:
+            subject = m.group(1)
+            if subject in plat_sepolicy_text:
+                rules.append(line)
+        else:
+            rules.append(line)
+    return narrowed.rstrip() + "\n\n" + "\n".join(rules) + "\n"
+
+
+def compute_plat_sepolicy_sha256(plat_sepolicy_bytes, mapping_bytes):
+    """Computes the SHA-256 hash of plat_sepolicy.cil concatenated with the mapping file."""
+    h = hashlib.sha256()
+    h.update(plat_sepolicy_bytes)
+    h.update(mapping_bytes)
+    return h.hexdigest() + "\n"
+
+
+def recompile_precompiled_sepolicy(otatools, cil_map, work_dir=None):
+    """Recompiles precompiled_sepolicy with secilc from otatools if available."""
+    if not otatools:
+        return None
+    secilc = Path(otatools) / "bin/secilc"
+    if not secilc.exists():
+        return None
+    if not os.access(secilc, os.X_OK):
+        try:
+            secilc.chmod(0o755)
+        except OSError:
+            pass
+    if not os.access(secilc, os.X_OK):
+        return None
+
+    with tempfile.TemporaryDirectory(dir=work_dir) as tmp:
+        tmp_path = Path(tmp)
+        cil_paths = []
+        ordered_keys = [
+            "SYSTEM/etc/selinux/plat_sepolicy.cil",
+            "SYSTEM/etc/selinux/mapping/",
+            "VENDOR/etc/selinux/plat_pub_versioned.cil",
+            "SYSTEM_EXT/etc/selinux/system_ext_sepolicy.cil",
+            "SYSTEM_EXT/etc/selinux/mapping/",
+            "PRODUCT/etc/selinux/product_sepolicy.cil",
+            "PRODUCT/etc/selinux/mapping/",
+            "VENDOR/etc/selinux/vendor_sepolicy.cil",
+            "ODM/etc/selinux/odm_sepolicy.cil",
+        ]
+        included = set()
+        for key in ordered_keys:
+            if key.endswith("/"):
+                for name, data in sorted(cil_map.items()):
+                    if name.startswith(key) and name.endswith(".cil") and name not in included:
+                        f = tmp_path / Path(name).name
+                        f.write_bytes(data)
+                        cil_paths.append(str(f))
+                        included.add(name)
+            elif key in cil_map and key not in included:
+                f = tmp_path / Path(key).name
+                f.write_bytes(cil_map[key])
+                cil_paths.append(str(f))
+                included.add(key)
+        for name, data in sorted(cil_map.items()):
+            if name.endswith(".cil") and name not in included:
+                f = tmp_path / Path(name).name
+                f.write_bytes(data)
+                cil_paths.append(str(f))
+                included.add(name)
+
+        out_policy = tmp_path / "precompiled_sepolicy"
+        cmd = [
+            str(secilc),
+            "-m",
+            "-M", "true",
+            "-G",
+            "-N",
+            "-c", "30",
+            "-o", str(out_policy),
+            "-f", "/dev/null",
+            *cil_paths,
+        ]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0 and out_policy.exists():
+                return out_policy.read_bytes()
+            print(f"secilc failed (code {res.returncode}): {res.stderr}")
+        except Exception as e:
+            print(f"Could not execute secilc: {e}")
+        return None
+
+
+def modify(source, dest, graphics_library=None, otatools=None):
     """Copies target_files, removing the shell apps and the published kernel modules,
     switching to a user build and adding the Hyper-V mount table."""
     fstab = (HERE / "fstab.dsa").read_bytes()
@@ -226,7 +366,40 @@ def modify(source, dest, graphics_library=None):
         graphics_payload = Path(graphics_library).read_bytes()
     replaced_graphics_payload = False
     kept_modules = re.compile(r"^(VENDOR_BOOT/RAMDISK|VENDOR_DLKM|SYSTEM_DLKM)/lib/modules/.*\.ko$")
+
+    fragment_text = SEPOLICY_FRAGMENT.read_text() if SEPOLICY_FRAGMENT.exists() else ""
+    cil_map = {}
+    new_plat_bytes = None
+    new_sha256 = None
+    recompiled_policy = None
+
     with zipfile.ZipFile(source) as zin, zipfile.ZipFile(dest, "w", zipfile.ZIP_STORED, allowZip64=True) as zout:
+        names = set(zin.namelist())
+        for name in names:
+            if name.endswith(".cil"):
+                cil_map[name] = zin.read(name)
+
+        if "SYSTEM/etc/selinux/plat_sepolicy.cil" in cil_map:
+            plat_orig = cil_map["SYSTEM/etc/selinux/plat_sepolicy.cil"].decode()
+            plat_patched = patch_plat_sepolicy(plat_orig, fragment_text)
+            new_plat_bytes = plat_patched.encode()
+            cil_map["SYSTEM/etc/selinux/plat_sepolicy.cil"] = new_plat_bytes
+
+            mapping_bytes = b""
+            if "VENDOR/etc/selinux/plat_sepolicy_vers.txt" in names:
+                vers = zin.read("VENDOR/etc/selinux/plat_sepolicy_vers.txt").decode().strip()
+                mapping_key = f"SYSTEM/etc/selinux/mapping/{vers}.cil"
+                if mapping_key in cil_map:
+                    mapping_bytes = cil_map[mapping_key]
+            if not mapping_bytes:
+                for k in cil_map:
+                    if k.startswith("SYSTEM/etc/selinux/mapping/") and k.endswith(".cil"):
+                        mapping_bytes = cil_map[k]
+                        break
+
+            new_sha256 = compute_plat_sepolicy_sha256(new_plat_bytes, mapping_bytes)
+            recompiled_policy = recompile_precompiled_sepolicy(otatools, cil_map)
+
         for info in zin.infolist():
             name = info.filename
             if removed(name) or kept_modules.match(name):
@@ -234,28 +407,45 @@ def modify(source, dest, graphics_library=None):
             if name.startswith("IMAGES/"):
                 # Rebuilt after signing from the modified contents.
                 continue
-            data = graphics_payload if name == GFXSTREAM_LIBRARY and graphics_payload is not None else zin.read(name)
-            if name == GFXSTREAM_LIBRARY and graphics_payload is not None:
+            if name.endswith("/etc/selinux/precompiled_sepolicy"):
+                if recompiled_policy is not None:
+                    data = recompiled_policy
+                else:
+                    continue  # Delete precompiled_sepolicy so the device compiles it at boot.
+            elif name == "SYSTEM/etc/selinux/plat_sepolicy.cil" and new_plat_bytes is not None:
+                data = new_plat_bytes
+            elif new_sha256 is not None and name in {
+                "SYSTEM/etc/selinux/plat_sepolicy_and_mapping.sha256",
+                "VENDOR/etc/selinux/precompiled_sepolicy.plat_sepolicy_and_mapping.sha256",
+                "ODM/etc/selinux/precompiled_sepolicy.plat_sepolicy_and_mapping.sha256",
+            }:
+                data = new_sha256.encode()
+            elif name == GFXSTREAM_LIBRARY and graphics_payload is not None:
+                data = graphics_payload
                 replaced_graphics_payload = True
-            if name in PROP_FILES:
-                data = edit_props(data.decode()).encode()
-            elif name.endswith("lib/modules/modules.load") or name.endswith("lib/modules/modules.dep"):
-                data = b""
-            elif name == "META/apkcerts.txt":
-                data = b"".join(
-                    line + b"\n" for line in data.splitlines() if not any(f'name="{a}.apk"' in line.decode() for a in REMOVED_APPS)
-                )
-            elif name in FSTAB_DIRS.values():
-                text = data.decode()
-                for directory, config in FSTAB_DIRS.items():
-                    if config == name:
-                        # vendor/etc/... for the partition, first_stage_ramdisk/... for the ramdisk.
-                        if name.startswith("META/vendor_boot"):
-                            prefix = directory.split("RAMDISK/", 1)[1]
-                        else:
-                            prefix = directory.lower()
-                        text += f"{prefix}fstab.dsa 0 0 644 capabilities=0x0\n"
-                data = text.encode()
+            else:
+                data = graphics_payload if name == GFXSTREAM_LIBRARY and graphics_payload is not None else zin.read(name)
+                if name == GFXSTREAM_LIBRARY and graphics_payload is not None:
+                    replaced_graphics_payload = True
+                if name in PROP_FILES:
+                    data = edit_props(data.decode()).encode()
+                elif name.endswith("lib/modules/modules.load") or name.endswith("lib/modules/modules.dep"):
+                    data = b""
+                elif name == "META/apkcerts.txt":
+                    data = b"".join(
+                        line + b"\n" for line in data.splitlines() if not any(f'name="{a}.apk"' in line.decode() for a in REMOVED_APPS)
+                    )
+                elif name in FSTAB_DIRS.values():
+                    text = data.decode()
+                    for directory, config in FSTAB_DIRS.items():
+                        if config == name:
+                            # vendor/etc/... for the partition, first_stage_ramdisk/... for the ramdisk.
+                            if name.startswith("META/vendor_boot"):
+                                prefix = directory.split("RAMDISK/", 1)[1]
+                            else:
+                                prefix = directory.lower()
+                            text += f"{prefix}fstab.dsa 0 0 644 capabilities=0x0\n"
+                    data = text.encode()
             info.compress_type = zipfile.ZIP_STORED
             zout.writestr(info, data)
         for directory in FSTAB_DIRS:
@@ -374,8 +564,8 @@ def unlisted_verified_boot_partitions(found, fstab):
     return [name for _, name in found if name not in listed]
 
 
-def disk(images, otatools, work, out):
-    """Lays the images out on a new user's disk and converts it to a dynamic VHDX."""
+def system_disk(images, otatools, work, out):
+    """Lays the system images out on the shared read-only system disk and converts it to a dynamic VHDX."""
     super_raw = work / "super.raw"
     super_img = images / "super.img"
     with open(super_img, "rb") as f:
@@ -384,9 +574,11 @@ def disk(images, otatools, work, out):
         run(otatools / "bin/simg2img", super_img, super_raw)
     else:
         shutil.copy(super_img, super_raw)
-    raw = work / "disk.raw"
-    make_raw_disk(raw, DISK_SIZE)
-    on_disk = {name for name, _ in SMALL_PARTITIONS}
+    raw = work / "system.raw"
+    needed = sum(size for _, size in SYSTEM_SMALL_PARTITIONS) + super_raw.stat().st_size + (128 << 20)
+    system_disk_size = ((needed + (1 << 20) - 1) // (1 << 20)) * (1 << 20)
+    make_raw_disk(raw, system_disk_size)
+    on_disk = {name for name, _ in SYSTEM_SMALL_PARTITIONS}
     found = verified_boot_partitions(images / "vbmeta.img", otatools)
     missing = [n for _, n in found if f"{n}_a" not in on_disk]
     if missing:
@@ -397,14 +589,12 @@ def disk(images, otatools, work, out):
     sgdisk = shutil.which("sgdisk") or str(otatools / "bin/sgdisk")
     cmd = [sgdisk, "--clear"]
     number = 1
-    for name, size in SMALL_PARTITIONS:
+    for name, size in SYSTEM_SMALL_PARTITIONS:
         cmd += [f"--new={number}:0:+{size // 1024}K", f"--change-name={number}:{name}"]
         if name == "misc":
             cmd += [f"--partition-guid={number}:{MISC_UUID}"]
         number += 1
-    cmd += [f"--new={number}:0:+{super_raw.stat().st_size // 1024}K", f"--change-name={number}:super", f"--partition-guid={number}:{SUPER_UUID}"]
-    number += 1
-    cmd += [f"--new={number}:0:0", f"--change-name={number}:userdata", str(raw)]
+    cmd += [f"--new={number}:0:+{super_raw.stat().st_size // 1024}K", f"--change-name={number}:super", f"--partition-guid={number}:{SUPER_UUID}", str(raw)]
     run(*cmd)
     materialize_backup_gpt(raw)
     layout = subprocess.run([sgdisk, "--print", raw], check=True, capture_output=True, text=True).stdout
@@ -415,7 +605,7 @@ def disk(images, otatools, work, out):
             first, last = int(m.group(2)), int(m.group(3))
             partitions[m.group(4)] = (first * 512, (last - first + 1) * 512)
     print(layout)
-    sizes = dict(SMALL_PARTITIONS)
+    sizes = dict(SYSTEM_SMALL_PARTITIONS)
     writes = [("super", super_raw)] + [(name, images / file) for name, file in PARTITION_IMAGES.items()]
     for name, image in writes:
         if not image.exists():
@@ -430,12 +620,30 @@ def disk(images, otatools, work, out):
     return command_line_partitions(partitions, {"misc": MISC_UUID})
 
 
+def data_disk(otatools, work, out):
+    """Emits an empty dynamic data disk template containing metadata and userdata partitions."""
+    raw = work / "data.raw"
+    make_raw_disk(raw, DISK_SIZE)
+    sgdisk = shutil.which("sgdisk") or str(otatools / "bin/sgdisk")
+    cmd = [
+        sgdisk, "--clear",
+        "--new=1:0:+64M", "--change-name=1:metadata",
+        "--new=2:0:0", "--change-name=2:userdata",
+        str(raw),
+    ]
+    run(*cmd)
+    materialize_backup_gpt(raw)
+    out.unlink(missing_ok=True)
+    run(shutil.which("qemu-img") or "qemu-img", "convert", "-f", "raw", "-O", "vhdx", "-o", "subformat=dynamic", "-S", "4k", raw, out)
+    raw.unlink()
+
+
 def kernel_cmdline(partition_cmdline):
     """Returns the kernel command line shared by every DSA guest image."""
     return " ".join([
         "console=ttyS0", "printk.devkmsg=on", "audit=1", "panic=-1", "8250.nr_uarts=1",
         "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init", partition_cmdline,
-        f"androidboot.boot_part_uuid={MISC_UUID}", "androidboot.fstab_suffix=dsa",
+        "androidboot.boot_devices=vmbus", "androidboot.fstab_suffix=dsa",
         "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",
         "androidboot.hardware=cutf_cvm", "androidboot.verifiedbootstate=orange",
         "androidboot.vbmeta.device_state=unlocked",
@@ -477,7 +685,7 @@ def main():
     env = dict(os.environ, PATH=f"{otatools / 'bin'}:{os.environ['PATH']}", TMPDIR=str(temp))
 
     modified = work / "modified.zip"
-    modify(target_files, modified, args.graphics_library)
+    modify(target_files, modified, args.graphics_library, otatools=otatools)
 
     signed = work / "signed.zip"
     run(otatools / "bin/sign_target_files_apks", "-p", otatools, *key_arguments(modified, str(keys)), modified, signed, env=env)
@@ -507,8 +715,9 @@ def main():
                 break
 
     ramdisk(signed, otatools, work, out / "initrd.img")
-    partition_cmdline = disk(images, otatools, work, out / "disk.vhdx")
-    files = ["disk.vhdx", "initrd.img"]
+    partition_cmdline = system_disk(images, otatools, work, out / "system.vhdx")
+    data_disk(otatools, work, out / "data.vhdx")
+    files = ["system.vhdx", "data.vhdx", "initrd.img"]
     if notice_name:
         files.append(notice_name)
     (out / "bzImage").unlink(missing_ok=True)
