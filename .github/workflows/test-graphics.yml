@@ -2,13 +2,6 @@
 name: Graphics test
 
 on:
-  push:
-    branches:
-      - feat/fix-image-avb-gpt
-    paths:
-      - "dsa/graphics/**"
-      - ".github/workflows/test-graphics.yml"
-      - "scripts/tests/graphics-workflow.test.sh"
   pull_request:
     paths:
       - "dsa/graphics/**"
