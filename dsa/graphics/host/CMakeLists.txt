@@ -85,6 +85,11 @@ if(TARGET gfxstream_backend_static)
     target_sources(gfxstream_backend_static PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/emugl_config_stub.cpp")
 endif()
 
+if(TARGET gfxstream_backend)
+    target_sources(gfxstream_backend PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/dsa_gfx_backend.cpp")
+    target_include_directories(gfxstream_backend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+endif()
+
 # Suppress warning escalation to error for compiler variations
 set(SUPPRESS_FLAGS -Wno-error -Wno-c++98-compat -Wno-c++98-compat-pedantic)
 
@@ -112,6 +117,7 @@ add_custom_target(dist_host_gfxstream ALL
         "$<TARGET_LINKER_FILE:gfxstream_backend>"
         "${DIST_DIR}/lib/"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/dsa_gfx_backend.h"
         "${GFXSTREAM_DIR}/host/include/gfxstream/virtio-gpu-gfxstream-renderer.h"
         "${GFXSTREAM_DIR}/host/include/gfxstream/virtio-gpu-gfxstream-renderer-unstable.h"
         "${GFXSTREAM_DIR}/host/include/gfxstream/virtio-gpu-gfxstream-renderer-goldfish.h"

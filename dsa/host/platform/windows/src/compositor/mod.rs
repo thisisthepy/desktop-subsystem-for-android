@@ -25,7 +25,7 @@ use dsa_transport::{Connector, Listener, TransportError};
 use self::log::CompositorLogger;
 use self::single_instance::DEFAULT_MUTEX_NAME;
 use crate::guid::Guid;
-use crate::hvsocket::HvSocketListener;
+use crate::hvsocket::RawHvSocketListener;
 use crate::pipe::NamedPipeConnector;
 use crate::vm_listener::{BindFn, VmBoundListener, VmIdSlot};
 
@@ -86,12 +86,12 @@ impl Compositor {
 
         let bind_command: BindFn = Box::new(move |vm_id| {
             let service_id = Guid::vsock_service(cmd_port);
-            HvSocketListener::bind(vm_id, service_id).map(|l| Box::new(l) as Box<dyn Listener>)
+            RawHvSocketListener::bind(vm_id, service_id).map(|l| Box::new(l) as Box<dyn Listener>)
         });
 
         let bind_process_pipe: BindFn = Box::new(move |vm_id| {
             let service_id = Guid::vsock_service(proc_port);
-            HvSocketListener::bind(vm_id, service_id).map(|l| Box::new(l) as Box<dyn Listener>)
+            RawHvSocketListener::bind(vm_id, service_id).map(|l| Box::new(l) as Box<dyn Listener>)
         });
 
         Compositor {

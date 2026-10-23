@@ -11,7 +11,9 @@ use std::mem::{size_of, zeroed};
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use dsa_transport::stream::{accept_with_timeout, FramedConnection, StreamSocket};
+use dsa_transport::stream::{
+    accept_with_timeout, FramedConnection, RawStreamConnection, StreamSocket,
+};
 use dsa_transport::{Connection, Connector, Listener, TransportError};
 use windows_sys::Win32::Networking::WinSock::{
     accept, bind, closesocket, connect, ioctlsocket, listen, recv, send, setsockopt, shutdown,
@@ -249,6 +251,39 @@ impl Listener for HvSocketListener {
         // An accepted socket inherits non-blocking mode; reads use timeouts instead.
         accepted.set_nonblocking(false)?;
         Ok(Box::new(FramedConnection::new(accepted)))
+    }
+}
+
+/// Listens on Hyper-V sockets and yields [RawStreamConnection]s without framing.
+pub struct RawHvSocketListener {
+    socket: HvSocket,
+}
+
+impl RawHvSocketListener {
+    /// Listens on service_id for connections from the partition m_id.
+    pub fn bind(vm_id: Guid, service_id: Guid) -> Result<RawHvSocketListener, TransportError> {
+        let listener = HvSocketListener::bind(vm_id, service_id)?;
+        Ok(RawHvSocketListener {
+            socket: listener.socket,
+        })
+    }
+}
+
+impl Listener for RawHvSocketListener {
+    fn accept(&mut self, timeout: Duration) -> Result<Box<dyn Connection>, TransportError> {
+        let accepted = accept_with_timeout(timeout, || {
+            // SAFETY: the peer address is not requested.
+            let raw =
+                unsafe { accept(self.socket.raw, std::ptr::null_mut(), std::ptr::null_mut()) };
+            if raw == INVALID_SOCKET {
+                Err(last_error())
+            } else {
+                Ok(HvSocket::from_raw(raw))
+            }
+        })?;
+        // An accepted socket inherits non-blocking mode; reads use timeouts instead.
+        accepted.set_nonblocking(false)?;
+        Ok(Box::new(RawStreamConnection::new(accepted)))
     }
 }
 

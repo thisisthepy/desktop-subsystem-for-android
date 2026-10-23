@@ -9,6 +9,7 @@ use std::time::Duration;
 use dsa_host_core::compositor::{FakeRenderer, GraphicsRenderer, GraphicsStreamKind};
 use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid};
 use dsa_host_core::session::SessionState;
+use dsa_host_windows::compositor::adapter::GfxstreamAdapter;
 use dsa_host_windows::compositor::log::CompositorLogger;
 use dsa_host_windows::compositor::single_instance::SingleInstanceMutex;
 use dsa_host_windows::compositor::{Compositor, CompositorConfig};
@@ -378,4 +379,121 @@ fn fr3_compositor_logs_to_user_local_appdata_folder() {
     assert!(content.contains("test log message 2"), "{content}");
 
     let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn pr3_compositor_serves_a_gfxstream_client() {
+    let dll_path = match std::env::var("GFXSTREAM_BACKEND_PATH") {
+        Ok(path) if !path.is_empty() => std::path::PathBuf::from(path),
+        _ => {
+            eprintln!(
+                "skipping pr3_compositor_serves_a_gfxstream_client: GFXSTREAM_BACKEND_PATH not set"
+            );
+            return;
+        }
+    };
+
+    if !dll_path.exists() {
+        eprintln!(
+            "skipping pr3_compositor_serves_a_gfxstream_client: library not found at {}",
+            dll_path.display()
+        );
+        return;
+    }
+
+    let adapter = Arc::new(GfxstreamAdapter::new(Some(dll_path)));
+    assert!(
+        adapter.is_available(),
+        "adapter should load native backend from GFXSTREAM_BACKEND_PATH"
+    );
+
+    // 1. Command stream: initialize renderControl and create color buffer.
+    let (mut cmd_server, mut cmd_client) = memory::pair();
+    let cmd_adapter = Arc::clone(&adapter);
+    let cmd_server_thread = thread::spawn(move || {
+        let conn = cmd_server.accept(WAIT).expect("accept command stream");
+        cmd_adapter
+            .serve_stream(GraphicsStreamKind::Command, conn)
+            .expect("serve command stream");
+    });
+
+    let mut client_conn = cmd_client.connect(WAIT).expect("connect command stream");
+
+    // Send zero clientFlags (4 bytes).
+    client_conn
+        .send(&0u32.to_le_bytes())
+        .expect("send client flags");
+
+    // Send rcGetRendererVersion (opcode 10000, size 8).
+    let mut get_version_cmd = Vec::new();
+    get_version_cmd.extend_from_slice(&10000u32.to_le_bytes());
+    get_version_cmd.extend_from_slice(&8u32.to_le_bytes());
+    client_conn
+        .send(&get_version_cmd)
+        .expect("send rcGetRendererVersion");
+
+    let version_resp = client_conn
+        .recv(Some(WAIT))
+        .expect("receive rcGetRendererVersion response");
+    assert_eq!(
+        version_resp.len(),
+        4,
+        "renderer version response must be 4 bytes"
+    );
+    let version = i32::from_le_bytes(version_resp.try_into().unwrap());
+    assert!(
+        version > 0,
+        "renderer version should be positive, got {version}"
+    );
+
+    // Send rcCreateColorBuffer (opcode 10012, size 20, 256x256, format GL_RGBA = 0x1908).
+    let mut create_cb_cmd = Vec::new();
+    create_cb_cmd.extend_from_slice(&10012u32.to_le_bytes());
+    create_cb_cmd.extend_from_slice(&20u32.to_le_bytes());
+    create_cb_cmd.extend_from_slice(&256u32.to_le_bytes());
+    create_cb_cmd.extend_from_slice(&256u32.to_le_bytes());
+    create_cb_cmd.extend_from_slice(&0x1908u32.to_le_bytes());
+    client_conn
+        .send(&create_cb_cmd)
+        .expect("send rcCreateColorBuffer");
+
+    let create_resp = client_conn
+        .recv(Some(WAIT))
+        .expect("receive rcCreateColorBuffer response");
+    assert_eq!(
+        create_resp.len(),
+        4,
+        "color buffer handle response must be 4 bytes"
+    );
+    let handle = u32::from_le_bytes(create_resp.try_into().unwrap());
+    assert!(
+        handle > 0,
+        "color buffer handle should be positive, got {handle}"
+    );
+
+    client_conn.close();
+    cmd_server_thread.join().expect("cmd server thread exit");
+
+    // 2. Process pipe: puid handshake.
+    let (mut pipe_server, mut pipe_client) = memory::pair();
+    let pipe_adapter = Arc::clone(&adapter);
+    let pipe_server_thread = thread::spawn(move || {
+        let conn = pipe_server.accept(WAIT).expect("accept process pipe");
+        pipe_adapter
+            .serve_stream(GraphicsStreamKind::ProcessPipe, conn)
+            .expect("serve process pipe");
+    });
+
+    let mut pipe_conn = pipe_client.connect(WAIT).expect("connect process pipe");
+    pipe_conn
+        .send(&100i32.to_le_bytes())
+        .expect("send confirm code 100");
+
+    let puid_resp = pipe_conn.recv(Some(WAIT)).expect("receive puid response");
+    assert_eq!(puid_resp.len(), 8, "puid response must be 8 bytes");
+    let puid = u64::from_le_bytes(puid_resp.try_into().unwrap());
+    assert!(puid > 0, "puid should be positive, got {puid}");
+
+    pipe_conn.close();
+    pipe_server_thread.join().expect("pipe server thread exit");
 }
