@@ -160,12 +160,14 @@ jobs:
       - name: Verify gfxstream_backend.dll is packaged beside dsa-compositor.exe
         shell: pwsh
         run: |
-          wix burn extract dsa/target/installer/setup-0.1.0.exe -o extracted
-          $msi = (Get-ChildItem extracted -Filter "*.msi").FullName
-          wix msi extract $msi -o msi-extracted
-          if (-not (Test-Path "msi-extracted/PFiles/DSA/gfxstream_backend.dll")) {
+          $msi = (Resolve-Path "dsa/target/installer/dsa-0.1.0.msi").Path
+          Start-Process msiexec -Wait -ArgumentList "/a", "`"$msi`"", "/qn", "TARGETDIR=`"$PWD\msi-extracted`""
+          $dll = Get-ChildItem -Recurse msi-extracted -Filter "gfxstream_backend.dll"
+          if (-not $dll) {
             throw "gfxstream_backend.dll was not found beside dsa-compositor.exe in the MSI"
           }
-          if (-not (Test-Path "msi-extracted/PFiles/DSA/licenses/gfxstream.txt")) {
+          $lic = Get-ChildItem -Recurse msi-extracted -Filter "gfxstream.txt"
+          if (-not $lic) {
             throw "licenses/gfxstream.txt was not found in the MSI"
           }
+          Write-Host "Verified gfxstream_backend.dll at $($dll.FullName) and licence at $($lic.FullName)"
