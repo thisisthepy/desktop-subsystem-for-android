@@ -431,3 +431,146 @@ fn nfr5_service_keeps_running_when_update_store_has_bad_file() {
     let res = server.join().unwrap();
     assert!(res.is_ok());
 }
+
+#[test]
+fn fr3_serve_registers_graphics_service_guids_at_startup() {
+    use dsa_host_core::compositor::{GRAPHICS_COMMAND_PORT, GRAPHICS_PROCESS_PIPE_PORT};
+    use dsa_host_windows::guest_communication_services::{
+        is_service_guid_registered_under, read_service_element_name_under,
+        register_graphics_service_guids_under, unregister_service_guid_under, RegistryHive,
+        GRAPHICS_COMMAND_ELEMENT_NAME, GRAPHICS_PROCESS_PIPE_ELEMENT_NAME,
+    };
+    use dsa_host_windows::guid::Guid;
+    use dsa_host_windows::host_config::HostConfig;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let id = std::process::id();
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("serve-guid-reg-{id}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    let images = dir.join("images");
+    std::fs::create_dir_all(&images).unwrap();
+
+    let test_key = format!(r"Software\DesktopSubsystemForAndroid\TestGuestCommService_{id}");
+    let command_guid = Guid::vsock_service(GRAPHICS_COMMAND_PORT);
+    let pipe_guid = Guid::vsock_service(GRAPHICS_PROCESS_PIPE_PORT);
+
+    let _ = unregister_service_guid_under(RegistryHive::CurrentUser, &test_key, command_guid);
+    let _ = unregister_service_guid_under(RegistryHive::CurrentUser, &test_key, pipe_guid);
+
+    let pipe = format!("dsa-test-serve-guid-{id}");
+    let config = HostConfig::parse(
+        &serde_json::json!({
+            "kernel": dir.join("missing").join("bzImage"),
+            "images_dir": images,
+            "first_image": {"version": "16.0.1", "android_major": 16, "build": 1},
+            "data_dir": dir.join("users"),
+            "pipe_name": pipe,
+            "pipe_sddl": "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)",
+            "log_file": dir.join("dsa-hostd.log"),
+            "connect_timeout_secs": 5,
+            "stop_timeout_secs": 5,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_serve = Arc::clone(&stop);
+    let key_clone = test_key.clone();
+    let server = std::thread::spawn(move || {
+        dsa_host_windows::service::serve_with(config, "test", stop_serve, move || {
+            register_graphics_service_guids_under(RegistryHive::CurrentUser, &key_clone)
+        })
+    });
+
+    let mut connector = NamedPipeConnector { name: pipe };
+    wait_until("the pipe to appear", Duration::from_secs(10), || {
+        HostApiClient::connect(&mut connector, "test", Duration::from_secs(1)).is_ok()
+    });
+
+    assert!(is_service_guid_registered_under(
+        RegistryHive::CurrentUser,
+        &test_key,
+        command_guid
+    ));
+    assert!(is_service_guid_registered_under(
+        RegistryHive::CurrentUser,
+        &test_key,
+        pipe_guid
+    ));
+    assert_eq!(
+        read_service_element_name_under(RegistryHive::CurrentUser, &test_key, command_guid)
+            .as_deref(),
+        Some(GRAPHICS_COMMAND_ELEMENT_NAME)
+    );
+    assert_eq!(
+        read_service_element_name_under(RegistryHive::CurrentUser, &test_key, pipe_guid).as_deref(),
+        Some(GRAPHICS_PROCESS_PIPE_ELEMENT_NAME)
+    );
+
+    stop.store(true, Ordering::Relaxed);
+    let res = server.join().unwrap();
+    assert!(res.is_ok());
+
+    let _ = unregister_service_guid_under(RegistryHive::CurrentUser, &test_key, command_guid);
+    let _ = unregister_service_guid_under(RegistryHive::CurrentUser, &test_key, pipe_guid);
+}
+
+#[test]
+fn nfr5_serve_survives_graphics_service_guid_registration_error() {
+    use dsa_host_windows::host_config::HostConfig;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let id = std::process::id();
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("serve-guid-err-{id}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    let images = dir.join("images");
+    std::fs::create_dir_all(&images).unwrap();
+
+    let pipe = format!("dsa-test-serve-err-{id}");
+    let config = HostConfig::parse(
+        &serde_json::json!({
+            "kernel": dir.join("missing").join("bzImage"),
+            "images_dir": images,
+            "first_image": {"version": "16.0.1", "android_major": 16, "build": 1},
+            "data_dir": dir.join("users"),
+            "pipe_name": pipe,
+            "pipe_sddl": "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)",
+            "log_file": dir.join("dsa-hostd.log"),
+            "connect_timeout_secs": 5,
+            "stop_timeout_secs": 5,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_serve = Arc::clone(&stop);
+    let server = std::thread::spawn(move || {
+        dsa_host_windows::service::serve_with(config, "test", stop_serve, || {
+            Err("simulated registration failure".to_string())
+        })
+    });
+
+    let mut connector = NamedPipeConnector { name: pipe };
+    let mut client = None;
+    wait_until("the pipe to appear", Duration::from_secs(10), || {
+        client = HostApiClient::connect(&mut connector, "test", Duration::from_secs(1)).ok();
+        client.is_some()
+    });
+    let mut client = client.unwrap();
+    let status = client.status();
+    assert!(
+        status.is_ok()
+            || matches!(
+                status,
+                Err(dsa_host_core::host_api::ClientError::Service { .. })
+            )
+    );
+
+    stop.store(true, Ordering::Relaxed);
+    let res = server.join().unwrap();
+    assert!(res.is_ok());
+}

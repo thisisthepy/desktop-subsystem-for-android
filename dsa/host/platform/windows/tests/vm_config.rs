@@ -96,6 +96,23 @@ fn pr1_only_system_and_the_vms_user_may_use_its_hyper_v_sockets() {
 }
 
 #[test]
+fn fr3_default_bind_security_descriptor_grants_user_sid_bind_access() {
+    let mut cfg = config();
+    let second_sid = "S-1-5-21-999999999-888888888-777777777-1002";
+    cfg.socket_sids.push(second_sid.to_string());
+    let doc = document(&cfg);
+    let sockets = &doc["VirtualMachine"]["Devices"]["HvSocket"]["HvSocketConfig"];
+    let bind_sddl = sockets["DefaultBindSecurityDescriptor"]
+        .as_str()
+        .expect("DefaultBindSecurityDescriptor string");
+
+    // The bind security descriptor must grant the user full access so user-session listeners can bind.
+    assert!(bind_sddl.contains(&format!("(A;;FA;;;{USER_SID})")));
+    assert!(bind_sddl.contains(&format!("(A;;FA;;;{second_sid})")));
+    assert!(bind_sddl.contains("(A;;FA;;;SY)"));
+}
+
+#[test]
 fn fr2_an_initrd_is_passed_when_configured() {
     let mut with_initrd = config();
     with_initrd.initrd = Some(PathBuf::from(r"C:\Program Files\DSA\vm\initrd.img"));
