@@ -988,6 +988,23 @@ static inline int native_window_set_auto_refresh(
     return window->perform(window, NATIVE_WINDOW_SET_AUTO_REFRESH, autoRefresh);
 }
 
+
+static inline int ANativeWindow_setUsage(struct ANativeWindow* window, uint64_t usage) {
+    return native_window_set_usage(window, usage);
+}
+
+static inline int ANativeWindow_queueBuffer(struct ANativeWindow* window, struct ANativeWindowBuffer* buffer, int fenceFd) {
+    return window->queueBuffer(window, buffer, fenceFd);
+}
+
+static inline int ANativeWindow_dequeueBuffer(struct ANativeWindow* window, struct ANativeWindowBuffer** buffer, int* fenceFd) {
+    return window->dequeueBuffer(window, buffer, fenceFd);
+}
+
+static inline int ANativeWindow_cancelBuffer(struct ANativeWindow* window, struct ANativeWindowBuffer* buffer, int fenceFd) {
+    return window->cancelBuffer(window, buffer, fenceFd);
+}
+
 __END_DECLS
 
 #endif /* SYSTEM_CORE_INCLUDE_ANDROID_WINDOW_H */
