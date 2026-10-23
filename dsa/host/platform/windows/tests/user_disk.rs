@@ -95,3 +95,27 @@ fn pr5_a_users_local_app_data_is_found_from_their_sid() {
         expected.to_string_lossy().to_lowercase()
     );
 }
+
+#[test]
+fn fr1_user_profile_disk_preparation_leaves_wslconfig_byte_identical() {
+    let profile = fresh_dir("fr1-profile");
+    std::fs::create_dir_all(&profile).unwrap();
+    let wslconfig = profile.join(".wslconfig");
+    let original = b"[wsl2]\r\nkernel=C:\\\\custom\\\\kernel\r\nmemory=8GB\r\n";
+    std::fs::write(&wslconfig, original).unwrap();
+
+    let disk = profile
+        .join("AppData")
+        .join("Local")
+        .join("DSA")
+        .join("android.vhdx");
+    prepare_user_disk_folder(&disk, false).unwrap();
+    prepare_user_data_disk(&disk, 8).unwrap();
+
+    let after = std::fs::read(&wslconfig).unwrap();
+    assert_eq!(
+        after, original,
+        "the user's .wslconfig must remain byte-identical after DSA disk preparation"
+    );
+    assert!(disk.exists(), "DSA profile disk was created");
+}
