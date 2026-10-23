@@ -69,12 +69,18 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
 
-info = json.loads(subprocess.run(["qemu-img", "info", "--output=json", str(image / "disk.vhdx")], check=True, capture_output=True, text=True).stdout)
-if info.get("format") != "vhdx":
-    problems.append(f"disk.vhdx is {info.get('format')}, not vhdx")
-print(f"disk.vhdx: {info['virtual-size'] >> 30} GiB virtual, {info.get('actual-size', 0) >> 20} MiB on disk")
-if "androidboot.boot_part_uuid=" not in manifest["kernel_cmdline"]:
-    problems.append("the kernel command line does not name the disk")
+disks_to_check = ["system.vhdx", "data.vhdx"] if (image / "system.vhdx").exists() else ["disk.vhdx"]
+for disk_file in disks_to_check:
+    info = json.loads(subprocess.run(["qemu-img", "info", "--output=json", str(image / disk_file)], check=True, capture_output=True, text=True).stdout)
+    if info.get("format") != "vhdx":
+        problems.append(f"{disk_file} is {info.get('format')}, not vhdx")
+    print(f"{disk_file}: {info['virtual-size'] >> 30} GiB virtual, {info.get('actual-size', 0) >> 20} MiB on disk")
+if "system.vhdx" in disks_to_check:
+    if "androidboot.boot_devices=" not in manifest["kernel_cmdline"]:
+        problems.append("the kernel command line does not name the boot devices")
+else:
+    if "androidboot.boot_part_uuid=" not in manifest["kernel_cmdline"]:
+        problems.append("the kernel command line does not name the disk")
 if "blkdevparts=sda:" not in manifest["kernel_cmdline"]:
     problems.append("the kernel command line does not restore Hyper-V GPT partition names")
 

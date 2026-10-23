@@ -197,3 +197,31 @@ fn fr14_an_unused_disk_of_an_older_layout_becomes_the_new_template() {
     assert!(why.contains("holds Android data"), "{why}");
     assert!(read_partition(&used, "userdata").iter().all(|&b| b == 0x11));
 }
+
+#[test]
+fn fr14_two_disk_data_template_creates_user_disk_and_preserves_data_on_update() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("two-disk-update-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let template = dir.join("v1").join("data.vhdx");
+    std::fs::create_dir_all(template.parent().unwrap()).unwrap();
+    std::fs::write(&template, b"data-template-v1").unwrap();
+
+    let user = dir.join("S-1-5-21-1-2-3-1001").join("data.vhdx");
+    bring_disk_to(&user, &template, "v1").unwrap();
+    assert_eq!(disk_image_version(&user).as_deref(), Some("v1"));
+    assert_eq!(std::fs::read(&user).unwrap(), b"data-template-v1");
+
+    // Simulate user writing actual data into their disk
+    std::fs::write(&user, b"user-stored-android-data").unwrap();
+
+    // Now update to v2 using v2 data.vhdx
+    let template_v2 = dir.join("v2").join("data.vhdx");
+    std::fs::create_dir_all(template_v2.parent().unwrap()).unwrap();
+    std::fs::write(&template_v2, b"data-template-v2").unwrap();
+
+    bring_disk_to(&user, &template_v2, "v2").unwrap();
+    assert_eq!(disk_image_version(&user).as_deref(), Some("v2"));
+    // User data MUST NOT be overwritten!
+    assert_eq!(std::fs::read(&user).unwrap(), b"user-stored-android-data");
+}
