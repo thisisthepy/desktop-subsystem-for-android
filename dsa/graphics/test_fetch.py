@@ -20,6 +20,15 @@ class GfxstreamFetchTests(unittest.TestCase):
         self.assertIn("git -C \"$source\" apply --recount --check", script)
         self.assertIn("git -C \"$source\" apply --recount", script)
 
+    def test_pr3_fetches_shallow_guest_dependencies(self):
+        script = FETCH.read_text()
+        self.assertIn("https://android.googlesource.com/platform/external/mesa3d", script)
+        self.assertIn("https://android.googlesource.com/platform/hardware/libhardware", script)
+        self.assertIn("https://android.googlesource.com/platform/system/libbase", script)
+        self.assertIn("https://android.googlesource.com/platform/system/core", script)
+        self.assertIn("https://android.googlesource.com/platform/system/logging", script)
+
 
 if __name__ == "__main__":
     unittest.main()
+

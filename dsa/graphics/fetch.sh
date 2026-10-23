@@ -24,6 +24,7 @@ fi
 
 git -C "$source" fetch --no-tags origin "$revision"
 git -C "$source" checkout --detach "$revision"
+git -C "$source" reset --hard "$revision"
 git -C "$source" clean -fdx
 
 shopt -s nullglob
@@ -34,3 +35,35 @@ if ((${#patches[@]})); then
 fi
 
 git -C "$source" rev-parse HEAD
+
+scratch_dir="$(cd "$(dirname "$source")" && pwd)"
+
+# Shallow dependencies required to build the guest OpenglSystemCommon library:
+mesa_dir="$scratch_dir/mesa3d"
+if [[ ! -d "$mesa_dir/.git" ]]; then
+    git clone --depth=1 --filter=blob:none --sparse https://android.googlesource.com/platform/external/mesa3d "$mesa_dir"
+fi
+git -C "$mesa_dir" sparse-checkout set src/gfxstream/guest src/util
+
+libhardware_dir="$scratch_dir/libhardware"
+if [[ ! -d "$libhardware_dir/.git" ]]; then
+    git clone --depth=1 https://android.googlesource.com/platform/hardware/libhardware "$libhardware_dir"
+fi
+
+libbase_dir="$scratch_dir/libbase"
+if [[ ! -d "$libbase_dir/.git" ]]; then
+    git clone --depth=1 https://android.googlesource.com/platform/system/libbase "$libbase_dir"
+fi
+
+system_core_dir="$scratch_dir/system_core"
+if [[ ! -d "$system_core_dir/.git" ]]; then
+    git clone --depth=1 --filter=blob:none --sparse https://android.googlesource.com/platform/system/core "$system_core_dir"
+fi
+git -C "$system_core_dir" sparse-checkout set libcutils/include libutils/include libnativebase/include libsystem/include
+
+system_logging_dir="$scratch_dir/system_logging"
+if [[ ! -d "$system_logging_dir/.git" ]]; then
+    git clone --depth=1 --filter=blob:none --sparse https://android.googlesource.com/platform/system/logging "$system_logging_dir"
+fi
+git -C "$system_logging_dir" sparse-checkout set liblog/include
+

@@ -1,6 +1,4 @@
-# Builds the patched Android guest transport from source.  The ordinary image
-# workflow consumes published target files, which cannot compile a replacement
-# native graphics library.
+# Builds the patched Android guest transport from source using the Android NDK and CMake.
 name: Graphics test
 
 on:
@@ -20,7 +18,7 @@ on:
 
 concurrency:
   group: test-graphics-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
-  # A source build consumes the whole runner.  A newer revision supersedes it.
+  # A source build consumes the whole runner. A newer revision supersedes it.
   cancel-in-progress: true
 
 permissions:
@@ -33,33 +31,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Make room
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
 
-      - name: Fetch the Android source tree
-        run: |
-          mkdir -p .scratch/aosp
-          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o .scratch/aosp/repo
-          chmod +x .scratch/aosp/repo
-          cd .scratch/aosp
-          ./repo init -u https://android.googlesource.com/platform/manifest -b android-latest-release \
-            --partial-clone --clone-filter=blob:limit=10M
-          ./repo sync -c -j2 --no-tags --optimized-fetch
-
-      - name: Apply the DSA gfxstream transport
-        run: dsa/graphics/fetch.sh .scratch/aosp/hardware/google/gfxstream
+      - name: Fetch gfxstream and guest build dependencies
+        run: dsa/graphics/fetch.sh .scratch/gfxstream
 
       - name: Build the guest transport
+        run: dsa/graphics/build.sh .scratch .scratch/build
+
+      - name: Verify ELF architecture and exported Hyper-V symbols
         run: |
-          source .scratch/aosp/build/envsetup.sh
-          lunch aosp_cf_x86_64_only_phone-userdebug
-          m libOpenglSystemCommon
+          target=".scratch/build/libOpenglSystemCommon.so"
+          readelf -h "$target" | grep -Fq 'Advanced Micro Devices X86-64'
+          nm -D "$target" | grep -Fq 'HvSocketStream'
+          nm -D "$target" | grep -Fq 'goldfish_get_egl_tls'
 
       - name: Keep the patched guest library
         uses: actions/upload-artifact@v4
         with:
           name: guest-gfxstream-hvsocket
-          path: .scratch/aosp/out/target/product/vsoc_x86_64/vendor/lib64/libOpenglSystemCommon.so
+          path: .scratch/build/libOpenglSystemCommon.so
           if-no-files-found: error

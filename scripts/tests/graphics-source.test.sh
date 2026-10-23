@@ -9,3 +9,4 @@ cd "$repo_root"
 
 python3 dsa/graphics/test_fetch.py
 python3 dsa/graphics/test_hvsocket_patch.py
+python3 dsa/graphics/test_build.py
