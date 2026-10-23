@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use dsa_host_windows::host_config::{expand_locations, HostConfig};
+use dsa_host_windows::host_config::{expand_locations, profile_disk, HostConfig};
 
 const MINIMAL: &str = r#"{
   "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
@@ -411,9 +411,10 @@ processors=4
     std::fs::write(&wslconfig, original).unwrap();
 
     let local_dir = dir.join("AppData").join("Local");
+    let profile_dir = local_dir.clone();
     let lookup_profile = move |sid: &str| -> Result<PathBuf, String> {
         if sid == "S-1-5-21-1-2-3-1001" {
-            Ok(local_dir.clone())
+            Ok(profile_dir.clone())
         } else {
             Err("no profile".into())
         }
@@ -424,25 +425,13 @@ processors=4
         .user_vm_with("S-1-5-21-1-2-3-1001", &lookup_profile)
         .unwrap();
 
-    assert_eq!(
-        alice.config.data_disk,
-        dir.join("AppData")
-            .join("Local")
-            .join("DSA")
-            .join("android.vhdx")
-    );
+    assert_eq!(alice.config.data_disk, profile_disk(&local_dir));
     assert!(alice.disk_in_profile);
 
     let vm = config
         .vm_config_with(Some("S-1-5-21-1-2-3-1001"), &lookup_profile)
         .unwrap();
-    assert_eq!(
-        vm.data_disk,
-        dir.join("AppData")
-            .join("Local")
-            .join("DSA")
-            .join("android.vhdx")
-    );
+    assert_eq!(vm.data_disk, profile_disk(&local_dir));
 
     let current = std::fs::read(&wslconfig).unwrap();
     assert_eq!(
