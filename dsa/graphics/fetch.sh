@@ -134,5 +134,10 @@ if [[ -f "$mesa_dir/src/vulkan/util/vk_entrypoints_gen.py" ]]; then
             --out-h "$gen_dir/vk_physical_device_properties.h" \
             --out-c "$gen_dir/vk_physical_device_properties.c" \
             --beta false
+
+        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/gen_enum_to_str.py" \
+            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
+            --outdir "$gen_dir" \
+            --beta false
     fi
 fi
