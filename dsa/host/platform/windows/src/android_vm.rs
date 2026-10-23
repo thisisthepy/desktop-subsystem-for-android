@@ -206,4 +206,8 @@ impl GuestLauncher for AndroidVmLauncher {
             .clone()
             .or_else(|| self.console.as_ref().map(ConsoleCapture::failure_report))
     }
+
+    fn vm_id(&self) -> Option<String> {
+        self.runtime_id().ok().map(|g| g.to_string())
+    }
 }
