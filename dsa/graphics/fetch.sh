@@ -140,6 +140,17 @@ if [[ -f "$mesa_dir/src/vulkan/util/vk_entrypoints_gen.py" ]]; then
             --outdir "$gen_dir" \
             --beta false
 
+        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_struct_type_cast_gen.py" \
+            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
+            --outdir "$gen_dir" \
+            --beta false
+
+        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_dispatch_trampolines_gen.py" \
+            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
+            --out-h "$gen_dir/vk_dispatch_trampolines.h" \
+            --out-c "$gen_dir/vk_dispatch_trampolines.c" \
+            --beta false
+
         if [[ -f "$mesa_dir/src/compiler/spirv/spirv_info_gen.py" ]]; then
             "${python_cmd[@]}" "$mesa_dir/src/compiler/spirv/spirv_info_gen.py" \
                 --json "$mesa_dir/src/compiler/spirv/spirv.core.grammar.json" \

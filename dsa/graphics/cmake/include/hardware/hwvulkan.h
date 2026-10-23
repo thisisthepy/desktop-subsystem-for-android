@@ -16,6 +16,10 @@
 
 #define HWVULKAN_DISPATCH_MAGIC 0x01CDC0DE
 
+typedef struct hwvulkan_dispatch_t {
+    uintptr_t magic;
+} hwvulkan_dispatch_t;
+
 typedef struct hwvulkan_module_t {
     struct hw_module_t common;
 } hwvulkan_module_t;
