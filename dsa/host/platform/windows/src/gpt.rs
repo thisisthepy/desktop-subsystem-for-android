@@ -63,7 +63,10 @@ pub fn partitions(disk: &mut (impl Read + Seek)) -> io::Result<Vec<Partition>> {
     // Read whole sectors, which raw disk devices require.
     let bytes = (count * entry_size).div_ceil(SECTOR as usize) * SECTOR as usize;
     let mut table = vec![0u8; bytes];
-    disk.seek(SeekFrom::Start(entries_lba * SECTOR))?;
+    let entries_offset = entries_lba
+        .checked_mul(SECTOR)
+        .ok_or_else(|| invalid("partition table location overflows"))?;
+    disk.seek(SeekFrom::Start(entries_offset))?;
     disk.read_exact(&mut table)?;
     let mut found = Vec::new();
     for entry in table.chunks(entry_size).take(count) {
@@ -72,6 +75,19 @@ pub fn partitions(disk: &mut (impl Read + Seek)) -> io::Result<Vec<Partition>> {
         }
         let first = u64::from_le_bytes(entry[32..40].try_into().unwrap());
         let last = u64::from_le_bytes(entry[40..48].try_into().unwrap());
+        if last < first {
+            return Err(invalid("partition last sector is before first sector"));
+        }
+        let sectors = last
+            .checked_sub(first)
+            .and_then(|diff| diff.checked_add(1))
+            .ok_or_else(|| invalid("partition sector count overflows"))?;
+        let len = sectors
+            .checked_mul(SECTOR)
+            .ok_or_else(|| invalid("partition length in bytes overflows"))?;
+        let start = first
+            .checked_mul(SECTOR)
+            .ok_or_else(|| invalid("partition start in bytes overflows"))?;
         let units: Vec<u16> = entry[56..128]
             .chunks(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
@@ -79,8 +95,8 @@ pub fn partitions(disk: &mut (impl Read + Seek)) -> io::Result<Vec<Partition>> {
             .collect();
         found.push(Partition {
             name: String::from_utf16_lossy(&units),
-            start: first * SECTOR,
-            len: (last + 1 - first) * SECTOR,
+            start,
+            len,
         });
     }
     Ok(found)

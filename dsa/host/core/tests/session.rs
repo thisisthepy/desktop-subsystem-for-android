@@ -9,7 +9,8 @@ use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::session::{
     GuestLauncher, Session, SessionConfig, SessionError, SessionEvent, SessionState, StopReason,
 };
-use dsa_protocol::control::Role;
+use dsa_protocol::control::{envelope::Body, Envelope, Role};
+use dsa_protocol::encode;
 use dsa_protocol::handshake::{guest_connect, local_hello, HandshakeError};
 use dsa_transport::memory::{self, MemoryConnector};
 use dsa_transport::{Connection, Connector, TransportError};
@@ -316,9 +317,8 @@ fn fr2_a_stopped_session_can_start_again() {
 }
 
 #[test]
-fn fr2_frames_flow_both_ways_while_active() {
+fn fr2_the_host_can_send_frames_while_active() {
     let (session, mut connector) = session_with(FakeLauncher::default(), WAIT);
-    let incoming = session.incoming();
     assert_eq!(
         session.send(b"too early".to_vec()),
         Err(SessionError::NotActive(SessionState::Stopped))
@@ -327,10 +327,81 @@ fn fr2_frames_flow_both_ways_while_active() {
     let mut agent = connect_agent(&mut connector);
     assert!(session.wait_for(SessionState::Active, WAIT));
 
-    agent.send(b"from the agent").unwrap();
-    assert_eq!(incoming.recv_timeout(WAIT).unwrap(), b"from the agent");
     session.send(b"from the host".to_vec()).unwrap();
     assert_eq!(agent.recv(Some(WAIT)).unwrap(), b"from the host");
+}
+
+#[test]
+fn nfr5_a_malformed_control_frame_is_dropped_and_the_session_stays_active() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut agent = connect_agent(&mut connector);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    // A malformed frame arrives after handshake: it is discarded and the session stays active.
+    agent.send(b"not a valid protobuf envelope").unwrap();
+    thread::sleep(Duration::from_millis(50));
+    assert_eq!(session.state(), SessionState::Active);
+
+    // Host can still send to the agent, and clean shutdown works.
+    session.send(b"from the host".to_vec()).unwrap();
+    assert_eq!(agent.recv(Some(WAIT)).unwrap(), b"from the host");
+
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(session.last_reason(), Some(StopReason::Requested));
+}
+
+#[test]
+fn nfr5_an_unexpected_message_is_dropped_and_logged() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut agent = connect_agent(&mut connector);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    // A Hello after handshake has already completed is unexpected.
+    let hello = local_hello(Role::Guest, "dsa-guestd test");
+    let frame = encode(&Envelope {
+        body: Some(Body::Hello(hello)),
+    });
+    agent.send(&frame).unwrap();
+
+    // An empty envelope with no body is also dropped as unknown.
+    let empty = encode(&Envelope { body: None });
+    agent.send(&empty).unwrap();
+
+    thread::sleep(Duration::from_millis(50));
+    assert_eq!(session.state(), SessionState::Active);
+
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(session.last_reason(), Some(StopReason::Requested));
+}
+
+#[test]
+fn nfr5_a_guest_that_dies_leaves_the_host_alive_and_can_start_again() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let agent = connect_agent(&mut connector);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    // Guest VM dies and drops its channel.
+    drop(agent);
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert!(matches!(
+        session.last_reason(),
+        Some(StopReason::ChannelLost(_))
+    ));
+    assert_eq!(launcher.processes(), 0);
+
+    // Host remains alive and the session can be started again.
+    session.start();
+    let _second_agent = connect_agent(&mut connector);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(launcher.processes(), 3);
 }
 
 #[test]
