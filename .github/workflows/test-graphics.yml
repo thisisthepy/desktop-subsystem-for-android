@@ -1,0 +1,50 @@
+# Builds the patched Android guest transport from source using the Android NDK and CMake.
+name: Graphics test
+
+on:
+  pull_request:
+    paths:
+      - "dsa/graphics/**"
+      - ".github/workflows/test-graphics.yml"
+      - "scripts/tests/graphics-workflow.test.sh"
+  workflow_dispatch:
+
+concurrency:
+  group: test-graphics-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
+  # A source build consumes the whole runner. A newer revision supersedes it.
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  guest-transport:
+    name: Build the guest Hyper-V graphics transport
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
+
+      - name: Fetch gfxstream and guest build dependencies
+        run: bash dsa/graphics/fetch.sh .scratch/gfxstream
+
+      - name: Build the guest transport
+        run: bash dsa/graphics/build.sh .scratch .scratch/build
+
+      - name: Verify ELF architecture and exported Hyper-V symbols
+        run: |
+          target=".scratch/build/libOpenglSystemCommon.so"
+          readelf -h "$target" | grep -Fq 'Advanced Micro Devices X86-64'
+          nm -D "$target" | grep -Fq 'HvSocketStream'
+          nm -D "$target" | grep -Fq 'goldfish_get_egl_tls'
+
+      - name: Keep the patched guest library
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-gfxstream-hvsocket
+          path: .scratch/build/libOpenglSystemCommon.so
+          if-no-files-found: error

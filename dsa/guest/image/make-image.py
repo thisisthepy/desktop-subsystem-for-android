@@ -45,6 +45,7 @@ REMOVED_APPS = ["Launcher3QuickStep", "SystemUI", "LatinIME"]
 # The user's disk. The super partition's UUID is how first-stage init finds the disk, so it
 # is fixed and passed on the kernel command line.
 SUPER_UUID = "6b1ad5ad-0d5a-4dd3-9a6b-5a0a1d5a5a17"
+MISC_UUID = "811d3bbb-a7ff-437a-857f-f54af996b190"
 DISK_SIZE = 64 << 30
 SMALL_PARTITIONS = [
     ("misc", 1 << 20),
@@ -56,10 +57,11 @@ SMALL_PARTITIONS = [
     # Verified boot reads these: the top-level vbmeta chains to boot and init_boot and
     # holds the hash of vendor_boot, so without them first stage init cannot set up
     # verity and does not mount /system. The VM boots DSA's kernel and initrd, not these.
-    # The sizes leave room for later builds, because a user's disk keeps its layout.
-    ("boot_a", 96 << 20),
-    ("init_boot_a", 32 << 20),
-    ("vendor_boot_a", 96 << 20),
+    # AVB finds the footer at the end of each partition, so these must match
+    # the partition sizes used when sign_target_files_apks signs the images.
+    ("boot_a", 64 << 20),
+    ("init_boot_a", 8 << 20),
+    ("vendor_boot_a", 64 << 20),
 ]
 
 # What is written to each partition, from the signed build's IMAGES/.
@@ -80,6 +82,17 @@ USER_PROPS = {
     "ro.force.debuggable": "0",
 }
 
+# Cuttlefish ships selectable vendor APEX implementations. Its launcher passes
+# the selections in bootconfig. DSA does not run that launcher, so choose the
+# implementations that can start without Cuttlefish remote services before
+# apexd scans the vendor APEX directory.
+VENDOR_APEX_BOOTCONFIG = {
+    "com.android.hardware.gatekeeper": "com.android.hardware.gatekeeper.nonsecure",
+    "com.android.hardware.keymint": "com.android.hardware.keymint.rust_nonsecure",
+    "com.android.hardware.graphics.composer": "com.android.hardware.graphics.composer.ranchu",
+    "com.google.emulated.camera.provider.hal": "com.google.emulated.camera.provider.hal",
+}
+
 
 def run(*cmd, **kw):
     print("+", " ".join(str(c) for c in cmd), flush=True)
@@ -92,6 +105,78 @@ def sha256(path):
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def is_wsl_windows_mount(parts):
+    """Whether resolved path parts name a WSL mount of a Windows drive."""
+    return len(parts) >= 3 and parts[1] == "mnt"
+
+
+def use_windows_sparse_file(path, windows=None, wsl_distro=None):
+    """Whether `path` is on Windows' NTFS, where WSL ftruncate allocates the whole file."""
+    windows = os.name == "nt" if windows is None else windows
+    wsl_distro = os.environ.get("WSL_DISTRO_NAME") if wsl_distro is None else wsl_distro
+    return windows or (bool(wsl_distro) and is_wsl_windows_mount(path.resolve().parts))
+
+
+def windows_path(path):
+    """The Windows spelling of `path`, from either Windows or WSL."""
+    if os.name == "nt":
+        return str(path.resolve())
+    return subprocess.run(
+        ["wslpath", "-w", path], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def make_raw_disk(path, size):
+    """Makes a zero-filled virtual disk without reserving its full size on NTFS."""
+    path.unlink(missing_ok=True)
+    if use_windows_sparse_file(path):
+        path_text = windows_path(path).replace("'", "''")
+        command = (
+            f"$path = '{path_text}'; New-Item -ItemType File -Force -Path $path | Out-Null; "
+            f"fsutil sparse setflag $path; fsutil file seteof $path {size}"
+        )
+        run("powershell.exe", "-NoProfile", "-Command", command)
+    else:
+        with open(path, "wb") as f:
+            f.truncate(size)
+
+
+def materialize_backup_gpt(path):
+    """Writes the backup GPT through Windows on a Windows sparse file.
+
+    DrvFs can leave the final sparse range unallocated after `sgdisk` writes the backup
+    GPT. qemu-img then converts it as zeroes, and the guest loses GPT partition names.
+    A GPT with 128 128-byte entries has a 32-sector entry array and one header sector.
+    """
+    if not use_windows_sparse_file(path):
+        return
+    path_text = windows_path(path).replace("'", "''")
+    command = (
+        f"$path = '{path_text}'; $stream = [System.IO.File]::Open($path, 'Open', 'ReadWrite', 'None'); "
+        "try { $bytes = New-Object byte[] 16896; $start = $stream.Length - $bytes.Length; "
+        "$stream.Position = $start; $read = $stream.Read($bytes, 0, $bytes.Length); "
+        "if ($read -ne $bytes.Length) { throw 'the raw disk has no complete backup GPT' }; "
+        "$stream.Position = $start; $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }"
+    )
+    run("powershell.exe", "-NoProfile", "-Command", command)
+
+
+def command_line_partitions(partitions, uuids=None):
+    """Returns the Hyper-V SCSI layout that restores GPT names in early Android init.
+
+    Hyper-V's virtual SCSI controller exposes the GPT partition devices but omits their
+    PARTNAME uevent property. The kernel's command-line partition parser supplies those
+    names before first-stage init starts. Every range comes from the GPT we just wrote, so
+    an AOSP super image changing size does not change the mapping by assumption.
+    """
+    entries = []
+    uuids = {} if uuids is None else uuids
+    for name, (offset, size) in partitions.items():
+        identifier = f"{name}:{uuids[name]}" if name in uuids else name
+        entries.append(f"{size}@{offset}({identifier})")
+    return "blkdevparts=sda:" + ",".join(entries)
 
 
 def removed(name):
@@ -194,7 +279,7 @@ def key_arguments(target_files, keys):
     avb = f"{keys}/avb.pem"
     for part in ["vbmeta", "vbmeta_system", "vbmeta_vendor", "boot", "init_boot"]:
         args += [f"--avb_{part}_key", avb, f"--avb_{part}_algorithm", "SHA256_RSA4096"]
-    for part in ["vbmeta_system_dlkm", "vbmeta_vendor_dlkm"]:
+    for part in ["vendor_boot", "vbmeta_system_dlkm", "vbmeta_vendor_dlkm"]:
         args += ["--avb_extra_custom_image_key", f"{part}={avb}"]
         args += ["--avb_extra_custom_image_algorithm", f"{part}=SHA256_RSA4096"]
     return args
@@ -260,17 +345,19 @@ def verified_boot_partitions(vbmeta, otatools):
     return found
 
 
-def unlisted_chained_partitions(found, fstab):
-    """The chained partitions outside the vbmeta ones that the mount table does not list for
-    first stage mount. First stage init creates by-name links only for the partitions it
-    is told it needs, so verified boot cannot read the vbmeta of an unlisted one."""
+def unlisted_verified_boot_partitions(found, fstab):
+    """The verified boot partitions outside vbmeta that lack a first-stage fstab entry.
+
+    First-stage init creates by-name links only for partitions it is told it needs. AVB
+    reads partitions a hash descriptor covers, so an omitted entry makes verification fail
+    before /system can mount. Chained vbmeta images are resolved by the AVB loader.
+    """
     listed = set()
     for line in fstab.splitlines():
         fields = line.split()
         if len(fields) >= 5 and not line.startswith("#") and "first_stage_mount" in fields[4].split(","):
             listed.add(fields[0].rsplit("/", 1)[-1])
-    return [name for kind, name in found
-            if kind == "chain" and not name.startswith("vbmeta") and name not in listed]
+    return [name for _, name in found if name not in listed]
 
 
 def disk(images, otatools, work, out):
@@ -284,15 +371,13 @@ def disk(images, otatools, work, out):
     else:
         shutil.copy(super_img, super_raw)
     raw = work / "disk.raw"
-    raw.unlink(missing_ok=True)
-    with open(raw, "wb") as f:
-        f.truncate(DISK_SIZE)
+    make_raw_disk(raw, DISK_SIZE)
     on_disk = {name for name, _ in SMALL_PARTITIONS}
     found = verified_boot_partitions(images / "vbmeta.img", otatools)
     missing = [n for _, n in found if f"{n}_a" not in on_disk]
     if missing:
         sys.exit(f"verified boot reads {', '.join(missing)}, which the disk layout has no partition for")
-    unlisted = unlisted_chained_partitions(found, (HERE / "fstab.dsa").read_text())
+    unlisted = unlisted_verified_boot_partitions(found, (HERE / "fstab.dsa").read_text())
     if unlisted:
         sys.exit(f"verified boot reads {', '.join(unlisted)}, which fstab.dsa does not list for first stage mount")
     sgdisk = shutil.which("sgdisk") or str(otatools / "bin/sgdisk")
@@ -300,17 +385,21 @@ def disk(images, otatools, work, out):
     number = 1
     for name, size in SMALL_PARTITIONS:
         cmd += [f"--new={number}:0:+{size // 1024}K", f"--change-name={number}:{name}"]
+        if name == "misc":
+            cmd += [f"--partition-guid={number}:{MISC_UUID}"]
         number += 1
     cmd += [f"--new={number}:0:+{super_raw.stat().st_size // 1024}K", f"--change-name={number}:super", f"--partition-guid={number}:{SUPER_UUID}"]
     number += 1
     cmd += [f"--new={number}:0:0", f"--change-name={number}:userdata", str(raw)]
     run(*cmd)
+    materialize_backup_gpt(raw)
     layout = subprocess.run([sgdisk, "--print", raw], check=True, capture_output=True, text=True).stdout
-    starts = {}
+    partitions = {}
     for line in layout.splitlines():
         m = re.match(r"\s*(\d+)\s+(\d+)\s+(\d+)\s+\S+\s+\S+\s+\S+\s+(\S+)", line)
         if m:
-            starts[m.group(4)] = int(m.group(2)) * 512
+            first, last = int(m.group(2)), int(m.group(3))
+            partitions[m.group(4)] = (first * 512, (last - first + 1) * 512)
     print(layout)
     sizes = dict(SMALL_PARTITIONS)
     writes = [("super", super_raw)] + [(name, images / file) for name, file in PARTITION_IMAGES.items()]
@@ -319,11 +408,26 @@ def disk(images, otatools, work, out):
             continue
         if name in sizes and image.stat().st_size > sizes[name]:
             sys.exit(f"{image.name} is {image.stat().st_size} bytes, more than the {name} partition holds")
-        run("dd", f"if={image}", f"of={raw}", "bs=1M", f"seek={starts[name]}", "oflag=seek_bytes", "conv=notrunc,sparse", "status=none")
+        run("dd", f"if={image}", f"of={raw}", "bs=1M", f"seek={partitions[name][0]}", "oflag=seek_bytes", "conv=notrunc,sparse", "status=none")
     super_raw.unlink()
     out.unlink(missing_ok=True)
-    run(shutil.which("qemu-img") or "qemu-img", "convert", "-f", "raw", "-O", "vhdx", "-o", "subformat=dynamic", raw, out)
+    run(shutil.which("qemu-img") or "qemu-img", "convert", "-f", "raw", "-O", "vhdx", "-o", "subformat=dynamic", "-S", "4k", raw, out)
     raw.unlink()
+    return command_line_partitions(partitions, {"misc": MISC_UUID})
+
+
+def kernel_cmdline(partition_cmdline):
+    """Returns the kernel command line shared by every DSA guest image."""
+    return " ".join([
+        "console=ttyS0", "printk.devkmsg=on", "audit=1", "panic=-1", "8250.nr_uarts=1",
+        "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init", partition_cmdline,
+        f"androidboot.boot_part_uuid={MISC_UUID}", "androidboot.fstab_suffix=dsa",
+        "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",
+        "androidboot.hardware=cutf_cvm", "androidboot.verifiedbootstate=orange",
+        "androidboot.vbmeta.device_state=unlocked",
+        *(f"androidboot.vendor.apex.{module}={apex}"
+          for module, apex in VENDOR_APEX_BOOTCONFIG.items()),
+    ])
 
 
 def main():
@@ -374,21 +478,14 @@ def main():
         run(otatools / "bin/build_super_image", "-p", otatools, signed, images / "super.img", env=env)
 
     ramdisk(signed, otatools, work, out / "initrd.img")
-    disk(images, otatools, work, out / "disk.vhdx")
+    partition_cmdline = disk(images, otatools, work, out / "disk.vhdx")
     files = ["disk.vhdx", "initrd.img"]
     (out / "bzImage").unlink(missing_ok=True)
     if args.kernel:
         shutil.copy(args.kernel, out / "bzImage")
         files.append("bzImage")
 
-    cmdline = " ".join([
-        "console=ttyS0", "printk.devkmsg=on", "audit=1", "panic=-1", "8250.nr_uarts=1",
-        "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init",
-        f"androidboot.boot_part_uuid={SUPER_UUID}", "androidboot.fstab_suffix=dsa",
-        "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",
-        "androidboot.hardware=cutf_cvm", "androidboot.verifiedbootstate=orange",
-        "androidboot.vbmeta.device_state=unlocked",
-    ])
+    cmdline = kernel_cmdline(partition_cmdline)
     manifest = {
         "version": spec["version"],
         "android_major": spec["android_major"],

@@ -1,0 +1,38 @@
+diff --git a/block/partitions/cmdline.c b/block/partitions/cmdline.c
+index 53d9fdcfa4ee..6081290ab29c 100644
+--- a/block/partitions/cmdline.c
++++ b/block/partitions/cmdline.c
+@@ -29,6 +29,7 @@ struct cmdline_subpart {
+ 	char name[BDEVNAME_SIZE]; /* partition name, such as 'rootfs' */
+ 	sector_t from;
+ 	sector_t size;
++	char uuid[PARTITION_META_INFO_UUIDLTH];
+ 	int flags;
+ 	struct cmdline_subpart *next_subpart;
+ };
+@@ -70,6 +71,17 @@ static int parse_subpart(struct cmdline_subpart **subpart, char *partdef)
+ 			goto fail;
+ 		}
+ 
++		/* A name may carry its GPT-style UUID as name:uuid. */
++		char *uuid = strchr(next, ':');
++		if (uuid) {
++			*uuid++ = '\0';
++			if (strlen(uuid) != UUID_STRING_LEN) {
++				pr_warn("cmdline partition UUID is invalid.");
++				ret = -EINVAL;
++				goto fail;
++			}
++			strscpy(new_subpart->uuid, uuid, sizeof(new_subpart->uuid));
++		}
+ 		strscpy(new_subpart->name, next, sizeof(new_subpart->name));
+ 	} else
+ 		new_subpart->name[0] = '\0';
+@@ -244,5 +257,7 @@ static int add_part(int slot, struct cmdline_subpart *subpart,
+ 	info = &state->parts[slot].info;
+ 
+ 	strscpy(info->volname, subpart->name, sizeof(info->volname));
++	if (subpart->uuid[0])
++		strscpy(info->uuid, subpart->uuid, sizeof(info->uuid));
+ 
+ 	snprintf(tmp, sizeof(tmp), "(%s)", info->volname);

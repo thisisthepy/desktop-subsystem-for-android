@@ -11,9 +11,24 @@ on:
       - "dsa/guest/image/**"
       - ".github/workflows/test-image.yml"
   workflow_dispatch:
+    inputs:
+      keep_disk:
+        description: "Keep each generated disk.vhdx as an artifact for a local boot check"
+        type: boolean
+        required: false
+        default: false
+      android:
+        description: "Android release to make. Use all for the compatibility run."
+        type: choice
+        required: false
+        default: "17"
+        options:
+          - "17"
+          - "16"
+          - all
 
 concurrency:
-  group: test-image-${{ github.event.pull_request.number || github.ref }}
+  group: test-image-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -26,7 +41,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        android: [17, 16]
+        # Pull requests cover both supported releases. A manual boot investigation
+        # builds one release first, unless an explicit compatibility run asks for all.
+        android: ${{ fromJSON(github.event_name == 'workflow_dispatch' && (inputs.android == 'all' && '["17", "16"]' || format('["{0}"]', inputs.android)) || '["17", "16"]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -44,6 +61,13 @@ jobs:
       - name: Fetch the pinned inputs
         run: dsa/guest/image/fetch.sh ${{ matrix.android }}
 
+      # The HCS image has no virtio GPU. Keep the exact Cuttlefish graphics payload in
+      # the log while replacing its minigbm path with the Hyper-V gfxstream transport.
+      - name: List the guest graphics payload
+        run: |
+          unzip -l .scratch/aosp-inputs/*/*target_files*.zip | \
+            grep -Ei 'graphics|gralloc|mapper|opengl|vulkan|goldfish|ranchu|drm'
+
       - name: Make a throwaway key set
         run: dsa/guest/image/make-keys.sh .scratch/image-keys
 
@@ -60,3 +84,11 @@ jobs:
           path: |
             dsa/target/image/*/image.json
             dsa/target/image/*/initrd.img
+
+      - name: Keep the guest disk
+        if: inputs.keep_disk
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-disk-android-${{ matrix.android }}
+          path: dsa/target/image/*/disk.vhdx
+          if-no-files-found: error

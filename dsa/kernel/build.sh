@@ -41,6 +41,13 @@ if [[ ! -f "$src/Makefile" ]]; then
     git -C "$src" checkout -q FETCH_HEAD
 fi
 
+shopt -s nullglob
+for patch in "$kernel_dir"/patches/*.patch; do
+    if ! git -C "$src" apply --reverse --check "$patch" >/dev/null 2>&1; then
+        git -C "$src" apply "$patch"
+    fi
+done
+
 # Merge: config-wsl, then the fragment, then fill in every option the fragment's choices
 # make newly visible with its default.
 cp "$src/Microsoft/config-wsl" "$src/.config"
