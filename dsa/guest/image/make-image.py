@@ -493,9 +493,24 @@ def main():
     if not (images / "super.img").exists():
         run(otatools / "bin/build_super_image", "-p", otatools, signed, images / "super.img", env=env)
 
+    notice_name = None
+    with zipfile.ZipFile(signed) as z:
+        for candidate in [
+            "SYSTEM/etc/NOTICE.xml.gz",
+            "SYSTEM/etc/NOTICE.html.gz",
+            "META/NOTICE.xml.gz",
+        ]:
+            if candidate in z.namelist():
+                notice_name = Path(candidate).name
+                with open(out / notice_name, "wb") as f:
+                    f.write(z.read(candidate))
+                break
+
     ramdisk(signed, otatools, work, out / "initrd.img")
     partition_cmdline = disk(images, otatools, work, out / "disk.vhdx")
     files = ["disk.vhdx", "initrd.img"]
+    if notice_name:
+        files.append(notice_name)
     (out / "bzImage").unlink(missing_ok=True)
     if args.kernel:
         shutil.copy(args.kernel, out / "bzImage")

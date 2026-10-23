@@ -54,6 +54,20 @@ try {
 Copy-Item (Join-Path $dsa "target\release\dsa-hostd.exe") $stage
 Copy-Item (Join-Path $dsa "target\release\dsa.exe") $stage
 
+# Generate the licence bundle for all shipped components and dependencies.
+$python = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }
+$licensesDir = Join-Path $stage "licenses"
+$masterNotice = Join-Path $stage "NOTICE.txt"
+$generateScript = Join-Path $installer "generate-licenses.py"
+& $python $generateScript --workspace $dsa --out-dir $licensesDir --master-notice $masterNotice
+if ($LASTEXITCODE -ne 0) { throw "generating the licence bundle failed" }
+
+# Reject Microsoft WSA binaries or components in the payload.
+$checkNoWsaScript = Join-Path $installer "check-no-wsa.py"
+& $python $checkNoWsaScript --manifests (Join-Path $installer "dsa.wxs") (Join-Path $installer "bundle.wxs") `
+    --stage-dir $stage --image-inputs (Join-Path $dsa "guest\image\inputs.json")
+if ($LASTEXITCODE -ne 0) { throw "WSA binary check failed" }
+
 if ($Kernel) {
     Copy-Item $Kernel (Join-Path $stage "bzImage")
 } elseif ($PlaceholderKernel) {
@@ -67,7 +81,7 @@ $imageManifest = $ImageDir -and (Test-Path (Join-Path $ImageDir "image.json"))
 if ($imageManifest) {
     $image = Get-Content -Raw (Join-Path $ImageDir "image.json") | ConvertFrom-Json
     foreach ($name in @($image.files.PSObject.Properties.Name)) {
-        if ($name -notin @("disk.vhdx", "initrd.img", "bzImage")) {
+        if ($name -notin @("disk.vhdx", "initrd.img", "bzImage", "NOTICE.html.gz", "NOTICE.xml.gz", "NOTICE.txt")) {
             throw "image.json names $name, which this package does not know how to install"
         }
         if (-not (Test-Path (Join-Path $ImageDir $name))) { throw "$ImageDir has no $name" }
@@ -129,6 +143,12 @@ if ($ImageDir) { $defines += @("-d", "ImageDir=$ImageDir", "-d", "ImageVersion=$
 if ($imageManifest) {
     $defines += @("-d", "ImageManifest=1")
     if ($image.files.PSObject.Properties.Name -contains "bzImage") { $defines += @("-d", "ImageKernel=1") }
+    foreach ($noticeCandidate in @("NOTICE.html.gz", "NOTICE.xml.gz", "NOTICE.txt")) {
+        if (Test-Path (Join-Path $ImageDir $noticeCandidate)) {
+            $defines += @("-d", "ImageNotice=$noticeCandidate")
+            break
+        }
+    }
 }
 
 Push-Location $installer

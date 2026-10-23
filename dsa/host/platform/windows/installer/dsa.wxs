@@ -63,6 +63,7 @@
         <StandardDirectory Id="ProgramFiles64Folder">
             <Directory Id="INSTALLFOLDER" Name="DSA">
                 <Directory Id="VMFOLDER" Name="vm" />
+                <Directory Id="LICENSESFOLDER" Name="licenses" />
             </Directory>
         </StandardDirectory>
         <StandardDirectory Id="CommonAppDataFolder">
@@ -96,6 +97,9 @@
                 <File Id="DsaExe" Source="$(SourceDir)\dsa.exe" KeyPath="yes" />
                 <Environment Id="Path" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="yes" Permanent="no" />
             </Component>
+            <Component Id="NoticeFile" Guid="*">
+                <File Id="NoticeFile" Source="$(SourceDir)\NOTICE.txt" KeyPath="yes" />
+            </Component>
         </ComponentGroup>
 
         <!-- The service's own folder: SYSTEM and Administrators only, and read access for
@@ -118,6 +122,37 @@
             </Component>
             <Component Id="ImageStore" Directory="IMAGESTORE" Guid="bd8a3e82-b7f2-4af5-a110-fc9722072f5f">
                 <CreateFolder />
+            </Component>
+        </ComponentGroup>
+
+        <!-- The licence bundle for all shipped components and dependencies. -->
+        <ComponentGroup Id="Licenses" Directory="LICENSESFOLDER">
+            <Component Id="LicNotice" Guid="*">
+                <File Id="LicNotice" Source="$(SourceDir)\licenses\NOTICE.txt" KeyPath="yes" />
+            </Component>
+            <Component Id="LicRust" Guid="*">
+                <File Id="LicRust" Source="$(SourceDir)\licenses\rust-crates.txt" KeyPath="yes" />
+            </Component>
+            <Component Id="LicKernel" Guid="*">
+                <File Id="LicKernel" Source="$(SourceDir)\licenses\kernel-GPL-2.0.txt" KeyPath="yes" />
+            </Component>
+            <Component Id="LicWix" Guid="*">
+                <File Id="LicWix" Source="$(SourceDir)\licenses\wix-MS-RL.txt" KeyPath="yes" />
+            </Component>
+            <Component Id="LicSetupUi" Guid="*">
+                <File Id="LicSetupUi" Source="$(SourceDir)\licenses\setup-ui.txt" KeyPath="yes" />
+            </Component>
+            <Component Id="LicGfxstream" Guid="*">
+                <File Id="LicGfxstream" Source="$(SourceDir)\licenses\gfxstream.txt" KeyPath="yes" />
+            </Component>
+            <Component Id="LicAosp" Guid="*">
+                <File Id="LicAosp" Source="$(SourceDir)\licenses\aosp-notice.txt" KeyPath="yes" />
+            </Component>
+            <Component Id="LicApache" Guid="*">
+                <File Id="LicApache" Source="$(SourceDir)\licenses\apache-2.0.txt" KeyPath="yes" />
+            </Component>
+            <Component Id="LicMit" Guid="*">
+                <File Id="LicMit" Source="$(SourceDir)\licenses\mit.txt" KeyPath="yes" />
             </Component>
         </ComponentGroup>
 
@@ -146,6 +181,11 @@
             <?ifdef ImageKernel ?>
             <Component Id="FirstImageKernel" Guid="*">
                 <File Id="FirstImageKernel" Source="$(ImageDir)\bzImage" KeyPath="yes" DiskId="2" />
+            </Component>
+            <?endif?>
+            <?ifdef ImageNotice ?>
+            <Component Id="FirstImageNotice" Guid="*">
+                <File Id="FirstImageNotice" Source="$(ImageDir)\$(ImageNotice)" KeyPath="yes" DiskId="2" />
             </Component>
             <?endif?>
             <?else?>
@@ -179,6 +219,7 @@
 
         <Feature Id="Main" Title="Desktop Subsystem for Android" Level="1">
             <ComponentGroupRef Id="Service" />
+            <ComponentGroupRef Id="Licenses" />
             <ComponentGroupRef Id="Data" />
             <ComponentGroupRef Id="Kernel" />
             <?ifdef ImageVersion ?>
