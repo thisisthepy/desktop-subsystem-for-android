@@ -16,6 +16,8 @@ SPEC.loader.exec_module(make_image)
 class ImageLayoutTests(unittest.TestCase):
     def test_fr1_selects_vendor_apexes_without_the_cuttlefish_launcher(self):
         cmdline = make_image.kernel_cmdline("blkdevparts=sda:1@0(misc)")
+        self.assertIn("androidboot.boot_devices=vmbus", cmdline)
+        self.assertNotIn("androidboot.boot_part_uuid", cmdline)
         self.assertIn(
             "androidboot.vendor.apex.com.android.hardware.gatekeeper=com.android.hardware.gatekeeper.nonsecure",
             cmdline,
@@ -114,6 +116,18 @@ class ImageLayoutTests(unittest.TestCase):
                 archive.writestr("SYSTEM/build.prop", b"ro.debuggable=1\n")
             with self.assertRaisesRegex(ValueError, "does not contain"):
                 make_image.modify(source, root / "modified.zip", graphics_library=replacement)
+
+
+    def test_fr1_two_disk_layout_separates_system_and_data_partitions(self):
+        system_partitions = [name for name, _ in make_image.SYSTEM_SMALL_PARTITIONS]
+        self.assertIn("misc", system_partitions)
+        self.assertIn("vbmeta_a", system_partitions)
+        self.assertIn("boot_a", system_partitions)
+        self.assertNotIn("metadata", system_partitions)
+        self.assertNotIn("userdata", system_partitions)
+
+        data_partitions = [name for name, _ in make_image.DATA_PARTITIONS]
+        self.assertEqual(data_partitions, ["metadata", "userdata"])
 
 
 if __name__ == "__main__":

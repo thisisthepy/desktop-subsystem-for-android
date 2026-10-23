@@ -455,14 +455,22 @@ impl HostConfig {
         match manifest {
             Some(manifest) => {
                 let image_cmdline = manifest["kernel_cmdline"].as_str().unwrap_or_default();
+                let system_vhdx = dir.join("system.vhdx");
+                let has_two_disks =
+                    system_vhdx.exists() || manifest["files"].get("system.vhdx").is_some();
+                let (system_image, disk_template) = if has_two_disks {
+                    (Some(system_vhdx), Some(dir.join("data.vhdx")))
+                } else {
+                    (None, Some(dir.join("disk.vhdx")))
+                };
                 ImageFiles {
                     kernel,
                     initrd: Some(dir.join("initrd.img")),
                     kernel_cmdline: format!("{image_cmdline} {}", self.kernel_cmdline)
                         .trim()
                         .to_string(),
-                    system_image: None,
-                    disk_template: Some(dir.join("disk.vhdx")),
+                    system_image,
+                    disk_template,
                 }
             }
             None => ImageFiles {

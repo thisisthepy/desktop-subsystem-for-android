@@ -47,9 +47,8 @@ REMOVED_APPS = ["Launcher3QuickStep", "SystemUI", "LatinIME"]
 SUPER_UUID = "6b1ad5ad-0d5a-4dd3-9a6b-5a0a1d5a5a17"
 MISC_UUID = "811d3bbb-a7ff-437a-857f-f54af996b190"
 DISK_SIZE = 64 << 30
-SMALL_PARTITIONS = [
+SYSTEM_SMALL_PARTITIONS = [
     ("misc", 1 << 20),
-    ("metadata", 64 << 20),
     ("vbmeta_a", 1 << 20),
     ("vbmeta_system_a", 1 << 20),
     ("vbmeta_system_dlkm_a", 1 << 20),
@@ -62,6 +61,12 @@ SMALL_PARTITIONS = [
     ("boot_a", 64 << 20),
     ("init_boot_a", 8 << 20),
     ("vendor_boot_a", 64 << 20),
+]
+SMALL_PARTITIONS = SYSTEM_SMALL_PARTITIONS
+
+DATA_PARTITIONS = [
+    ("metadata", 64 << 20),
+    ("userdata", 0),
 ]
 
 # What is written to each partition, from the signed build's IMAGES/.
@@ -374,8 +379,8 @@ def unlisted_verified_boot_partitions(found, fstab):
     return [name for _, name in found if name not in listed]
 
 
-def disk(images, otatools, work, out):
-    """Lays the images out on a new user's disk and converts it to a dynamic VHDX."""
+def system_disk(images, otatools, work, out):
+    """Lays the system images out on the shared read-only system disk and converts it to a dynamic VHDX."""
     super_raw = work / "super.raw"
     super_img = images / "super.img"
     with open(super_img, "rb") as f:
@@ -384,9 +389,11 @@ def disk(images, otatools, work, out):
         run(otatools / "bin/simg2img", super_img, super_raw)
     else:
         shutil.copy(super_img, super_raw)
-    raw = work / "disk.raw"
-    make_raw_disk(raw, DISK_SIZE)
-    on_disk = {name for name, _ in SMALL_PARTITIONS}
+    raw = work / "system.raw"
+    needed = sum(size for _, size in SYSTEM_SMALL_PARTITIONS) + super_raw.stat().st_size + (128 << 20)
+    system_disk_size = ((needed + (1 << 20) - 1) // (1 << 20)) * (1 << 20)
+    make_raw_disk(raw, system_disk_size)
+    on_disk = {name for name, _ in SYSTEM_SMALL_PARTITIONS}
     found = verified_boot_partitions(images / "vbmeta.img", otatools)
     missing = [n for _, n in found if f"{n}_a" not in on_disk]
     if missing:
@@ -397,14 +404,12 @@ def disk(images, otatools, work, out):
     sgdisk = shutil.which("sgdisk") or str(otatools / "bin/sgdisk")
     cmd = [sgdisk, "--clear"]
     number = 1
-    for name, size in SMALL_PARTITIONS:
+    for name, size in SYSTEM_SMALL_PARTITIONS:
         cmd += [f"--new={number}:0:+{size // 1024}K", f"--change-name={number}:{name}"]
         if name == "misc":
             cmd += [f"--partition-guid={number}:{MISC_UUID}"]
         number += 1
-    cmd += [f"--new={number}:0:+{super_raw.stat().st_size // 1024}K", f"--change-name={number}:super", f"--partition-guid={number}:{SUPER_UUID}"]
-    number += 1
-    cmd += [f"--new={number}:0:0", f"--change-name={number}:userdata", str(raw)]
+    cmd += [f"--new={number}:0:+{super_raw.stat().st_size // 1024}K", f"--change-name={number}:super", f"--partition-guid={number}:{SUPER_UUID}", str(raw)]
     run(*cmd)
     materialize_backup_gpt(raw)
     layout = subprocess.run([sgdisk, "--print", raw], check=True, capture_output=True, text=True).stdout
@@ -415,7 +420,7 @@ def disk(images, otatools, work, out):
             first, last = int(m.group(2)), int(m.group(3))
             partitions[m.group(4)] = (first * 512, (last - first + 1) * 512)
     print(layout)
-    sizes = dict(SMALL_PARTITIONS)
+    sizes = dict(SYSTEM_SMALL_PARTITIONS)
     writes = [("super", super_raw)] + [(name, images / file) for name, file in PARTITION_IMAGES.items()]
     for name, image in writes:
         if not image.exists():
@@ -430,12 +435,30 @@ def disk(images, otatools, work, out):
     return command_line_partitions(partitions, {"misc": MISC_UUID})
 
 
+def data_disk(otatools, work, out):
+    """Emits an empty dynamic data disk template containing metadata and userdata partitions."""
+    raw = work / "data.raw"
+    make_raw_disk(raw, DISK_SIZE)
+    sgdisk = shutil.which("sgdisk") or str(otatools / "bin/sgdisk")
+    cmd = [
+        sgdisk, "--clear",
+        "--new=1:0:+64M", "--change-name=1:metadata",
+        "--new=2:0:0", "--change-name=2:userdata",
+        str(raw),
+    ]
+    run(*cmd)
+    materialize_backup_gpt(raw)
+    out.unlink(missing_ok=True)
+    run(shutil.which("qemu-img") or "qemu-img", "convert", "-f", "raw", "-O", "vhdx", "-o", "subformat=dynamic", "-S", "4k", raw, out)
+    raw.unlink()
+
+
 def kernel_cmdline(partition_cmdline):
     """Returns the kernel command line shared by every DSA guest image."""
     return " ".join([
         "console=ttyS0", "printk.devkmsg=on", "audit=1", "panic=-1", "8250.nr_uarts=1",
         "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init", partition_cmdline,
-        f"androidboot.boot_part_uuid={MISC_UUID}", "androidboot.fstab_suffix=dsa",
+        "androidboot.boot_devices=vmbus", "androidboot.fstab_suffix=dsa",
         "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",
         "androidboot.hardware=cutf_cvm", "androidboot.verifiedbootstate=orange",
         "androidboot.vbmeta.device_state=unlocked",
@@ -507,8 +530,9 @@ def main():
                 break
 
     ramdisk(signed, otatools, work, out / "initrd.img")
-    partition_cmdline = disk(images, otatools, work, out / "disk.vhdx")
-    files = ["disk.vhdx", "initrd.img"]
+    partition_cmdline = system_disk(images, otatools, work, out / "system.vhdx")
+    data_disk(otatools, work, out / "data.vhdx")
+    files = ["system.vhdx", "data.vhdx", "initrd.img"]
     if notice_name:
         files.append(notice_name)
     (out / "bzImage").unlink(missing_ok=True)
