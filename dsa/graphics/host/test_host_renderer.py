@@ -36,6 +36,7 @@ STREAM_RENDERER_PARAM_RENDERER_FLAGS = 2
 STREAM_RENDERER_PARAM_FENCE_CALLBACK = 3
 STREAM_RENDERER_PARAM_WIN0_WIDTH = 4
 STREAM_RENDERER_PARAM_WIN0_HEIGHT = 5
+STREAM_RENDERER_SKIP_OPENGLES_INIT = 10
 
 STREAM_RENDERER_FLAGS_USE_SURFACELESS_BIT = 1 << 3
 STREAM_RENDERER_FLAGS_USE_VK_BIT = 1 << 5
@@ -93,6 +94,7 @@ class HostRendererSmokeTests(unittest.TestCase):
                 ctypes.cast(dummy_fence_callback, ctypes.c_void_p).value,
             ),
             StreamRendererParam(STREAM_RENDERER_PARAM_RENDERER_FLAGS, flags),
+            StreamRendererParam(STREAM_RENDERER_SKIP_OPENGLES_INIT, 1),
             StreamRendererParam(STREAM_RENDERER_PARAM_WIN0_WIDTH, 256),
             StreamRendererParam(STREAM_RENDERER_PARAM_WIN0_HEIGHT, 256),
         ]

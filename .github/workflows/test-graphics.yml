@@ -74,17 +74,36 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/mmozeiko/build-mesa/releases/download/26.2.5/mesa-lavapipe-x64-26.2.5.7z" -OutFile ".scratch/mesa-lavapipe.7z"
           & "C:\Program Files\7-Zip\7z.exe" x .scratch/mesa-lavapipe.7z "-o.scratch/lavapipe" -y
           $jsonPath = (Resolve-Path .scratch/lavapipe/lvp_icd.x86_64.json).Path
-          $dllPath = (Resolve-Path .scratch/lavapipe/vulkan_lvp.dll).Path -replace '\\', '/'
-          $jsonContent = Get-Content $jsonPath -Raw | ConvertFrom-Json
-          $jsonContent.ICD.library_path = $dllPath
-          $jsonContent | ConvertTo-Json | Set-Content $jsonPath
+          $dllPath = (Resolve-Path .scratch/lavapipe/vulkan_lvp.dll).Path
+          
+          # Copy driver into system and binary directories
+          Copy-Item $dllPath -Destination "C:\Windows\System32\vulkan_lvp.dll" -Force
+          Copy-Item $dllPath -Destination ".scratch/build-host/dist/bin/vulkan_lvp.dll" -Force
+
+          # Configure manifest with escaped backslashes for absolute DLL path
+          $escapedDllPath = $dllPath.Replace('\', '\\')
+          $jsonContent = @"
+{
+    "ICD": {
+        "api_version": "1.4.354",
+        "library_path": "$escapedDllPath"
+    },
+    "file_format_version": "1.0.1"
+}
+"@
+          Set-Content -Path $jsonPath -Value $jsonContent -Encoding utf8
+
+          # Register driver in Windows Registry
+          New-Item -Path "HKLM:\SOFTWARE\Khronos\Vulkan\Drivers" -Force | Out-Null
+          New-ItemProperty -Path "HKLM:\SOFTWARE\Khronos\Vulkan\Drivers" -Name $jsonPath -Value 0 -PropertyType DWord -Force | Out-Null
 
       - name: Run host renderer smoke test on software Vulkan
         shell: pwsh
         env:
-          VK_ICD_FILENAMES: ${{ github.workspace }}/.scratch/lavapipe/lvp_icd.x86_64.json
-          VK_DRIVER_FILES: ${{ github.workspace }}/.scratch/lavapipe/lvp_icd.x86_64.json
-          GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}/.scratch/build-host/dist/bin/gfxstream_backend.dll
+          VK_ICD_FILENAMES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
+          VK_DRIVER_FILES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
+          VK_LOADER_DEBUG: all
+          GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
         run: |
           uv run dsa/graphics/host/test_host_renderer.py
 
