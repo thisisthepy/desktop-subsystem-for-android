@@ -111,13 +111,16 @@ jobs:
       - name: Fetch the pinned inputs
         run: dsa/guest/image/fetch.sh ${{ matrix.android }}
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Make the image
         run: >
-          python3 dsa/guest/image/make-image.py --major ${{ matrix.android }}
+          uv run dsa/guest/image/make-image.py --major ${{ matrix.android }}
           --keys .scratch/image-keys --kernel .scratch/kernel-out/bzImage
 
       - name: Check the image
-        run: python3 dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
+        run: uv run dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
 
       - name: Publish the image
         id: publish

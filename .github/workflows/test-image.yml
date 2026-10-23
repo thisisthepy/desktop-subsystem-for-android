@@ -71,11 +71,14 @@ jobs:
       - name: Make a throwaway key set
         run: dsa/guest/image/make-keys.sh .scratch/image-keys
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Make the image
-        run: python3 dsa/guest/image/make-image.py --major ${{ matrix.android }} --keys .scratch/image-keys
+        run: uv run dsa/guest/image/make-image.py --major ${{ matrix.android }} --keys .scratch/image-keys
 
       - name: Check the image
-        run: python3 dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
+        run: uv run dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
 
       - name: Keep the ramdisk and the manifest
         uses: actions/upload-artifact@v4
