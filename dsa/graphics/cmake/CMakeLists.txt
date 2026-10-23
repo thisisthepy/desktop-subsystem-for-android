@@ -1,5 +1,6 @@
 # Copyright 2026 The DSA Authors
 # SPDX-License-Identifier: Apache-2.0
+# Standalone Android guest Vulkan and OpenGL transport build.
 
 cmake_minimum_required(VERSION 3.22)
 project(guest_gfxstream LANGUAGES C CXX)
