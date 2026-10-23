@@ -92,6 +92,10 @@ add_stub_library(OpenglCodecCommon)
 add_stub_library(_renderControl_enc)
 add_stub_library(GLESv1_enc)
 add_stub_library(GLESv2_enc)
+add_stub_library(sync)
+add_stub_library(nativewindow)
+add_stub_library(hardware)
+add_stub_library(utils)
 
 set_target_properties(OpenglSystemCommon PROPERTIES
     OUTPUT_NAME "OpenglSystemCommon"
@@ -106,5 +110,100 @@ target_link_libraries(OpenglSystemCommon PRIVATE
     _renderControl_enc
     GLESv1_enc
     GLESv2_enc
+    log
+)
+
+set(VULKAN_SOURCES
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan/gfxstream_vk_android.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan/gfxstream_vk_cmd.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan/gfxstream_vk_wsi_stub.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/AndroidHardwareBuffer.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/CommandBufferStagingStream.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/DescriptorSetVirtualization.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/HostVisibleMemoryVirtualization.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/Resources.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/Validation.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/VulkanHandleMapping.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/VulkanStreamGuest.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/gfxstream_vk_private.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/GfxStreamVulkanConnection.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/goldfish_vk_counting_guest.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/goldfish_vk_deepcopy_guest.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/goldfish_vk_extension_structs_guest.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/goldfish_vk_marshaling_guest.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/goldfish_vk_reserved_marshaling_guest.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/goldfish_vk_transform_guest.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc/func_table.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/connection-manager/GfxStreamConnection.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/connection-manager/QemuPipeStream.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/connection-manager/VirtioGpuPipeStream.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/android/ANativeWindowAndroid.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/android/GfxStreamGralloc.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/android/GrallocGoldfish.cpp
+    ${MESA3D_DIR}/src/gfxstream/guest/android/GrallocMinigbm.cpp
+    ${GFXSTREAM_DIR}/guest/OpenglSystemCommon/HvSocketStream.cpp
+)
+
+add_library(vulkan.ranchu SHARED ${VULKAN_SOURCES})
+
+target_include_directories(vulkan.ranchu PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${SCRATCH_DIR}/gen
+    ${GFXSTREAM_DIR}/guest/OpenglSystemCommon
+    ${GFXSTREAM_DIR}/guest/renderControl_enc
+    ${GFXSTREAM_DIR}/guest/OpenglCodecCommon
+    ${GFXSTREAM_DIR}/guest/OpenglCodecCommon/include
+    ${GFXSTREAM_DIR}/guest/android-emu
+    ${GFXSTREAM_DIR}/guest/android-emu/aemu/base
+    ${GFXSTREAM_DIR}/guest/gralloc_cb/include
+    ${GFXSTREAM_DIR}/guest/qemupipe/include
+    ${GFXSTREAM_DIR}/guest/qemupipe/include-types
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan
+    ${MESA3D_DIR}/src/gfxstream/guest/vulkan_enc
+    ${MESA3D_DIR}/src/gfxstream/guest/connection-manager
+    ${MESA3D_DIR}/src/gfxstream/guest/android
+    ${MESA3D_DIR}/src/gfxstream/guest/android/include
+    ${MESA3D_DIR}/src/gfxstream/guest/iostream/include
+    ${MESA3D_DIR}/src/gfxstream/guest/platform/include
+    ${MESA3D_DIR}/src/gfxstream/guest/GoldfishAddressSpace/include
+    ${MESA3D_DIR}/src/vulkan/util
+    ${MESA3D_DIR}/src/vulkan/runtime
+    ${MESA3D_DIR}/src/vulkan/wsi
+    ${MESA3D_DIR}/src/util
+    ${MESA3D_DIR}/src
+    ${SCRATCH_DIR}/minigbm
+    ${LIBHARDWARE_DIR}/include_all
+    ${LIBHARDWARE_DIR}/include
+    ${LIBBASE_DIR}/include
+    ${SYSTEM_CORE_DIR}/libcutils/include
+    ${SYSTEM_CORE_DIR}/libutils/include
+    ${SYSTEM_CORE_DIR}/libsystem/include
+    ${SYSTEM_CORE_DIR}/libnativebase/include
+    ${SYSTEM_LOGGING_DIR}/liblog/include
+)
+
+target_compile_definitions(vulkan.ranchu PRIVATE
+    LOG_TAG="goldfish_vulkan"
+    VK_NO_PROTOTYPES
+    VK_USE_PLATFORM_ANDROID_KHR
+)
+
+set_target_properties(vulkan.ranchu PROPERTIES
+    OUTPUT_NAME "vulkan.ranchu"
+    LINK_FLAGS "-Wl,-z,undefs -Wl,-Bsymbolic -Wl,--gc-sections"
+)
+
+target_link_libraries(vulkan.ranchu PRIVATE
+    base
+    cutils
+    drm
+    sync
+    nativewindow
+    hardware
+    utils
     log
 )
