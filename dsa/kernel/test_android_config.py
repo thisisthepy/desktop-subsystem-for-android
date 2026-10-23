@@ -16,6 +16,11 @@ class AndroidKernelConfigTests(unittest.TestCase):
         config = CONFIG.read_text()
         self.assertIn("CONFIG_CRYPTO_HCTR2=y", config)
 
+    def test_pr3_hyper_v_socket_transport_is_built_into_the_guest_kernel(self):
+        config = CONFIG.read_text()
+        self.assertIn("CONFIG_VSOCKETS=y", config)
+        self.assertIn("CONFIG_HYPERV_VSOCKETS=y", config)
+
 
 if __name__ == "__main__":
     unittest.main()
