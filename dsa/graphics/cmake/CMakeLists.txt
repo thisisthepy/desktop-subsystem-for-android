@@ -159,7 +159,6 @@ add_library(vulkan.ranchu SHARED ${VULKAN_SOURCES})
 target_include_directories(vulkan.ranchu PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${MESA3D_DIR}/include
-    ${MESA3D_DIR}/include/android_stub
     ${MESA3D_DIR}/include/drm-uapi
     ${SCRATCH_DIR}/gen
     ${GFXSTREAM_DIR}/guest/OpenglSystemCommon
