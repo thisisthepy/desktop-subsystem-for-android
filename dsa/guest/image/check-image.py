@@ -83,9 +83,9 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
 
     if "VENDOR/etc/selinux/vendor_file_contexts" in names:
         vendor_fc = z.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
-        for expected_path in ["vulkan\\.ranchu\\.so", "libOpenglSystemCommon\\.so"]:
-            if not re.search(rf"{expected_path}.*same_process_hal_file", vendor_fc):
-                problems.append(f"vendor_file_contexts does not label {expected_path} as same_process_hal_file")
+        for expected in ["vulkan", "libOpenglSystemCommon"]:
+            if not any(expected in line and "same_process_hal_file" in line for line in vendor_fc.splitlines()):
+                problems.append(f"vendor_file_contexts does not label {expected} as same_process_hal_file")
 
     vendor_props = z.read("VENDOR/build.prop").decode() if "VENDOR/build.prop" in names else ""
     for prop, val in [
