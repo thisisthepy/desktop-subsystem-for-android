@@ -48,7 +48,7 @@ git -C "$mesa_dir" fetch --depth=1 origin "$mesa_revision"
 git -C "$mesa_dir" checkout --detach "$mesa_revision"
 git -C "$mesa_dir" reset --hard "$mesa_revision"
 git -C "$mesa_dir" clean -fdx
-git -C "$mesa_dir" sparse-checkout set include src/c11 src/gfxstream/guest src/util src/vulkan
+git -C "$mesa_dir" sparse-checkout set include src/c11 src/compiler src/gfxstream/guest src/util src/vulkan
 
 mesa_patches=("$patch_dir"/0002-*.patch)
 if ((${#mesa_patches[@]})); then
@@ -139,5 +139,12 @@ if [[ -f "$mesa_dir/src/vulkan/util/vk_entrypoints_gen.py" ]]; then
             --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
             --outdir "$gen_dir" \
             --beta false
+
+        if [[ -f "$mesa_dir/src/compiler/spirv/spirv_info_gen.py" ]]; then
+            "${python_cmd[@]}" "$mesa_dir/src/compiler/spirv/spirv_info_gen.py" \
+                --json "$mesa_dir/src/compiler/spirv/spirv.core.grammar.json" \
+                --out-h "$gen_dir/spirv_info.h" \
+                --out-c "$gen_dir/spirv_info.c"
+        fi
     fi
 fi
