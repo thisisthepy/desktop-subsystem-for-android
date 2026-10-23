@@ -3,7 +3,7 @@ namespace Dsa.Setup
     /// <summary>The words on the setup screens (English).</summary>
     internal static class Text
     {
-        public const string Caption = "Desktop Subsystem for Android Setup";
+        public const string Caption = "Desktop Subsystem for Android\u2122 Setup";
         public const string Title = "Desktop Subsystem for Android\u2122";
         public const string Publisher = "Thisisthepy";
         public const string Architecture = "x64";
@@ -19,7 +19,9 @@ namespace Dsa.Setup
         public const string ChangeButton = "Change";
         public const string LegalBefore = "By installing, you agree to the ";
         public const string LegalLink = "Apache License 2.0";
-        public const string LegalAfter = ". Android is a trademark of Google LLC.";
+        public const string LegalAfter =
+            ". DSA is an independent open-source project. It is not affiliated with, " +
+            "endorsed by or sponsored by Microsoft or Google. Android is a trademark of Google LLC.";
         public const string LicenseUrl = "https://www.apache.org/licenses/LICENSE-2.0";
 
         public const string OptionsHeader = "Install location";

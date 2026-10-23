@@ -30,6 +30,9 @@ jobs:
           # The release sync test builds throwaway repositories; it needs git, not history.
           fetch-depth: 1
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Run the repository checks
         run: |
           git config --global user.email "ci@example.invalid"
