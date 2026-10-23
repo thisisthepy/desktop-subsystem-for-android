@@ -61,6 +61,13 @@ jobs:
       - name: Fetch the pinned inputs
         run: dsa/guest/image/fetch.sh ${{ matrix.android }}
 
+      # The HCS image has no virtio GPU. Keep the exact Cuttlefish graphics payload in
+      # the log while replacing its minigbm path with the Hyper-V gfxstream transport.
+      - name: List the guest graphics payload
+        run: |
+          unzip -l .scratch/aosp-inputs/*/*target_files*.zip | \
+            grep -Ei 'graphics|gralloc|mapper|opengl|vulkan|goldfish|ranchu|drm'
+
       - name: Make a throwaway key set
         run: dsa/guest/image/make-keys.sh .scratch/image-keys
 
