@@ -277,22 +277,42 @@ pub fn unregister_service_guid(guid: Guid) -> Result<(), String> {
     )
 }
 
-/// Registers the graphics command stream (port 5566) and process pipe (port 5567) service GUIDs.
-///
-/// This function is intended to be called by the DSA Windows service during startup so that
-/// user-session compositor processes can listen on these ports without requiring administrator rights.
-pub fn register_graphics_service_guids() -> Result<(), String> {
+/// Registers the graphics command stream (port 5566) and process pipe (port 5567) service GUIDs under `root` at `base_path`.
+pub fn register_graphics_service_guids_under(
+    root: RegistryHive,
+    base_path: &str,
+) -> Result<(), String> {
     let command_guid = Guid::vsock_service(GRAPHICS_COMMAND_PORT);
     let process_pipe_guid = Guid::vsock_service(GRAPHICS_PROCESS_PIPE_PORT);
-    register_service_guid(
+    register_service_guid_under(
+        root,
+        base_path,
         command_guid,
         GRAPHICS_COMMAND_ELEMENT_NAME,
         Some(DEFAULT_SERVICE_SDDL),
     )?;
-    register_service_guid(
+    register_service_guid_under(
+        root,
+        base_path,
         process_pipe_guid,
         GRAPHICS_PROCESS_PIPE_ELEMENT_NAME,
         Some(DEFAULT_SERVICE_SDDL),
     )?;
     Ok(())
+}
+
+/// Registers the graphics command stream (port 5566) and process pipe (port 5567) service GUIDs.
+///
+/// This function is intended to be called by the DSA Windows service during startup so that
+/// user-session compositor processes can listen on these ports without requiring administrator rights.
+pub fn register_graphics_service_guids() -> Result<(), String> {
+    if let Ok(test_key) = std::env::var("DSA_TEST_GUEST_COMMUNICATION_SERVICES_KEY") {
+        if !test_key.is_empty() {
+            return register_graphics_service_guids_under(RegistryHive::CurrentUser, &test_key);
+        }
+    }
+    register_graphics_service_guids_under(
+        RegistryHive::LocalMachine,
+        GUEST_COMMUNICATION_SERVICES_KEY,
+    )
 }

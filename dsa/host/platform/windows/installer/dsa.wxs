@@ -80,6 +80,12 @@
             </Directory>
         </StandardDirectory>
 
+        <util:CloseApplication Id="CloseCompositor"
+                               Target="dsa-compositor.exe"
+                               CloseMessage="yes"
+                               PromptToContinue="no"
+                               RebootPrompt="no" />
+
         <ComponentGroup Id="Service" Directory="INSTALLFOLDER">
             <Component Id="HostdExe" Guid="*">
                 <File Id="HostdExe" Source="$(SourceDir)\dsa-hostd.exe" KeyPath="yes" />
@@ -105,6 +111,41 @@
             <Component Id="DsaExe" Guid="*">
                 <File Id="DsaExe" Source="$(SourceDir)\dsa.exe" KeyPath="yes" />
                 <Environment Id="Path" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="yes" Permanent="no" />
+            </Component>
+            <Component Id="CompositorExe" Guid="*">
+                <File Id="CompositorExe" Source="$(SourceDir)\dsa-compositor.exe" KeyPath="yes" />
+            </Component>
+            <Component Id="CompositorRun" Guid="9f3a61ec-d762-4f18-bbbe-5c0245a49808">
+                <RegistryValue Root="HKLM"
+                               Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+                               Name="DsaCompositor"
+                               Type="string"
+                               Value="&quot;[INSTALLFOLDER]dsa-compositor.exe&quot;"
+                               KeyPath="yes" />
+            </Component>
+            <Component Id="GuestCommunicationCommandService" Guid="6a0a012a-3eb5-44ea-86ad-953e5e01b341">
+                <RegistryKey Root="HKLM"
+                             Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\000015be-facb-11e6-bd58-64006a7986d3"
+                             ForceCreateOnInstall="yes"
+                             ForceDeleteOnUninstall="yes">
+                    <RegistryValue Name="ElementName"
+                                   Type="string"
+                                   Value="Desktop Subsystem for Android Graphics Command Stream"
+                                   KeyPath="yes" />
+                    <PermissionEx Sddl="D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)(A;OICI;GA;;;OW)(A;OICI;GR;;;IU)(A;OICI;GR;;;AU)" />
+                </RegistryKey>
+            </Component>
+            <Component Id="GuestCommunicationProcessPipeService" Guid="5b1a0e1c-5264-42b4-82a1-547dfaaef758">
+                <RegistryKey Root="HKLM"
+                             Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\000015bf-facb-11e6-bd58-64006a7986d3"
+                             ForceCreateOnInstall="yes"
+                             ForceDeleteOnUninstall="yes">
+                    <RegistryValue Name="ElementName"
+                                   Type="string"
+                                   Value="Desktop Subsystem for Android Graphics Process Pipe"
+                                   KeyPath="yes" />
+                    <PermissionEx Sddl="D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)(A;OICI;GA;;;OW)(A;OICI;GR;;;IU)(A;OICI;GR;;;AU)" />
+                </RegistryKey>
             </Component>
             <Component Id="NoticeFile" Guid="*">
                 <File Id="NoticeFile" Source="$(SourceDir)\NOTICE.txt" KeyPath="yes" />
