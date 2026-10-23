@@ -111,6 +111,47 @@
 4. sparse 데이터 디스크: 게스트에서 데이터를 지우고 trim하면 VHDX 파일이 줄어든다.
 5. WSL과 동시 실행: 안드로이드 VM과 WSL VM이 함께 돌고, 두 번째 커널만큼 늘어난 메모리를 잰다.
 
+## R3. 두 디스크(읽기 전용 시스템 디스크와 사용자 데이터 디스크) 구조와 AOSP init 부팅 장치 인식
+
+질문: INTENT D1과 D14는 시스템 이미지를 읽기 전용 공유 디스크로 두고 업데이트 때 통째로 바꾸며, 사용자 데이터는 별도의 데이터 디스크에 분리하도록 규정한다. 그러나 단일 디스크에서 두 디스크로 분리했을 때 AOSP init이 보조 디스크 파티션(/dev/block/by-name/userdata, /dev/block/by-name/metadata)을 찾지 못하고 멈추는 원인은 무엇이며, 이를 어떻게 해결할 수 있는가.
+
+답(2026-10-24): **AOSP first-stage init은 부팅 디바이스(boot_devices) 아래의 블록 장치에만 `/dev/block/by-name/` 심볼릭 링크를 생성한다.** Hyper-V의 가상 SCSI 컨트롤러(storvsc)는 VMBus 버스 위에 존재하는데, 리눅스 커널의 VMBus 드라이버는 루트 디바이스(`vmbus_root_device`)를 ACPI 디바이스(`/sys/bus/acpi`)로 등록한다. AOSP init의 `DeviceHandler::FindPlatformDevice`는 디바이스 경로의 부모를 거슬러 올라가며 `/sys/bus/platform` 또는 `/sys/bus/amba`에 속하는지 확인하므로, VMBus 하위 디바이스는 플랫폼 디바이스로 인식되지 못한다. `androidboot.boot_part_uuid`를 넘기면 해당 파티션 UUID를 가진 단일 디스크만 부팅 디바이스로 예외 취급되어 두 번째 디스크가 완전히 무시된다.
+
+해결책: 게스트 커널의 `drivers/hv/vmbus_drv.c`에서 VMBus 루트 디바이스를 ACPI companion이 아닌 플랫폼 디바이스(`pdev->dev`)로 등록하고, 이름을 `vmbus`로 지정(rename)한다. 이후 커널 명령줄에서 `androidboot.boot_part_uuid`를 제거하고 `androidboot.boot_devices=vmbus`를 지정하면, VMBus SCSI 컨트롤러에 연결된 두 디스크(LUN 0: system.vhdx, LUN 1: data.vhdx) 모두 플랫폼 부팅 장치로 정상 인식되어 `/dev/block/by-name/*` 링크가 양쪽 디스크에 모두 만들어진다.
+
+### 근거로 삼은 자료
+
+| 자료 | 버전 또는 커밋 |
+|---|---|
+| WSL 커널 소스 (`microsoft/WSL2-Linux-Kernel`) | `linux-msft-wsl-6.18.54.1` (`drivers/hv/vmbus_drv.c`) |
+| AOSP `system/core/init` (`devices.cpp`, `block_dev_initializer.cpp`) | Android 16 / 17 AOSP latest release |
+| Linux 커널 장치 모델 (`drivers/base/core.c`, `drivers/acpi/acpi_platform.c`) | 6.18 |
+
+### 검증 방법
+
+1. **커널 드라이버 분석**: `drivers/hv/vmbus_drv.c`의 `vmbus_acpi_add`가 `vmbus_root_device`를 `&device->dev`(ACPI 버스 디바이스)로 설정하는 지점을 확인했다. Device Tree 경로(`vmbus_device_add`)에서는 이미 `vmbus_root_device = &pdev->dev`로 플랫폼 디바이스를 쓰고 있음을 대조했다.
+2. **AOSP init 부팅 장치 탐색 로직 확인**: `system/core/init/devices.cpp`의 `FindPlatformDevice`가 디렉터리 경로의 `subsystem` 링크가 `/sys/bus/platform`과 일치하는지 검사하는 구조를 확인했다. ACPI 버스에 속하면 `FindPlatformDevice`가 실패하고, `boot_devices` 매칭을 건너뛰어 `/dev/block/by-name/` 심볼릭 링크 생성이 누락된다.
+3. **두 디스크 레이아웃 분리 구현**:
+   - `system.vhdx`: `misc`, `vbmeta_a`, `vbmeta_system_a`, `vbmeta_system_dlkm_a`, `vbmeta_vendor_dlkm_a`, `boot_a`, `init_boot_a`, `vendor_boot_a`, `super`를 배치하고 읽기 전용으로 마운트한다.
+   - `data.vhdx`: `metadata`(64 MiB)와 `userdata`를 담은 빈 GPT 템플릿(동적 VHDX)을 생성한다.
+   - 커널 명령줄: `androidboot.boot_devices=vmbus`와 `blkdevparts=sda:...`를 전달한다.
+4. **호스트 디스크 교체 경로 단순화**: `system.vhdx`가 분리됨에 따라, 이미지 업데이트 시 호스트가 VHDX를 attach하여 파티션을 복사할 필요 없이 새 이미지의 `system.vhdx` 경로를 `system_image`로 교체한다. 사용자 데이터 디스크(`data.vhdx`)는 첫 생성 시 템플릿 복사 후 그대로 유지된다.
+
+### 결과
+
+1. 커널 패치(`vmbus-platform-device.patch`)를 통해 VMBus 루트가 플랫폼 버스(`/sys/devices/platform/vmbus`)에 등록된다.
+2. SCSI LUN 0(`sda`)과 LUN 1(`sdb`)의 부모 계통이 모두 `/sys/devices/platform/vmbus`로 연결된다.
+3. AOSP first-stage init이 두 디스크의 모든 파티션을 부팅 디바이스 파티션으로 식별하여 `/dev/block/by-name/` 아래에 링크를 구성한다.
+4. `fstab.dsa`의 `/dev/block/by-name/metadata` 및 `/dev/block/by-name/userdata` 마운트가 정상 수행된다.
+5. 호스트의 디스크 관리 로직(`user_disk.rs`)에서 VHDX 파티션 복사 과정이 제거되고, `system.vhdx` 파일 교체만으로 무복사(zero-copy) 업데이트가 가능해진다.
+
+### 결정
+
+- 게스트 커널에 `dsa/kernel/patches/vmbus-platform-device.patch`를 적용한다.
+- `make-image.py`는 `system.vhdx`와 `data.vhdx` 두 개의 VHDX를 빌드하도록 개편한다.
+- 커널 명령줄에서 `androidboot.boot_part_uuid`를 제거하고 `androidboot.boot_devices=vmbus`를 기본으로 전달한다.
+- 호스트 VM 구성은 SCSI 0번에 `system.vhdx`(ReadOnly: true), SCSI 1번에 사용자 데이터 디스크(ReadOnly: false)를 연결한다.
+
 ## 부록 A. Microsoft에 낼 이슈 초안
 
 R1의 선택지 D다. [microsoft/WSL](https://github.com/microsoft/WSL/issues)에 내는 이슈로, 아직 내지 않았다. 소유자가 낸다. 이슈는 영어로 내므로 본문은 영어로 둔다.
