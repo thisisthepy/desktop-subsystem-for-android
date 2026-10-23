@@ -143,6 +143,11 @@ pub trait GuestLauncher: Send + 'static {
     fn diagnostics(&mut self) -> Option<String> {
         None
     }
+
+    /// The runtime ID of the guest, if running (such as the VM GUID on Windows).
+    fn vm_id(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Checks a new control channel connection before the session trusts it.
@@ -203,6 +208,7 @@ enum Command {
 
 struct Shared {
     status: Mutex<(SessionState, Option<StopReason>)>,
+    vm_id: Mutex<Option<String>>,
     changed: Condvar,
     subscribers: Mutex<Vec<Sender<SessionEvent>>>,
 }
@@ -218,10 +224,17 @@ impl Shared {
             if reason.is_some() {
                 status.1 = reason.clone();
             }
+            if state == SessionState::Stopped {
+                *self.vm_id.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            }
         }
         self.changed.notify_all();
         let event = SessionEvent { state, reason };
         subscribers.retain(|subscriber| subscriber.send(event.clone()).is_ok());
+    }
+
+    fn set_vm_id(&self, vm_id: Option<String>) {
+        *self.vm_id.lock().unwrap_or_else(|e| e.into_inner()) = vm_id;
     }
 }
 
@@ -243,6 +256,7 @@ impl Session {
     ) -> Session {
         let shared = Arc::new(Shared {
             status: Mutex::new((SessionState::Stopped, None)),
+            vm_id: Mutex::new(None),
             changed: Condvar::new(),
             subscribers: Mutex::new(Vec::new()),
         });
@@ -297,6 +311,15 @@ impl Session {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .1
+            .clone()
+    }
+
+    /// The runtime ID of the guest, if running.
+    pub fn vm_id(&self) -> Option<String> {
+        self.shared
+            .vm_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
             .clone()
     }
 
@@ -489,6 +512,7 @@ impl Worker {
                 Ok(mut connection) => match self.handshake.accept(connection.as_mut()) {
                     Ok(()) => {
                         self.connection = Some(connection);
+                        self.shared.set_vm_id(self.launcher.vm_id());
                         self.shared.set(SessionState::Active, None);
                         return;
                     }
@@ -587,6 +611,7 @@ impl Worker {
     }
 
     fn stop_with(&mut self, reason: impl FnOnce(&mut dyn GuestLauncher) -> StopReason) {
+        self.shared.set_vm_id(None);
         self.shared.set(SessionState::Stopping, None);
         if let Some(mut connection) = self.connection.take() {
             connection.close();

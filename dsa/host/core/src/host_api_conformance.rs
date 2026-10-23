@@ -62,6 +62,9 @@ impl UserAndroid for FakeAndroid {
     fn stop(&self) {
         *self.state.lock().unwrap() = SessionState::Stopped;
     }
+    fn vm_id(&self) -> Option<String> {
+        (self.state() == SessionState::Active).then(|| "fake-vm-id-1234".into())
+    }
 }
 
 /// One [`FakeAndroid`] per user, except for the users it refuses.
@@ -189,6 +192,10 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::reads_its_users_state(&mut || $make);
         }
         #[test]
+        fn pr5_the_client_reads_the_vm_id_of_its_users_android() {
+            $crate::host_api_conformance::reads_its_users_vm_id(&mut || $make);
+        }
+        #[test]
         fn pr5_start_and_stop_reach_the_callers_android() {
             $crate::host_api_conformance::start_and_stop_reach_the_caller(&mut || $make);
         }
@@ -233,6 +240,20 @@ pub fn reads_its_users_state(make: MakeLocal<'_>) {
         vec![user],
         "the service must act for the user the transport reports"
     );
+}
+
+pub fn reads_its_users_vm_id(make: MakeLocal<'_>) {
+    let (listener, mut connector, _user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids);
+    let mut client = connect(&mut *connector);
+    assert_eq!(client.vm_id().unwrap(), None);
+
+    client.start().unwrap();
+    assert_eq!(client.vm_id().unwrap().as_deref(), Some("fake-vm-id-1234"));
+
+    client.stop().unwrap();
+    assert_eq!(client.vm_id().unwrap(), None);
 }
 
 pub fn start_and_stop_reach_the_caller(make: MakeLocal<'_>) {

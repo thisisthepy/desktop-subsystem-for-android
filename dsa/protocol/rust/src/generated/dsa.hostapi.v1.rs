@@ -45,6 +45,9 @@ pub struct StopSession {}
 /// once setup has started, or says that DSA is up to date.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct UpdateProgram {}
+/// Asks for the runtime ID of the caller's Android VM.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetVmId {}
 /// The caller's Android as the service sees it.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Status {
@@ -70,6 +73,13 @@ pub struct ProgramUpdate {
     #[prost(string, tag = "2")]
     pub detail: ::prost::alloc::string::String,
 }
+/// The answer to GetVmId.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VmId {
+    /// The runtime ID of the caller's Android VM. Empty when the VM is not running.
+    #[prost(string, tag = "1")]
+    pub vm_id: ::prost::alloc::string::String,
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Error {
     #[prost(enumeration = "ErrorCode", tag = "1")]
@@ -83,7 +93,7 @@ pub struct Error {
 pub struct Request {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "request::Body", tags = "2, 3, 4, 5")]
+    #[prost(oneof = "request::Body", tags = "2, 3, 4, 5, 6")]
     pub body: ::core::option::Option<request::Body>,
 }
 /// Nested message and enum types in `Request`.
@@ -98,13 +108,15 @@ pub mod request {
         StopSession(super::StopSession),
         #[prost(message, tag = "5")]
         UpdateProgram(super::UpdateProgram),
+        #[prost(message, tag = "6")]
+        GetVmId(super::GetVmId),
     }
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Response {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "response::Body", tags = "2, 3, 4")]
+    #[prost(oneof = "response::Body", tags = "2, 3, 4, 5")]
     pub body: ::core::option::Option<response::Body>,
 }
 /// Nested message and enum types in `Response`.
@@ -117,6 +129,8 @@ pub mod response {
         Error(super::Error),
         #[prost(message, tag = "4")]
         ProgramUpdate(super::ProgramUpdate),
+        #[prost(message, tag = "5")]
+        VmId(super::VmId),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.
