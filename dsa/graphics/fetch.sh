@@ -29,8 +29,8 @@ git -C "$source" clean -fdx
 shopt -s nullglob
 patches=("$patch_dir"/*.patch)
 if ((${#patches[@]})); then
-    git -C "$source" apply --check "${patches[@]}"
-    git -C "$source" apply "${patches[@]}"
+    git -C "$source" apply --recount --check "${patches[@]}"
+    git -C "$source" apply --recount "${patches[@]}"
 fi
 
 git -C "$source" rev-parse HEAD

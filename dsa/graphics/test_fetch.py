@@ -17,8 +17,8 @@ class GfxstreamFetchTests(unittest.TestCase):
             script,
         )
         self.assertIn("git -C \"$source\" checkout --detach \"$revision\"", script)
-        self.assertIn("git -C \"$source\" apply --check", script)
-        self.assertIn("git -C \"$source\" apply", script)
+        self.assertIn("git -C \"$source\" apply --recount --check", script)
+        self.assertIn("git -C \"$source\" apply --recount", script)
 
 
 if __name__ == "__main__":
