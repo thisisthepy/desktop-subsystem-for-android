@@ -16,7 +16,6 @@ SPEC.loader.exec_module(make_image)
 class ImageLayoutTests(unittest.TestCase):
     def test_fr1_selects_vendor_apexes_without_the_cuttlefish_launcher(self):
         cmdline = make_image.kernel_cmdline("blkdevparts=sda:1@0(misc)")
-        self.assertIn("androidboot.hardware.gltransport=hvsocket", cmdline)
         self.assertIn(
             "androidboot.vendor.apex.com.android.hardware.gatekeeper=com.android.hardware.gatekeeper.nonsecure",
             cmdline,

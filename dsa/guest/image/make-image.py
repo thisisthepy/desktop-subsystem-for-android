@@ -424,7 +424,6 @@ def kernel_cmdline(partition_cmdline):
         f"androidboot.boot_part_uuid={MISC_UUID}", "androidboot.fstab_suffix=dsa",
         "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",
         "androidboot.hardware=cutf_cvm", "androidboot.verifiedbootstate=orange",
-        "androidboot.hardware.gltransport=hvsocket",
         "androidboot.vbmeta.device_state=unlocked",
         *(f"androidboot.vendor.apex.{module}={apex}"
           for module, apex in VENDOR_APEX_BOOTCONFIG.items()),
