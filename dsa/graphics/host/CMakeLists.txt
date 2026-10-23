@@ -81,11 +81,16 @@ set(VIRGL_RENDERER_UNSTABLE_APIS ON CACHE BOOL "" FORCE)
 add_subdirectory("${GFXSTREAM_DIR}" gfxstream_build EXCLUDE_FROM_ALL)
 
 # Suppress warning escalation to error for compiler variations
+set(SUPPRESS_FLAGS -Wno-error -Wno-c++98-compat -Wno-c++98-compat-pedantic)
+
+if(TARGET gfxstream-vulkan-server)
+    target_compile_options(gfxstream-vulkan-server PRIVATE ${SUPPRESS_FLAGS})
+endif()
 if(TARGET gfxstream_backend_static)
-    target_compile_options(gfxstream_backend_static PRIVATE -Wno-error)
+    target_compile_options(gfxstream_backend_static PRIVATE ${SUPPRESS_FLAGS})
 endif()
 if(TARGET gfxstream_backend)
-    target_compile_options(gfxstream_backend PRIVATE -Wno-error)
+    target_compile_options(gfxstream_backend PRIVATE ${SUPPRESS_FLAGS})
 endif()
 
 # Staging distribution target
