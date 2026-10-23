@@ -166,6 +166,7 @@ target_include_directories(vulkan.ranchu PRIVATE
     ${GFXSTREAM_DIR}/guest/OpenglCodecCommon/include
     ${GFXSTREAM_DIR}/guest/android-emu
     ${GFXSTREAM_DIR}/guest/android-emu/aemu/base
+    ${GFXSTREAM_DIR}/guest/android-emu/aemu/base/files
     ${GFXSTREAM_DIR}/guest/gralloc_cb/include
     ${GFXSTREAM_DIR}/guest/qemupipe/include
     ${GFXSTREAM_DIR}/guest/qemupipe/include-types

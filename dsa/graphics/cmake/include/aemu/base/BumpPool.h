@@ -9,24 +9,19 @@
 
 #include <vector>
 #include <unordered_set>
-
+#include <cstdlib>
+#include <cstdint>
 #include <inttypes.h>
 
-namespace android {
-namespace base {
+namespace gfxstream {
+namespace aemu {
 
-// Class to make it easier to set up memory regions where it is fast
-// to allocate buffers AND we don't care about freeing individual pieces,
-// BUT it's necessary to preserve previous pointer values in between the first
-// alloc() after a freeAll(), and the freeAll() itself, allowing some sloppy use of
-// malloc in the first pass while we find out how much data was needed.
+using Allocator = gfxstream::guest::Allocator;
+
 class BumpPool : public Allocator {
 public:
-    BumpPool(size_t startingBytes = 4096) : mStorage(startingBytes / sizeof(uint64_t))  { }
-    // All memory allocated by this pool
-    // is automatically deleted when the pool
-    // is deconstructed.
-    ~BumpPool() {
+    BumpPool(size_t startingBytes = 4096) : mStorage(startingBytes / sizeof(uint64_t)) { }
+    ~BumpPool() override {
         freeAll();
     }
 
@@ -59,12 +54,27 @@ public:
         mTotalWantedThisGeneration = 0;
     }
 private:
-    AlignedBuf<uint64_t, 8> mStorage;
+    gfxstream::guest::AlignedBuf<uint64_t, 8> mStorage;
     std::unordered_set<void*> mFallbackPtrs;
     size_t mAllocPos = 0;
     size_t mTotalWantedThisGeneration = 0;
     bool mNeedRealloc = false;
 };
 
+} // namespace aemu
+
+namespace guest {
+using BumpPool = gfxstream::aemu::BumpPool;
+} // namespace guest
+
+} // namespace gfxstream
+
+namespace android {
+namespace base {
+using Allocator = gfxstream::guest::Allocator;
+using BumpPool = gfxstream::aemu::BumpPool;
 } // namespace base
 } // namespace android
+
+using Allocator = gfxstream::guest::Allocator;
+using BumpPool = gfxstream::aemu::BumpPool;
