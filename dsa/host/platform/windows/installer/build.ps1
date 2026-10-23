@@ -136,6 +136,17 @@ if (-not (Test-Path $balDll)) {
     if (-not (Test-Path $balDll)) { throw "the bootstrapper extension has no $balDll" }
 }
 
+$utilVersion = "5.0.2"
+$utilDir = Join-Path $out "ext\util-$utilVersion"
+$utilDll = Join-Path $utilDir "wixext5\WixToolset.Util.wixext.dll"
+if (-not (Test-Path $utilDll)) {
+    New-Item -ItemType Directory -Force $utilDir | Out-Null
+    $nupkg = Join-Path $utilDir "util.zip"
+    Invoke-WebRequest -Uri "https://api.nuget.org/v3-flatcontainer/wixtoolset.util.wixext/$utilVersion/wixtoolset.util.wixext.$utilVersion.nupkg" -OutFile $nupkg
+    Expand-Archive -Path $nupkg -DestinationPath $utilDir -Force
+    if (-not (Test-Path $utilDll)) { throw "the util extension has no $utilDll" }
+}
+
 $msi = Join-Path $out "dsa-$Version.msi"
 $setup = Join-Path $out "setup-$Version.exe"
 $defines = @("-d", "Version=$Version", "-d", "SourceDir=$stage")
@@ -153,7 +164,8 @@ if ($imageManifest) {
 
 Push-Location $installer
 try {
-    wix build -arch x64 @defines dsa.wxs -o $msi
+    $msiExt = if (Test-Path $utilDll) { @("-ext", $utilDll) } else { @("-ext", "WixToolset.Util.wixext") }
+    wix build -arch x64 @msiExt @defines dsa.wxs -o $msi
     if ($LASTEXITCODE -ne 0) { throw "building the package failed" }
     $bundleDefines = @("-d", "Version=$Version", "-d", "MsiPath=$msi", "-d", "SetupUiDir=$setupUi")
     if ($AndroidMajor -gt 0) { $bundleDefines += @("-d", "AndroidMajor=$AndroidMajor") }
