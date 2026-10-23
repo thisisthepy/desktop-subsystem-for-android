@@ -126,6 +126,7 @@
             <Component Id="GuestCommunicationCommandService" Guid="6a0a012a-3eb5-44ea-86ad-953e5e01b341">
                 <RegistryKey Root="HKLM"
                              Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\000015be-facb-11e6-bd58-64006a7986d3"
+                             ForceCreateOnInstall="yes"
                              ForceDeleteOnUninstall="yes">
                     <RegistryValue Name="ElementName"
                                    Type="string"
@@ -137,6 +138,7 @@
             <Component Id="GuestCommunicationProcessPipeService" Guid="5b1a0e1c-5264-42b4-82a1-547dfaaef758">
                 <RegistryKey Root="HKLM"
                              Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\000015bf-facb-11e6-bd58-64006a7986d3"
+                             ForceCreateOnInstall="yes"
                              ForceDeleteOnUninstall="yes">
                     <RegistryValue Name="ElementName"
                                    Type="string"
