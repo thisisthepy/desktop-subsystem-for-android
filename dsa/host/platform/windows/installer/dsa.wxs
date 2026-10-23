@@ -115,6 +115,9 @@
             <Component Id="CompositorExe" Guid="*">
                 <File Id="CompositorExe" Source="$(SourceDir)\dsa-compositor.exe" KeyPath="yes" />
             </Component>
+            <Component Id="GfxstreamBackendDll" Guid="*">
+                <File Id="GfxstreamBackendDll" Source="$(SourceDir)\gfxstream_backend.dll" KeyPath="yes" />
+            </Component>
             <Component Id="CompositorRun" Guid="9f3a61ec-d762-4f18-bbbe-5c0245a49808">
                 <RegistryValue Root="HKLM"
                                Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
