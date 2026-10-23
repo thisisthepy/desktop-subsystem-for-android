@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use dsa_host_windows::host_config::{expand_locations, HostConfig};
+use dsa_host_windows::host_config::{expand_locations, profile_disk, HostConfig};
 
 const MINIMAL: &str = r#"{
   "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
@@ -393,4 +393,49 @@ fn fr2_without_a_service_log_the_console_is_kept_beside_the_users_disk() {
         PathBuf::from(r"C:\Users\alice\AppData\Local\DSA\android-S-1-5-21-1-2-3-1001.log")
     );
     assert_eq!(alice.config.image_version, None, "no versioned image");
+}
+
+#[test]
+fn fr1_user_profile_resolution_and_vm_config_leave_wslconfig_untouched() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("fr1-wslconfig-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let wslconfig = dir.join(".wslconfig");
+    let original = b"[wsl2]
+kernel=C:\\WSL\\bzImage
+memory=8GB
+processors=4
+";
+    std::fs::write(&wslconfig, original).unwrap();
+
+    let local_dir = dir.join("AppData").join("Local");
+    let profile_dir = local_dir.clone();
+    let lookup_profile = move |sid: &str| -> Result<PathBuf, String> {
+        if sid == "S-1-5-21-1-2-3-1001" {
+            Ok(profile_dir.clone())
+        } else {
+            Err("no profile".into())
+        }
+    };
+
+    let config = HostConfig::parse(PROFILES).unwrap();
+    let alice = config
+        .user_vm_with("S-1-5-21-1-2-3-1001", &lookup_profile)
+        .unwrap();
+
+    assert_eq!(alice.config.data_disk, profile_disk(&local_dir));
+    assert!(alice.disk_in_profile);
+
+    let vm = config
+        .vm_config_with(Some("S-1-5-21-1-2-3-1001"), &lookup_profile)
+        .unwrap();
+    assert_eq!(vm.data_disk, profile_disk(&local_dir));
+
+    let current = std::fs::read(&wslconfig).unwrap();
+    assert_eq!(
+        current, original,
+        "the user's .wslconfig must remain byte-identical"
+    );
 }
