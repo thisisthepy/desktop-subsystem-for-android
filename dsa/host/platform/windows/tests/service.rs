@@ -376,3 +376,58 @@ fn fr15_the_installed_service_runs_a_signed_setup_and_reports_when_it_fails() {
         .unwrap_or_default()
         .contains("being installed"));
 }
+
+#[test]
+fn nfr5_service_keeps_running_when_update_store_has_bad_file() {
+    use dsa_host_windows::host_config::HostConfig;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let id = std::process::id();
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("bad-store-{id}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    let images = dir.join("images");
+    std::fs::create_dir_all(&images).unwrap();
+    // A corrupted state file that cannot be parsed as JSON.
+    std::fs::write(images.join("state.json"), b"{ invalid json").unwrap();
+
+    let pipe = format!("dsa-test-bad-store-{id}");
+    let config = HostConfig::parse(
+        &serde_json::json!({
+            "kernel": dir.join("missing").join("bzImage"),
+            "images_dir": images,
+            "first_image": {"version": "16.0.1", "android_major": 16, "build": 1},
+            "data_dir": dir.join("users"),
+            "pipe_name": pipe,
+            "pipe_sddl": "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)",
+            "log_file": dir.join("dsa-hostd.log"),
+            "connect_timeout_secs": 5,
+            "stop_timeout_secs": 5,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_serve = Arc::clone(&stop);
+    let server =
+        std::thread::spawn(move || dsa_host_windows::service::serve(config, "test", stop_serve));
+
+    let mut connector = NamedPipeConnector { name: pipe };
+    let mut client = None;
+    wait_until("the pipe to appear", Duration::from_secs(10), || {
+        client = HostApiClient::connect(&mut connector, "test", Duration::from_secs(1)).ok();
+        client.is_some()
+    });
+    use dsa_host_core::host_api::ClientError;
+    let mut client = client.unwrap();
+    match client.status() {
+        Ok(status) => assert_eq!(status.state, SessionState::Stopped),
+        Err(ClientError::Service { .. }) => {}
+        Err(other) => panic!("expected status or service error, got {other:?}"),
+    }
+
+    stop.store(true, Ordering::Relaxed);
+    let res = server.join().unwrap();
+    assert!(res.is_ok());
+}
