@@ -44,6 +44,47 @@ permissions:
   contents: read
 
 jobs:
+  guest-graphics:
+    name: Build the guest Hyper-V graphics transport
+    if: inputs.rebuild_images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
+
+      - name: Fetch gfxstream and guest build dependencies
+        run: bash dsa/graphics/fetch.sh .scratch/gfxstream
+
+      - name: Build the guest transport
+        run: bash dsa/graphics/build.sh .scratch .scratch/build
+
+      - name: Verify ELF architecture and exported Hyper-V symbols
+        run: |
+          target=".scratch/build/libOpenglSystemCommon.so"
+          readelf -h "$target" | grep -Fq 'Advanced Micro Devices X86-64'
+          nm -D "$target" | grep -Fq 'HvSocketStream'
+          nm -D "$target" | grep -Fq 'goldfish_get_egl_tls'
+          target_vk=".scratch/build/vulkan.ranchu.so"
+          readelf -h "$target_vk" | grep -Fq 'Advanced Micro Devices X86-64'
+          nm -D "$target_vk" | grep -Fq 'vk_icdGetInstanceProcAddr'
+          nm -D "$target_vk" | grep -Fq 'HMI'
+
+      - name: Keep the patched guest library
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-gfxstream-hvsocket
+          path: |
+            .scratch/build/libOpenglSystemCommon.so
+            .scratch/build/vulkan.ranchu.so
+          if-no-files-found: error
+
   kernel:
     name: Build the guest kernel (x86_64)
     if: inputs.rebuild_images
@@ -72,7 +113,7 @@ jobs:
 
   image:
     name: Make and publish the guest image (ubuntu-latest, Android ${{ matrix.android }})
-    needs: kernel
+    needs: [kernel, guest-graphics]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
@@ -108,8 +149,29 @@ jobs:
           name: guest-kernel
           path: .scratch/kernel-out
 
+      - name: Download guest graphics transport
+        uses: actions/download-artifact@v4
+        with:
+          name: guest-gfxstream-hvsocket
+          path: .scratch/guest-graphics
+
       - name: Fetch the pinned inputs
         run: dsa/guest/image/fetch.sh ${{ matrix.android }}
+
+      - name: Verify graphics libraries ELF dependencies
+        run: |
+          target_zip=$(echo .scratch/aosp-inputs/*/*target_files*.zip)
+          for lib in .scratch/guest-graphics/libOpenglSystemCommon.so .scratch/guest-graphics/vulkan.ranchu.so; do
+            echo "Checking ELF dependencies for $lib..."
+            needed=$(readelf -d "$lib" | grep NEEDED | sed -E 's/.*\[(.*)\]/\1/')
+            for dep in $needed; do
+              if ! unzip -l "$target_zip" | grep -E "(VENDOR|SYSTEM)/lib64/(hw/|egl/)?$dep" >/dev/null 2>&1; then
+                echo "Missing dependency $dep for $lib in image!" >&2
+                exit 1
+              fi
+              echo "  OK: $dep found in image"
+            done
+          done
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
@@ -118,6 +180,7 @@ jobs:
         run: >
           uv run dsa/guest/image/make-image.py --major ${{ matrix.android }}
           --keys .scratch/image-keys --kernel .scratch/kernel-out/bzImage
+          --graphics-dir .scratch/guest-graphics
 
       - name: Check the image
         run: uv run dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys

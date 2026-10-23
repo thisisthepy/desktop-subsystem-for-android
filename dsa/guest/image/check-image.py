@@ -14,6 +14,7 @@ META/apkcerts.txt over unchanged, so that file still names AOSP's keys after sig
 import base64
 import gzip
 import io
+import shutil
 import stat
 
 import hashlib
@@ -75,12 +76,41 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         if not re.search(r"\(allow\s+appdomain\s+self\s+\(\s*vsock_socket\s*\(.*connect", plat_sepolicy):
             problems.append("the SELinux policy does not allow appdomain to connect vsock_socket")
 
-disks_to_check = ["system.vhdx", "data.vhdx"] if (image / "system.vhdx").exists() else ["disk.vhdx"]
+    if "VENDOR/lib64/hw/vulkan.ranchu.so" not in names:
+        problems.append("VENDOR/lib64/hw/vulkan.ranchu.so is missing from the image")
+    if "VENDOR/lib64/libOpenglSystemCommon.so" not in names:
+        problems.append("VENDOR/lib64/libOpenglSystemCommon.so is missing from the image")
+
+    if "VENDOR/etc/selinux/vendor_file_contexts" in names:
+        vendor_fc = z.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
+        for expected_path in ["vulkan\\.ranchu\\.so", "libOpenglSystemCommon\\.so"]:
+            if not re.search(rf"{expected_path}.*same_process_hal_file", vendor_fc):
+                problems.append(f"vendor_file_contexts does not label {expected_path} as same_process_hal_file")
+
+    vendor_props = z.read("VENDOR/build.prop").decode() if "VENDOR/build.prop" in names else ""
+    for prop, val in [
+        ("ro.hardware.egl", "angle"),
+        ("ro.hardware.vulkan", "ranchu"),
+        ("ro.hardware.gralloc", "minigbm"),
+        ("ro.cpuvulkan.version", "0"),
+    ]:
+        if f"{prop}={val}" not in props and f"{prop}={val}" not in vendor_props:
+            problems.append(f"neither SYSTEM nor VENDOR build.prop sets {prop}={val}")
+
+disks_to_check = [d for d in ["system.vhdx", "data.vhdx"] if (image / d).exists()]
+if not disks_to_check and (image / "disk.vhdx").exists():
+    disks_to_check = ["disk.vhdx"]
+if not disks_to_check:
+    problems.append("no guest disk image found")
 for disk_file in disks_to_check:
-    info = json.loads(subprocess.run(["qemu-img", "info", "--output=json", str(image / disk_file)], check=True, capture_output=True, text=True).stdout)
-    if info.get("format") != "vhdx":
-        problems.append(f"{disk_file} is {info.get('format')}, not vhdx")
-    print(f"{disk_file}: {info['virtual-size'] >> 30} GiB virtual, {info.get('actual-size', 0) >> 20} MiB on disk")
+    try:
+        qemu_img = shutil.which("qemu-img") or "qemu-img"
+        info = json.loads(subprocess.run([qemu_img, "info", "--output=json", str(image / disk_file)], check=True, capture_output=True, text=True).stdout)
+        if info.get("format") != "vhdx":
+            problems.append(f"{disk_file} is {info.get('format')}, not vhdx")
+        print(f"{disk_file}: {info['virtual-size'] >> 30} GiB virtual, {info.get('actual-size', 0) >> 20} MiB on disk")
+    except Exception as e:
+        problems.append(f"could not inspect {disk_file}: {e}")
 if "system.vhdx" in disks_to_check:
     if "androidboot.boot_devices=" not in manifest["kernel_cmdline"]:
         problems.append("the kernel command line does not name the boot devices")
@@ -91,6 +121,15 @@ if "blkdevparts=sda:" not in manifest["kernel_cmdline"]:
     problems.append("the kernel command line does not restore Hyper-V GPT partition names")
 if "androidboot.selinux=permissive" in manifest["kernel_cmdline"]:
     problems.append("the kernel command line sets SELinux to permissive")
+for boot_arg in [
+    "androidboot.hardware.gltransport=hvsocket",
+    "androidboot.hardware.egl=angle",
+    "androidboot.hardware.vulkan=ranchu",
+    "androidboot.hardware.gralloc=minigbm",
+    "androidboot.cpuvulkan.version=0",
+]:
+    if boot_arg not in manifest["kernel_cmdline"]:
+        problems.append(f"the kernel command line does not contain {boot_arg}")
 
 def ramdisk_entries(data):
     """Name to mode of every entry in a ramdisk of gzip'd newc cpio archives."""

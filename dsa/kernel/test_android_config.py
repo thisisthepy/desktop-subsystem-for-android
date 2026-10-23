@@ -27,6 +27,11 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertIn("CONFIG_VSOCKETS=y", config)
         self.assertIn("CONFIG_HYPERV_VSOCKETS=y", config)
 
+    def test_pr3_vgem_is_built_into_the_guest_kernel_for_minigbm(self):
+        config = CONFIG.read_text()
+        self.assertIn("CONFIG_DRM=y", config)
+        self.assertIn("CONFIG_DRM_VGEM=y", config)
+
     def test_fr1_vmbus_root_device_is_platform_device_patch(self):
         patch = (PATCHES / "vmbus-platform-device.patch").read_text()
         self.assertIn("drivers/hv/vmbus_drv.c", patch)
