@@ -150,6 +150,8 @@ set(VULKAN_SOURCES
     ${MESA3D_DIR}/src/gfxstream/guest/android/GrallocGoldfish.cpp
     ${MESA3D_DIR}/src/gfxstream/guest/android/GrallocMinigbm.cpp
     ${GFXSTREAM_DIR}/guest/OpenglSystemCommon/HvSocketStream.cpp
+    ${GFXSTREAM_DIR}/guest/android-emu/aemu/base/files/Stream.cpp
+    ${GFXSTREAM_DIR}/guest/android-emu/aemu/base/files/StreamSerializing.cpp
 )
 
 add_library(vulkan.ranchu SHARED ${VULKAN_SOURCES})
