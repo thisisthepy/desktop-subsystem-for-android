@@ -3,7 +3,7 @@ param(
     [string]$ScratchDir = "$PSScriptRoot/../../../../.scratch",
     [string]$OutDir = "",
     [string]$Config = "Release",
-    [string]$Generator = "Visual Studio 17 2022",
+    [string]$Generator = "Ninja",
     [string]$Platform = "x64",
     [string]$Toolset = "ClangCL"
 )
@@ -34,6 +34,23 @@ if ((-not (Test-Path "$GfxstreamDir/CMakeLists.txt")) -or
     & "$PSScriptRoot/fetch.ps1" -ScratchDir $ScratchPath
 }
 
+# Import Visual Studio environment if available
+$Vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+if (Test-Path $Vswhere) {
+    $VsPath = & $Vswhere -latest -property installationPath
+    if ($VsPath) {
+        $Vcvars = Join-Path $VsPath "VC\Auxiliary\Build\vcvars64.bat"
+        if (Test-Path $Vcvars) {
+            Write-Host "Initializing Visual Studio environment from $Vcvars..."
+            cmd.exe /c "call `"$Vcvars`" && set" | ForEach-Object {
+                if ($_ -match '^(.*?)=(.*)$') {
+                    Set-Content "env:$($matches[1])" $matches[2]
+                }
+            }
+        }
+    }
+}
+
 $CMakeBin = "cmake"
 if (-not (Get-Command $CMakeBin -ErrorAction SilentlyContinue)) {
     # Check Android SDK cmake candidates
@@ -53,7 +70,15 @@ $ConfigureArgs = @(
     "-DDIST_DIR=$DistDir"
 )
 
-if ($Generator -match "Visual Studio") {
+$HasNinja = [bool](Get-Command ninja.exe -ErrorAction SilentlyContinue)
+$HasClangCl = [bool](Get-Command clang-cl.exe -ErrorAction SilentlyContinue)
+
+if ($Generator -eq "Ninja" -and $HasNinja) {
+    $ConfigureArgs += @("-G", "Ninja", "-DCMAKE_BUILD_TYPE=$Config")
+    if ($HasClangCl) {
+        $ConfigureArgs += @("-DCMAKE_C_COMPILER=clang-cl", "-DCMAKE_CXX_COMPILER=clang-cl")
+    }
+} elseif ($Generator -match "Visual Studio") {
     $ConfigureArgs += @("-G", $Generator, "-A", $Platform)
     if ($Toolset) {
         $ConfigureArgs += @("-T", $Toolset)

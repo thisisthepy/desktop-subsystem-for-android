@@ -13,19 +13,17 @@ CMAKE_FILE = HERE / "CMakeLists.txt"
 class HostGraphicsBuildTests(unittest.TestCase):
     def test_pr3_host_build_script_invokes_cmake_for_gfxstream_backend(self):
         script = BUILD_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("Visual Studio 17 2022", script)
-        self.assertIn("ClangCL", script)
+        self.assertIn("Ninja", script)
+        self.assertIn("clang-cl", script)
         self.assertIn("gfxstream_backend", script)
         self.assertIn("dist_host_gfxstream", script)
 
     def test_pr3_host_cmake_glue_enforces_vulkan_and_standalone_aemu(self):
         cmake = CMAKE_FILE.read_text(encoding="utf-8")
         self.assertIn("VK_USE_PLATFORM_WIN32_KHR", cmake)
-        self.assertIn("VK_GFXSTREAM_STRUCTURE_TYPE_EXT", cmake)
         self.assertIn("AEMU_COMMON_BUILD_CONFIG", cmake)
         self.assertIn("add_library(flatbuffers INTERFACE)", cmake)
         self.assertIn("add_library(libdrm_headers INTERFACE)", cmake)
-        self.assertIn("add_library(gfxstream_vulkan_headers INTERFACE)", cmake)
         self.assertIn("add_library(gfxstream_egl_headers INTERFACE)", cmake)
         self.assertIn("add_custom_target(dist_host_gfxstream", cmake)
 

@@ -10,7 +10,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(NOT DEFINED SCRATCH_DIR)
-    set(SCRATCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../.scratch")
+    set(SCRATCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../.scratch")
 endif()
 get_filename_component(SCRATCH_DIR "${SCRATCH_DIR}" ABSOLUTE)
 
@@ -59,17 +59,6 @@ endif()
 
 if(NOT TARGET libdrm_headers)
     add_library(libdrm_headers INTERFACE)
-endif()
-
-if(NOT TARGET gfxstream_vulkan_headers)
-    add_library(gfxstream_vulkan_headers INTERFACE)
-    target_include_directories(gfxstream_vulkan_headers INTERFACE
-        "${GFXSTREAM_DIR}/common/vulkan/include"
-    )
-    target_compile_definitions(gfxstream_vulkan_headers INTERFACE
-        VK_GFXSTREAM_STRUCTURE_TYPE_EXT
-        VK_USE_PLATFORM_WIN32_KHR
-    )
 endif()
 
 if(NOT TARGET gfxstream_egl_headers)
