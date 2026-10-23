@@ -43,8 +43,9 @@ jobs:
           curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o .scratch/aosp/repo
           chmod +x .scratch/aosp/repo
           cd .scratch/aosp
-          ./repo init -u https://android.googlesource.com/platform/manifest -b android-latest-release
-          ./repo sync -c -j2 --no-tags
+          ./repo init -u https://android.googlesource.com/platform/manifest -b android-latest-release \
+            --partial-clone --clone-filter=blob:limit=10M
+          ./repo sync -c -j2 --no-tags --optimized-fetch
 
       - name: Apply the DSA gfxstream transport
         run: dsa/graphics/fetch.sh .scratch/aosp/hardware/google/gfxstream
