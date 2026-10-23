@@ -15,6 +15,7 @@ class GraphicsBuildTests(unittest.TestCase):
         self.assertIn("android.toolchain.cmake", script)
         self.assertIn("ANDROID_ABI=x86_64", script)
         self.assertIn("OpenglSystemCommon", script)
+        self.assertIn("vulkan.ranchu", script)
 
     def test_pr3_cmake_defines_guest_library_and_stub_linkage(self):
         cmake = CMAKE_FILE.read_text()
@@ -22,6 +23,15 @@ class GraphicsBuildTests(unittest.TestCase):
         self.assertIn("HvSocketStream.cpp", cmake)
         self.assertIn("-Wl,-z,undefs", cmake)
         self.assertIn("add_stub_library", cmake)
+
+    def test_pr3_cmake_defines_vulkan_ranchu_library_and_exports(self):
+        cmake = CMAKE_FILE.read_text()
+        self.assertIn("add_library(vulkan.ranchu SHARED", cmake)
+        self.assertIn("OUTPUT_NAME \"vulkan.ranchu\"", cmake)
+        self.assertIn("gfxstream_vk_device.cpp", cmake)
+        self.assertIn("gfxstream_vk_android.cpp", cmake)
+        self.assertIn("add_stub_library(sync)", cmake)
+        self.assertIn("add_stub_library(nativewindow)", cmake)
 
 
 if __name__ == "__main__":

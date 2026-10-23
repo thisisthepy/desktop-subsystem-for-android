@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the guest libOpenglSystemCommon with Hyper-V socket transport using Android NDK and CMake.
+# Builds the guest libOpenglSystemCommon and vulkan.ranchu with Hyper-V socket transport using Android NDK and CMake.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -55,6 +55,7 @@ fi
     -DANDROID_PLATFORM=android-34 \
     -DSCRATCH_DIR="$scratch"
 
-"$cmake_bin" --build "$out_dir" --target OpenglSystemCommon
+"$cmake_bin" --build "$out_dir" --target OpenglSystemCommon vulkan.ranchu
 
 echo "Built library: $out_dir/libOpenglSystemCommon.so"
+echo "Built library: $out_dir/vulkan.ranchu.so"
