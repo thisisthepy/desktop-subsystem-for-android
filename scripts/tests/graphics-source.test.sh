@@ -7,6 +7,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-python3 dsa/graphics/test_fetch.py
-python3 dsa/graphics/test_hvsocket_patch.py
-python3 dsa/graphics/test_build.py
+uv run dsa/graphics/test_fetch.py
+uv run dsa/graphics/test_hvsocket_patch.py
+uv run dsa/graphics/test_build.py
