@@ -1,7 +1,7 @@
 [package]
 name = "dsa-host-windows"
 version = "0.1.0"
-description = "The Windows host: WSL launch and the hvsocket transport"
+description = "The Windows host: the Android VM and the hvsocket transport"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
