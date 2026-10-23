@@ -573,7 +573,7 @@ You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
 
-Portions of gfxstream and related guest dependencies (mesa3d, libhardware, system/core)
+Portions of gfxstream and related guest and host dependencies (aemu, mesa3d, libhardware, system/core, glm, renderdoc, stb, angle)
 are licensed under the MIT License or BSD-3-Clause License.
 """
 
