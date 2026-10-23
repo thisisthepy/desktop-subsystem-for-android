@@ -16,6 +16,13 @@ class HvSocketPatchTests(unittest.TestCase):
         self.assertIn('transport == "hvsocket"', patch)
         self.assertIn("HvSocketStream.cpp", patch)
 
+    def test_pr3_process_pipe_uses_a_separate_hyper_v_socket(self):
+        patch = PATCH.read_text()
+        self.assertIn('#include "HvSocketStream.h"', patch)
+        self.assertIn("sHvSocketStream", patch)
+        self.assertIn("HOST_CONNECTION_HYPERV_SOCKET", patch)
+        self.assertIn("kProcessPipePort", patch)
+
 
 if __name__ == "__main__":
     unittest.main()

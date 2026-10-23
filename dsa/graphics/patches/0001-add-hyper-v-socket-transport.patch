@@ -81,7 +81,7 @@ index 0000000..6a216d3
 +// host's AF_HYPERV listener, so no virtio-gpu device or guest DRM node is required.
 +class HvSocketStream final : public gfxstream::guest::IOStream {
 +public:
-+    explicit HvSocketStream(size_t buffer_size);
++    explicit HvSocketStream(size_t buffer_size, uint32_t port = 5566);
 +    ~HvSocketStream() override;
 +
 +    int connect(const char* service_name = nullptr);
@@ -96,6 +96,7 @@ index 0000000..6a216d3
 +private:
 +    bool connected() const;
 +    int fd_;
++    uint32_t port_;
 +    size_t buffer_size_;
 +    unsigned char* buffer_;
 +};
@@ -120,12 +121,8 @@ index 0000000..4debf68
 +
 +#include <cutils/log.h>
 +
-+namespace {
-+constexpr unsigned int kGraphicsPort = 5566;
-+}
-+
-+HvSocketStream::HvSocketStream(size_t buffer_size)
-+    : IOStream(buffer_size), fd_(-1), buffer_size_(buffer_size), buffer_(nullptr) {}
++HvSocketStream::HvSocketStream(size_t buffer_size, uint32_t port)
++    : IOStream(buffer_size), fd_(-1), port_(port), buffer_size_(buffer_size), buffer_(nullptr) {}
 +
 +HvSocketStream::~HvSocketStream() {
 +    if (fd_ >= 0) {
@@ -149,7 +146,7 @@ index 0000000..4debf68
 +    }
 +    sockaddr_vm address{};
 +    address.svm_family = AF_VSOCK;
-+    address.svm_port = kGraphicsPort;
++    address.svm_port = port_;
 +    address.svm_cid = VMADDR_CID_HOST;
 +    if (::connect(socket_fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0) {
 +        ALOGE("HvSocketStream: connect failed: %s", strerror(errno));
@@ -161,9 +158,14 @@ index 0000000..4debf68
 +}
 +
 +uint64_t HvSocketStream::processPipeInit() {
-+    // The graphics service identifies a connection by its dedicated port. It does not use
-+    // the emulator's GLProcessPipe control request.
-+    return 0;
++    int32_t confirm = 100;
++    uint64_t process_uid = 0;
++    if (writeFully(&confirm, sizeof(confirm)) != 0 ||
++        !readFully(&process_uid, sizeof(process_uid))) {
++        ALOGW("HvSocketStream: process pipe initialisation failed");
++        return 0;
++    }
++    return process_uid;
 +}
 +
 +void* HvSocketStream::allocBuffer(size_t minimum_size) {
@@ -249,3 +251,40 @@ index 0000000..4debf68
 +        return nullptr;
 +    }
 +}
+diff --git a/guest/OpenglSystemCommon/ProcessPipe.cpp b/guest/OpenglSystemCommon/ProcessPipe.cpp
+index 30b8d8e7..b443e54e 100644
+--- a/guest/OpenglSystemCommon/ProcessPipe.cpp
++++ b/guest/OpenglSystemCommon/ProcessPipe.cpp
+@@ -26,10 +26,13 @@
+ #ifndef __Fuchsia__
+ 
+ #include "QemuPipeStream.h"
+ #include "VirtioGpuPipeStream.h"
++#include "HvSocketStream.h"
+ 
+ static QemuPipeStream* sQemuPipeStream = nullptr;
+ static VirtioGpuPipeStream* sVirtioGpuPipeStream = nullptr;
++static HvSocketStream* sHvSocketStream = nullptr;
+ static int sStreamHandle = -1;
++static constexpr unsigned int kProcessPipePort = 5567;
+ 
+ #endif  // !__Fuchsia__
+@@ -67,6 +70,11 @@ static void processPipeDoInit(uint32_t noRenderControlEnc) {
+             sProcUID = sVirtioGpuPipeStream->processPipeInit();
+             break;
+         }
++        case HOST_CONNECTION_HYPERV_SOCKET:
++            sHvSocketStream = new HvSocketStream(4096, kProcessPipePort);
++            sHvSocketStream->connect();
++            sProcUID = sHvSocketStream->processPipeInit();
++            break;
+     }
+ #endif
+ }
+@@ -91,5 +99,5 @@ bool processPipeInit(int streamHandle, HostConnectionType connType, uint32_t noR
+ #ifndef __Fuchsia__
+-            if (!sQemuPipeStream && !sVirtioGpuPipeStream) {
++            if (!sQemuPipeStream && !sVirtioGpuPipeStream && !sHvSocketStream) {
+                 return false;
+             }
+ #endif
