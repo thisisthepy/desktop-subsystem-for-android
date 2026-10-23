@@ -8,7 +8,7 @@ index 0401a87..e3c90b0 100644
  
 +#include "GfxStreamConnectionManager.h"
 +#include "GfxStreamRenderControl.h"
-+#include "renderControl_enc.h"
++#include "ExtendedRenderControl.h"
 +#include <gralloc_cb_bp.h>
 +
  #include <cros_gralloc/cros_gralloc_handle.h>
