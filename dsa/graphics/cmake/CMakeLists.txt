@@ -152,6 +152,7 @@ add_library(vulkan.ranchu SHARED ${VULKAN_SOURCES})
 
 target_include_directories(vulkan.ranchu PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${MESA3D_DIR}/include
     ${SCRATCH_DIR}/gen
     ${GFXSTREAM_DIR}/guest/OpenglSystemCommon
     ${GFXSTREAM_DIR}/guest/renderControl_enc
