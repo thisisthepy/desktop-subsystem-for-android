@@ -1,0 +1,238 @@
+diff --git a/src/gfxstream/guest/android/GrallocMinigbm.cpp b/src/gfxstream/guest/android/GrallocMinigbm.cpp
+index 0401a87..e3c90b0 100644
+--- a/src/gfxstream/guest/android/GrallocMinigbm.cpp
++++ b/src/gfxstream/guest/android/GrallocMinigbm.cpp
+@@ -5,6 +5,11 @@
+ 
+ #include "GrallocMinigbm.h"
+ 
++#include "GfxStreamConnectionManager.h"
++#include "GfxStreamRenderControl.h"
++#include "ExtendedRenderControl.h"
++#include <gralloc_cb_bp.h>
++
+ #include <cros_gralloc/cros_gralloc_handle.h>
+ #include <stdlib.h>
+ #include <sys/user.h>
+@@ -71,7 +76,36 @@ int MinigbmGralloc::allocate(uint32_t width, uint32_t height, uint32_t format, u
+ 
+ void MinigbmGralloc::acquire(AHardwareBuffer* ahb) { AHardwareBuffer_acquire(ahb); }
+ 
+-void MinigbmGralloc::release(AHardwareBuffer* ahb) { AHardwareBuffer_release(ahb); }
++void MinigbmGralloc::release(AHardwareBuffer* ahb) {
++    if (ahb) {
++        const native_handle_t* handle = AHardwareBuffer_getNativeHandle(ahb);
++        if (handle) {
++            cros_gralloc_handle const* cros_handle =
++                reinterpret_cast<cros_gralloc_handle const*>(handle);
++            uint32_t hostHandle = 0;
++            {
++                std::lock_guard<std::mutex> lock(mColorBufferMutex);
++                auto it = mBufferIdToColorBuffer.find(cros_handle->id);
++                if (it != mBufferIdToColorBuffer.end()) {
++                    hostHandle = it->second;
++                    mBufferIdToColorBuffer.erase(it);
++                }
++            }
++            if (hostHandle != 0) {
++                GfxStreamConnectionManager* mgr = GfxStreamConnectionManager::getThreadLocalInstance(
++                    renderControlGetTransport(), kCapsetGfxStreamVulkan);
++                if (mgr) {
++                    auto* rcEnc = static_cast<ExtendedRCEncoderContext*>(
++                        mgr->getEncoder(GFXSTREAM_CONNECTION_RENDER_CONTROL));
++                    if (rcEnc) {
++                        rcEnc->rcCloseColorBuffer(rcEnc, hostHandle);
++                    }
++                }
++            }
++        }
++        AHardwareBuffer_release(ahb);
++    }
++}
+ 
+ int MinigbmGralloc::lock(AHardwareBuffer* ahb, uint8_t** ptr) {
+     return AHardwareBuffer_lock(ahb, AHARDWAREBUFFER_USAGE_CPU_READ_RARELY, -1, nullptr,
+@@ -86,22 +120,68 @@ int MinigbmGralloc::lockPlanes(AHardwareBuffer* ahb, std::vector<LockedPlane>* a
+ int MinigbmGralloc::unlock(AHardwareBuffer* ahb) { return AHardwareBuffer_unlock(ahb, nullptr); }
+ 
+ uint32_t MinigbmGralloc::getHostHandle(const native_handle_t* handle) {
++    if (!handle) {
++        return 0;
++    }
++
++    // If the pinned code already has a goldfish/host-handle path that fits, use it.
++    const cb_handle_t* cb = cb_handle_t::from(handle);
++    if (cb && cb->hostHandle != 0) {
++        return cb->hostHandle;
++    }
++
+     cros_gralloc_handle const* cros_handle = reinterpret_cast<cros_gralloc_handle const*>(handle);
+-    struct VirtGpuExternalHandle hnd = {
+-        .osHandle = dup(cros_handle->fds[0]),
+-        .type = kMemHandleDmabuf,
+-    };
++    if (mDevice) {
++        struct VirtGpuExternalHandle hnd = {
++            .osHandle = dup(cros_handle->fds[0]),
++            .type = kMemHandleDmabuf,
++        };
++
++        auto resource = mDevice->importBlob(hnd);
++        if (resource && !resource->wait()) {
++            return resource->getResourceHandle();
++        }
++    }
+ 
+-    auto resource = mDevice->importBlob(hnd);
+-    if (!resource) {
++    // In a Hyper-V VM, minigbm handles cannot be imported via virtgpu blob ioctls because
++    // there is no virtio-gpu device. When a gralloc buffer has no host handle, allocate a
++    // host ColorBuffer through renderControl (rcCreateColorBuffer) on first use and cache
++    // the handle per buffer id; release with rcCloseColorBuffer when the buffer goes away.
++    const uint32_t bufferId = cros_handle->id;
++    {
++        std::lock_guard<std::mutex> lock(mColorBufferMutex);
++        auto it = mBufferIdToColorBuffer.find(bufferId);
++        if (it != mBufferIdToColorBuffer.end()) {
++            return it->second;
++        }
++    }
++
++    GfxStreamConnectionManager* mgr = GfxStreamConnectionManager::getThreadLocalInstance(
++        renderControlGetTransport(), kCapsetGfxStreamVulkan);
++    if (!mgr) {
+         return 0;
+     }
+ 
+-    if (resource->wait()) {
++    renderControlInit(mgr, nullptr);
++    auto* rcEnc = static_cast<ExtendedRCEncoderContext*>(
++        mgr->getEncoder(GFXSTREAM_CONNECTION_RENDER_CONTROL));
++    if (!rcEnc) {
+         return 0;
+     }
+ 
+-    return resource->getResourceHandle();
++    constexpr uint32_t kGlFormatRGBA = 0x1908;
++    const uint32_t width = cros_handle->width ? cros_handle->width : 1;
++    const uint32_t height = cros_handle->height ? cros_handle->height : 1;
++    uint32_t hostHandle = rcEnc->rcCreateColorBuffer(rcEnc, width, height, kGlFormatRGBA);
++    if (hostHandle == 0) {
++        return 0;
++    }
++
++    {
++        std::lock_guard<std::mutex> lock(mColorBufferMutex);
++        mBufferIdToColorBuffer[bufferId] = hostHandle;
++    }
++    return hostHandle;
+ }
+ 
+ uint32_t MinigbmGralloc::getHostHandle(const AHardwareBuffer* ahb) {
+diff --git a/src/gfxstream/guest/android/GrallocMinigbm.h b/src/gfxstream/guest/android/GrallocMinigbm.h
+index c10771c..c9dfc9a 100644
+--- a/src/gfxstream/guest/android/GrallocMinigbm.h
++++ b/src/gfxstream/guest/android/GrallocMinigbm.h
+@@ -7,6 +7,9 @@
+ 
+ #include <memory>
+ 
++#include <mutex>
++#include <unordered_map>
++
+ #include "VirtGpu.h"
+ #include "gfxstream/guest/GfxStreamGralloc.h"
+ 
+@@ -54,6 +57,8 @@ class MinigbmGralloc : public Gralloc {
+ 
+    private:
+     std::unique_ptr<VirtGpuDevice> mDevice;
++    std::mutex mColorBufferMutex;
++    std::unordered_map<uint32_t, uint32_t> mBufferIdToColorBuffer;
+ };
+ 
+ }  // namespace gfxstream
+diff --git a/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.cpp b/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.cpp
+index 31a9505..7927f80 100644
+--- a/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.cpp
++++ b/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.cpp
+@@ -10,6 +10,7 @@
+ #include "GoldfishAddressSpaceStream.h"
+ #include "QemuPipeStream.h"
+ #include "VirtGpu.h"
++#include "HvSocketStream.h"
+ #include "VirtioGpuAddressSpaceStream.h"
+ #include "VirtioGpuPipeStream.h"
+ #include "util/log.h"
+@@ -79,6 +80,19 @@ bool GfxStreamConnectionManager::initialize() {
+ 
+             break;
+         }
++        case GFXSTREAM_TRANSPORT_HYPERV_SOCKET: {
++            auto stream = new HvSocketStream(STREAM_BUFFER_SIZE, 5566);
++            if (!stream) {
++                mesa_loge("Failed to create Hyper-V socket stream for host connection\n");
++                return false;
++            }
++            if (stream->connect() < 0) {
++                mesa_loge("Failed to connect to host (HvSocketStream)\n");
++                return false;
++            }
++            mStream = stream;
++            break;
++        }
+         default:
+             return false;
+     }
+@@ -142,6 +156,14 @@ gfxstream::guest::IOStream* GfxStreamConnectionManager::processPipeStream(
+         case GFXSTREAM_TRANSPORT_VIRTIO_GPU_ADDRESS_SPACE:
+         case GFXSTREAM_TRANSPORT_VIRTIO_GPU_PIPE:
+             return new VirtioGpuPipeStream(STREAM_BUFFER_SIZE, mDescriptor);
++        case GFXSTREAM_TRANSPORT_HYPERV_SOCKET: {
++            auto stream = new HvSocketStream(4096, 5567);
++            if (!stream || stream->connect() < 0) {
++                mesa_loge("Failed to connect process pipe to host (HvSocketStream)\n");
++                return nullptr;
++            }
++            return stream;
++        }
+         default:
+             return nullptr;
+     }
+diff --git a/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.h b/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.h
+index c624341..8607999 100644
+--- a/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.h
++++ b/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.h
+@@ -25,6 +25,7 @@ enum GfxStreamTransportType {
+     GFXSTREAM_TRANSPORT_ADDRESS_SPACE = 2,
+     GFXSTREAM_TRANSPORT_VIRTIO_GPU_PIPE = 3,
+     GFXSTREAM_TRANSPORT_VIRTIO_GPU_ADDRESS_SPACE = 4,
++    GFXSTREAM_TRANSPORT_HYPERV_SOCKET = 5,
+ };
+ 
+ class GfxStreamConnectionManager {
+diff --git a/src/gfxstream/guest/vulkan/stubs/GfxStreamRenderControl.cpp b/src/gfxstream/guest/vulkan/stubs/GfxStreamRenderControl.cpp
+index cf95839..5c707c3 100644
+--- a/src/gfxstream/guest/vulkan/stubs/GfxStreamRenderControl.cpp
++++ b/src/gfxstream/guest/vulkan/stubs/GfxStreamRenderControl.cpp
+@@ -1,3 +1,7 @@
++#include <string>
++#if defined(__ANDROID__)
++#include "android-base/properties.h"
++#endif
+ /*
+  * Copyright 2024 Google LLC
+  * SPDX-License-Identifier: MIT
+@@ -7,6 +11,12 @@
+ #include <cerrno>
+ 
+ GfxStreamTransportType renderControlGetTransport() {
++#if defined(__ANDROID__)
++    std::string transport = android::base::GetProperty("ro.boot.hardware.gltransport", "");
++    if (transport == "hvsocket") {
++        return GFXSTREAM_TRANSPORT_HYPERV_SOCKET;
++    }
++#endif
+     return GFXSTREAM_TRANSPORT_VIRTIO_GPU_ADDRESS_SPACE;
+ }
+ 
