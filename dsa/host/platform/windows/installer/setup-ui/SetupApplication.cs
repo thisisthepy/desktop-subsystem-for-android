@@ -564,6 +564,11 @@ namespace Dsa.Setup
 
             if (status >= 0)
             {
+                if (this.PlannedAction == LaunchAction.Install)
+                {
+                    this.LaunchCompositor();
+                }
+
                 this.window.ShowSuccess(this.PlannedAction, promptRestart);
             }
             else
@@ -572,6 +577,34 @@ namespace Dsa.Setup
                 this.window.ShowFailure(this.PlannedAction, cancelled ? null : this.lastError, cancelled, promptRestart);
             }
         }
+        private void LaunchCompositor()
+        {
+            try
+            {
+                var installFolder = this.GetFolder("InstallFolder");
+                if (string.IsNullOrEmpty(installFolder))
+                {
+                    installFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "DSA");
+                }
+
+                var exePath = Path.Combine(installFolder, "dsa-compositor.exe");
+                if (File.Exists(exePath))
+                {
+                    var startInfo = new ProcessStartInfo
+                    {
+                        FileName = exePath,
+                        UseShellExecute = true,
+                        WorkingDirectory = installFolder,
+                    };
+                    Process.Start(startInfo);
+                }
+            }
+            catch (Exception e)
+            {
+                this.Log("could not launch compositor: " + e.Message);
+            }
+        }
+
 
         protected override void OnShutdown(ShutdownEventArgs args)
         {

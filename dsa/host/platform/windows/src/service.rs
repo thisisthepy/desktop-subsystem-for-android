@@ -33,6 +33,7 @@ use dsa_host_core::update::store::ImageStore;
 use dsa_transport::Listener;
 
 use crate::android_vm::AndroidVmLauncher;
+use crate::guest_communication_services::register_graphics_service_guids;
 use crate::guid::Guid;
 use crate::host_config::HostConfig;
 use crate::https::{UrlFetch, WinHttpFetch};
@@ -222,6 +223,22 @@ const FIRST_IMAGE_RETRY: Duration = Duration::from_secs(300);
 
 /// Serves the local API until `stop` is set, then stops every user's VM.
 pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(), String> {
+    serve_with(config, build, stop, register_graphics_service_guids)
+}
+
+/// Serves the local API with custom graphics service GUID registration.
+pub fn serve_with<F>(
+    config: HostConfig,
+    build: &str,
+    stop: Arc<AtomicBool>,
+    register_graphics_services: F,
+) -> Result<(), String>
+where
+    F: FnOnce() -> Result<(), String>,
+{
+    if let Err(error) = register_graphics_services() {
+        eprintln!("{build}: registering graphics service GUIDs: {error}");
+    }
     let sddl = config.pipe_sddl.as_deref().unwrap_or(DEFAULT_PIPE_SDDL);
     let listener = NamedPipeListener::bind(&config.pipe_name, sddl)
         .map_err(|e| format!("opening the pipe {:?}: {e}", config.pipe_name))?;
