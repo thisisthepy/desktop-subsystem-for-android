@@ -68,6 +68,12 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         problems.append(f"{len(unsigned)} apps are not signed with our keys, e.g. {unsigned[:3]}")
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
+    if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:
+        problems.append("plat_sepolicy.cil is missing from the image")
+    else:
+        plat_sepolicy = z.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+        if not re.search(r"\(allow\s+appdomain\s+self\s+\(\s*vsock_socket\s*\(.*connect", plat_sepolicy):
+            problems.append("the SELinux policy does not allow appdomain to connect vsock_socket")
 
 disks_to_check = ["system.vhdx", "data.vhdx"] if (image / "system.vhdx").exists() else ["disk.vhdx"]
 for disk_file in disks_to_check:
@@ -83,6 +89,8 @@ else:
         problems.append("the kernel command line does not name the disk")
 if "blkdevparts=sda:" not in manifest["kernel_cmdline"]:
     problems.append("the kernel command line does not restore Hyper-V GPT partition names")
+if "androidboot.selinux=permissive" in manifest["kernel_cmdline"]:
+    problems.append("the kernel command line sets SELinux to permissive")
 
 def ramdisk_entries(data):
     """Name to mode of every entry in a ramdisk of gzip'd newc cpio archives."""
