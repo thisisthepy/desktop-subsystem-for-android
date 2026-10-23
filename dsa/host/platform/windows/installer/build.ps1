@@ -33,7 +33,8 @@ param(
     [string[]]$TrustedKey = @(),
     [string]$ProgramListUrl,
     [string]$PipeSddl,
-    [int]$AndroidMajor
+    [int]$AndroidMajor,
+    [string]$GfxstreamBackend
 )
 $ErrorActionPreference = "Stop"
 
@@ -54,6 +55,18 @@ try {
 Copy-Item (Join-Path $dsa "target\release\dsa-hostd.exe") $stage
 Copy-Item (Join-Path $dsa "target\release\dsa-compositor.exe") $stage
 Copy-Item (Join-Path $dsa "target\release\dsa.exe") $stage
+
+if ($GfxstreamBackend) {
+    Copy-Item $GfxstreamBackend (Join-Path $stage "gfxstream_backend.dll")
+} elseif (Test-Path (Join-Path $stage "gfxstream_backend.dll")) {
+    # Already staged.
+} elseif (Test-Path (Join-Path $dsa "..\..\..\.scratch\build-host\dist\bin\gfxstream_backend.dll")) {
+    Copy-Item (Join-Path $dsa "..\..\..\.scratch\build-host\dist\bin\gfxstream_backend.dll") (Join-Path $stage "gfxstream_backend.dll")
+} elseif ($PlaceholderKernel) {
+    Set-Content -Path (Join-Path $stage "gfxstream_backend.dll") -Value "" -NoNewline
+} else {
+    throw "name the gfxstream backend library with -GfxstreamBackend (or -PlaceholderKernel for an installer test)"
+}
 
 # Generate the licence bundle for all shipped components and dependencies.
 $python = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }

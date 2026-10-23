@@ -128,6 +128,39 @@ class HostRendererSmokeTests(unittest.TestCase):
         finally:
             lib.stream_renderer_teardown()
 
+    def test_pr3_dsa_gfx_backend_api(self):
+        env_path = os.environ.get("GFXSTREAM_BACKEND_PATH")
+        if not env_path or not Path(env_path).exists():
+            self.skipTest("GFXSTREAM_BACKEND_PATH is not set or library does not exist.")
+
+        dll_path = Path(env_path).resolve()
+        if hasattr(os, "add_dll_directory"):
+            os.add_dll_directory(str(dll_path.parent))
+
+        lib = ctypes.CDLL(str(dll_path))
+
+        lib.dsa_gfx_init.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+        lib.dsa_gfx_init.restype = ctypes.c_int
+
+        lib.dsa_gfx_teardown.argtypes = []
+        lib.dsa_gfx_teardown.restype = None
+
+        lib.dsa_gfx_on_process_create.argtypes = []
+        lib.dsa_gfx_on_process_create.restype = ctypes.c_uint64
+
+        lib.dsa_gfx_on_process_destroy.argtypes = [ctypes.c_uint64]
+        lib.dsa_gfx_on_process_destroy.restype = None
+
+        init_ret = lib.dsa_gfx_init(256, 256)
+        self.assertEqual(init_ret, 0, f"dsa_gfx_init returned {init_ret}")
+
+        try:
+            puid = lib.dsa_gfx_on_process_create()
+            self.assertGreater(puid, 0)
+            lib.dsa_gfx_on_process_destroy(puid)
+        finally:
+            lib.dsa_gfx_teardown()
+
 
 if __name__ == "__main__":
     unittest.main()

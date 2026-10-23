@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - "dsa/graphics/**"
+      - "dsa/host/platform/windows/**"
       - ".github/workflows/test-graphics.yml"
       - "scripts/tests/graphics-workflow.test.sh"
   workflow_dispatch:
@@ -110,6 +111,17 @@ jobs:
         run: |
           uv run dsa/graphics/host/test_host_renderer.py
 
+      - name: Run compositor graphics renderer integration test on software Vulkan
+        shell: pwsh
+        working-directory: dsa
+        env:
+          VK_ICD_FILENAMES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
+          VK_DRIVER_FILES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
+          VK_LOADER_DEBUG: all
+          GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
+        run: |
+          cargo test -p dsa-host-windows --test compositor -- pr3_compositor_serves_a_gfxstream_client --nocapture
+
       - name: Keep the host renderer library and headers
         uses: actions/upload-artifact@v4
         with:
@@ -118,3 +130,42 @@ jobs:
             .scratch/build-host/dist/bin/gfxstream_backend.dll
             .scratch/build-host/dist/include/
           if-no-files-found: error
+
+  installer-package:
+    name: Package the installer with the host graphics renderer (windows)
+    needs: host-renderer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the host renderer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: host-gfxstream-windows
+          path: .scratch/host-gfxstream
+
+      - name: Install WiX 5
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.Util.wixext/5.0.2
+
+      - name: Build the package with gfxstream backend
+        shell: pwsh
+        run: |
+          $dll = (Get-ChildItem -Recurse .scratch/host-gfxstream -Filter "gfxstream_backend.dll").FullName
+          dsa/host/platform/windows/installer/build.ps1 -Version 0.1.0 -PlaceholderKernel `
+            -GfxstreamBackend $dll
+
+      - name: Verify gfxstream_backend.dll is packaged beside dsa-compositor.exe
+        shell: pwsh
+        run: |
+          wix burn extract dsa/target/installer/setup-0.1.0.exe -o extracted
+          $msi = (Get-ChildItem extracted -Filter "*.msi").FullName
+          wix msi extract $msi -o msi-extracted
+          if (-not (Test-Path "msi-extracted/PFiles/DSA/gfxstream_backend.dll")) {
+            throw "gfxstream_backend.dll was not found beside dsa-compositor.exe in the MSI"
+          }
+          if (-not (Test-Path "msi-extracted/PFiles/DSA/licenses/gfxstream.txt")) {
+            throw "licenses/gfxstream.txt was not found in the MSI"
+          }

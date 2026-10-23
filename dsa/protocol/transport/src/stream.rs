@@ -157,6 +157,87 @@ impl<S: StreamSocket> Drop for FramedConnection<S> {
     }
 }
 
+/// A [Connection] that carries raw byte sequences over a [StreamSocket].
+///
+/// Unlike [FramedConnection], frames are sent without length prefixes, and receives
+/// return whatever byte chunks arrive from the underlying socket.
+pub struct RawStreamConnection<S: StreamSocket> {
+    socket: S,
+    closed: bool,
+}
+
+impl<S: StreamSocket> RawStreamConnection<S> {
+    pub fn new(socket: S) -> Self {
+        RawStreamConnection {
+            socket,
+            closed: false,
+        }
+    }
+}
+
+impl<S: StreamSocket> Connection for RawStreamConnection<S> {
+    fn send(&mut self, frame: &[u8]) -> Result<(), TransportError> {
+        if self.closed {
+            return Err(TransportError::Closed);
+        }
+        self.socket
+            .write_all(frame)
+            .and_then(|()| self.socket.flush())
+            .map_err(|error| {
+                let error = TransportError::from(error);
+                if error == TransportError::Closed {
+                    self.closed = true;
+                }
+                error
+            })
+    }
+
+    fn recv(&mut self, timeout: Option<Duration>) -> Result<Vec<u8>, TransportError> {
+        if self.closed {
+            return Err(TransportError::Closed);
+        }
+        match self.socket.set_read_timeout(timeout) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {}
+            Err(error) => return Err(error.into()),
+        }
+        let mut chunk = vec![0u8; 64 * 1024];
+        loop {
+            match self.socket.read(&mut chunk) {
+                Ok(0) => {
+                    self.closed = true;
+                    return Err(TransportError::Closed);
+                }
+                Ok(read) => {
+                    chunk.truncate(read);
+                    return Ok(chunk);
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => {
+                    let error = TransportError::from(error);
+                    if error == TransportError::Closed {
+                        self.closed = true;
+                    }
+                    return Err(error);
+                }
+            }
+        }
+    }
+
+    fn close(&mut self) {
+        if !self.closed {
+            self.socket.shutdown();
+            self.closed = true;
+        }
+    }
+}
+
+impl<S: StreamSocket> Drop for RawStreamConnection<S> {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
 /// Repeats a non-blocking accept until it yields a connection or `timeout` passes.
 ///
 /// `try_accept` must return `WouldBlock` while nothing is waiting. Socket listeners use
