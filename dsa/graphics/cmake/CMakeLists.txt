@@ -27,6 +27,10 @@ add_compile_definitions(
     __ANDROID__
     ANDROID_API_LEVEL=34
     DETECT_OS_ANDROID=1
+    HAVE_PTHREAD=1
+    HAVE_STRUCT_TIMESPEC=1
+    HAVE_LINUX_FUTEX_H=1
+    HAVE_ENDIAN_H=1
 )
 
 add_compile_options(
@@ -153,6 +157,7 @@ add_library(vulkan.ranchu SHARED ${VULKAN_SOURCES})
 target_include_directories(vulkan.ranchu PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${MESA3D_DIR}/include
+    ${MESA3D_DIR}/include/drm-uapi
     ${SCRATCH_DIR}/gen
     ${GFXSTREAM_DIR}/guest/OpenglSystemCommon
     ${GFXSTREAM_DIR}/guest/renderControl_enc
