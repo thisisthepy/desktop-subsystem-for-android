@@ -115,9 +115,9 @@
 
 질문: INTENT D1과 D14는 시스템 이미지를 읽기 전용 공유 디스크로 두고 업데이트 때 통째로 바꾸며, 사용자 데이터는 별도의 데이터 디스크에 분리하도록 규정한다. 그러나 단일 디스크에서 두 디스크로 분리했을 때 AOSP init이 보조 디스크 파티션(/dev/block/by-name/userdata, /dev/block/by-name/metadata)을 찾지 못하고 멈추는 원인은 무엇이며, 이를 어떻게 해결할 수 있는가.
 
-답(2026-10-24): **AOSP first-stage init은 부팅 디바이스(boot_devices) 아래의 블록 장치에만 `/dev/block/by-name/` 심볼릭 링크를 생성한다.** Hyper-V의 가상 SCSI 컨트롤러(storvsc)는 VMBus 버스 위에 존재하는데, 리눅스 커널의 VMBus 드라이버는 루트 디바이스(`vmbus_root_device`)를 ACPI 디바이스(`/sys/bus/acpi`)로 등록한다. AOSP init의 `DeviceHandler::FindPlatformDevice`는 디바이스 경로의 부모를 거슬러 올라가며 `/sys/bus/platform` 또는 `/sys/bus/amba`에 속하는지 확인하므로, VMBus 하위 디바이스는 플랫폼 디바이스로 인식되지 못한다. `androidboot.boot_part_uuid`를 넘기면 해당 파티션 UUID를 가진 단일 디스크만 부팅 디바이스로 예외 취급되어 두 번째 디스크가 완전히 무시된다.
+답(2026-10-24, 상태: 가설, 실기기 부팅 확인 전): **AOSP first-stage init은 부팅 디바이스(boot_devices) 아래의 블록 장치에만 `/dev/block/by-name/` 심볼릭 링크를 생성한다.** Hyper-V의 가상 SCSI 컨트롤러(storvsc)는 VMBus 버스 위에 존재하는데, 리눅스 커널의 VMBus 드라이버는 루트 디바이스(`vmbus_root_device`)를 ACPI 디바이스(`/sys/bus/acpi`)로 등록한다. AOSP init의 `DeviceHandler::FindPlatformDevice`는 디바이스 경로의 부모를 거슬러 올라가며 `/sys/bus/platform` 또는 `/sys/bus/amba`에 속하는지 확인하므로, VMBus 하위 디바이스는 플랫폼 디바이스로 인식되지 못한다. `androidboot.boot_part_uuid`를 넘기면 해당 파티션 UUID를 가진 단일 디스크만 부팅 디바이스로 예외 취급되어 두 번째 디스크가 완전히 무시된다.
 
-해결책: 게스트 커널의 `drivers/hv/vmbus_drv.c`에서 VMBus 루트 디바이스를 ACPI companion이 아닌 플랫폼 디바이스(`pdev->dev`)로 등록하고, 이름을 `vmbus`로 지정(rename)한다. 이후 커널 명령줄에서 `androidboot.boot_part_uuid`를 제거하고 `androidboot.boot_devices=vmbus`를 지정하면, VMBus SCSI 컨트롤러에 연결된 두 디스크(LUN 0: system.vhdx, LUN 1: data.vhdx) 모두 플랫폼 부팅 장치로 정상 인식되어 `/dev/block/by-name/*` 링크가 양쪽 디스크에 모두 만들어진다.
+가설과 해결책: 게스트 커널의 `drivers/hv/vmbus_drv.c`에서 VMBus 루트 디바이스를 ACPI companion이 아닌 플랫폼 디바이스(`pdev->dev`)로 등록하고, 이름을 `vmbus`로 지정(device_rename)한다. 이후 커널 명령줄에서 `androidboot.boot_part_uuid`를 제거하고 `androidboot.boot_devices=vmbus`를 지정하면, VMBus SCSI 컨트롤러에 연결된 두 디스크(LUN 0: system.vhdx, LUN 1: data.vhdx) 모두 플랫폼 부팅 장치로 인식되어 `/dev/block/by-name/*` 링크가 양쪽 디스크에 모두 구성될 것으로 예상한다.
 
 ### 근거로 삼은 자료
 
@@ -135,22 +135,23 @@
    - `system.vhdx`: `misc`, `vbmeta_a`, `vbmeta_system_a`, `vbmeta_system_dlkm_a`, `vbmeta_vendor_dlkm_a`, `boot_a`, `init_boot_a`, `vendor_boot_a`, `super`를 배치하고 읽기 전용으로 마운트한다.
    - `data.vhdx`: `metadata`(64 MiB)와 `userdata`를 담은 빈 GPT 템플릿(동적 VHDX)을 생성한다.
    - 커널 명령줄: `androidboot.boot_devices=vmbus`와 `blkdevparts=sda:...`를 전달한다.
-4. **호스트 디스크 교체 경로 단순화**: `system.vhdx`가 분리됨에 따라, 이미지 업데이트 시 호스트가 VHDX를 attach하여 파티션을 복사할 필요 없이 새 이미지의 `system.vhdx` 경로를 `system_image`로 교체한다. 사용자 데이터 디스크(`data.vhdx`)는 첫 생성 시 템플릿 복사 후 그대로 유지된다.
+4. **호스트 디스크 교체 경로 단순화 및 단일 디스크 하위 호환**: `system.vhdx`가 있는 경우 두 디스크를 연결하고, 기존 단일 디스크(`disk.vhdx`) 이미지인 경우 단일 디스크로 동작하도록 분기 처리했다.
 
-### 결과
+### 현재까지 검증된 결과 (CI 및 단위 테스트)
 
-1. 커널 패치(`vmbus-platform-device.patch`)를 통해 VMBus 루트가 플랫폼 버스(`/sys/devices/platform/vmbus`)에 등록된다.
-2. SCSI LUN 0(`sda`)과 LUN 1(`sdb`)의 부모 계통이 모두 `/sys/devices/platform/vmbus`로 연결된다.
-3. AOSP first-stage init이 두 디스크의 모든 파티션을 부팅 디바이스 파티션으로 식별하여 `/dev/block/by-name/` 아래에 링크를 구성한다.
-4. `fstab.dsa`의 `/dev/block/by-name/metadata` 및 `/dev/block/by-name/userdata` 마운트가 정상 수행된다.
-5. 호스트의 디스크 관리 로직(`user_disk.rs`)에서 VHDX 파티션 복사 과정이 제거되고, `system.vhdx` 파일 교체만으로 무복사(zero-copy) 업데이트가 가능해진다.
+1. **커널 패치 및 설정 검증**: `dsa/kernel/patches/vmbus-platform-device.patch` 적용 및 패치 검증 테스트(`test_android_config.py`)가 통과했다.
+2. **이미지 생성 도구 검증**: `make-image.py`의 듀얼 디스크 분리 생성과 명령줄 생성 로직이 단위 테스트(`test_make_image.py`)를 통과했다.
+3. **호스트 VM 구성 검증**: 두 디스크 이미지가 주어졌을 때 HCS SCSI 0번(읽기 전용 system.vhdx), 1번(쓰기 가능 data.vhdx)으로 정상 구성됨을 단위 테스트(`host_config.rs`)로 확인했다.
+4. **단일 디스크 하위 호환 검증**: 기존 `disk.vhdx` 단일 디스크 이미지 역시 호스트가 그대로 인식하고 부팅 구성함을 단위 테스트(`host_config.rs`)로 확인했다.
+5. **실기기 부팅 검증 항목(예정)**: 실기기 첫 부팅 시 콘솔 로그에서 `/sys/devices/platform/vmbus` 경로 확인, `hv_balloon`/`hv_pci`/메모리 핫애드 프로브 정상 동작 확인, `/dev/block/by-name/metadata` 및 `userdata` 마운트 성공 여부는 실기기 부팅 후 후속 변경에서 확인 결과를 기록한다.
 
 ### 결정
 
 - 게스트 커널에 `dsa/kernel/patches/vmbus-platform-device.patch`를 적용한다.
 - `make-image.py`는 `system.vhdx`와 `data.vhdx` 두 개의 VHDX를 빌드하도록 개편한다.
 - 커널 명령줄에서 `androidboot.boot_part_uuid`를 제거하고 `androidboot.boot_devices=vmbus`를 기본으로 전달한다.
-- 호스트 VM 구성은 SCSI 0번에 `system.vhdx`(ReadOnly: true), SCSI 1번에 사용자 데이터 디스크(ReadOnly: false)를 연결한다.
+- 호스트 VM 구성은 SCSI 0번에 `system.vhdx`(ReadOnly: true), SCSI 1번에 사용자 데이터 디스크(ReadOnly: false)를 연결하되, 기존 단일 디스크 이미지 호환성을 유지한다.
+- 실기기 부팅 검증 결과를 확인한 뒤 가설 상태를 검증 완료로 전환한다.
 
 ## 부록 A. Microsoft에 낼 이슈 초안
 
