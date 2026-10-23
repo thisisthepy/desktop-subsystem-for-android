@@ -211,11 +211,20 @@ FSTAB_DIRS = {
     "VENDOR_BOOT/RAMDISK/first_stage_ramdisk/system/etc/": "META/vendor_boot_filesystem_config.txt",
 }
 
+# The transport library stays in vendor with the rest of the Cuttlefish graphics stack.
+# Supplying it at image-build time keeps the signed target_files archive as the single
+# source from which AVB-protected partitions are generated.
+GFXSTREAM_LIBRARY = "VENDOR/lib64/libOpenglSystemCommon.so"
 
-def modify(source, dest):
+
+def modify(source, dest, graphics_library=None):
     """Copies target_files, removing the shell apps and the published kernel modules,
     switching to a user build and adding the Hyper-V mount table."""
     fstab = (HERE / "fstab.dsa").read_bytes()
+    graphics_payload = None
+    if graphics_library:
+        graphics_payload = Path(graphics_library).read_bytes()
+    replaced_graphics_payload = False
     kept_modules = re.compile(r"^(VENDOR_BOOT/RAMDISK|VENDOR_DLKM|SYSTEM_DLKM)/lib/modules/.*\.ko$")
     with zipfile.ZipFile(source) as zin, zipfile.ZipFile(dest, "w", zipfile.ZIP_STORED, allowZip64=True) as zout:
         for info in zin.infolist():
@@ -225,7 +234,9 @@ def modify(source, dest):
             if name.startswith("IMAGES/"):
                 # Rebuilt after signing from the modified contents.
                 continue
-            data = zin.read(name)
+            data = graphics_payload if name == GFXSTREAM_LIBRARY and graphics_payload is not None else zin.read(name)
+            if name == GFXSTREAM_LIBRARY and graphics_payload is not None:
+                replaced_graphics_payload = True
             if name in PROP_FILES:
                 data = edit_props(data.decode()).encode()
             elif name.endswith("lib/modules/modules.load") or name.endswith("lib/modules/modules.dep"):
@@ -249,6 +260,9 @@ def modify(source, dest):
             zout.writestr(info, data)
         for directory in FSTAB_DIRS:
             zout.writestr(directory + "fstab.dsa", fstab)
+    if graphics_payload is not None and not replaced_graphics_payload:
+        dest.unlink(missing_ok=True)
+        raise ValueError(f"target_files does not contain {GFXSTREAM_LIBRARY}")
 
 
 def key_arguments(target_files, keys):
@@ -438,6 +452,8 @@ def main():
     parser.add_argument("--out", type=Path, default=REPO / "dsa/target/image")
     parser.add_argument("--kernel", type=Path, help="the guest kernel (bzImage) the image boots with; "
                         "without it the host's own kernel is used")
+    parser.add_argument("--graphics-library", type=Path,
+                        help="a libOpenglSystemCommon.so built for the selected guest")
     args = parser.parse_args()
 
     spec = next(i for i in json.loads((HERE / "inputs.json").read_text())["images"] if i["android_major"] == args.major)
@@ -461,7 +477,7 @@ def main():
     env = dict(os.environ, PATH=f"{otatools / 'bin'}:{os.environ['PATH']}", TMPDIR=str(temp))
 
     modified = work / "modified.zip"
-    modify(target_files, modified)
+    modify(target_files, modified, args.graphics_library)
 
     signed = work / "signed.zip"
     run(otatools / "bin/sign_target_files_apks", "-p", otatools, *key_arguments(modified, str(keys)), modified, signed, env=env)

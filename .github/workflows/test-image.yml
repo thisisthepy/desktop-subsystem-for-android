@@ -26,6 +26,11 @@ on:
           - "17"
           - "16"
           - all
+      graphics_run:
+        description: "Graphics test run that produced guest-gfxstream-hvsocket"
+        type: string
+        required: false
+        default: ""
 
 concurrency:
   group: test-image-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
@@ -33,6 +38,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   image:
@@ -74,8 +80,23 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
 
+      - name: Fetch the selected guest graphics transport
+        if: inputs.graphics_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${{ inputs.graphics_run }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name guest-gfxstream-hvsocket \
+            --dir .scratch/guest-graphics
+
       - name: Make the image
-        run: uv run dsa/guest/image/make-image.py --major ${{ matrix.android }} --keys .scratch/image-keys
+        run: |
+          args=(--major "${{ matrix.android }}" --keys .scratch/image-keys)
+          if [[ -n "${{ inputs.graphics_run }}" ]]; then
+            args+=(--graphics-library .scratch/guest-graphics/libOpenglSystemCommon.so)
+          fi
+          uv run dsa/guest/image/make-image.py "${args[@]}"
 
       - name: Check the image
         run: uv run dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys

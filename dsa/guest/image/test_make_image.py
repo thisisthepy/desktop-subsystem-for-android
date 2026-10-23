@@ -87,6 +87,34 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertIn("fileencryption=aes-256-xts:aes-256-hctr2", userdata)
         self.assertNotIn("keydirectory=", userdata)
 
+    def test_pr3_graphics_library_replaces_the_vendor_gfxstream_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            replacement = root / "libOpenglSystemCommon.so"
+            replacement.write_bytes(b"hyper-v-gfxstream")
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("VENDOR/lib64/libOpenglSystemCommon.so", b"cuttlefish-gfxstream")
+                archive.writestr("SYSTEM/build.prop", b"ro.debuggable=1\n")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, graphics_library=replacement)
+            with zipfile.ZipFile(modified) as archive:
+                self.assertEqual(
+                    archive.read("VENDOR/lib64/libOpenglSystemCommon.so"),
+                    b"hyper-v-gfxstream",
+                )
+
+    def test_pr3_graphics_library_must_have_a_vendor_gfxstream_payload_to_replace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            replacement = root / "libOpenglSystemCommon.so"
+            replacement.write_bytes(b"hyper-v-gfxstream")
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/build.prop", b"ro.debuggable=1\n")
+            with self.assertRaisesRegex(ValueError, "does not contain"):
+                make_image.modify(source, root / "modified.zip", graphics_library=replacement)
+
 
 if __name__ == "__main__":
     unittest.main()
