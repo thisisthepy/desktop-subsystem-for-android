@@ -69,10 +69,10 @@ done < "$fragment"
 # Android must not need ashmem: it left the kernel in 6.6 and a guest that relies on it
 # breaks on newer kernels. memfd replaces it.
 if grep -qE '^CONFIG_ASHMEM=' "$src/.config"; then
-    echo "fr1: CONFIG_ASHMEM is set; the guest must run without ashmem" >&2
+    echo "CONFIG_ASHMEM is set; the guest must run without ashmem" >&2
     failed=1
 fi
-grep -qx 'CONFIG_MEMFD_CREATE=y' "$src/.config" || { echo "fr1: CONFIG_MEMFD_CREATE is not set" >&2; failed=1; }
+grep -qx 'CONFIG_MEMFD_CREATE=y' "$src/.config" || { echo "CONFIG_MEMFD_CREATE is not set" >&2; failed=1; }
 (( failed == 0 )) || exit 1
 
 # `make kernelrelease` reads a file only a build regenerates, so derive the release from
