@@ -37,10 +37,10 @@ jobs:
           ndk-version: r26b
 
       - name: Fetch gfxstream and guest build dependencies
-        run: dsa/graphics/fetch.sh .scratch/gfxstream
+        run: bash dsa/graphics/fetch.sh .scratch/gfxstream
 
       - name: Build the guest transport
-        run: dsa/graphics/build.sh .scratch .scratch/build
+        run: bash dsa/graphics/build.sh .scratch .scratch/build
 
       - name: Verify ELF architecture and exported Hyper-V symbols
         run: |
