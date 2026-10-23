@@ -46,6 +46,7 @@ jobs:
       - name: Install WiX 5
         run: |
           dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.Util.wixext/5.0.2
           wix --version
 
       - name: Make a stand-in image
@@ -160,6 +161,77 @@ jobs:
           $wslconfig = "$env:USERPROFILE\.wslconfig"
           $currentHash = (Get-FileHash -Path $wslconfig -Algorithm SHA256).Hash
           if ($currentHash -ne $env:INITIAL_WSLCONFIG_HASH) { throw ".wslconfig was modified by installation or service startup" }
+
+      - name: nfr5_service_recovery_and_start_type
+        run: |
+          $qc = sc.exe qc DsaHost | Out-String
+          Write-Host $qc
+          if ($qc -notmatch 'START_TYPE\s+:\s+2\s+AUTO_START') { throw "DsaHost is not automatic start" }
+          $qf = sc.exe qfailure DsaHost | Out-String
+          Write-Host $qf
+          if ($qf -notmatch 'RESTART') { throw "DsaHost has no restart failure actions" }
+          $p = Get-Process dsa-hostd -ErrorAction Stop
+          Stop-Process -Id $p.Id -Force
+          $deadline = (Get-Date).AddSeconds(30)
+          $restarted = $false
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 2
+            $svc = Get-Service DsaHost -ErrorAction SilentlyContinue
+            if ($svc -and $svc.Status -eq 'Running') {
+              $newProc = Get-Process dsa-hostd -ErrorAction SilentlyContinue
+              if ($newProc -and $newProc.Id -ne $p.Id) {
+                $restarted = $true
+                break
+              }
+            }
+          }
+          if (-not $restarted) { throw "DsaHost was not restarted after process termination" }
+          Write-Host "DsaHost restarted successfully with new process ID $($newProc.Id)"
+
+      - name: nfr5_standard_user_can_start_service_but_cannot_stop_it
+        run: |
+          $password = ConvertTo-SecureString "TestStandard1234!" -AsPlainText -Force
+          New-LocalUser -Name "DsaTestStdUser" -Password $password -FullName "DSA Standard Test User" -Description "Standard test user"
+          try {
+            # Stop the service as administrator first
+            Stop-Service DsaHost
+            (Get-Service DsaHost).WaitForStatus('Stopped', '00:00:30')
+            if ((Get-Service DsaHost).Status -ne 'Stopped') { throw "DsaHost did not stop" }
+
+            # Standard user can start the stopped service
+            $startAction = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c sc.exe start DsaHost > C:\dsa_test_start.log 2>&1"
+            $startTask = Register-ScheduledTask -TaskName "DsaTestStartTask" -Action $startAction -User "DsaTestStdUser" -Password "TestStandard1234!" -Force
+            Start-ScheduledTask -TaskName "DsaTestStartTask"
+            $deadline = (Get-Date).AddSeconds(30)
+            while ((Get-Service DsaHost).Status -ne 'Running' -and (Get-Date) -lt $deadline) {
+              Start-Sleep -Seconds 1
+            }
+            Get-Content C:\dsa_test_start.log -ErrorAction SilentlyContinue
+            if ((Get-Service DsaHost).Status -ne 'Running') {
+              throw "Standard user failed to start DsaHost"
+            }
+            Write-Host "Standard user successfully started DsaHost"
+
+            # Standard user cannot stop the running service
+            $stopAction = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c sc.exe stop DsaHost > C:\dsa_test_stop.log 2>&1"
+            $stopTask = Register-ScheduledTask -TaskName "DsaTestStopTask" -Action $stopAction -User "DsaTestStdUser" -Password "TestStandard1234!" -Force
+            Start-ScheduledTask -TaskName "DsaTestStopTask"
+            Start-Sleep -Seconds 3
+            $stopOut = Get-Content C:\dsa_test_stop.log -Raw -ErrorAction SilentlyContinue
+            Write-Host "Stop output: $stopOut"
+            if ($stopOut -notmatch 'Access is denied|5:') {
+              throw "Standard user was able to stop DsaHost or did not get Access Denied: $stopOut"
+            }
+            if ((Get-Service DsaHost).Status -ne 'Running') {
+              throw "DsaHost was stopped by standard user, but stopping must be denied"
+            }
+            Write-Host "Stopping DsaHost was correctly denied to standard user"
+          } finally {
+            Unregister-ScheduledTask -TaskName "DsaTestStartTask" -Confirm:$false -ErrorAction SilentlyContinue
+            Unregister-ScheduledTask -TaskName "DsaTestStopTask" -Confirm:$false -ErrorAction SilentlyContinue
+            Remove-LocalUser -Name "DsaTestStdUser" -ErrorAction SilentlyContinue
+            Remove-Item "C:\dsa_test_start.log", "C:\dsa_test_stop.log" -ErrorAction SilentlyContinue
+          }
 
       - name: nfr7_installed_program_folder_contains_licence_bundle
         run: |

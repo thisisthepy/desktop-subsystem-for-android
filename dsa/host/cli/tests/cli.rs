@@ -366,3 +366,95 @@ fn fr15_dsa_update_says_when_the_service_did_not_restart_and_what_it_says_now() 
     assert!(said.contains("has not restarted after 1 seconds"), "{said}");
     assert!(said.contains("Android: Stopped"), "{said}");
 }
+
+struct FakeStarter<F> {
+    start: F,
+}
+
+impl<F> dsa_cli::ServiceStarter for FakeStarter<F>
+where
+    F: Fn() -> Result<(), String> + Send + Sync,
+{
+    fn start_service(&self) -> Result<(), String> {
+        (self.start)()
+    }
+}
+
+#[test]
+fn fr2_dsa_start_starts_a_stopped_service_first() {
+    let ((listener, mut connector, _user), _endpoint) = local_pair();
+    let listener_slot = Arc::new(std::sync::Mutex::new(Some(listener)));
+    let androids = Arc::new(FakeAndroids::default());
+    let service_slot = Arc::new(std::sync::Mutex::new(None));
+    let service_ref = Arc::clone(&service_slot);
+    let fake_starter = FakeStarter {
+        start: move || {
+            let l = listener_slot.lock().unwrap().take().unwrap();
+            *service_ref.lock().unwrap() = Some(RunningService::start(l, androids.clone()));
+            Ok(())
+        },
+    };
+    let invocation = parse(&args("start")).unwrap();
+    let result = dsa_cli::run_with_starter(&invocation, &mut *connector, Some(&fake_starter));
+    assert!(result.is_ok(), "result: {result:?}");
+    let line = result.unwrap();
+    assert_eq!(line, "Android: Active");
+}
+
+#[test]
+fn fr2_dsa_start_reports_why_when_it_cannot_start_the_service() {
+    let ((listener, mut connector, _), _) = local_pair();
+    drop(listener);
+    let fake_starter = FakeStarter {
+        start: || Err("access denied (system error 5)".into()),
+    };
+    let invocation = parse(&args("start")).unwrap();
+    let result = dsa_cli::run_with_starter(&invocation, &mut *connector, Some(&fake_starter));
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("starting the service failed: access denied (system error 5)"),
+        "{err}"
+    );
+}
+
+#[test]
+fn fr2_dsa_status_starts_a_stopped_service_when_pipe_is_missing() {
+    let ((listener, mut connector, _user), _endpoint) = local_pair();
+    let listener_slot = Arc::new(std::sync::Mutex::new(Some(listener)));
+    let androids = Arc::new(FakeAndroids::default());
+    let service_slot = Arc::new(std::sync::Mutex::new(None));
+    let service_ref = Arc::clone(&service_slot);
+    let fake_starter = FakeStarter {
+        start: move || {
+            let l = listener_slot.lock().unwrap().take().unwrap();
+            *service_ref.lock().unwrap() = Some(RunningService::start(l, androids.clone()));
+            Ok(())
+        },
+    };
+    let invocation = parse(&args("status")).unwrap();
+    let result = dsa_cli::run_with_starter(&invocation, &mut *connector, Some(&fake_starter));
+    assert!(result.is_ok(), "result: {result:?}");
+    assert_eq!(
+        result.unwrap(),
+        "Android: Stopped (last stopped: stopped on request)"
+    );
+}
+
+#[test]
+fn fr2_dsa_stop_does_not_start_stopped_service() {
+    let ((listener, mut connector, _), _) = local_pair();
+    drop(listener);
+    let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let started_ref = Arc::clone(&started);
+    let fake_starter = FakeStarter {
+        start: move || {
+            started_ref.store(true, std::sync::atomic::Ordering::Relaxed);
+            Ok(())
+        },
+    };
+    let invocation = parse(&args("stop")).unwrap();
+    let result = dsa_cli::run_with_starter(&invocation, &mut *connector, Some(&fake_starter));
+    assert!(result.is_err());
+    assert!(!started.load(std::sync::atomic::Ordering::Relaxed));
+}
