@@ -258,7 +258,7 @@ jobs:
           } finally {
             Unregister-ScheduledTask -TaskName "DsaTestStartTask" -Confirm:$false -ErrorAction SilentlyContinue
             Unregister-ScheduledTask -TaskName "DsaTestStopTask" -Confirm:$false -ErrorAction SilentlyContinue
-            net user StdTestUser /delete -ErrorAction SilentlyContinue
+            Remove-LocalUser -Name "StdTestUser" -ErrorAction SilentlyContinue
             Remove-Item $startLog, $stopLog, $tempInf, $tempSdb -ErrorAction SilentlyContinue
           }
 
