@@ -92,6 +92,9 @@ message StopSession {}
 // once setup has started, or says that DSA is up to date.
 message UpdateProgram {}
 
+// Asks for the runtime ID of the caller's Android VM.
+message GetVmId {}
+
 // The caller's Android as the service sees it.
 message Status {
   SessionState state = 1;
@@ -110,6 +113,12 @@ message ProgramUpdate {
   string installing = 1;
   // What happens next, in words for the user.
   string detail = 2;
+}
+
+// The answer to GetVmId.
+message VmId {
+  // The runtime ID of the caller's Android VM. Empty when the VM is not running.
+  string vm_id = 1;
 }
 
 // What went wrong with a request.
@@ -138,6 +147,7 @@ message Request {
     StartSession start_session = 3;
     StopSession stop_session = 4;
     UpdateProgram update_program = 5;
+    GetVmId get_vm_id = 6;
   }
 }
 
@@ -147,6 +157,7 @@ message Response {
     Status status = 2;
     Error error = 3;
     ProgramUpdate program_update = 4;
+    VmId vm_id = 5;
   }
 }
 
