@@ -54,8 +54,9 @@ jobs:
           Set-Content -Path "$dir\disk.vhdx" -Value "a disk" -NoNewline
           Set-Content -Path "$dir\initrd.img" -Value "a ramdisk" -NoNewline
           Set-Content -Path "$dir\bzImage" -Value "a kernel" -NoNewline
+          Set-Content -Path "$dir\NOTICE.txt" -Value "AOSP stand-in notice" -NoNewline
           @{ version = "17.0.0-1"; android_major = 17; build = 1; kernel_cmdline = "console=ttyS0";
-             files = @{ "disk.vhdx" = @{}; "initrd.img" = @{}; "bzImage" = @{} } } |
+             files = @{ "disk.vhdx" = @{}; "initrd.img" = @{}; "bzImage" = @{}; "NOTICE.txt" = @{} } } |
             ConvertTo-Json -Depth 4 | Set-Content -Path "$dir\image.json"
 
       # The lists the installed service reads are files in this folder, signed with a key
@@ -160,10 +161,33 @@ jobs:
           $currentHash = (Get-FileHash -Path $wslconfig -Algorithm SHA256).Hash
           if ($currentHash -ne $env:INITIAL_WSLCONFIG_HASH) { throw ".wslconfig was modified by installation or service startup" }
 
+      - name: nfr7_installed_program_folder_contains_licence_bundle
+        run: |
+          $licDir = Join-Path $env:PROGRAM_DIR "licenses"
+          $noticeFile = Join-Path $env:PROGRAM_DIR "NOTICE.txt"
+          if (-not (Test-Path $licDir)) { throw "no licenses folder in $env:PROGRAM_DIR" }
+          if (-not (Test-Path $noticeFile)) { throw "no NOTICE.txt in $env:PROGRAM_DIR" }
+          foreach ($name in @("NOTICE.txt", "rust-crates.txt", "kernel-GPL-2.0.txt", "wix-MS-RL.txt", "setup-ui.txt", "gfxstream.txt", "aosp-notice.txt")) {
+            if (-not (Test-Path (Join-Path $licDir $name))) { throw "licence bundle is missing $name" }
+          }
+          $bundle = Get-Content -Raw (Join-Path $licDir "rust-crates.txt")
+          $lock = Get-Content -Raw "dsa\Cargo.lock"
+          $crates = [regex]::Matches($lock, 'name = "([^"]+)"') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique
+          $missing = @()
+          foreach ($crate in $crates) {
+            if ($bundle -notmatch "(?m)^$([regex]::Escape($crate))\s") {
+              $missing += $crate
+            }
+          }
+          if ($missing.Count -gt 0) {
+            throw "The licence bundle is missing crates from Cargo.lock: $($missing -join ', ')"
+          }
+          Write-Host "The licence bundle contains all $($crates.Count) crates from Cargo.lock."
+
       - name: Check the first image and the configuration that names it
         run: |
           $image = "$env:DATA_DIR\images\images\17.0.0-1"
-          foreach ($name in 'image.json', 'disk.vhdx', 'initrd.img', 'bzImage') {
+          foreach ($name in 'image.json', 'disk.vhdx', 'initrd.img', 'bzImage', 'NOTICE.txt') {
             if (-not (Test-Path "$image\$name")) { throw "the first image has no $name" }
           }
           $config = Get-Content -Raw "$env:DATA_DIR\dsa-hostd.json" | ConvertFrom-Json
@@ -260,6 +284,7 @@ jobs:
           if ($p.ExitCode -ne 0) { Get-ChildItem uninstall*.log | ForEach-Object { Get-Content $_ -Tail 80 }; throw "uninstall failed ($($p.ExitCode))" }
           if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
           if (Test-Path "$env:PROGRAM_DIR\dsa.exe") { throw "the program is still there" }
+          if (Test-Path "$env:PROGRAM_DIR\licenses") { throw "the licence folder is still there" }
           if (Test-Path "$env:DATA_DIR\images") { throw "the downloaded images are still there" }
           if (Test-Path "$env:DATA_DIR\updates") { throw "the downloaded setup files are still there" }
           if (-not (Test-Path "$env:LOCALAPPDATA\DSA")) { throw "each user's Android folder must stay" }
@@ -280,6 +305,7 @@ jobs:
           if ($service.Status -ne 'Running') { throw "DsaHost is $($service.Status)" }
           if (-not (Test-Path "$env:BUNDLE_PROGRAM_DIR\dsa.exe")) { throw "the program is not in the folder named on the command line" }
           if (-not (Test-Path "$env:BUNDLE_DATA_DIR\dsa-hostd.json")) { throw "the configuration is not in the folder named on the command line" }
+          if (-not (Test-Path "$env:BUNDLE_PROGRAM_DIR\licenses\NOTICE.txt")) { throw "no licence bundle in the quiet installation" }
           $out = & "$env:BUNDLE_PROGRAM_DIR\dsa.exe" status 2>&1
           Write-Host $out
           if ($LASTEXITCODE -ne 0) { throw "dsa status: $out" }
@@ -291,6 +317,7 @@ jobs:
           $wslconfig = "$env:USERPROFILE\.wslconfig"
           $currentHash = (Get-FileHash -Path $wslconfig -Algorithm SHA256).Hash
           if ($currentHash -ne $env:INITIAL_WSLCONFIG_HASH) { throw ".wslconfig was modified by setup.exe" }
+          if (Test-Path "$env:BUNDLE_PROGRAM_DIR\licenses") { throw "the licence folder is still there after quiet uninstall" }
 
           # A release ships setup.exe only. /layout copies the bundle (its package is inside
           # it), and wix burn extract takes the package out for msiexec.

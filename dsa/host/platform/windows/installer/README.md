@@ -46,6 +46,8 @@ copies only `setup.exe` itself, because the package is embedded in it.)
   the first Android image in the update store. `-ImageDir` names a folder made by
   `dsa/guest/image/make-image.py`, and the image's version comes from its `image.json`.
   Without an image the service downloads the newest supported one from `-ListUrl`.
+- Puts the licence bundle and master notice in `C:\Program Files\DSA\licenses\` and
+  `C:\Program Files\DSA\NOTICE.txt`.
 - Keeps the image in `image.cab` beside the MSI, because an MSI holds at most 2 GB.
   `setup.exe` carries both.
 - Lets Hyper-V's virtual machines (`S-1-5-83-0`) read the kernel and the images, which a VM

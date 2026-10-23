@@ -132,6 +132,11 @@ jobs:
           for name in image.json $(jq -r '.files | keys[]' "$dir/image.json"); do
             files+=("$dir/$name")
           done
+          for n in NOTICE.xml.gz NOTICE.html.gz NOTICE.txt; do
+            if [ -f "$dir/$n" ] && [[ ! " ${files[*]} " =~ " $dir/$n " ]]; then
+              files+=("$dir/$n")
+            fi
+          done
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${files[@]}" --clobber
           else
