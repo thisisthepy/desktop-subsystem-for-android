@@ -20,7 +20,8 @@ on:
 
 concurrency:
   group: test-graphics-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A source build consumes the whole runner.  A newer revision supersedes it.
+  cancel-in-progress: true
 
 permissions:
   contents: read
