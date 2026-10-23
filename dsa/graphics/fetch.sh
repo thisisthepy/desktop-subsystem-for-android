@@ -48,7 +48,7 @@ git -C "$mesa_dir" fetch --depth=1 origin "$mesa_revision"
 git -C "$mesa_dir" checkout --detach "$mesa_revision"
 git -C "$mesa_dir" reset --hard "$mesa_revision"
 git -C "$mesa_dir" clean -fdx
-git -C "$mesa_dir" sparse-checkout set include src/gfxstream/guest src/util src/vulkan
+git -C "$mesa_dir" sparse-checkout set include src/c11 src/gfxstream/guest src/util src/vulkan
 
 mesa_patches=("$patch_dir"/0002-*.patch)
 if ((${#mesa_patches[@]})); then

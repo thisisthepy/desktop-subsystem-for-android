@@ -14,7 +14,7 @@
 #define HWVULKAN_DEVICE_API_VERSION_0_1 HARDWARE_DEVICE_API_VERSION(0, 1)
 #define HWVULKAN_DEVICE_0 "0"
 
-#define HWVULKAN_DISPATCH_MAGIC 0x564B5F4C4F41444552ULL
+#define HWVULKAN_DISPATCH_MAGIC 0x01CDC0DE
 
 typedef struct hwvulkan_module_t {
     struct hw_module_t common;
