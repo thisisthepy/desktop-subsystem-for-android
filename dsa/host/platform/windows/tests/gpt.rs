@@ -146,3 +146,19 @@ fn fr14_a_partition_android_never_wrote_to_is_blank() {
     assert!(!partition_is_blank(&mut written, "userdata").unwrap());
     assert!(partition_is_blank(&mut d, "nonexistent").is_err());
 }
+
+#[test]
+fn nfr5_a_corrupted_partition_table_does_not_panic() {
+    let mut d = disk(&[("corrupt", 8)], 0);
+    // Overwrite the first entry's last sector (bytes 40..48) with a value smaller than first sector (2048).
+    d.seek(SeekFrom::Start(2 * SECTOR + 40)).unwrap();
+    d.write_all(&1000u64.to_le_bytes()).unwrap();
+    let result = partitions(&mut d);
+    assert!(result.is_err());
+
+    let mut d = disk(&[("overflow", 8)], 0);
+    d.seek(SeekFrom::Start(SECTOR + 72)).unwrap();
+    d.write_all(&u64::MAX.to_le_bytes()).unwrap();
+    let result = partitions(&mut d);
+    assert!(result.is_err());
+}

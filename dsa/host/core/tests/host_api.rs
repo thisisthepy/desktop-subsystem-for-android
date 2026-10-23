@@ -128,3 +128,58 @@ fn fr14_the_user_is_told_about_an_update_through_the_local_api() {
     );
     assert_eq!(status.last_reason, None);
 }
+
+struct CrashedAndroid {
+    state: std::sync::Mutex<SessionState>,
+    reason: std::sync::Mutex<Option<String>>,
+}
+
+impl UserAndroid for CrashedAndroid {
+    fn state(&self) -> SessionState {
+        *self.state.lock().unwrap()
+    }
+    fn last_reason(&self) -> Option<String> {
+        self.reason.lock().unwrap().clone()
+    }
+    fn start(&self) {
+        *self.state.lock().unwrap() = SessionState::Active;
+        *self.reason.lock().unwrap() = None;
+    }
+    fn stop(&self) {
+        *self.state.lock().unwrap() = SessionState::Stopped;
+        *self.reason.lock().unwrap() = Some("stopped on request".into());
+    }
+}
+
+#[test]
+fn nfr5_a_crashed_android_reports_stopped_and_can_start_again() {
+    let (listener, mut connector) = local::pair();
+    let android = Arc::new(CrashedAndroid {
+        state: std::sync::Mutex::new(SessionState::Stopped),
+        reason: std::sync::Mutex::new(None),
+    });
+    let androids = Arc::new(PerUser::new({
+        let android = Arc::clone(&android);
+        move |_: &str| Ok(android.clone() as Arc<dyn UserAndroid>)
+    }));
+    let _service = RunningService::start(Box::new(listener), androids);
+    let mut client = HostApiClient::connect(&mut connector, "test", WAIT).unwrap();
+
+    client.start().unwrap();
+    assert_eq!(client.status().unwrap().state, SessionState::Active);
+
+    // Simulate guest crash or channel loss by setting the guest state to Stopped with a cause.
+    *android.state.lock().unwrap() = SessionState::Stopped;
+    *android.reason.lock().unwrap() = Some("the control channel was lost: connection reset".into());
+
+    let status = client.status().unwrap();
+    assert_eq!(status.state, SessionState::Stopped);
+    assert_eq!(
+        status.last_reason.as_deref(),
+        Some("the control channel was lost: connection reset")
+    );
+
+    // The user can start Android again.
+    client.start().unwrap();
+    assert_eq!(client.status().unwrap().state, SessionState::Active);
+}
