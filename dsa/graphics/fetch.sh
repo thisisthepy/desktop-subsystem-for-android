@@ -87,23 +87,52 @@ if [[ ! -d "$system_logging_dir/.git" ]]; then
 fi
 git -C "$system_logging_dir" sparse-checkout set liblog/include
 
-# Generate Vulkan entrypoints if generator script is present
+# Generate Vulkan headers if generator script is present
 gen_dir="$scratch_dir/gen"
 mkdir -p "$gen_dir"
 if [[ -f "$mesa_dir/src/vulkan/util/vk_entrypoints_gen.py" ]]; then
+    python_cmd=()
     if command -v uv >/dev/null 2>&1; then
-        uv run --with mako python "$mesa_dir/src/vulkan/util/vk_entrypoints_gen.py" \
-            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
-            --proto --weak \
-            --out-h "$gen_dir/gfxstream_vk_entrypoints.h" \
-            --out-c "$gen_dir/gfxstream_vk_entrypoints.c" \
-            --prefix gfxstream_vk --beta false
+        python_cmd=(uv run --with mako python)
     elif python3 -c "import mako" >/dev/null 2>&1; then
-        python3 "$mesa_dir/src/vulkan/util/vk_entrypoints_gen.py" \
+        python_cmd=(python3)
+    fi
+
+    if ((${#python_cmd[@]})); then
+        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_entrypoints_gen.py" \
             --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
             --proto --weak \
             --out-h "$gen_dir/gfxstream_vk_entrypoints.h" \
             --out-c "$gen_dir/gfxstream_vk_entrypoints.c" \
             --prefix gfxstream_vk --beta false
+
+        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_dispatch_table_gen.py" \
+            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
+            --out-h "$gen_dir/vk_dispatch_table.h" \
+            --out-c "$gen_dir/vk_dispatch_table.c" \
+            --beta false
+
+        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_extensions_gen.py" \
+            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
+            --out-h "$gen_dir/vk_extensions.h" \
+            --out-c "$gen_dir/vk_extensions.c"
+
+        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_cmd_queue_gen.py" \
+            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
+            --out-h "$gen_dir/vk_cmd_queue.h" \
+            --out-c "$gen_dir/vk_cmd_queue.c" \
+            --beta false
+
+        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_physical_device_features_gen.py" \
+            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
+            --out-h "$gen_dir/vk_physical_device_features.h" \
+            --out-c "$gen_dir/vk_physical_device_features.c" \
+            --beta false
+
+        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_physical_device_properties_gen.py" \
+            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
+            --out-h "$gen_dir/vk_physical_device_properties.h" \
+            --out-c "$gen_dir/vk_physical_device_properties.c" \
+            --beta false
     fi
 fi
