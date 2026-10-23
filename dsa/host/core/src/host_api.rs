@@ -220,9 +220,15 @@ impl HostApiService {
             match listener.accept(Duration::from_millis(200)) {
                 Ok((connection, peer)) => {
                     let service = Arc::clone(&self);
-                    let spawned = thread::Builder::new()
-                        .name("dsa-host-api".into())
-                        .spawn(move || service.serve_connection(connection, peer));
+                    let spawned =
+                        thread::Builder::new()
+                            .name("dsa-host-api".into())
+                            .spawn(move || {
+                                let _ =
+                                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                        service.serve_connection(connection, peer);
+                                    }));
+                            });
                     if let Err(error) = spawned {
                         eprintln!("local API: could not start a connection thread: {error}");
                     }
