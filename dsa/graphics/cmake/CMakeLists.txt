@@ -202,6 +202,7 @@ target_compile_definitions(vulkan.ranchu PRIVATE
 )
 
 set_target_properties(vulkan.ranchu PROPERTIES
+    PREFIX ""
     OUTPUT_NAME "vulkan.ranchu"
     LINK_FLAGS "-Wl,-z,undefs -Wl,-Bsymbolic -Wl,--gc-sections"
 )
