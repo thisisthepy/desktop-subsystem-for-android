@@ -388,6 +388,27 @@ class ImageLayoutTests(unittest.TestCase):
                 self.assertIn("libOpenglSystemCommon\\.so", fc)
 
 
+    def test_fr2_android_log_reaches_the_vm_console_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("VENDOR/etc/ueventd.rc", "# seriallogging\n/dev/hvc2 0660 system logd\n")
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/etc/ueventd.rc 0 0 644 capabilities=0x0\n")
+
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+
+            with zipfile.ZipFile(modified) as archive:
+                rc = archive.read("VENDOR/etc/init/dsa-console-logcat.rc").decode()
+                self.assertIn("/system/bin/logcat -b all -v threadtime -f /dev/ttyS0", rc)
+                self.assertIn("seclabel u:r:logpersist:s0", rc)
+                self.assertIn("user logd", rc)
+                ueventd = archive.read("VENDOR/etc/ueventd.rc").decode()
+                self.assertTrue(ueventd.splitlines()[-1].split() == ["/dev/ttyS0", "0660", "system", "logd"])
+                fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
+                self.assertIn("vendor/etc/init/dsa-console-logcat.rc 0 0 644 capabilities=0x0", fs_config)
+
     def test_pr3_check_image_verifies_graphics_stack(self):
         check_script = Path(__file__).with_name("check-image.py")
         with tempfile.TemporaryDirectory() as tmp:
