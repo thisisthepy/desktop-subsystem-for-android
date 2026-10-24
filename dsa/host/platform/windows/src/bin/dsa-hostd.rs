@@ -5,6 +5,7 @@
 //! dsa-hostd serve <config.json>    the local API in the foreground, one VM per user
 //! dsa-hostd service <config.json>  the same, as a Windows service
 //! dsa-hostd remove-images <folder> removes the downloaded images (the uninstaller runs it)
+//! dsa-hostd remove-updates <folder> removes the downloaded setup files (the same)
 //! ```
 //!
 //! Without a mode it starts one VM, waits for the guest's channel daemon to connect and
@@ -56,22 +57,32 @@ mod windows_host {
     use dsa_host_windows::account::current_user_sid;
     use dsa_host_windows::android_vm::AndroidVmLauncher;
     use dsa_host_windows::guid::Guid;
-    use dsa_host_windows::host_config::HostConfig;
+    use dsa_host_windows::host_config::{expand_locations, HostConfig};
     use dsa_host_windows::hvsocket::HvSocketListener;
     use dsa_host_windows::vm_listener::VmBoundListener;
     use dsa_host_windows::{scm, service};
     use dsa_transport::Listener;
 
-    const USAGE: &str =
-        "usage: dsa-hostd [serve | service] <config.json> | dsa-hostd remove-images <folder>";
+    const USAGE: &str = "usage: dsa-hostd [serve | service] <config.json> | \
+                         dsa-hostd remove-images <folder> | dsa-hostd remove-updates <folder>";
 
     fn build() -> String {
-        format!("dsa-hostd {}", env!("CARGO_PKG_VERSION"))
+        format!("dsa-hostd {}", dsa_host_windows::VERSION)
     }
 
     fn read_config(path: &str) -> Result<HostConfig, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("reading {path}: {e}"))?;
-        HostConfig::parse(&text).map_err(|e| e.to_string())
+        // The installer lets the user choose both folders, so the file names them as
+        // {data} (the file's own folder) and {program} (this program's folder).
+        let data = std::path::Path::new(path)
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_default();
+        let program = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+            .unwrap_or_default();
+        HostConfig::parse(&expand_locations(&text, &data, &program)).map_err(|e| e.to_string())
     }
 
     pub fn run() -> Result<(), String> {
@@ -82,6 +93,10 @@ mod windows_host {
             [mode, path] if mode == "remove-images" => {
                 use dsa_host_windows::uninstall::{installer_folder, remove_downloaded_images};
                 remove_downloaded_images(&installer_folder(path))
+            }
+            [mode, path] if mode == "remove-updates" => {
+                use dsa_host_windows::uninstall::{installer_folder, remove_downloaded_updates};
+                remove_downloaded_updates(&installer_folder(path))
             }
             [path] if path != "serve" && path != "service" => one_vm(read_config(path)?),
             _ => Err(USAGE.into()),
@@ -145,8 +160,13 @@ mod windows_host {
         } else {
             None
         };
-        let launcher =
-            AndroidVmLauncher::new(&config.vm_name, config.vm_config(fallback_sid.as_deref()));
+        let vm = config
+            .vm_config(fallback_sid.as_deref())
+            .map_err(|e| e.to_string())?;
+        let user = config.user_sid.clone().or(fallback_sid).unwrap_or_default();
+        let console_log = config.console_log_path(&user, &vm.data_disk);
+        println!("the Android console is kept in {}", console_log.display());
+        let launcher = AndroidVmLauncher::new(&config.vm_name, vm).with_console_log(console_log);
         let service = Guid::vsock_service(config.control_port);
         let listener = VmBoundListener::new(
             launcher.vm_id_slot(),

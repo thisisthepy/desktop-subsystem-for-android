@@ -1,6 +1,17 @@
 # The guest's mount table on Hyper-V. Every partition is on the user's one Android disk,
-# which first-stage init finds by the super partition's UUID (androidboot.boot_part_uuid),
-# so /dev/block/by-name links exist for all of them.
+# which first-stage init finds by its fixed misc partition UUID (androidboot.boot_part_uuid).
+# First stage init creates /dev/block/by-name links only for the partitions listed here
+# with first_stage_mount.
+# Not mounted in a normal boot (recoveryonly), but listed so that first stage init creates
+# their by-name links: verified boot reads its root and chained vbmeta images, boot and
+# init_boot, and vendor_boot's hash from them.
+/dev/block/by-name/vbmeta /vbmeta emmc defaults recoveryonly,slotselect,first_stage_mount
+/dev/block/by-name/vbmeta_system /vbmeta_system emmc defaults recoveryonly,slotselect,first_stage_mount
+/dev/block/by-name/vbmeta_system_dlkm /vbmeta_system_dlkm emmc defaults recoveryonly,slotselect,first_stage_mount
+/dev/block/by-name/vbmeta_vendor_dlkm /vbmeta_vendor_dlkm emmc defaults recoveryonly,slotselect,first_stage_mount
+/dev/block/by-name/boot /boot emmc defaults recoveryonly,slotselect,first_stage_mount,avb=boot
+/dev/block/by-name/init_boot /init_boot emmc defaults recoveryonly,slotselect,first_stage_mount,avb=init_boot
+/dev/block/by-name/vendor_boot /vendor_boot emmc defaults recoveryonly,slotselect,first_stage_mount
 system /system erofs ro wait,logical,first_stage_mount,slotselect,avb=vbmeta_system,avb_keys=/avb
 system /system ext4 noatime,ro,errors=panic wait,logical,first_stage_mount,slotselect,avb=vbmeta_system,avb_keys=/avb
 system_ext /system_ext erofs ro wait,logical,first_stage_mount,slotselect,avb=vbmeta_system,nofail
@@ -19,5 +30,5 @@ odm_dlkm /odm_dlkm erofs ro wait,logical,first_stage_mount,slotselect,avb,nofail
 odm_dlkm /odm_dlkm ext4 noatime,ro,errors=panic wait,logical,first_stage_mount,slotselect,avb,nofail
 /dev/block/by-name/metadata /metadata ext4 nodev,noatime,nosuid wait,check,formattable,first_stage_mount
 /dev/block/by-name/misc /misc emmc defaults defaults
-/dev/block/by-name/userdata /data ext4 nodev,noatime,nosuid,errors=panic latemount,wait,check,quota,formattable,keydirectory=/metadata/vold/metadata_encryption,checkpoint=block,fileencryption=aes-256-xts:aes-256-hctr2
+/dev/block/by-name/userdata /data ext4 nodev,noatime,nosuid,errors=panic latemount,wait,check,quota,formattable,checkpoint=block,fileencryption=aes-256-xts:aes-256-hctr2
 /dev/block/zram0 none swap defaults zramsize=50%

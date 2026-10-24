@@ -3,15 +3,19 @@
     uv run dsa/guest/image/check-image.py dsa/target/image/17.0.0-16373615 .scratch/image-keys
 
 It fails when the shell apps are still there, when the build is still debuggable, when an
-app is not signed with one of the keys in the key folder, or when the files do not match
-image.json.
+app is not signed with one of the keys in the key folder, when the files do not match
+image.json, or when the ramdisk lacks the directories and links Android's first stage
+init needs.
 
 The signatures are read from the apps themselves. sign_target_files_apks copies
 META/apkcerts.txt over unchanged, so that file still names AOSP's keys after signing.
 """
 
 import base64
+import gzip
 import io
+import shutil
+import stat
 
 import hashlib
 import json
@@ -65,13 +69,104 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         problems.append(f"{len(unsigned)} apps are not signed with our keys, e.g. {unsigned[:3]}")
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
+    if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:
+        problems.append("plat_sepolicy.cil is missing from the image")
+    else:
+        plat_sepolicy = z.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+        if not re.search(r"\(allow\s+appdomain\s+self\s+\(\s*vsock_socket\s*\(.*connect", plat_sepolicy):
+            problems.append("the SELinux policy does not allow appdomain to connect vsock_socket")
 
-info = json.loads(subprocess.run(["qemu-img", "info", "--output=json", str(image / "disk.vhdx")], check=True, capture_output=True, text=True).stdout)
-if info.get("format") != "vhdx":
-    problems.append(f"disk.vhdx is {info.get('format')}, not vhdx")
-print(f"disk.vhdx: {info['virtual-size'] >> 30} GiB virtual, {info.get('actual-size', 0) >> 20} MiB on disk")
-if "androidboot.boot_part_uuid=" not in manifest["kernel_cmdline"]:
-    problems.append("the kernel command line does not name the disk")
+    if "VENDOR/lib64/hw/vulkan.ranchu.so" not in names:
+        problems.append("VENDOR/lib64/hw/vulkan.ranchu.so is missing from the image")
+    if "VENDOR/lib64/libOpenglSystemCommon.so" not in names:
+        problems.append("VENDOR/lib64/libOpenglSystemCommon.so is missing from the image")
+
+    if "VENDOR/etc/selinux/vendor_file_contexts" in names:
+        vendor_fc = z.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
+        for expected in ["vulkan", "libOpenglSystemCommon"]:
+            if not any(expected in line and "same_process_hal_file" in line for line in vendor_fc.splitlines()):
+                problems.append(f"vendor_file_contexts does not label {expected} as same_process_hal_file")
+
+    vendor_props = z.read("VENDOR/build.prop").decode() if "VENDOR/build.prop" in names else ""
+    for prop, val in [
+        ("ro.hardware.egl", "angle"),
+        ("ro.hardware.vulkan", "ranchu"),
+        ("ro.hardware.gralloc", "minigbm"),
+        ("ro.cpuvulkan.version", "0"),
+    ]:
+        if f"{prop}={val}" not in props and f"{prop}={val}" not in vendor_props:
+            problems.append(f"neither SYSTEM nor VENDOR build.prop sets {prop}={val}")
+
+disks_to_check = [d for d in ["system.vhdx", "data.vhdx"] if (image / d).exists()]
+if not disks_to_check and (image / "disk.vhdx").exists():
+    disks_to_check = ["disk.vhdx"]
+if not disks_to_check:
+    problems.append("no guest disk image found")
+for disk_file in disks_to_check:
+    try:
+        qemu_img = shutil.which("qemu-img") or "qemu-img"
+        info = json.loads(subprocess.run([qemu_img, "info", "--output=json", str(image / disk_file)], check=True, capture_output=True, text=True).stdout)
+        if info.get("format") != "vhdx":
+            problems.append(f"{disk_file} is {info.get('format')}, not vhdx")
+        print(f"{disk_file}: {info['virtual-size'] >> 30} GiB virtual, {info.get('actual-size', 0) >> 20} MiB on disk")
+    except Exception as e:
+        problems.append(f"could not inspect {disk_file}: {e}")
+if "system.vhdx" in disks_to_check:
+    if "androidboot.boot_devices=" not in manifest["kernel_cmdline"]:
+        problems.append("the kernel command line does not name the boot devices")
+else:
+    if "androidboot.boot_part_uuid=" not in manifest["kernel_cmdline"]:
+        problems.append("the kernel command line does not name the disk")
+if "blkdevparts=sda:" not in manifest["kernel_cmdline"]:
+    problems.append("the kernel command line does not restore Hyper-V GPT partition names")
+if "androidboot.selinux=permissive" in manifest["kernel_cmdline"]:
+    problems.append("the kernel command line sets SELinux to permissive")
+for boot_arg in [
+    "androidboot.hardware.gltransport=hvsocket",
+    "androidboot.hardware.egl=angle",
+    "androidboot.hardware.vulkan=ranchu",
+    "androidboot.hardware.gralloc=minigbm",
+    "androidboot.cpuvulkan.version=0",
+]:
+    if boot_arg not in manifest["kernel_cmdline"]:
+        problems.append(f"the kernel command line does not contain {boot_arg}")
+
+def ramdisk_entries(data):
+    """Name to mode of every entry in a ramdisk of gzip'd newc cpio archives."""
+    entries = {}
+    archive = gzip.decompress(data)  # every gzip member, one after another
+    at = 0
+    while at + 110 <= len(archive):
+        header = archive[at:at + 110]
+        if header[:6] not in (b"070701", b"070702"):
+            # Padding after an archive's trailer; the next archive, if any, follows it.
+            following = archive.find(b"0707", at)
+            if following < 0:
+                break
+            at = following
+            continue
+        mode = int(header[14:22], 16)
+        size = int(header[54:62], 16)
+        name_size = int(header[94:102], 16)
+        name = archive[at + 110:at + 110 + name_size - 1].decode()
+        at = (at + 110 + name_size + 3) & ~3
+        at = (at + size + 3) & ~3
+        if name == "TRAILER!!!":
+            continue  # the next archive follows
+        entries[name.lstrip("./")] = mode
+    return entries
+
+
+entries = ramdisk_entries((image / "initrd.img").read_bytes())
+# First stage init mounts onto these and fails without them.
+mount_points = ["dev", "proc", "sys", "mnt", "debug_ramdisk", "second_stage_resources", "metadata"]
+missing = [d for d in mount_points if not stat.S_ISDIR(entries.get(d, 0))]
+if missing:
+    problems.append(f"the ramdisk has no {', '.join(missing)} directories, which first stage init mounts onto")
+links = sum(1 for mode in entries.values() if stat.S_ISLNK(mode))
+print(f"initrd.img: {len(entries)} entries, {links} symbolic links")
+if links == 0:
+    problems.append("the ramdisk has no symbolic links; they were written as plain files")
 
 for p in problems:
     print("problem:", p)

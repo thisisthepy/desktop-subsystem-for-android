@@ -9,6 +9,7 @@ them with the project's keys.
 | `inputs.json` | The pinned inputs: per Android version, the CI build number and the SHA-256 of its `target_files` and `otatools` |
 | `fetch.sh` | Downloads one version's inputs into `.scratch/aosp-inputs/<build>/` and checks them |
 | `make-keys.sh` | Makes a set of signing keys (CI makes a throwaway set each run) |
+| `pack-keys.sh`, `unpack-keys.sh` | Split the key set into repository secrets and put it back |
 | `make-image.py` | Changes, re-signs and lays out the image |
 | `check-image.py` | Checks a made image |
 | `fstab.dsa` | The guest's mount table on Hyper-V |
@@ -56,19 +57,26 @@ In `dsa/target/image/<version>/`:
 Change the build number and the two SHA-256 values in `inputs.json`. The Image test
 workflow makes and checks the image from it.
 
+To publish a remade image of the same build, after a fix to how images are made, raise
+`revision` and the version's suffix (`17.0.0-16373615-2`). The image's `build`, which
+orders images of one Android version, is the build number times 100 plus the revision, so
+the service treats the remade image as newer and moves to it.
+
 ## Releasing
 
 The Image release workflow (`.github/workflows/release-image.yml`, run by hand) makes
 every image in `inputs.json` with the project's keys and the kernel it builds, publishes
 each as the GitHub release `android-<version>`, and publishes the signed list the service
-reads as the release `images`. It needs two repository secrets:
+reads as the release `images`. It needs these repository secrets:
 
-- `DSA_ANDROID_KEYS`: the key set, made once and kept, since every later image must be
-  signed with the same keys for an update to keep each user's data:
+- `DSA_ANDROID_KEYS_1` and `DSA_ANDROID_KEYS_2`: the key set, made once and kept, since
+  every later image must be signed with the same keys for an update to keep each user's
+  data. A secret holds at most 48 KB and the key set is larger, so `pack-keys.sh` splits
+  it and prints the command for each part:
 
   ```
   dsa/guest/image/make-keys.sh .scratch/release-keys
-  tar czf - -C .scratch/release-keys . | base64 -w0
+  dsa/guest/image/pack-keys.sh .scratch/release-keys .scratch/release-keys-packed
   ```
 
 - `DSA_RELEASE_SIGNING_KEY`: the list's key, from `dsa-release keygen`.

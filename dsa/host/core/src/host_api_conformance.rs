@@ -16,7 +16,10 @@ use dsa_protocol::host_api::{client_connect, local_hello, HandshakeError};
 use dsa_transport::local::LocalListener;
 use dsa_transport::Connector;
 
-use crate::host_api::{ClientError, HostApiClient, HostApiService, UserAndroid, UserAndroids};
+use crate::host_api::{
+    running_of, stop_every, ClientError, HostApiClient, HostApiService, ProgramUpdate,
+    UpdateProgram, UserAndroid, UserAndroids,
+};
 use crate::session::SessionState;
 
 /// A fresh listener, a connector that reaches it, and the user it reports for this process.
@@ -59,6 +62,9 @@ impl UserAndroid for FakeAndroid {
     fn stop(&self) {
         *self.state.lock().unwrap() = SessionState::Stopped;
     }
+    fn vm_id(&self) -> Option<String> {
+        (self.state() == SessionState::Active).then(|| "fake-vm-id-1234".into())
+    }
 }
 
 /// One [`FakeAndroid`] per user, except for the users it refuses.
@@ -89,6 +95,46 @@ impl UserAndroids for FakeAndroids {
         );
         Ok(android)
     }
+    fn running(&self) -> Vec<(String, SessionState)> {
+        let androids = self.all();
+        running_of(androids.iter().map(|(user, android)| (user, android)))
+    }
+    fn stop_all(&self, timeout: Duration) -> Vec<(String, SessionState)> {
+        stop_every(self.all(), timeout)
+    }
+}
+
+impl FakeAndroids {
+    fn all(&self) -> Vec<(String, Arc<dyn UserAndroid>)> {
+        self.androids
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(user, android)| (user.clone(), Arc::clone(android) as Arc<dyn UserAndroid>))
+            .collect()
+    }
+}
+
+/// A program updater that answers with `answer` and counts the requests.
+pub struct FakeProgramUpdates {
+    pub answer: Result<ProgramUpdate, String>,
+    pub requests: Mutex<u32>,
+}
+
+impl FakeProgramUpdates {
+    pub fn answering(answer: Result<ProgramUpdate, String>) -> FakeProgramUpdates {
+        FakeProgramUpdates {
+            answer,
+            requests: Mutex::new(0),
+        }
+    }
+}
+
+impl UpdateProgram for FakeProgramUpdates {
+    fn update_now(&self) -> Result<ProgramUpdate, String> {
+        *self.requests.lock().unwrap() += 1;
+        self.answer.clone()
+    }
 }
 
 /// A service running on its own thread, stopped and joined on drop.
@@ -99,8 +145,22 @@ pub struct RunningService {
 
 impl RunningService {
     pub fn start(listener: Box<dyn LocalListener>, androids: Arc<dyn UserAndroids>) -> Self {
+        Self::start_service(listener, HostApiService::new(androids, "test service"))
+    }
+
+    /// A service that answers `dsa update` with `program`.
+    pub fn start_updating(
+        listener: Box<dyn LocalListener>,
+        androids: Arc<dyn UserAndroids>,
+        program: Arc<dyn UpdateProgram>,
+    ) -> Self {
+        let service = HostApiService::new(androids, "test service").with_program_updates(program);
+        Self::start_service(listener, service)
+    }
+
+    fn start_service(listener: Box<dyn LocalListener>, service: HostApiService) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
-        let service = Arc::new(HostApiService::new(androids, "test service"));
+        let service = Arc::new(service);
         let flag = Arc::clone(&stop);
         let thread = thread::spawn(move || service.serve(listener, flag));
         RunningService {
@@ -132,6 +192,10 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::reads_its_users_state(&mut || $make);
         }
         #[test]
+        fn pr5_the_client_reads_the_vm_id_of_its_users_android() {
+            $crate::host_api_conformance::reads_its_users_vm_id(&mut || $make);
+        }
+        #[test]
         fn pr5_start_and_stop_reach_the_callers_android() {
             $crate::host_api_conformance::start_and_stop_reach_the_caller(&mut || $make);
         }
@@ -146,6 +210,14 @@ macro_rules! host_api_conformance {
         #[test]
         fn pr5_a_user_without_an_android_is_told_why() {
             $crate::host_api_conformance::user_without_an_android_is_told_why(&mut || $make);
+        }
+        #[test]
+        fn fr15_an_update_request_reaches_the_program_updater() {
+            $crate::host_api_conformance::update_request_reaches_the_updater(&mut || $make);
+        }
+        #[test]
+        fn fr15_an_update_that_cannot_be_installed_is_reported_with_its_reason() {
+            $crate::host_api_conformance::update_failure_is_reported(&mut || $make);
         }
     };
 }
@@ -168,6 +240,20 @@ pub fn reads_its_users_state(make: MakeLocal<'_>) {
         vec![user],
         "the service must act for the user the transport reports"
     );
+}
+
+pub fn reads_its_users_vm_id(make: MakeLocal<'_>) {
+    let (listener, mut connector, _user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids);
+    let mut client = connect(&mut *connector);
+    assert_eq!(client.vm_id().unwrap(), None);
+
+    client.start().unwrap();
+    assert_eq!(client.vm_id().unwrap().as_deref(), Some("fake-vm-id-1234"));
+
+    client.stop().unwrap();
+    assert_eq!(client.vm_id().unwrap(), None);
 }
 
 pub fn start_and_stop_reach_the_caller(make: MakeLocal<'_>) {
@@ -223,6 +309,53 @@ pub fn user_without_an_android_is_told_why(make: MakeLocal<'_>) {
         Err(ClientError::Service { code, detail }) => {
             assert_eq!(code, ErrorCode::Unavailable);
             assert!(detail.contains(&user), "{detail}");
+        }
+        other => panic!("expected the service to refuse, got {other:?}"),
+    }
+}
+
+pub fn update_request_reaches_the_updater(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let program = Arc::new(FakeProgramUpdates::answering(Ok(ProgramUpdate {
+        installing: Some("0.1.1".into()),
+        detail: "installing DSA 0.1.1".into(),
+    })));
+    let _service = RunningService::start_updating(
+        listener,
+        Arc::new(FakeAndroids::default()),
+        program.clone(),
+    );
+    let mut client = connect(&mut *connector);
+    let update = client.update_program(WAIT).expect("the update request");
+    assert_eq!(update.installing.as_deref(), Some("0.1.1"));
+    assert_eq!(update.detail, "installing DSA 0.1.1");
+    assert_eq!(*program.requests.lock().unwrap(), 1);
+    // The connection goes on serving after the update request.
+    assert_eq!(client.status().unwrap().state, SessionState::Stopped);
+}
+
+pub fn update_failure_is_reported(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let program = Arc::new(FakeProgramUpdates::answering(Err(
+        "the program list is not signed by the project".into(),
+    )));
+    let _service =
+        RunningService::start_updating(listener, Arc::new(FakeAndroids::default()), program);
+    let mut client = connect(&mut *connector);
+    match client.update_program(WAIT) {
+        Err(ClientError::Service { code, detail }) => {
+            assert_eq!(code, ErrorCode::UpdateFailed);
+            assert!(detail.contains("not signed"), "{detail}");
+        }
+        other => panic!("expected the service to refuse, got {other:?}"),
+    }
+    // A service that does not update itself says so.
+    let (listener, mut connector, _) = make();
+    let _plain = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    match connect(&mut *connector).update_program(WAIT) {
+        Err(ClientError::Service { code, detail }) => {
+            assert_eq!(code, ErrorCode::UpdateFailed);
+            assert!(detail.contains("by hand"), "{detail}");
         }
         other => panic!("expected the service to refuse, got {other:?}"),
     }

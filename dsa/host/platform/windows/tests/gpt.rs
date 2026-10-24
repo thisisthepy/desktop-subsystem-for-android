@@ -2,7 +2,9 @@
 
 use std::io::{Cursor, Seek, SeekFrom, Write};
 
-use dsa_host_windows::gpt::{copy_partitions, partitions, SECTOR};
+use dsa_host_windows::gpt::{
+    copy_partitions, fits, is_blank, partition_is_blank, partitions, SECTOR,
+};
 
 /// A disk image with a GPT holding `parts` (name, sectors), laid out one after another
 /// from sector 2048, each filled with `fill`.
@@ -106,4 +108,57 @@ fn fr14_a_larger_partition_than_the_new_image_needs_is_zero_filled_and_a_smaller
 fn fr14_a_disk_without_a_partition_table_is_refused() {
     let mut blank = Cursor::new(vec![0u8; 1 << 20]);
     assert!(partitions(&mut blank).is_err());
+}
+
+#[test]
+fn fr14_a_disk_nothing_was_written_to_is_blank_and_one_with_a_table_is_not() {
+    let mut empty = Cursor::new(vec![0u8; 4 << 20]);
+    assert!(is_blank(&mut empty).unwrap());
+    let mut formatted = Cursor::new(vec![0u8; 4 << 20]);
+    // A file system written straight onto the disk, as the guest does with an empty one.
+    formatted.get_mut()[1024 + 56..1024 + 58].copy_from_slice(&[0x53, 0xef]);
+    assert!(!is_blank(&mut formatted).unwrap());
+    assert!(!is_blank(&mut disk(&[("misc", 2048)], 0)).unwrap());
+}
+
+#[test]
+fn fr14_a_disk_without_a_partition_the_new_image_has_does_not_fit_it() {
+    let old = &LAYOUT;
+    let new = [
+        ("misc", 8),
+        ("metadata", 64),
+        ("vbmeta_a", 8),
+        ("boot_a", 64),
+        ("super", 4096),
+        ("userdata", 1024),
+    ];
+    let names = ["super", "vbmeta_a", "boot_a"];
+    assert!(!fits(&mut disk(&new, 0), &mut disk(old, 0), &names).unwrap());
+    assert!(fits(&mut disk(&new, 0), &mut disk(&new, 0), &names).unwrap());
+    assert!(fits(&mut disk(old, 0), &mut disk(&new, 0), &names).unwrap());
+}
+
+#[test]
+fn fr14_a_partition_android_never_wrote_to_is_blank() {
+    let mut d = disk(&LAYOUT, 0);
+    assert!(partition_is_blank(&mut d, "userdata").unwrap());
+    let mut written = disk(&LAYOUT, 0x5a);
+    assert!(!partition_is_blank(&mut written, "userdata").unwrap());
+    assert!(partition_is_blank(&mut d, "nonexistent").is_err());
+}
+
+#[test]
+fn nfr5_a_corrupted_partition_table_does_not_panic() {
+    let mut d = disk(&[("corrupt", 8)], 0);
+    // Overwrite the first entry's last sector (bytes 40..48) with a value smaller than first sector (2048).
+    d.seek(SeekFrom::Start(2 * SECTOR + 40)).unwrap();
+    d.write_all(&1000u64.to_le_bytes()).unwrap();
+    let result = partitions(&mut d);
+    assert!(result.is_err());
+
+    let mut d = disk(&[("overflow", 8)], 0);
+    d.seek(SeekFrom::Start(SECTOR + 72)).unwrap();
+    d.write_all(&u64::MAX.to_le_bytes()).unwrap();
+    let result = partitions(&mut d);
+    assert!(result.is_err());
 }

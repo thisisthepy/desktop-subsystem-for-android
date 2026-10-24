@@ -35,6 +35,12 @@ pub enum Outcome {
         reason: String,
         image: InstalledImage,
     },
+    /// The new image did not boot and there is no image to go back to: it was the first
+    /// one since an installation without a bundled image.
+    GaveUp {
+        failed: InstalledImage,
+        reason: String,
+    },
 }
 
 /// Starts the current image. A new image on trial that does not boot within `timeout` is
@@ -57,6 +63,12 @@ pub fn start(
         Err(reason) if state.on_trial => {
             guest.halt();
             let image = store.roll_back()?;
+            if !store.has_image(&image.version) {
+                return Ok(Outcome::GaveUp {
+                    failed: state.current,
+                    reason,
+                });
+            }
             guest
                 .boot(&image, &store.image_dir(&image.version), timeout)
                 .map_err(|why| {

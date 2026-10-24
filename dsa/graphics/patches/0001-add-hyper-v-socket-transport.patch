@@ -1,0 +1,290 @@
+diff --git a/guest/OpenglSystemCommon/Android.bp b/guest/OpenglSystemCommon/Android.bp
+index 5fecdd2..f37168f 100644
+--- a/guest/OpenglSystemCommon/Android.bp
++++ b/guest/OpenglSystemCommon/Android.bp
+@@ -91,6 +91,7 @@ cc_defaults {
+         "FormatConversions.cpp",
+         "HostConnection.cpp",
++        "HvSocketStream.cpp",
+         "ProcessPipe.cpp",
+         "QemuPipeStream.cpp",
+         "ThreadInfo.cpp",
+diff --git a/guest/OpenglSystemCommon/HostConnection.cpp b/guest/OpenglSystemCommon/HostConnection.cpp
+index 3361cd5..78b0c9e 100644
+--- a/guest/OpenglSystemCommon/HostConnection.cpp
++++ b/guest/OpenglSystemCommon/HostConnection.cpp
+@@ -20,6 +20,7 @@
+ #include "GoldfishAddressSpaceStream.h"
+ #include "VirtioGpuAddressSpaceStream.h"
+ #include "aemu/base/threads/AndroidThread.h"
++#include "HvSocketStream.h"
+ #if defined(__ANDROID__)
+ #include "android-base/properties.h"
+ #endif
+@@ -78,6 +79,9 @@ static HostConnectionType getConnectionTypeFromProperty(enum VirtGpuCapset capset) {
+     if (transport == "pipe") {
+         return HOST_CONNECTION_QEMU_PIPE;
+     }
++    if (transport == "hvsocket") {
++        return HOST_CONNECTION_HYPERV_SOCKET;
++    }
+ 
+     if (transport == "virtio-gpu-asg" || transport == "virtio-gpu-pipe") {
+@@ -169,6 +173,18 @@ std::unique_ptr<HostConnection> HostConnection::connect(enum VirtGpuCapset capset) {
+             con->m_rendernodeFd = deviceHandle;
+             break;
+         }
++        case HOST_CONNECTION_HYPERV_SOCKET: {
++            auto stream = new HvSocketStream(STREAM_BUFFER_SIZE);
++            if (!stream) {
++                ALOGE("Failed to create Hyper-V socket stream for host connection");
++                return nullptr;
++            }
++            if (stream->connect() < 0) {
++                ALOGE("Failed to connect to the Hyper-V graphics service");
++                return nullptr;
++            }
++            con->m_stream = stream;
++            break;
++        }
+         default:
+             break;
+     }
+diff --git a/guest/OpenglSystemCommon/HostConnection.h b/guest/OpenglSystemCommon/HostConnection.h
+index 2941e18..f399e07 100644
+--- a/guest/OpenglSystemCommon/HostConnection.h
++++ b/guest/OpenglSystemCommon/HostConnection.h
+@@ -44,6 +44,7 @@ enum HostConnectionType {
+     HOST_CONNECTION_ADDRESS_SPACE = 2,
+     HOST_CONNECTION_VIRTIO_GPU_PIPE = 3,
+     HOST_CONNECTION_VIRTIO_GPU_ADDRESS_SPACE = 4,
++    HOST_CONNECTION_HYPERV_SOCKET = 5,
+ };
+diff --git a/guest/OpenglSystemCommon/HvSocketStream.h b/guest/OpenglSystemCommon/HvSocketStream.h
+new file mode 100644
+index 0000000..6a216d3
+--- /dev/null
++++ b/guest/OpenglSystemCommon/HvSocketStream.h
+@@ -0,0 +1,33 @@
++/*
++ * Copyright 2026 The DSA Authors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++
++#include "gfxstream/guest/IOStream.h"
++
++// An IOStream over Linux AF_VSOCK. Hyper-V maps this guest endpoint to the Windows
++// host's AF_HYPERV listener, so no virtio-gpu device or guest DRM node is required.
++class HvSocketStream final : public gfxstream::guest::IOStream {
++public:
++    explicit HvSocketStream(size_t buffer_size, uint32_t port = 5566);
++    ~HvSocketStream() override;
++
++    int connect(const char* service_name = nullptr);
++    uint64_t processPipeInit();
++    void* allocBuffer(size_t minimum_size);
++    int commitBuffer(size_t size);
++    const unsigned char* readFully(void* buffer, size_t size);
++    const unsigned char* commitBufferAndReadFully(size_t write_size, void* buffer, size_t read_size);
++    const unsigned char* read(void* buffer, size_t* size);
++    int writeFully(const void* buffer, size_t size);
++
++private:
++    bool connected() const;
++    int fd_;
++    uint32_t port_;
++    size_t buffer_size_;
++    unsigned char* buffer_;
++};
+diff --git a/guest/OpenglSystemCommon/HvSocketStream.cpp b/guest/OpenglSystemCommon/HvSocketStream.cpp
+new file mode 100644
+index 0000000..4debf68
+--- /dev/null
++++ b/guest/OpenglSystemCommon/HvSocketStream.cpp
+@@ -0,0 +1,144 @@
++/*
++ * Copyright 2026 The DSA Authors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++#include "HvSocketStream.h"
++
++#include <cerrno>
++#include <cstdlib>
++#include <cstring>
++#include <sys/socket.h>
++#include <linux/vm_sockets.h>
++#include <unistd.h>
++
++#include <cutils/log.h>
++
++HvSocketStream::HvSocketStream(size_t buffer_size, uint32_t port)
++    : IOStream(buffer_size), fd_(-1), port_(port), buffer_size_(buffer_size), buffer_(nullptr) {}
++
++HvSocketStream::~HvSocketStream() {
++    if (fd_ >= 0) {
++        close(fd_);
++    }
++    free(buffer_);
++}
++
++bool HvSocketStream::connected() const {
++    return fd_ >= 0;
++}
++
++int HvSocketStream::connect(const char*) {
++    if (connected()) {
++        return 0;
++    }
++    int socket_fd = socket(AF_VSOCK, SOCK_STREAM | SOCK_CLOEXEC, 0);
++    if (socket_fd < 0) {
++        ALOGE("HvSocketStream: AF_VSOCK socket failed: %s", strerror(errno));
++        return -1;
++    }
++    sockaddr_vm address{};
++    address.svm_family = AF_VSOCK;
++    address.svm_port = port_;
++    address.svm_cid = VMADDR_CID_HOST;
++    if (::connect(socket_fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0) {
++        ALOGE("HvSocketStream: connect failed: %s", strerror(errno));
++        close(socket_fd);
++        return -1;
++    }
++    fd_ = socket_fd;
++    return 0;
++}
++
++uint64_t HvSocketStream::processPipeInit() {
++    int32_t confirm = 100;
++    uint64_t process_uid = 0;
++    if (writeFully(&confirm, sizeof(confirm)) != 0 ||
++        !readFully(&process_uid, sizeof(process_uid))) {
++        ALOGW("HvSocketStream: process pipe initialisation failed");
++        return 0;
++    }
++    return process_uid;
++}
++
++void* HvSocketStream::allocBuffer(size_t minimum_size) {
++    const size_t requested = minimum_size > buffer_size_ ? minimum_size : buffer_size_;
++    auto* replacement = static_cast<unsigned char*>(realloc(buffer_, requested));
++    if (!replacement) {
++        ALOGE("HvSocketStream: buffer allocation failed for %zu bytes", requested);
++        free(buffer_);
++        buffer_ = nullptr;
++        buffer_size_ = 0;
++        return nullptr;
++    }
++    buffer_ = replacement;
++    buffer_size_ = requested;
++    return buffer_;
++}
++
++int HvSocketStream::commitBuffer(size_t size) {
++    return size == 0 ? 0 : writeFully(buffer_, size);
++}
++
++int HvSocketStream::writeFully(const void* buffer, size_t size) {
++    if (!connected() || (!buffer && size != 0)) {
++        return -1;
++    }
++    const auto* cursor = static_cast<const unsigned char*>(buffer);
++    while (size != 0) {
++        const ssize_t written = send(fd_, cursor, size, MSG_NOSIGNAL);
++        if (written > 0) {
++            cursor += written;
++            size -= static_cast<size_t>(written);
++            continue;
++        }
++        if (written < 0 && errno == EINTR) {
++            continue;
++        }
++        ALOGE("HvSocketStream: write failed: %s", strerror(errno));
++        return -1;
++    }
++    return 0;
++}
++
++const unsigned char* HvSocketStream::readFully(void* buffer, size_t size) {
++    if (!connected() || (!buffer && size != 0)) {
++        return nullptr;
++    }
++    auto* cursor = static_cast<unsigned char*>(buffer);
++    const size_t total = size;
++    while (size != 0) {
++        const ssize_t received = recv(fd_, cursor, size, 0);
++        if (received > 0) {
++            cursor += received;
++            size -= static_cast<size_t>(received);
++            continue;
++        }
++        if (received < 0 && errno == EINTR) {
++            continue;
++        }
++        ALOGE("HvSocketStream: read failed: %s", strerror(errno));
++        return nullptr;
++    }
++    return total == 0 ? nullptr : static_cast<const unsigned char*>(buffer);
++}
++
++const unsigned char* HvSocketStream::commitBufferAndReadFully(
++    size_t write_size, void* buffer, size_t read_size) {
++    return commitBuffer(write_size) == 0 ? readFully(buffer, read_size) : nullptr;
++}
++
++const unsigned char* HvSocketStream::read(void* buffer, size_t* size) {
++    if (!connected() || !buffer || !size) {
++        return nullptr;
++    }
++    for (;;) {
++        const ssize_t received = recv(fd_, buffer, *size, 0);
++        if (received > 0) {
++            *size = static_cast<size_t>(received);
++            return static_cast<const unsigned char*>(buffer);
++        }
++        if (received < 0 && errno == EINTR) {
++            continue;
++        }
++        return nullptr;
++    }
++}
+diff --git a/guest/OpenglSystemCommon/ProcessPipe.cpp b/guest/OpenglSystemCommon/ProcessPipe.cpp
+index 30b8d8e7..b443e54e 100644
+--- a/guest/OpenglSystemCommon/ProcessPipe.cpp
++++ b/guest/OpenglSystemCommon/ProcessPipe.cpp
+@@ -26,10 +26,13 @@
+ #ifndef __Fuchsia__
+ 
+ #include "QemuPipeStream.h"
+ #include "VirtioGpuPipeStream.h"
++#include "HvSocketStream.h"
+ 
+ static QemuPipeStream* sQemuPipeStream = nullptr;
+ static VirtioGpuPipeStream* sVirtioGpuPipeStream = nullptr;
++static HvSocketStream* sHvSocketStream = nullptr;
+ static int sStreamHandle = -1;
++static constexpr unsigned int kProcessPipePort = 5567;
+ 
+ #endif  // !__Fuchsia__
+@@ -67,6 +70,11 @@ static void processPipeDoInit(uint32_t noRenderControlEnc) {
+             sProcUID = sVirtioGpuPipeStream->processPipeInit();
+             break;
+         }
++        case HOST_CONNECTION_HYPERV_SOCKET:
++            sHvSocketStream = new HvSocketStream(4096, kProcessPipePort);
++            sHvSocketStream->connect();
++            sProcUID = sHvSocketStream->processPipeInit();
++            break;
+     }
+ #endif
+ }
+@@ -91,5 +99,5 @@ bool processPipeInit(int streamHandle, HostConnectionType connType, uint32_t noR
+ #ifndef __Fuchsia__
+-            if (!sQemuPipeStream && !sVirtioGpuPipeStream) {
++            if (!sQemuPipeStream && !sVirtioGpuPipeStream && !sHvSocketStream) {
+                 return false;
+             }
+ #endif

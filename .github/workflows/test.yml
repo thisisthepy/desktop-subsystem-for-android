@@ -30,6 +30,9 @@ jobs:
           # The release sync test builds throwaway repositories; it needs git, not history.
           fetch-depth: 1
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Run the repository checks
         run: |
           git config --global user.email "ci@example.invalid"
@@ -54,6 +57,12 @@ jobs:
 
       - name: Lint
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Check license policy with cargo-deny
+        if: runner.os == 'Linux'
+        run: |
+          curl -sSL https://github.com/EmbarkStudios/cargo-deny/releases/download/0.16.4/cargo-deny-0.16.4-x86_64-unknown-linux-musl.tar.gz | tar -xz --strip-components=1 -C /usr/local/bin cargo-deny-0.16.4-x86_64-unknown-linux-musl/cargo-deny
+          cargo deny --all-features check --config deny.toml licenses
 
       # On Windows this includes the transport suite over real Hyper-V sockets (host to
       # host through the loopback partition).

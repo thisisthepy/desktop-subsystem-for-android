@@ -1,12 +1,13 @@
 {
-  "comment": "The published AOSP build inputs each guest image is made from, pinned by build number and SHA-256. Change a build number (and the hashes) to move to a newer build.",
+  "comment": "The published AOSP build inputs each guest image is made from, pinned by build number and SHA-256. Change a build number (and the hashes) to move to a newer build. Raise revision (and the version suffix) to publish a remade image of the same build.",
   "images": [
     {
       "android_major": 17,
-      "version": "17.0.0-16373615",
+      "version": "17.0.0-16373615-7",
       "branch": "aosp-android-latest-release",
       "target": "aosp_cf_x86_64_only_phone-userdebug",
       "build_id": "16373615",
+      "revision": 7,
       "security_patch": "2026-06-05",
       "files": {
         "target_files": {
@@ -23,10 +24,11 @@
     },
     {
       "android_major": 16,
-      "version": "16.0.0-15581820",
+      "version": "16.0.0-15581820-7",
       "branch": "aosp-android-latest-release",
       "target": "aosp_cf_x86_64_only_phone-userdebug",
       "build_id": "15581820",
+      "revision": 7,
       "security_patch": "2025-12-05",
       "files": {
         "target_files": {

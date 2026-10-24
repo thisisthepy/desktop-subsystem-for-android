@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use ed25519_dalek::VerifyingKey;
 
-use super::manifest;
+use super::manifest::{self, ImageEntry};
 use super::policy::{decide, Decision, InstalledImage};
 use super::store::{Fetch, ImageStore};
 use super::trial::{self, Boot, Outcome};
@@ -38,6 +38,50 @@ pub fn check(
     list_url: &str,
     keys: &[VerifyingKey],
 ) -> Result<Option<String>, UpdateError> {
+    check_reporting(store, fetch, list_url, keys, &mut |_| {})
+}
+
+/// How far the download of an image has got.
+#[derive(Debug, Clone, Copy)]
+pub struct Download<'a> {
+    pub image: &'a ImageEntry,
+    /// Bytes of the image's files downloaded so far.
+    pub done: u64,
+    /// Bytes of all its files, as the release list gives them.
+    pub total: u64,
+}
+
+impl Download<'_> {
+    /// The download in words, for `dsa status`.
+    pub fn notice(&self) -> String {
+        let percent = (self.done as u128 * 100)
+            .checked_div(self.total as u128)
+            .unwrap_or(100);
+        format!(
+            "downloading Android {}: {percent}% ({} of {} GB)",
+            self.image.version,
+            gigabytes(self.done),
+            gigabytes(self.total)
+        )
+    }
+}
+
+/// Gigabytes with at most two decimals and no trailing zeros: 1.8, 0.45, 0.
+fn gigabytes(bytes: u64) -> String {
+    let text = format!("{:.2}", bytes as f64 / 1e9);
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// [`check`], calling `downloading` once before the download of a new image starts
+/// (`done` is 0) and again as it goes. A download takes minutes, and the user can be told
+/// what is happening meanwhile.
+pub fn check_reporting(
+    store: &ImageStore,
+    fetch: &dyn Fetch,
+    list_url: &str,
+    keys: &[VerifyingKey],
+    downloading: &mut dyn FnMut(&Download),
+) -> Result<Option<String>, UpdateError> {
     let mut list = Vec::new();
     fetch
         .fetch(list_url, &mut list)
@@ -56,12 +100,41 @@ pub fn check(
         Decision::UpToDate => Ok(None),
         Decision::Unsupported(why) => Ok(Some(why)),
         Decision::Apply(image) => {
-            store.stage(&image, &manifest, fetch)?;
+            let total = image.files.iter().map(|file| file.size).sum();
+            downloading(&Download {
+                image: &image,
+                done: 0,
+                total,
+            });
+            store.stage_reporting(&image, &manifest, fetch, &mut |done| {
+                downloading(&Download {
+                    image: &image,
+                    done,
+                    total,
+                })
+            })?;
             Ok(Some(format!(
                 "Android {} is downloaded and will be used the next time Android starts",
                 image.version
             )))
         }
+    }
+}
+
+/// When the image check runs next. A check scheduled while an image was in place stands,
+/// unless none is left now (the first image failed its first boot): then waiting for the
+/// regular interval would leave the user with no Android for that long, so it runs now if
+/// it was due later than `retry`.
+pub fn next_image_check(
+    scheduled: Instant,
+    now: Instant,
+    has_image: bool,
+    retry: Duration,
+) -> Instant {
+    if !has_image && scheduled > now + retry {
+        now
+    } else {
+        scheduled
     }
 }
 
@@ -108,6 +181,19 @@ impl Boot for SessionBoot {
     }
 }
 
+const NO_IMAGE_YET: &str = "no Android image is installed yet; the service downloads one after \
+     installation, and `dsa status` says when it is ready. Start Android again then";
+
+impl UpdatingAndroid {
+    /// Whether the current image is only a name, with no files to boot from.
+    fn no_image_yet(&self) -> bool {
+        self.store
+            .state()
+            .map(|state| !self.store.has_image(&state.current.version))
+            .unwrap_or(false)
+    }
+}
+
 /// A user's Android in a service that updates its image. A start while a new image is on
 /// trial boots it on trial, and goes back to the previous image when it fails.
 pub struct UpdatingAndroid {
@@ -124,6 +210,9 @@ impl UserAndroid for UpdatingAndroid {
         self.session.state()
     }
     fn last_reason(&self) -> Option<String> {
+        if self.no_image_yet() {
+            return Some(NO_IMAGE_YET.into());
+        }
         UserAndroid::last_reason(&*self.session)
     }
     fn stop(&self) {
@@ -132,9 +221,22 @@ impl UserAndroid for UpdatingAndroid {
     fn update_notice(&self) -> Option<String> {
         self.notices.get()
     }
+    fn vm_id(&self) -> Option<String> {
+        UserAndroid::vm_id(&*self.session)
+    }
 
     fn start(&self) {
-        let on_trial = self.store.state().map(|s| s.on_trial).unwrap_or(false);
+        if self.no_image_yet() {
+            return;
+        }
+        let state = self.store.state().ok();
+        let on_trial = state.as_ref().is_some_and(|s| s.on_trial);
+        // The first image since an installation without a bundled one has nothing before it.
+        let first = state.as_ref().is_some_and(|s| {
+            s.previous
+                .as_ref()
+                .is_none_or(|previous| !self.store.has_image(&previous.version))
+        });
         if self.session.state() != SessionState::Stopped
             || !on_trial
             || self.trial_running.swap(true, Ordering::SeqCst)
@@ -153,6 +255,10 @@ impl UserAndroid for UpdatingAndroid {
                 Ok(Outcome::Booted {
                     image,
                     confirmed: true,
+                }) if first => format!("Android {} is installed", image.version),
+                Ok(Outcome::Booted {
+                    image,
+                    confirmed: true,
                 }) => {
                     format!("Android was updated to {}", image.version)
                 }
@@ -164,6 +270,12 @@ impl UserAndroid for UpdatingAndroid {
                 }) => format!(
                     "Android {} did not start ({reason}), so Android {} is in use again",
                     failed.version, image.version
+                ),
+                Ok(Outcome::GaveUp { failed, reason }) => format!(
+                    "Android {} did not start ({reason}); no other image is installed. The \
+                     service downloads another image if there is one, and the next \
+                     version of DSA tries this one again",
+                    failed.version
                 ),
                 Err(error) => error.to_string(),
             });

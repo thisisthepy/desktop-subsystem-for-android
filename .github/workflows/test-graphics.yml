@@ -1,0 +1,173 @@
+# Builds the patched Android guest transport and Windows host renderer from source.
+name: Graphics test
+
+on:
+  pull_request:
+    paths:
+      - "dsa/graphics/**"
+      - "dsa/host/platform/windows/**"
+      - ".github/workflows/test-graphics.yml"
+      - "scripts/tests/graphics-workflow.test.sh"
+  workflow_dispatch:
+
+concurrency:
+  group: test-graphics-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
+  # A source build consumes the whole runner. A newer revision supersedes it.
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  guest-transport:
+    name: Build the guest Hyper-V graphics transport
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
+
+      - name: Fetch gfxstream and guest build dependencies
+        run: bash dsa/graphics/fetch.sh .scratch/gfxstream
+
+      - name: Build the guest transport
+        run: bash dsa/graphics/build.sh .scratch .scratch/build
+
+      - name: Verify ELF architecture and exported Hyper-V symbols
+        run: |
+          target=".scratch/build/libOpenglSystemCommon.so"
+          readelf -h "$target" | grep -Fq 'Advanced Micro Devices X86-64'
+          nm -D "$target" | grep -Fq 'HvSocketStream'
+          nm -D "$target" | grep -Fq 'goldfish_get_egl_tls'
+          target_vk=".scratch/build/vulkan.ranchu.so"
+          readelf -h "$target_vk" | grep -Fq 'Advanced Micro Devices X86-64'
+          nm -D "$target_vk" | grep -Fq 'vk_icdGetInstanceProcAddr'
+          nm -D "$target_vk" | grep -Fq 'HMI'
+
+      - name: Keep the patched guest library
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-gfxstream-hvsocket
+          path: |
+            .scratch/build/libOpenglSystemCommon.so
+            .scratch/build/vulkan.ranchu.so
+          if-no-files-found: error
+
+  host-renderer:
+    name: Build the host graphics renderer (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Fetch gfxstream and host build dependencies
+        shell: pwsh
+        run: |
+          & dsa/graphics/host/fetch.ps1 -ScratchDir .scratch
+
+      - name: Build the host graphics renderer
+        shell: pwsh
+        run: |
+          & dsa/graphics/host/build.ps1 -ScratchDir .scratch -OutDir .scratch/build-host
+
+      - name: Download software Vulkan (Mesa Lavapipe)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/mmozeiko/build-mesa/releases/download/26.2.5/mesa-lavapipe-x64-26.2.5.7z" -OutFile ".scratch/mesa-lavapipe.7z"
+          & "C:\Program Files\7-Zip\7z.exe" x .scratch/mesa-lavapipe.7z "-o.scratch/lavapipe" -y
+          $jsonPath = (Resolve-Path .scratch/lavapipe/lvp_icd.x86_64.json).Path
+          $dllPath = (Resolve-Path .scratch/lavapipe/vulkan_lvp.dll).Path
+
+          Copy-Item $dllPath -Destination "C:\Windows\System32\vulkan_lvp.dll" -Force
+          Copy-Item $dllPath -Destination ".scratch/build-host/dist/bin/vulkan_lvp.dll" -Force
+
+          $jsonObj = [ordered]@{
+              ICD = [ordered]@{
+                  api_version = "1.4.354"
+                  library_path = $dllPath
+              }
+              file_format_version = "1.0.1"
+          }
+          $jsonObj | ConvertTo-Json | Set-Content -Path $jsonPath -Encoding utf8
+
+          New-Item -Path "HKLM:\SOFTWARE\Khronos\Vulkan\Drivers" -Force | Out-Null
+          New-ItemProperty -Path "HKLM:\SOFTWARE\Khronos\Vulkan\Drivers" -Name $jsonPath -Value 0 -PropertyType DWord -Force | Out-Null
+
+      - name: Run host renderer smoke test on software Vulkan
+        shell: pwsh
+        env:
+          VK_ICD_FILENAMES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
+          VK_DRIVER_FILES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
+          VK_LOADER_DEBUG: all
+          GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
+        run: |
+          uv run dsa/graphics/host/test_host_renderer.py
+
+      - name: Run compositor graphics renderer integration test on software Vulkan
+        shell: pwsh
+        working-directory: dsa
+        env:
+          VK_ICD_FILENAMES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
+          VK_DRIVER_FILES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
+          VK_LOADER_DEBUG: all
+          GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
+        run: |
+          cargo test -p dsa-host-windows --test compositor -- pr3_compositor_serves_a_gfxstream_client --nocapture
+
+      - name: Keep the host renderer library and headers
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-gfxstream-windows
+          path: |
+            .scratch/build-host/dist/bin/gfxstream_backend.dll
+            .scratch/build-host/dist/include/
+          if-no-files-found: error
+
+  installer-package:
+    name: Package the installer with the host graphics renderer (windows)
+    needs: host-renderer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the host renderer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: host-gfxstream-windows
+          path: .scratch/host-gfxstream
+
+      - name: Install WiX 5
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.Util.wixext/5.0.2
+
+      - name: Build the package with gfxstream backend
+        shell: pwsh
+        run: |
+          $dll = (Get-ChildItem -Recurse .scratch/host-gfxstream -Filter "gfxstream_backend.dll").FullName
+          dsa/host/platform/windows/installer/build.ps1 -Version 0.1.0 -PlaceholderKernel `
+            -GfxstreamBackend $dll
+
+      - name: Verify gfxstream_backend.dll is packaged beside dsa-compositor.exe
+        shell: pwsh
+        run: |
+          $msi = (Resolve-Path "dsa/target/installer/dsa-0.1.0.msi").Path
+          Start-Process msiexec -Wait -ArgumentList "/a", "`"$msi`"", "/qn", "TARGETDIR=`"$PWD\msi-extracted`""
+          $dll = Get-ChildItem -Recurse msi-extracted -Filter "gfxstream_backend.dll"
+          if (-not $dll) {
+            throw "gfxstream_backend.dll was not found beside dsa-compositor.exe in the MSI"
+          }
+          $lic = Get-ChildItem -Recurse msi-extracted -Filter "gfxstream.txt"
+          if (-not $lic) {
+            throw "licenses/gfxstream.txt was not found in the MSI"
+          }
+          Write-Host "Verified gfxstream_backend.dll at $($dll.FullName) and licence at $($lic.FullName)"

@@ -86,6 +86,15 @@ message StartSession {}
 // Stops the caller's Android. Returns at once; the state moves on its own.
 message StopSession {}
 
+// Installs the newest version of DSA now instead of waiting until no Android is running.
+// It downloads that version first when it has not been downloaded yet, stops every user's
+// Android, and starts setup, which stops the service and starts the new one. It returns
+// once setup has started, or says that DSA is up to date.
+message UpdateProgram {}
+
+// Asks for the runtime ID of the caller's Android VM.
+message GetVmId {}
+
 // The caller's Android as the service sees it.
 message Status {
   SessionState state = 1;
@@ -98,6 +107,20 @@ message Status {
   string update_notice = 3;
 }
 
+// The answer to UpdateProgram.
+message ProgramUpdate {
+  // The version setup is installing. Empty when there is nothing newer to install.
+  string installing = 1;
+  // What happens next, in words for the user.
+  string detail = 2;
+}
+
+// The answer to GetVmId.
+message VmId {
+  // The runtime ID of the caller's Android VM. Empty when the VM is not running.
+  string vm_id = 1;
+}
+
 // What went wrong with a request.
 enum ErrorCode {
   ERROR_CODE_UNSPECIFIED = 0;
@@ -105,6 +128,9 @@ enum ErrorCode {
   ERROR_CODE_UNKNOWN_REQUEST = 1;
   // The service could not provide an Android for this user.
   ERROR_CODE_UNAVAILABLE = 2;
+  // DSA could not be updated: updates are off, the program list or the setup file did not
+  // check out, or setup could not start. The detail says which.
+  ERROR_CODE_UPDATE_FAILED = 3;
 }
 
 message Error {
@@ -120,6 +146,8 @@ message Request {
     GetStatus get_status = 2;
     StartSession start_session = 3;
     StopSession stop_session = 4;
+    UpdateProgram update_program = 5;
+    GetVmId get_vm_id = 6;
   }
 }
 
@@ -128,6 +156,8 @@ message Response {
   oneof body {
     Status status = 2;
     Error error = 3;
+    ProgramUpdate program_update = 4;
+    VmId vm_id = 5;
   }
 }
 

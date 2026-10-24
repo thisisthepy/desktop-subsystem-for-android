@@ -127,3 +127,24 @@ fn fr2_after_a_restart_the_host_listens_on_the_new_vm() {
         .collect();
     assert_eq!(ids, [1, 2]);
 }
+
+#[test]
+fn nfr5_a_guest_that_dies_leaves_the_host_listening_for_the_next_vm() {
+    let (session, slot, bindings) = host();
+    session.start();
+    let guest1 = guest(&bindings, 1);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    // The guest VM dies and its channel closes.
+    drop(guest1);
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(*slot.lock().unwrap(), None, "the dead VM's ID is withdrawn");
+
+    // The host remains alive and can start a new VM.
+    session.start();
+    let _guest2 = guest(&bindings, 2);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+}

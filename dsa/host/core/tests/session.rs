@@ -9,7 +9,8 @@ use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::session::{
     GuestLauncher, Session, SessionConfig, SessionError, SessionEvent, SessionState, StopReason,
 };
-use dsa_protocol::control::Role;
+use dsa_protocol::control::{envelope::Body, Envelope, Role};
+use dsa_protocol::encode;
 use dsa_protocol::handshake::{guest_connect, local_hello, HandshakeError};
 use dsa_transport::memory::{self, MemoryConnector};
 use dsa_transport::{Connection, Connector, TransportError};
@@ -23,6 +24,13 @@ struct Guest {
     starts: usize,
     fail_start: Option<String>,
     fail_stop: Option<String>,
+    /// Set to make the guest end by itself, as a VM that crashes during boot does.
+    exited: Option<String>,
+    /// What the launcher tells about the boot when a start fails.
+    diagnostics: Option<String>,
+    /// How many times the session asked for the diagnostics, and whether the guest was
+    /// already stopped each time.
+    diagnostics_asked: Vec<bool>,
 }
 
 #[derive(Clone, Default)]
@@ -60,6 +68,17 @@ impl GuestLauncher for FakeLauncher {
             }
             thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    fn exited(&mut self) -> Option<String> {
+        self.0.lock().unwrap().exited.clone()
+    }
+
+    fn diagnostics(&mut self) -> Option<String> {
+        let mut guest = self.0.lock().unwrap();
+        let stopped = guest.processes == 0;
+        guest.diagnostics_asked.push(stopped);
+        guest.diagnostics.clone()
     }
 }
 
@@ -141,7 +160,7 @@ fn fr2_an_agent_that_never_connects_returns_the_session_to_stopped_with_the_caus
         ]
     );
     match seen[2].reason.clone() {
-        Some(StopReason::AgentDidNotConnect { waited }) => assert!(waited >= timeout),
+        Some(StopReason::AgentDidNotConnect { waited, .. }) => assert!(waited >= timeout),
         other => panic!("expected AgentDidNotConnect, got {other:?}"),
     }
     assert_eq!(session.last_reason(), seen[2].reason);
@@ -298,9 +317,8 @@ fn fr2_a_stopped_session_can_start_again() {
 }
 
 #[test]
-fn fr2_frames_flow_both_ways_while_active() {
+fn fr2_the_host_can_send_frames_while_active() {
     let (session, mut connector) = session_with(FakeLauncher::default(), WAIT);
-    let incoming = session.incoming();
     assert_eq!(
         session.send(b"too early".to_vec()),
         Err(SessionError::NotActive(SessionState::Stopped))
@@ -309,10 +327,81 @@ fn fr2_frames_flow_both_ways_while_active() {
     let mut agent = connect_agent(&mut connector);
     assert!(session.wait_for(SessionState::Active, WAIT));
 
-    agent.send(b"from the agent").unwrap();
-    assert_eq!(incoming.recv_timeout(WAIT).unwrap(), b"from the agent");
     session.send(b"from the host".to_vec()).unwrap();
     assert_eq!(agent.recv(Some(WAIT)).unwrap(), b"from the host");
+}
+
+#[test]
+fn nfr5_a_malformed_control_frame_is_dropped_and_the_session_stays_active() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut agent = connect_agent(&mut connector);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    // A malformed frame arrives after handshake: it is discarded and the session stays active.
+    agent.send(b"not a valid protobuf envelope").unwrap();
+    thread::sleep(Duration::from_millis(50));
+    assert_eq!(session.state(), SessionState::Active);
+
+    // Host can still send to the agent, and clean shutdown works.
+    session.send(b"from the host".to_vec()).unwrap();
+    assert_eq!(agent.recv(Some(WAIT)).unwrap(), b"from the host");
+
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(session.last_reason(), Some(StopReason::Requested));
+}
+
+#[test]
+fn nfr5_an_unexpected_message_is_dropped_and_logged() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut agent = connect_agent(&mut connector);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    // A Hello after handshake has already completed is unexpected.
+    let hello = local_hello(Role::Guest, "dsa-guestd test");
+    let frame = encode(&Envelope {
+        body: Some(Body::Hello(hello)),
+    });
+    agent.send(&frame).unwrap();
+
+    // An empty envelope with no body is also dropped as unknown.
+    let empty = encode(&Envelope { body: None });
+    agent.send(&empty).unwrap();
+
+    thread::sleep(Duration::from_millis(50));
+    assert_eq!(session.state(), SessionState::Active);
+
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(session.last_reason(), Some(StopReason::Requested));
+}
+
+#[test]
+fn nfr5_a_guest_that_dies_leaves_the_host_alive_and_can_start_again() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let agent = connect_agent(&mut connector);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    // Guest VM dies and drops its channel.
+    drop(agent);
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert!(matches!(
+        session.last_reason(),
+        Some(StopReason::ChannelLost(_))
+    ));
+    assert_eq!(launcher.processes(), 0);
+
+    // Host remains alive and the session can be started again.
+    session.start();
+    let _second_agent = connect_agent(&mut connector);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(launcher.processes(), 3);
 }
 
 #[test]
@@ -345,4 +434,97 @@ fn pr5_a_start_through_the_local_api_answers_after_the_session_has_moved() {
     assert!(UserAndroid::last_reason(&session)
         .unwrap()
         .contains("no kernel"));
+}
+
+#[test]
+fn fr2_a_start_that_times_out_reports_what_the_launcher_saw_of_the_boot() {
+    let launcher = FakeLauncher::default();
+    launcher.0.lock().unwrap().diagnostics =
+        Some("the guest's last console lines:\n  Kernel panic - not syncing: VFS".into());
+    let timeout = Duration::from_millis(200);
+    let (session, _connector) = session_with(launcher.clone(), timeout);
+    session.start();
+    assert!(session.wait_for(SessionState::Starting, WAIT));
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+
+    let reason = session.last_reason().expect("a reason");
+    match &reason {
+        StopReason::AgentDidNotConnect { diagnostics, .. } => assert_eq!(
+            diagnostics.as_deref(),
+            Some("the guest's last console lines:\n  Kernel panic - not syncing: VFS")
+        ),
+        other => panic!("expected AgentDidNotConnect, got {other:?}"),
+    }
+    let text = reason.to_string();
+    assert!(
+        text.starts_with("the agent did not connect to the control channel within"),
+        "{text}"
+    );
+    assert!(
+        text.ends_with("\nthe guest's last console lines:\n  Kernel panic - not syncing: VFS"),
+        "{text}"
+    );
+    assert_eq!(
+        launcher.0.lock().unwrap().diagnostics_asked,
+        [true],
+        "asked once, after the guest had stopped"
+    );
+}
+
+#[test]
+fn fr2_a_guest_that_exits_during_boot_ends_the_start_without_waiting_for_the_timeout() {
+    let launcher = FakeLauncher::default();
+    {
+        let mut guest = launcher.0.lock().unwrap();
+        guest.exited = Some("the guest exited during boot".into());
+        guest.diagnostics = Some("last line: init: reboot".into());
+    }
+    let (session, _connector) = session_with(launcher.clone(), Duration::from_secs(600));
+    let events = session.events();
+    let asked = std::time::Instant::now();
+    session.start();
+
+    let seen = next_states(&events, 3);
+    assert_eq!(
+        states(&seen),
+        [
+            SessionState::Starting,
+            SessionState::Stopping,
+            SessionState::Stopped
+        ]
+    );
+    assert!(
+        asked.elapsed() < WAIT,
+        "the start ended long before the connect timeout"
+    );
+    assert_eq!(
+        seen[2].reason,
+        Some(StopReason::GuestExited {
+            why: "the guest exited during boot".into(),
+            diagnostics: Some("last line: init: reboot".into()),
+        })
+    );
+    assert_eq!(
+        seen[2].reason.as_ref().unwrap().to_string(),
+        "the guest exited during boot\nlast line: init: reboot"
+    );
+    assert_eq!(
+        launcher.processes(),
+        0,
+        "what was left of the guest was stopped"
+    );
+}
+
+#[test]
+fn fr2_a_stop_on_request_does_not_ask_for_boot_diagnostics() {
+    let launcher = FakeLauncher::default();
+    launcher.0.lock().unwrap().diagnostics = Some("not wanted".into());
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let _agent = connect_agent(&mut connector);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(session.last_reason(), Some(StopReason::Requested));
+    assert!(launcher.0.lock().unwrap().diagnostics_asked.is_empty());
 }

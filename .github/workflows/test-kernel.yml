@@ -45,6 +45,9 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
         run: echo "${{ inputs.tag }}" > dsa/kernel/wsl-kernel.tag
 
+      - name: Test the kernel configuration
+        run: python3 dsa/kernel/test_android_config.py
+
       - name: Configure and check the fragment
         run: dsa/kernel/build.sh --config-only
 

@@ -15,7 +15,8 @@ It takes the pinned target_files and otatools (fetch.sh downloads them) and:
 The results go to dsa/target/image/<version>/:
 
 - disk.vhdx: a new user's Android disk (dynamic, so it holds only what is written): the
-  super partition with Android itself, its verified boot data, and empty misc, metadata
+  super partition with Android itself, its verified boot data (the vbmeta images, and the
+  boot images verified boot checks: boot, init_boot, vendor_boot), and empty misc, metadata
   and userdata partitions that Android formats on first boot;
 - initrd.img: the vendor and generic ramdisks, which the VM boots with DSA's kernel;
 - image.json: the version, the kernel command line the VM needs, and the files' SHA-256.
@@ -28,6 +29,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -43,21 +45,64 @@ REMOVED_APPS = ["Launcher3QuickStep", "SystemUI", "LatinIME"]
 # The user's disk. The super partition's UUID is how first-stage init finds the disk, so it
 # is fixed and passed on the kernel command line.
 SUPER_UUID = "6b1ad5ad-0d5a-4dd3-9a6b-5a0a1d5a5a17"
+MISC_UUID = "811d3bbb-a7ff-437a-857f-f54af996b190"
 DISK_SIZE = 64 << 30
-SMALL_PARTITIONS = [
+SYSTEM_SMALL_PARTITIONS = [
     ("misc", 1 << 20),
-    ("metadata", 64 << 20),
     ("vbmeta_a", 1 << 20),
     ("vbmeta_system_a", 1 << 20),
     ("vbmeta_system_dlkm_a", 1 << 20),
     ("vbmeta_vendor_dlkm_a", 1 << 20),
+    # Verified boot reads these: the top-level vbmeta chains to boot and init_boot and
+    # holds the hash of vendor_boot, so without them first stage init cannot set up
+    # verity and does not mount /system. The VM boots DSA's kernel and initrd, not these.
+    # AVB finds the footer at the end of each partition, so these must match
+    # the partition sizes used when sign_target_files_apks signs the images.
+    ("boot_a", 64 << 20),
+    ("init_boot_a", 8 << 20),
+    ("vendor_boot_a", 64 << 20),
 ]
+SMALL_PARTITIONS = SYSTEM_SMALL_PARTITIONS
+
+DATA_PARTITIONS = [
+    ("metadata", 64 << 20),
+    ("userdata", 0),
+]
+
+# What is written to each partition, from the signed build's IMAGES/.
+PARTITION_IMAGES = {
+    "vbmeta_a": "vbmeta.img",
+    "vbmeta_system_a": "vbmeta_system.img",
+    "vbmeta_system_dlkm_a": "vbmeta_system_dlkm.img",
+    "vbmeta_vendor_dlkm_a": "vbmeta_vendor_dlkm.img",
+    "boot_a": "boot.img",
+    "init_boot_a": "init_boot.img",
+    "vendor_boot_a": "vendor_boot.img",
+}
 
 USER_PROPS = {
     "ro.debuggable": "0",
     "ro.adb.secure": "1",
     "ro.secure": "1",
     "ro.force.debuggable": "0",
+}
+
+GRAPHICS_PROPS = {
+    "ro.hardware.egl": "angle",
+    "ro.hardware.vulkan": "ranchu",
+    "ro.hardware.gralloc": "minigbm",
+    "ro.cpuvulkan.version": "0",
+}
+
+# Cuttlefish ships selectable vendor APEX implementations. Its launcher passes
+# the selections in bootconfig. DSA does not run that launcher, so choose the
+# implementations that can start without Cuttlefish remote services before
+# apexd scans the vendor APEX directory.
+VENDOR_APEX_BOOTCONFIG = {
+    "com.android.hardware.gatekeeper": "com.android.hardware.gatekeeper.nonsecure",
+    "com.android.hardware.keymint": "com.android.hardware.keymint.rust_nonsecure",
+    "com.android.hardware.graphics.composer": "com.android.hardware.graphics.composer.ranchu",
+    "com.google.emulated.camera.provider.hal": "com.google.emulated.camera.provider.hal",
 }
 
 
@@ -74,21 +119,94 @@ def sha256(path):
     return h.hexdigest()
 
 
+def is_wsl_windows_mount(parts):
+    """Whether resolved path parts name a WSL mount of a Windows drive."""
+    return len(parts) >= 3 and parts[1] == "mnt"
+
+
+def use_windows_sparse_file(path, windows=None, wsl_distro=None):
+    """Whether `path` is on Windows' NTFS, where WSL ftruncate allocates the whole file."""
+    windows = os.name == "nt" if windows is None else windows
+    wsl_distro = os.environ.get("WSL_DISTRO_NAME") if wsl_distro is None else wsl_distro
+    return windows or (bool(wsl_distro) and is_wsl_windows_mount(path.resolve().parts))
+
+
+def windows_path(path):
+    """The Windows spelling of `path`, from either Windows or WSL."""
+    if os.name == "nt":
+        return str(path.resolve())
+    return subprocess.run(
+        ["wslpath", "-w", path], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def make_raw_disk(path, size):
+    """Makes a zero-filled virtual disk without reserving its full size on NTFS."""
+    path.unlink(missing_ok=True)
+    if use_windows_sparse_file(path):
+        path_text = windows_path(path).replace("'", "''")
+        command = (
+            f"$path = '{path_text}'; New-Item -ItemType File -Force -Path $path | Out-Null; "
+            f"fsutil sparse setflag $path; fsutil file seteof $path {size}"
+        )
+        run("powershell.exe", "-NoProfile", "-Command", command)
+    else:
+        with open(path, "wb") as f:
+            f.truncate(size)
+
+
+def materialize_backup_gpt(path):
+    """Writes the backup GPT through Windows on a Windows sparse file.
+
+    DrvFs can leave the final sparse range unallocated after `sgdisk` writes the backup
+    GPT. qemu-img then converts it as zeroes, and the guest loses GPT partition names.
+    A GPT with 128 128-byte entries has a 32-sector entry array and one header sector.
+    """
+    if not use_windows_sparse_file(path):
+        return
+    path_text = windows_path(path).replace("'", "''")
+    command = (
+        f"$path = '{path_text}'; $stream = [System.IO.File]::Open($path, 'Open', 'ReadWrite', 'None'); "
+        "try { $bytes = New-Object byte[] 16896; $start = $stream.Length - $bytes.Length; "
+        "$stream.Position = $start; $read = $stream.Read($bytes, 0, $bytes.Length); "
+        "if ($read -ne $bytes.Length) { throw 'the raw disk has no complete backup GPT' }; "
+        "$stream.Position = $start; $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }"
+    )
+    run("powershell.exe", "-NoProfile", "-Command", command)
+
+
+def command_line_partitions(partitions, uuids=None):
+    """Returns the Hyper-V SCSI layout that restores GPT names in early Android init.
+
+    Hyper-V's virtual SCSI controller exposes the GPT partition devices but omits their
+    PARTNAME uevent property. The kernel's command-line partition parser supplies those
+    names before first-stage init starts. Every range comes from the GPT we just wrote, so
+    an AOSP super image changing size does not change the mapping by assumption.
+    """
+    entries = []
+    uuids = {} if uuids is None else uuids
+    for name, (offset, size) in partitions.items():
+        identifier = f"{name}:{uuids[name]}" if name in uuids else name
+        entries.append(f"{size}@{offset}({identifier})")
+    return "blkdevparts=sda:" + ",".join(entries)
+
+
 def removed(name):
     """Whether a target_files member belongs to an app the guest must not have."""
     return any(f"/{app}/" in name for app in REMOVED_APPS)
 
 
 def edit_props(text):
+    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS}
     out = []
     for line in text.splitlines():
         key = line.split("=", 1)[0]
-        if key in USER_PROPS:
+        if key in props_to_apply:
             continue
         if key.endswith("build.type"):
             line = f"{key}=user"
         out.append(line)
-    out += [f"{k}={v}" for k, v in USER_PROPS.items()]
+    out += [f"{k}={v}" for k, v in props_to_apply.items()]
     return "\n".join(out) + "\n"
 
 
@@ -106,13 +224,217 @@ FSTAB_DIRS = {
     "VENDOR_BOOT/RAMDISK/first_stage_ramdisk/system/etc/": "META/vendor_boot_filesystem_config.txt",
 }
 
+# The transport library stays in vendor with the rest of the Cuttlefish graphics stack.
+# Supplying it at image-build time keeps the signed target_files archive as the single
+# source from which AVB-protected partitions are generated.
+GFXSTREAM_LIBRARY = "VENDOR/lib64/libOpenglSystemCommon.so"
+VULKAN_RANCHU_LIBRARY = "VENDOR/lib64/hw/vulkan.ranchu.so"
 
-def modify(source, dest):
+
+def update_vendor_file_contexts(fc_text):
+    """Adds same_process_hal_file contexts for guest graphics libraries if not present."""
+    lines = fc_text.splitlines()
+    entries = [
+        (r"/vendor/lib64/hw/vulkan\.ranchu\.so", "/vendor/lib64/hw/vulkan\\.ranchu\\.so u:object_r:same_process_hal_file:s0"),
+        (r"/vendor/lib64/libOpenglSystemCommon\.so", "/vendor/lib64/libOpenglSystemCommon\\.so u:object_r:same_process_hal_file:s0"),
+    ]
+    for pattern, rule in entries:
+        if not any(pattern in line for line in lines):
+            lines.append(rule)
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def update_vendor_filesystem_config(fs_config_text):
+    """Adds filesystem configuration entries for guest graphics libraries if not present."""
+    lines = fs_config_text.splitlines()
+    entries = [
+        ("vendor/lib64/hw/vulkan.ranchu.so", "vendor/lib64/hw/vulkan.ranchu.so 0 0 644 capabilities=0x0"),
+        ("vendor/lib64/libOpenglSystemCommon.so", "vendor/lib64/libOpenglSystemCommon.so 0 0 644 capabilities=0x0"),
+    ]
+    for path, rule in entries:
+        if not any(line.startswith(path + " ") for line in lines):
+            lines.append(rule)
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+# Minimal socket permissions needed by guest gfxstream client connections.
+GFXSTREAM_ALLOWED_PERMS = {
+    "create", "connect", "read", "write", "getattr", "setopt", "getopt", "shutdown"
+}
+SEPOLICY_FRAGMENT = HERE / "sepolicy/graphics-vsock.cil"
+
+
+def narrow_vsock_neverallows(text):
+    """Narrows neverallow rules on vsock_socket so apps can connect to host graphics."""
+    pattern = re.compile(
+        r"\(neverallow\s+([^\s()]+)\s+([^\s()]+)\s+\(\s*vsock_socket\s*\(([^)]*)\)\)\)"
+    )
+
+    def replace(m):
+        src, tgt, perms_str = m.group(1), m.group(2), m.group(3)
+        perms = [p for p in perms_str.split() if p not in GFXSTREAM_ALLOWED_PERMS]
+        if not perms:
+            return ""
+        return f"(neverallow {src} {tgt} (vsock_socket ({' '.join(perms)})))"
+
+    narrowed = pattern.sub(replace, text)
+
+    cps_pattern = re.compile(
+        r"\(classpermissionset\s+([^\s()]+)\s+\(\s*vsock_socket\s*\(([^)]*)\)\)\)"
+    )
+
+    def replace_cps(m):
+        name, perms_str = m.group(1), m.group(2)
+        perms = [p for p in perms_str.split() if p not in GFXSTREAM_ALLOWED_PERMS]
+        if not perms:
+            return ""
+        return f"(classpermissionset {name} (vsock_socket ({' '.join(perms)})))"
+
+    narrowed = cps_pattern.sub(replace_cps, narrowed)
+    return re.sub(r"\n{3,}", "\n\n", narrowed)
+
+
+def patch_plat_sepolicy(plat_sepolicy_text, fragment_text):
+    """Narrows neverallows on vsock_socket and appends the graphics vsock policy rules."""
+    narrowed = narrow_vsock_neverallows(plat_sepolicy_text)
+    rules = []
+    for line in fragment_text.splitlines():
+        line = line.strip()
+        if not line or line.startswith(";"):
+            continue
+        m = re.match(r"\(allow\s+([^\s()]+)", line)
+        if m:
+            subject = m.group(1)
+            if subject in plat_sepolicy_text:
+                rules.append(line)
+        else:
+            rules.append(line)
+    return narrowed.rstrip() + "\n\n" + "\n".join(rules) + "\n"
+
+
+def compute_plat_sepolicy_sha256(plat_sepolicy_bytes, mapping_bytes):
+    """Computes the SHA-256 hash of plat_sepolicy.cil concatenated with the mapping file."""
+    h = hashlib.sha256()
+    h.update(plat_sepolicy_bytes)
+    h.update(mapping_bytes)
+    return h.hexdigest() + "\n"
+
+
+def recompile_precompiled_sepolicy(otatools, cil_map, work_dir=None):
+    """Recompiles precompiled_sepolicy with secilc from otatools if available."""
+    if not otatools:
+        return None
+    secilc = Path(otatools) / "bin/secilc"
+    if not secilc.exists():
+        return None
+    if not os.access(secilc, os.X_OK):
+        try:
+            secilc.chmod(0o755)
+        except OSError:
+            pass
+    if not os.access(secilc, os.X_OK):
+        return None
+
+    with tempfile.TemporaryDirectory(dir=work_dir) as tmp:
+        tmp_path = Path(tmp)
+        cil_paths = []
+        ordered_keys = [
+            "SYSTEM/etc/selinux/plat_sepolicy.cil",
+            "SYSTEM/etc/selinux/mapping/",
+            "VENDOR/etc/selinux/plat_pub_versioned.cil",
+            "SYSTEM_EXT/etc/selinux/system_ext_sepolicy.cil",
+            "SYSTEM_EXT/etc/selinux/mapping/",
+            "PRODUCT/etc/selinux/product_sepolicy.cil",
+            "PRODUCT/etc/selinux/mapping/",
+            "VENDOR/etc/selinux/vendor_sepolicy.cil",
+            "ODM/etc/selinux/odm_sepolicy.cil",
+        ]
+        included = set()
+        for key in ordered_keys:
+            if key.endswith("/"):
+                for name, data in sorted(cil_map.items()):
+                    if name.startswith(key) and name.endswith(".cil") and name not in included:
+                        f = tmp_path / Path(name).name
+                        f.write_bytes(data)
+                        cil_paths.append(str(f))
+                        included.add(name)
+            elif key in cil_map and key not in included:
+                f = tmp_path / Path(key).name
+                f.write_bytes(cil_map[key])
+                cil_paths.append(str(f))
+                included.add(key)
+        for name, data in sorted(cil_map.items()):
+            if name.endswith(".cil") and name not in included:
+                f = tmp_path / Path(name).name
+                f.write_bytes(data)
+                cil_paths.append(str(f))
+                included.add(name)
+
+        out_policy = tmp_path / "precompiled_sepolicy"
+        cmd = [
+            str(secilc),
+            "-m",
+            "-M", "true",
+            "-G",
+            "-N",
+            "-c", "30",
+            "-o", str(out_policy),
+            "-f", "/dev/null",
+            *cil_paths,
+        ]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0 and out_policy.exists():
+                return out_policy.read_bytes()
+            print(f"secilc failed (code {res.returncode}): {res.stderr}")
+        except Exception as e:
+            print(f"Could not execute secilc: {e}")
+        return None
+
+
+def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=None):
     """Copies target_files, removing the shell apps and the published kernel modules,
     switching to a user build and adding the Hyper-V mount table."""
     fstab = (HERE / "fstab.dsa").read_bytes()
+    graphics_payload = Path(graphics_library).read_bytes() if graphics_library else None
+    vulkan_payload = Path(vulkan_driver).read_bytes() if vulkan_driver else None
+    replaced_graphics_payload = False
+    replaced_vulkan_payload = False
     kept_modules = re.compile(r"^(VENDOR_BOOT/RAMDISK|VENDOR_DLKM|SYSTEM_DLKM)/lib/modules/.*\.ko$")
+
+    fragment_text = SEPOLICY_FRAGMENT.read_text() if SEPOLICY_FRAGMENT.exists() else ""
+    cil_map = {}
+    new_plat_bytes = None
+    new_sha256 = None
+    recompiled_policy = None
+
     with zipfile.ZipFile(source) as zin, zipfile.ZipFile(dest, "w", zipfile.ZIP_STORED, allowZip64=True) as zout:
+        names = set(zin.namelist())
+        for name in names:
+            if name.endswith(".cil"):
+                cil_map[name] = zin.read(name)
+
+        if "SYSTEM/etc/selinux/plat_sepolicy.cil" in cil_map:
+            plat_orig = cil_map["SYSTEM/etc/selinux/plat_sepolicy.cil"].decode()
+            plat_patched = patch_plat_sepolicy(plat_orig, fragment_text)
+            new_plat_bytes = plat_patched.encode()
+            cil_map["SYSTEM/etc/selinux/plat_sepolicy.cil"] = new_plat_bytes
+
+            mapping_bytes = b""
+            if "VENDOR/etc/selinux/plat_sepolicy_vers.txt" in names:
+                vers = zin.read("VENDOR/etc/selinux/plat_sepolicy_vers.txt").decode().strip()
+                mapping_key = f"SYSTEM/etc/selinux/mapping/{vers}.cil"
+                if mapping_key in cil_map:
+                    mapping_bytes = cil_map[mapping_key]
+            if not mapping_bytes:
+                for k in cil_map:
+                    if k.startswith("SYSTEM/etc/selinux/mapping/") and k.endswith(".cil"):
+                        mapping_bytes = cil_map[k]
+                        break
+
+            new_sha256 = compute_plat_sepolicy_sha256(new_plat_bytes, mapping_bytes)
+            recompiled_policy = recompile_precompiled_sepolicy(otatools, cil_map)
+
         for info in zin.infolist():
             name = info.filename
             if removed(name) or kept_modules.match(name):
@@ -120,30 +442,65 @@ def modify(source, dest):
             if name.startswith("IMAGES/"):
                 # Rebuilt after signing from the modified contents.
                 continue
-            data = zin.read(name)
-            if name in PROP_FILES:
-                data = edit_props(data.decode()).encode()
-            elif name.endswith("lib/modules/modules.load") or name.endswith("lib/modules/modules.dep"):
-                data = b""
-            elif name == "META/apkcerts.txt":
-                data = b"".join(
-                    line + b"\n" for line in data.splitlines() if not any(f'name="{a}.apk"' in line.decode() for a in REMOVED_APPS)
-                )
-            elif name in FSTAB_DIRS.values():
-                text = data.decode()
-                for directory, config in FSTAB_DIRS.items():
-                    if config == name:
-                        # vendor/etc/... for the partition, first_stage_ramdisk/... for the ramdisk.
-                        if name.startswith("META/vendor_boot"):
-                            prefix = directory.split("RAMDISK/", 1)[1]
-                        else:
-                            prefix = directory.lower()
-                        text += f"{prefix}fstab.dsa 0 0 644 capabilities=0x0\n"
-                data = text.encode()
+            if name.endswith("/etc/selinux/precompiled_sepolicy"):
+                if recompiled_policy is not None:
+                    data = recompiled_policy
+                else:
+                    continue  # Delete precompiled_sepolicy so the device compiles it at boot.
+            elif name == "SYSTEM/etc/selinux/plat_sepolicy.cil" and new_plat_bytes is not None:
+                data = new_plat_bytes
+            elif new_sha256 is not None and name in {
+                "SYSTEM/etc/selinux/plat_sepolicy_and_mapping.sha256",
+                "VENDOR/etc/selinux/precompiled_sepolicy.plat_sepolicy_and_mapping.sha256",
+                "ODM/etc/selinux/precompiled_sepolicy.plat_sepolicy_and_mapping.sha256",
+            }:
+                data = new_sha256.encode()
+            elif name == GFXSTREAM_LIBRARY and graphics_payload is not None:
+                data = graphics_payload
+                replaced_graphics_payload = True
+            elif name == VULKAN_RANCHU_LIBRARY and vulkan_payload is not None:
+                data = vulkan_payload
+                replaced_vulkan_payload = True
+            else:
+                data = zin.read(name)
+                if name in PROP_FILES:
+                    data = edit_props(data.decode()).encode()
+                elif name.endswith("lib/modules/modules.load") or name.endswith("lib/modules/modules.dep"):
+                    data = b""
+                elif name == "META/apkcerts.txt":
+                    data = b"".join(
+                        line + b"\n" for line in data.splitlines() if not any(f'name="{a}.apk"' in line.decode() for a in REMOVED_APPS)
+                    )
+                elif name in FSTAB_DIRS.values():
+                    text = data.decode()
+                    for directory, config in FSTAB_DIRS.items():
+                        if config == name:
+                            # vendor/etc/... for the partition, first_stage_ramdisk/... for the ramdisk.
+                            if name.startswith("META/vendor_boot"):
+                                prefix = directory.split("RAMDISK/", 1)[1]
+                            else:
+                                prefix = directory.lower()
+                            text += f"{prefix}fstab.dsa 0 0 644 capabilities=0x0\n"
+                    if name == "META/vendor_filesystem_config.txt":
+                        text = update_vendor_filesystem_config(text)
+                    data = text.encode()
+                elif name in ("VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"):
+                    data = update_vendor_file_contexts(data.decode()).encode()
             info.compress_type = zipfile.ZIP_STORED
             zout.writestr(info, data)
         for directory in FSTAB_DIRS:
             zout.writestr(directory + "fstab.dsa", fstab)
+        if vulkan_payload is not None and not replaced_vulkan_payload:
+            zout.writestr(VULKAN_RANCHU_LIBRARY, vulkan_payload)
+            replaced_vulkan_payload = True
+        if "VENDOR/etc/selinux/vendor_file_contexts" not in names:
+            zout.writestr(
+                "VENDOR/etc/selinux/vendor_file_contexts",
+                update_vendor_file_contexts("").encode(),
+            )
+    if graphics_payload is not None and not replaced_graphics_payload:
+        dest.unlink(missing_ok=True)
+        raise ValueError(f"target_files does not contain {GFXSTREAM_LIBRARY}")
 
 
 def key_arguments(target_files, keys):
@@ -174,10 +531,34 @@ def key_arguments(target_files, keys):
     avb = f"{keys}/avb.pem"
     for part in ["vbmeta", "vbmeta_system", "vbmeta_vendor", "boot", "init_boot"]:
         args += [f"--avb_{part}_key", avb, f"--avb_{part}_algorithm", "SHA256_RSA4096"]
-    for part in ["vbmeta_system_dlkm", "vbmeta_vendor_dlkm"]:
+    for part in ["vendor_boot", "vbmeta_system_dlkm", "vbmeta_vendor_dlkm"]:
         args += ["--avb_extra_custom_image_key", f"{part}={avb}"]
         args += ["--avb_extra_custom_image_algorithm", f"{part}=SHA256_RSA4096"]
     return args
+
+
+def extract_tree(z, prefix, dest):
+    """Writes the entries under prefix to dest as the tree they describe.
+
+    zipfile.extract would turn symbolic links into files holding their target, and the
+    ramdisk would lose its empty directories (proc, sys, dev...), which first stage init
+    mounts onto: without them it stops and the kernel panics.
+    """
+    shutil.rmtree(dest, ignore_errors=True)
+    dest.mkdir(parents=True)
+    for info in z.infolist():
+        if not info.filename.startswith(prefix) or info.filename == prefix:
+            continue
+        path = dest / info.filename[len(prefix):]
+        mode = info.external_attr >> 16
+        if info.filename.endswith("/"):
+            path.mkdir(parents=True, exist_ok=True)
+        elif stat.S_ISLNK(mode):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            os.symlink(z.read(info).decode(), path)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(z.read(info))
 
 
 def ramdisk(signed, otatools, work, out):
@@ -187,10 +568,8 @@ def ramdisk(signed, otatools, work, out):
         for prefix, config in [("VENDOR_BOOT/RAMDISK/", "META/vendor_boot_filesystem_config.txt"), ("INIT_BOOT/RAMDISK/", "META/init_boot_filesystem_config.txt")]:
             root = work / prefix.split("/")[0].lower()
             shutil.rmtree(root, ignore_errors=True)
-            for name in z.namelist():
-                if name.startswith(prefix) and not name.endswith("/"):
-                    z.extract(name, work / "extract")
             src = work / "extract" / prefix
+            extract_tree(z, prefix, src)
             src.mkdir(parents=True, exist_ok=True)
             cfg = work / f"{root.name}.fs_config"
             cfg.write_bytes(z.read(config))
@@ -199,8 +578,42 @@ def ramdisk(signed, otatools, work, out):
     out.write_bytes(b"".join(parts))
 
 
-def disk(images, otatools, work, out):
-    """Lays the images out on a new user's disk and converts it to a dynamic VHDX."""
+def verified_boot_partitions(vbmeta, otatools):
+    """The partitions verified boot reads from the disk itself: those the top-level vbmeta
+    chains to or holds a whole-partition hash of. Hashtree partitions live in super."""
+    # avbtool is a native launcher in otatools, run as it is.
+    result = subprocess.run([otatools / "bin/avbtool", "info_image", "--image", vbmeta],
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        sys.exit(f"avbtool could not read {vbmeta.name}: {result.stderr.strip()}")
+    info = result.stdout
+    found, kind = [], None
+    for line in info.splitlines():
+        line = line.strip()
+        if line.endswith("descriptor:"):
+            kind = line
+        elif line.startswith("Partition Name:") and kind in ("Chain Partition descriptor:", "Hash descriptor:"):
+            found.append((kind.split()[0].lower(), line.split(":", 1)[1].strip()))
+    return found
+
+
+def unlisted_verified_boot_partitions(found, fstab):
+    """The verified boot partitions outside vbmeta that lack a first-stage fstab entry.
+
+    First-stage init creates by-name links only for partitions it is told it needs. AVB
+    reads partitions a hash descriptor covers, so an omitted entry makes verification fail
+    before /system can mount. Chained vbmeta images are resolved by the AVB loader.
+    """
+    listed = set()
+    for line in fstab.splitlines():
+        fields = line.split()
+        if len(fields) >= 5 and not line.startswith("#") and "first_stage_mount" in fields[4].split(","):
+            listed.add(fields[0].rsplit("/", 1)[-1])
+    return [name for _, name in found if name not in listed]
+
+
+def system_disk(images, otatools, work, out):
+    """Lays the system images out on the shared read-only system disk and converts it to a dynamic VHDX."""
     super_raw = work / "super.raw"
     super_img = images / "super.img"
     with open(super_img, "rb") as f:
@@ -209,35 +622,87 @@ def disk(images, otatools, work, out):
         run(otatools / "bin/simg2img", super_img, super_raw)
     else:
         shutil.copy(super_img, super_raw)
-    raw = work / "disk.raw"
-    raw.unlink(missing_ok=True)
-    with open(raw, "wb") as f:
-        f.truncate(DISK_SIZE)
+    raw = work / "system.raw"
+    needed = sum(size for _, size in SYSTEM_SMALL_PARTITIONS) + super_raw.stat().st_size + (128 << 20)
+    system_disk_size = ((needed + (1 << 20) - 1) // (1 << 20)) * (1 << 20)
+    make_raw_disk(raw, system_disk_size)
+    on_disk = {name for name, _ in SYSTEM_SMALL_PARTITIONS}
+    found = verified_boot_partitions(images / "vbmeta.img", otatools)
+    missing = [n for _, n in found if f"{n}_a" not in on_disk]
+    if missing:
+        sys.exit(f"verified boot reads {', '.join(missing)}, which the disk layout has no partition for")
+    unlisted = unlisted_verified_boot_partitions(found, (HERE / "fstab.dsa").read_text())
+    if unlisted:
+        sys.exit(f"verified boot reads {', '.join(unlisted)}, which fstab.dsa does not list for first stage mount")
     sgdisk = shutil.which("sgdisk") or str(otatools / "bin/sgdisk")
     cmd = [sgdisk, "--clear"]
     number = 1
-    for name, size in SMALL_PARTITIONS:
+    for name, size in SYSTEM_SMALL_PARTITIONS:
         cmd += [f"--new={number}:0:+{size // 1024}K", f"--change-name={number}:{name}"]
+        if name == "misc":
+            cmd += [f"--partition-guid={number}:{MISC_UUID}"]
         number += 1
-    cmd += [f"--new={number}:0:+{super_raw.stat().st_size // 1024}K", f"--change-name={number}:super", f"--partition-guid={number}:{SUPER_UUID}"]
-    number += 1
-    cmd += [f"--new={number}:0:0", f"--change-name={number}:userdata", str(raw)]
+    cmd += [f"--new={number}:0:+{super_raw.stat().st_size // 1024}K", f"--change-name={number}:super", f"--partition-guid={number}:{SUPER_UUID}", str(raw)]
     run(*cmd)
+    materialize_backup_gpt(raw)
     layout = subprocess.run([sgdisk, "--print", raw], check=True, capture_output=True, text=True).stdout
-    starts = {}
+    partitions = {}
     for line in layout.splitlines():
         m = re.match(r"\s*(\d+)\s+(\d+)\s+(\d+)\s+\S+\s+\S+\s+\S+\s+(\S+)", line)
         if m:
-            starts[m.group(4)] = int(m.group(2)) * 512
+            first, last = int(m.group(2)), int(m.group(3))
+            partitions[m.group(4)] = (first * 512, (last - first + 1) * 512)
     print(layout)
-    for name, image in [("super", super_raw), ("vbmeta_a", images / "vbmeta.img"), ("vbmeta_system_a", images / "vbmeta_system.img"), ("vbmeta_system_dlkm_a", images / "vbmeta_system_dlkm.img"), ("vbmeta_vendor_dlkm_a", images / "vbmeta_vendor_dlkm.img")]:
+    sizes = dict(SYSTEM_SMALL_PARTITIONS)
+    writes = [("super", super_raw)] + [(name, images / file) for name, file in PARTITION_IMAGES.items()]
+    for name, image in writes:
         if not image.exists():
             continue
-        run("dd", f"if={image}", f"of={raw}", "bs=1M", f"seek={starts[name]}", "oflag=seek_bytes", "conv=notrunc,sparse", "status=none")
+        if name in sizes and image.stat().st_size > sizes[name]:
+            sys.exit(f"{image.name} is {image.stat().st_size} bytes, more than the {name} partition holds")
+        run("dd", f"if={image}", f"of={raw}", "bs=1M", f"seek={partitions[name][0]}", "oflag=seek_bytes", "conv=notrunc,sparse", "status=none")
     super_raw.unlink()
     out.unlink(missing_ok=True)
-    run(shutil.which("qemu-img") or "qemu-img", "convert", "-f", "raw", "-O", "vhdx", "-o", "subformat=dynamic", raw, out)
+    run(shutil.which("qemu-img") or "qemu-img", "convert", "-f", "raw", "-O", "vhdx", "-o", "subformat=dynamic", "-S", "4k", raw, out)
     raw.unlink()
+    return command_line_partitions(partitions, {"misc": MISC_UUID})
+
+
+def data_disk(otatools, work, out):
+    """Emits an empty dynamic data disk template containing metadata and userdata partitions."""
+    raw = work / "data.raw"
+    make_raw_disk(raw, DISK_SIZE)
+    sgdisk = shutil.which("sgdisk") or str(otatools / "bin/sgdisk")
+    cmd = [
+        sgdisk, "--clear",
+        "--new=1:0:+64M", "--change-name=1:metadata",
+        "--new=2:0:0", "--change-name=2:userdata",
+        str(raw),
+    ]
+    run(*cmd)
+    materialize_backup_gpt(raw)
+    out.unlink(missing_ok=True)
+    run(shutil.which("qemu-img") or "qemu-img", "convert", "-f", "raw", "-O", "vhdx", "-o", "subformat=dynamic", "-S", "4k", raw, out)
+    raw.unlink()
+
+
+def kernel_cmdline(partition_cmdline):
+    """Returns the kernel command line shared by every DSA guest image."""
+    return " ".join([
+        "console=ttyS0", "printk.devkmsg=on", "audit=1", "panic=-1", "8250.nr_uarts=1",
+        "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init", partition_cmdline,
+        "androidboot.boot_devices=vmbus", "androidboot.fstab_suffix=dsa",
+        "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",
+        "androidboot.hardware=cutf_cvm", "androidboot.verifiedbootstate=orange",
+        "androidboot.vbmeta.device_state=unlocked",
+        "androidboot.hardware.gltransport=hvsocket",
+        "androidboot.hardware.egl=angle",
+        "androidboot.hardware.vulkan=ranchu",
+        "androidboot.hardware.gralloc=minigbm",
+        "androidboot.cpuvulkan.version=0",
+        *(f"androidboot.vendor.apex.{module}={apex}"
+          for module, apex in VENDOR_APEX_BOOTCONFIG.items()),
+    ])
 
 
 def main():
@@ -248,6 +713,12 @@ def main():
     parser.add_argument("--out", type=Path, default=REPO / "dsa/target/image")
     parser.add_argument("--kernel", type=Path, help="the guest kernel (bzImage) the image boots with; "
                         "without it the host's own kernel is used")
+    parser.add_argument("--graphics-library", type=Path,
+                        help="a libOpenglSystemCommon.so built for the selected guest")
+    parser.add_argument("--vulkan-driver", type=Path,
+                        help="a vulkan.ranchu.so built for the selected guest")
+    parser.add_argument("--graphics-dir", type=Path,
+                        help="a directory containing guest graphics libraries (vulkan.ranchu.so, libOpenglSystemCommon.so)")
     args = parser.parse_args()
 
     spec = next(i for i in json.loads((HERE / "inputs.json").read_text())["images"] if i["android_major"] == args.major)
@@ -270,8 +741,20 @@ def main():
     temp.mkdir()
     env = dict(os.environ, PATH=f"{otatools / 'bin'}:{os.environ['PATH']}", TMPDIR=str(temp))
 
+    graphics_library = args.graphics_library
+    vulkan_driver = args.vulkan_driver
+    if args.graphics_dir:
+        if not graphics_library and (args.graphics_dir / "libOpenglSystemCommon.so").exists():
+            graphics_library = args.graphics_dir / "libOpenglSystemCommon.so"
+        if not vulkan_driver and (args.graphics_dir / "vulkan.ranchu.so").exists():
+            vulkan_driver = args.graphics_dir / "vulkan.ranchu.so"
+    elif graphics_library and not vulkan_driver:
+        sibling = graphics_library.parent / "vulkan.ranchu.so"
+        if sibling.exists():
+            vulkan_driver = sibling
+
     modified = work / "modified.zip"
-    modify(target_files, modified)
+    modify(target_files, modified, graphics_library=graphics_library, vulkan_driver=vulkan_driver, otatools=otatools)
 
     signed = work / "signed.zip"
     run(otatools / "bin/sign_target_files_apks", "-p", otatools, *key_arguments(modified, str(keys)), modified, signed, env=env)
@@ -281,33 +764,44 @@ def main():
     images = work / "images"
     with zipfile.ZipFile(signed) as z:
         for name in z.namelist():
-            if name.startswith("IMAGES/") and (name.endswith("super.img") or "/vbmeta" in name):
+            if name.startswith("IMAGES/") and name[len("IMAGES/"):] in {"super.img", *PARTITION_IMAGES.values()}:
                 z.extract(name, work)
     (work / "IMAGES").rename(images)
     if not (images / "super.img").exists():
         run(otatools / "bin/build_super_image", "-p", otatools, signed, images / "super.img", env=env)
 
+    notice_name = None
+    with zipfile.ZipFile(signed) as z:
+        for candidate in [
+            "SYSTEM/etc/NOTICE.xml.gz",
+            "SYSTEM/etc/NOTICE.html.gz",
+            "META/NOTICE.xml.gz",
+        ]:
+            if candidate in z.namelist():
+                notice_name = Path(candidate).name
+                with open(out / notice_name, "wb") as f:
+                    f.write(z.read(candidate))
+                break
+
     ramdisk(signed, otatools, work, out / "initrd.img")
-    disk(images, otatools, work, out / "disk.vhdx")
-    files = ["disk.vhdx", "initrd.img"]
+    partition_cmdline = system_disk(images, otatools, work, out / "system.vhdx")
+    data_disk(otatools, work, out / "data.vhdx")
+    files = ["system.vhdx", "data.vhdx", "initrd.img"]
+    if notice_name:
+        files.append(notice_name)
     (out / "bzImage").unlink(missing_ok=True)
     if args.kernel:
         shutil.copy(args.kernel, out / "bzImage")
         files.append("bzImage")
 
-    cmdline = " ".join([
-        "console=ttyS0", "printk.devkmsg=on", "audit=1", "panic=-1", "8250.nr_uarts=1",
-        "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init",
-        f"androidboot.boot_part_uuid={SUPER_UUID}", "androidboot.fstab_suffix=dsa",
-        "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",
-        "androidboot.hardware=cutf_cvm", "androidboot.verifiedbootstate=orange",
-        "androidboot.vbmeta.device_state=unlocked",
-    ])
+    cmdline = kernel_cmdline(partition_cmdline)
     manifest = {
         "version": spec["version"],
         "android_major": spec["android_major"],
-        "build": int(spec["build_id"]),
-        "source": {"branch": spec["branch"], "target": spec["target"], "build_id": spec["build_id"], "security_patch": spec["security_patch"]},
+        # Orders images of one Android version: a new AOSP build, or a new revision of
+        # DSA's image of the same build (a fix to how the image is made), is newer.
+        "build": int(spec["build_id"]) * 100 + spec.get("revision", 1),
+        "source": {"branch": spec["branch"], "target": spec["target"], "build_id": spec["build_id"], "revision": spec.get("revision", 1), "security_patch": spec["security_patch"]},
         "kernel_cmdline": cmdline,
         "files": {name: {"size": (out / name).stat().st_size, "sha256": sha256(out / name)} for name in files},
     }

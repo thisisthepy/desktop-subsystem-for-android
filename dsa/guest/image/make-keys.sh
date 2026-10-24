@@ -14,7 +14,10 @@ mkdir -p "$dir"
 for name in releasekey platform shared media networkstack sdk_sandbox bluetooth nfc apexcontainer; do
   [[ -f "$dir/$name.pk8" ]] && continue
   openssl genrsa -out "$dir/$name.pem" 4096 2>/dev/null
-  openssl req -new -x509 -sha256 -key "$dir/$name.pem" -out "$dir/$name.x509.pem" -days 10000 -subj "$subject"
+  # Git Bash on Windows rewrites an argument that starts with / into a Windows path, which
+  # breaks the subject. MSYS2_ARG_CONV_EXCL exempts the subject alone, so the key paths
+  # are still converted; it means nothing elsewhere.
+  MSYS2_ARG_CONV_EXCL="$subject" openssl req -new -x509 -sha256 -key "$dir/$name.pem" -out "$dir/$name.x509.pem" -days 10000 -subj "$subject"
   openssl pkcs8 -in "$dir/$name.pem" -topk8 -outform DER -out "$dir/$name.pk8" -nocrypt
 done
 for name in avb apex; do

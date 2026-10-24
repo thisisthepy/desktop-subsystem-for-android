@@ -20,6 +20,8 @@ fn config() -> AndroidVmConfig {
         data_disk: PathBuf::from(r"C:\Users\me\AppData\Local\DSA\data.vhdx"),
         socket_sids: vec![USER_SID.into()],
         page_reporting_order: 5,
+        console_pipe: Some(r"\\.\pipe\dsa-console-dsa-android-S-1-5-21-1".into()),
+        image_version: Some("17.0.0-1".into()),
     }
 }
 
@@ -38,9 +40,13 @@ fn fr2_the_vm_boots_its_kernel_directly_with_the_android_command_line() {
     );
     let cmdline = kernel["KernelCmdLine"].as_str().unwrap();
     assert!(
-        cmdline.starts_with("console=hvc0 panic=-1 page_reporting.page_reporting_order=5"),
+        cmdline.starts_with(
+            "earlycon=uart8250,io,0x3f8,115200 console=ttyS0,115200 panic=-1 \
+             page_reporting.page_reporting_order=5"
+        ),
         "{cmdline}"
     );
+    assert!(!cmdline.contains("hvc0"), "{cmdline}");
     assert!(cmdline.ends_with("androidboot.hardware=dsa"), "{cmdline}");
     assert_eq!(doc["SchemaVersion"]["Major"], 2);
     assert_eq!(doc["ShouldTerminateOnLastHandleClosed"], true);
@@ -87,6 +93,23 @@ fn pr1_only_system_and_the_vms_user_may_use_its_hyper_v_sockets() {
         sockets["DefaultConnectSecurityDescriptor"],
         expected.as_str()
     );
+}
+
+#[test]
+fn fr3_default_bind_security_descriptor_grants_user_sid_bind_access() {
+    let mut cfg = config();
+    let second_sid = "S-1-5-21-999999999-888888888-777777777-1002";
+    cfg.socket_sids.push(second_sid.to_string());
+    let doc = document(&cfg);
+    let sockets = &doc["VirtualMachine"]["Devices"]["HvSocket"]["HvSocketConfig"];
+    let bind_sddl = sockets["DefaultBindSecurityDescriptor"]
+        .as_str()
+        .expect("DefaultBindSecurityDescriptor string");
+
+    // The bind security descriptor must grant the user full access so user-session listeners can bind.
+    assert!(bind_sddl.contains(&format!("(A;;FA;;;{USER_SID})")));
+    assert!(bind_sddl.contains(&format!("(A;;FA;;;{second_sid})")));
+    assert!(bind_sddl.contains("(A;;FA;;;SY)"));
 }
 
 #[test]
@@ -149,4 +172,58 @@ fn fr2_the_runtime_id_is_read_from_the_vm_properties() {
     }
     assert_eq!(runtime_id_from_properties("not json"), None);
     assert_eq!(runtime_id_from_properties(r#"{"RuntimeId":"nope"}"#), None);
+}
+
+#[test]
+fn fr2_the_guest_console_goes_to_a_named_pipe_on_the_first_serial_port() {
+    let doc = document(&config());
+    let ports = &doc["VirtualMachine"]["Devices"]["ComPorts"];
+    assert_eq!(
+        ports,
+        &serde_json::json!({ "0": { "NamedPipe": r"\\.\pipe\dsa-console-dsa-android-S-1-5-21-1" } })
+    );
+    let cmdline = doc["VirtualMachine"]["Chipset"]["LinuxKernelDirect"]["KernelCmdLine"]
+        .as_str()
+        .unwrap();
+    assert!(
+        cmdline.contains("earlycon=uart8250,io,0x3f8,115200"),
+        "COM1 from the first instruction: {cmdline}"
+    );
+    assert!(cmdline.contains("console=ttyS0,115200"), "{cmdline}");
+    // The other devices are still there.
+    assert!(doc["VirtualMachine"]["Devices"]["Scsi"]["0"]["Attachments"]["1"].is_object());
+    assert!(doc["VirtualMachine"]["Devices"]["HvSocket"].is_object());
+}
+
+#[test]
+fn fr2_each_vm_has_its_own_console_pipe() {
+    use dsa_host_windows::vm::console_pipe_path;
+    assert_eq!(
+        console_pipe_path("dsa-android-S-1-5-21-1-2-3-1001"),
+        r"\\.\pipe\dsa-console-dsa-android-S-1-5-21-1-2-3-1001"
+    );
+    assert_ne!(console_pipe_path("a"), console_pipe_path("b"));
+}
+
+#[test]
+fn fr2_without_a_console_pipe_the_vm_has_no_serial_port() {
+    let mut without = config();
+    without.console_pipe = None;
+    let doc = document(&without);
+    assert!(doc["VirtualMachine"]["Devices"].get("ComPorts").is_none());
+}
+
+#[test]
+fn fr2_a_console_pipe_that_is_not_a_local_pipe_is_refused() {
+    for bad in [
+        r"C:\console",
+        r"\\.\pipe\",
+        r"\\server\pipe\x",
+        r#"\\.\pipe\a"b"#,
+    ] {
+        let mut broken = config();
+        broken.console_pipe = Some(bad.into());
+        let error = broken.to_hcs_document().unwrap_err().to_string();
+        assert!(error.contains("console pipe"), "{bad:?}: {error}");
+    }
 }

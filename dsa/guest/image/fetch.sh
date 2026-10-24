@@ -21,7 +21,7 @@ for kind in target_files otatools; do
     continue
   fi
   echo "downloading $name of build $build"
-  curl -fsSL --retry 3 -o "$file.part" "https://ci.android.com/builds/submitted/$build/$target/latest/raw/$name"
+  curl -fsSL --retry 8 --retry-all-errors -o "$file.part" "https://ci.android.com/builds/submitted/$build/$target/latest/raw/$name"
   if ! echo "$sha  $file.part" | sha256sum --check --status; then
     echo "$name does not match the SHA-256 pinned in inputs.json" >&2
     rm -f "$file.part"

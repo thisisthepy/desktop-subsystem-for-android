@@ -34,6 +34,10 @@ pub trait UserAndroid: Send + Sync {
     fn update_notice(&self) -> Option<String> {
         None
     }
+    /// The runtime ID of the VM (such as a GUID on Windows), if running.
+    fn vm_id(&self) -> Option<String> {
+        None
+    }
 }
 
 impl UserAndroid for Session {
@@ -56,6 +60,9 @@ impl UserAndroid for Session {
     fn stop(&self) {
         Session::stop(self)
     }
+    fn vm_id(&self) -> Option<String> {
+        Session::vm_id(self)
+    }
 }
 
 /// Finds or creates the Android of a user.
@@ -63,6 +70,26 @@ pub trait UserAndroids: Send + Sync {
     /// The Android of `user` (an identity as the transport reports it), created on first
     /// use. An error says why this user cannot have one.
     fn android(&self, user: &str) -> Result<Arc<dyn UserAndroid>, String>;
+    /// The users whose Android is not stopped, with its state.
+    fn running(&self) -> Vec<(String, SessionState)>;
+    /// Stops every user's Android and waits at most `timeout` for all of them. Returns the
+    /// users whose Android had not stopped by then, with its state.
+    fn stop_all(&self, timeout: Duration) -> Vec<(String, SessionState)>;
+}
+
+/// The answer to a request to update DSA itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgramUpdate {
+    /// The version setup is installing; `None` when there is nothing newer.
+    pub installing: Option<String>,
+    /// What happens next, in words for the user.
+    pub detail: String,
+}
+
+/// Updates DSA itself when a user asks (`dsa update`).
+pub trait UpdateProgram: Send + Sync {
+    /// Installs the newest version now. An error says why it cannot.
+    fn update_now(&self) -> Result<ProgramUpdate, String>;
 }
 
 /// One Android per user, each created by `create` the first time its user asks.
@@ -83,32 +110,44 @@ where
     }
 }
 
+/// The users of `androids` whose Android is not stopped, with its state.
+pub fn running_of<'a>(
+    androids: impl IntoIterator<Item = (&'a String, &'a Arc<dyn UserAndroid>)>,
+) -> Vec<(String, SessionState)> {
+    androids
+        .into_iter()
+        .map(|(user, android)| (user.clone(), android.state()))
+        .filter(|(_, state)| *state != SessionState::Stopped)
+        .collect()
+}
+
+/// Stops every Android of `androids` and waits at most `timeout` for all of them. Returns
+/// the users whose Android had not stopped by then, with its state.
+pub fn stop_every(
+    androids: Vec<(String, Arc<dyn UserAndroid>)>,
+    timeout: Duration,
+) -> Vec<(String, SessionState)> {
+    for (_, android) in &androids {
+        android.stop();
+    }
+    let deadline = Instant::now() + timeout;
+    loop {
+        let running = running_of(androids.iter().map(|(user, android)| (user, android)));
+        if running.is_empty() || Instant::now() >= deadline {
+            return running;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
 impl<F> PerUser<F> {
-    /// Stops every user's Android and waits at most `timeout` for all of them. Returns the
-    /// users whose Android had not stopped by then, with its state.
-    pub fn stop_all(&self, timeout: Duration) -> Vec<(String, SessionState)> {
-        let androids: Vec<(String, Arc<dyn UserAndroid>)> = self
-            .androids
+    fn snapshot(&self) -> Vec<(String, Arc<dyn UserAndroid>)> {
+        self.androids
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
             .map(|(user, android)| (user.clone(), Arc::clone(android)))
-            .collect();
-        for (_, android) in &androids {
-            android.stop();
-        }
-        let deadline = Instant::now() + timeout;
-        loop {
-            let running: Vec<(String, SessionState)> = androids
-                .iter()
-                .map(|(user, android)| (user.clone(), android.state()))
-                .filter(|(_, state)| *state != SessionState::Stopped)
-                .collect();
-            if running.is_empty() || Instant::now() >= deadline {
-                return running;
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
+            .collect()
     }
 }
 
@@ -124,6 +163,13 @@ where
         let android = (self.create)(user)?;
         androids.insert(user.to_string(), Arc::clone(&android));
         Ok(android)
+    }
+    fn running(&self) -> Vec<(String, SessionState)> {
+        let androids = self.snapshot();
+        running_of(androids.iter().map(|(user, android)| (user, android)))
+    }
+    fn stop_all(&self, timeout: Duration) -> Vec<(String, SessionState)> {
+        stop_every(self.snapshot(), timeout)
     }
 }
 
@@ -153,6 +199,7 @@ fn from_wire(state: i32) -> Option<SessionState> {
 /// The service end of the local API.
 pub struct HostApiService {
     androids: Arc<dyn UserAndroids>,
+    program: Option<Arc<dyn UpdateProgram>>,
     hello: types::Hello,
     handshake_timeout: Duration,
 }
@@ -161,9 +208,16 @@ impl HostApiService {
     pub fn new(androids: Arc<dyn UserAndroids>, build: &str) -> HostApiService {
         HostApiService {
             androids,
+            program: None,
             hello: local_hello(Role::Service, build),
             handshake_timeout: Duration::from_secs(5),
         }
+    }
+
+    /// The service that answers `dsa update` with `program`.
+    pub fn with_program_updates(mut self, program: Arc<dyn UpdateProgram>) -> HostApiService {
+        self.program = Some(program);
+        self
     }
 
     /// Accepts connections until `stop` is set, serving each on its own thread. A failed
@@ -173,9 +227,15 @@ impl HostApiService {
             match listener.accept(Duration::from_millis(200)) {
                 Ok((connection, peer)) => {
                     let service = Arc::clone(&self);
-                    let spawned = thread::Builder::new()
-                        .name("dsa-host-api".into())
-                        .spawn(move || service.serve_connection(connection, peer));
+                    let spawned =
+                        thread::Builder::new()
+                            .name("dsa-host-api".into())
+                            .spawn(move || {
+                                let _ =
+                                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                        service.serve_connection(connection, peer);
+                                    }));
+                            });
                     if let Err(error) = spawned {
                         eprintln!("local API: could not start a connection thread: {error}");
                     }
@@ -238,6 +298,13 @@ impl HostApiService {
                  update the service"
                     .into(),
             ),
+            Some(request::Body::UpdateProgram(_)) => self.update_program(peer),
+            Some(request::Body::GetVmId(_)) => match self.androids.android(&peer.user) {
+                Err(why) => error(ErrorCode::Unavailable, why),
+                Ok(android) => response::Body::VmId(types::VmId {
+                    vm_id: android.vm_id().unwrap_or_default(),
+                }),
+            },
             Some(body) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => {
@@ -245,6 +312,8 @@ impl HostApiService {
                         request::Body::GetStatus(_) => {}
                         request::Body::StartSession(_) => android.start(),
                         request::Body::StopSession(_) => android.stop(),
+                        request::Body::UpdateProgram(_) => unreachable!("answered above"),
+                        request::Body::GetVmId(_) => unreachable!("answered above"),
                     }
                     response::Body::Status(types::Status {
                         state: to_wire(android.state()) as i32,
@@ -257,6 +326,25 @@ impl HostApiService {
         Response {
             id: request.id,
             body: Some(body),
+        }
+    }
+}
+
+impl HostApiService {
+    fn update_program(&self, peer: &Peer) -> response::Body {
+        let Some(program) = &self.program else {
+            return error(
+                ErrorCode::UpdateFailed,
+                "this service does not update DSA; install the new version by hand".into(),
+            );
+        };
+        eprintln!("local API: {} asked to update DSA now", peer.user);
+        match program.update_now() {
+            Ok(update) => response::Body::ProgramUpdate(types::ProgramUpdate {
+                installing: update.installing.unwrap_or_default(),
+                detail: update.detail,
+            }),
+            Err(why) => error(ErrorCode::UpdateFailed, why),
         }
     }
 }
@@ -344,7 +432,50 @@ impl HostApiClient {
         self.call(request::Body::StopSession(types::StopSession {}))
     }
 
+    /// Asks the service to install the newest version of DSA now. Downloading it can take
+    /// a while, so the answer is awaited for at most `timeout`.
+    pub fn update_program(&mut self, timeout: Duration) -> Result<ProgramUpdate, ClientError> {
+        match self.exchange(
+            request::Body::UpdateProgram(types::UpdateProgram {}),
+            timeout,
+        )? {
+            response::Body::ProgramUpdate(update) => Ok(ProgramUpdate {
+                installing: Some(update.installing).filter(|version| !version.is_empty()),
+                detail: update.detail,
+            }),
+            _ => Err(ClientError::Malformed(
+                "expected the answer to an update request".into(),
+            )),
+        }
+    }
+
+    /// Asks for the runtime ID of the caller's Android VM, if running.
+    pub fn vm_id(&mut self) -> Result<Option<String>, ClientError> {
+        match self.exchange(request::Body::GetVmId(types::GetVmId {}), self.timeout)? {
+            response::Body::VmId(vm_id) => Ok(Some(vm_id.vm_id).filter(|id| !id.is_empty())),
+            _ => Err(ClientError::Malformed("expected a vm_id response".into())),
+        }
+    }
+
     fn call(&mut self, body: request::Body) -> Result<Status, ClientError> {
+        match self.exchange(body, self.timeout)? {
+            response::Body::Status(status) => Ok(Status {
+                state: from_wire(status.state).ok_or_else(|| {
+                    ClientError::Malformed(format!("unknown session state {}", status.state))
+                })?,
+                last_reason: Some(status.last_reason).filter(|reason| !reason.is_empty()),
+                update_notice: Some(status.update_notice).filter(|notice| !notice.is_empty()),
+            }),
+            _ => Err(ClientError::Malformed("expected a status".into())),
+        }
+    }
+
+    /// Sends `body` and returns the answer's body; an error answer is an error.
+    fn exchange(
+        &mut self,
+        body: request::Body,
+        timeout: Duration,
+    ) -> Result<response::Body, ClientError> {
         let id = self.next_id;
         self.next_id += 1;
         send(
@@ -357,7 +488,7 @@ impl HostApiClient {
         .map_err(ClientError::Transport)?;
         let frame = self
             .connection
-            .recv(Some(self.timeout))
+            .recv(Some(timeout))
             .map_err(ClientError::Transport)?;
         let response = match decode(&frame) {
             Ok(Envelope {
@@ -373,17 +504,11 @@ impl HostApiClient {
             )));
         }
         match response.body {
-            Some(response::Body::Status(status)) => Ok(Status {
-                state: from_wire(status.state).ok_or_else(|| {
-                    ClientError::Malformed(format!("unknown session state {}", status.state))
-                })?,
-                last_reason: Some(status.last_reason).filter(|reason| !reason.is_empty()),
-                update_notice: Some(status.update_notice).filter(|notice| !notice.is_empty()),
-            }),
             Some(response::Body::Error(error)) => Err(ClientError::Service {
                 code: ErrorCode::try_from(error.code).unwrap_or(ErrorCode::Unspecified),
                 detail: error.detail,
             }),
+            Some(body) => Ok(body),
             None => Err(ClientError::Malformed("an empty response".into())),
         }
     }

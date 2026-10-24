@@ -9,24 +9,91 @@ on:
   pull_request:
     paths:
       - "dsa/guest/image/**"
+      - "dsa/graphics/**"
+      - "dsa/kernel/**"
       - ".github/workflows/test-image.yml"
+      - "scripts/tests/image-graphics-workflow.test.sh"
   workflow_dispatch:
+    inputs:
+      keep_disk:
+        description: "Keep each generated disk.vhdx as an artifact for a local boot check"
+        type: boolean
+        required: false
+        default: false
+      android:
+        description: "Android release to make. Use all for the compatibility run."
+        type: choice
+        required: false
+        default: "17"
+        options:
+          - "17"
+          - "16"
+          - all
+      graphics_run:
+        description: "Graphics test run that produced guest-gfxstream-hvsocket"
+        type: string
+        required: false
+        default: ""
 
 concurrency:
-  group: test-image-${{ github.event.pull_request.number || github.ref }}
+  group: test-image-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  guest-graphics:
+    name: Build the guest Hyper-V graphics transport
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
+
+      - name: Fetch gfxstream and guest build dependencies
+        run: bash dsa/graphics/fetch.sh .scratch/gfxstream
+
+      - name: Build the guest transport
+        run: bash dsa/graphics/build.sh .scratch .scratch/build
+
+      - name: Verify ELF architecture and exported Hyper-V symbols
+        run: |
+          target=".scratch/build/libOpenglSystemCommon.so"
+          readelf -h "$target" | grep -Fq 'Advanced Micro Devices X86-64'
+          nm -D "$target" | grep -Fq 'HvSocketStream'
+          nm -D "$target" | grep -Fq 'goldfish_get_egl_tls'
+          target_vk=".scratch/build/vulkan.ranchu.so"
+          readelf -h "$target_vk" | grep -Fq 'Advanced Micro Devices X86-64'
+          nm -D "$target_vk" | grep -Fq 'vk_icdGetInstanceProcAddr'
+          nm -D "$target_vk" | grep -Fq 'HMI'
+
+      - name: Keep the patched guest library
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-gfxstream-hvsocket
+          path: |
+            .scratch/build/libOpenglSystemCommon.so
+            .scratch/build/vulkan.ranchu.so
+          if-no-files-found: error
+
   image:
     name: Make and check the guest image (ubuntu-latest, Android ${{ matrix.android }})
+    needs: guest-graphics
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        android: [17, 16]
+        # Pull requests cover both supported releases. A manual boot investigation
+        # builds one release first, unless an explicit compatibility run asks for all.
+        android: ${{ fromJSON(github.event_name == 'workflow_dispatch' && (inputs.android == 'all' && '["17", "16"]' || format('["{0}"]', inputs.android)) || '["17", "16"]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -44,14 +111,59 @@ jobs:
       - name: Fetch the pinned inputs
         run: dsa/guest/image/fetch.sh ${{ matrix.android }}
 
+      # The HCS image has no virtio GPU. Keep the exact Cuttlefish graphics payload in
+      # the log while replacing its minigbm path with the Hyper-V gfxstream transport.
+      - name: List the guest graphics payload
+        run: |
+          unzip -l .scratch/aosp-inputs/*/*target_files*.zip | \
+            grep -Ei 'graphics|gralloc|mapper|opengl|vulkan|goldfish|ranchu|drm'
+
       - name: Make a throwaway key set
         run: dsa/guest/image/make-keys.sh .scratch/image-keys
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Fetch the selected guest graphics transport
+        if: inputs.graphics_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${{ inputs.graphics_run }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name guest-gfxstream-hvsocket \
+            --dir .scratch/guest-graphics
+
+      - name: Download guest graphics transport from current commit
+        if: inputs.graphics_run == ''
+        uses: actions/download-artifact@v4
+        with:
+          name: guest-gfxstream-hvsocket
+          path: .scratch/guest-graphics
+
+      - name: Verify graphics libraries ELF dependencies
+        run: |
+          target_zip=$(echo .scratch/aosp-inputs/*/*target_files*.zip)
+          for lib in .scratch/guest-graphics/libOpenglSystemCommon.so .scratch/guest-graphics/vulkan.ranchu.so; do
+            echo "Checking ELF dependencies for $lib..."
+            needed=$(readelf -d "$lib" | grep NEEDED | sed -E 's/.*\[(.*)\]/\1/')
+            for dep in $needed; do
+              if ! unzip -l "$target_zip" | grep -E "(VENDOR|SYSTEM)/lib64/(hw/|egl/)?$dep" >/dev/null 2>&1; then
+                echo "Missing dependency $dep for $lib in image!" >&2
+                exit 1
+              fi
+              echo "  OK: $dep found in image"
+            done
+          done
+
       - name: Make the image
-        run: python3 dsa/guest/image/make-image.py --major ${{ matrix.android }} --keys .scratch/image-keys
+        run: |
+          args=(--major "${{ matrix.android }}" --keys .scratch/image-keys)
+          args+=(--graphics-dir .scratch/guest-graphics --graphics-library .scratch/guest-graphics/libOpenglSystemCommon.so)
+          uv run dsa/guest/image/make-image.py "${args[@]}"
 
       - name: Check the image
-        run: python3 dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
+        run: uv run dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
 
       - name: Keep the ramdisk and the manifest
         uses: actions/upload-artifact@v4
@@ -60,3 +172,11 @@ jobs:
           path: |
             dsa/target/image/*/image.json
             dsa/target/image/*/initrd.img
+
+      - name: Keep the guest disk
+        if: inputs.keep_disk
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-disk-android-${{ matrix.android }}
+          path: dsa/target/image/*/disk.vhdx
+          if-no-files-found: error
