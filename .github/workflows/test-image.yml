@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       keep_disk:
-        description: "Keep each generated disk.vhdx as an artifact for a local boot check"
+        description: "Keep each generated image (its disks, initrd and image.json) as an artifact for a local boot check"
         type: boolean
         required: false
         default: false
@@ -178,5 +178,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: image-disk-android-${{ matrix.android }}
-          path: dsa/target/image/*/disk.vhdx
+          path: |
+            dsa/target/image/*/system.vhdx
+            dsa/target/image/*/data.vhdx
+            dsa/target/image/*/image.json
+            dsa/target/image/*/initrd.img
           if-no-files-found: error
