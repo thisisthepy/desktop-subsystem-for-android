@@ -325,7 +325,31 @@ def compute_plat_sepolicy_sha256(plat_sepolicy_bytes, mapping_bytes):
     return h.hexdigest() + "\n"
 
 
-def recompile_precompiled_sepolicy(otatools, cil_map, work_dir=None):
+def policy_sources(cil_map, vendor_version, genfs_version):
+    """Lists the policy files init compiles at boot, in its order.
+
+    The policy must be built from exactly these: every partition names its mapping file after
+    the same version, and the build also carries mapping and genfs files for versions this
+    vendor does not use. Mixing those in, or letting one partition's mapping stand in for
+    another's, leaves the vendor policy's versioned types mapped to nothing."""
+    keys = [
+        "SYSTEM/etc/selinux/plat_sepolicy.cil",
+        f"SYSTEM/etc/selinux/mapping/{vendor_version}.cil",
+        f"SYSTEM/etc/selinux/mapping/{vendor_version}.compat.cil",
+        "SYSTEM_EXT/etc/selinux/system_ext_sepolicy.cil",
+        f"SYSTEM_EXT/etc/selinux/mapping/{vendor_version}.cil",
+        f"SYSTEM_EXT/etc/selinux/mapping/{vendor_version}.compat.cil",
+        "PRODUCT/etc/selinux/product_sepolicy.cil",
+        f"PRODUCT/etc/selinux/mapping/{vendor_version}.cil",
+        "VENDOR/etc/selinux/plat_pub_versioned.cil",
+        "VENDOR/etc/selinux/vendor_sepolicy.cil",
+        "ODM/etc/selinux/odm_sepolicy.cil",
+        f"SYSTEM/etc/selinux/plat_sepolicy_genfs_{genfs_version}.cil",
+    ]
+    return [key for key in keys if key in cil_map]
+
+
+def recompile_precompiled_sepolicy(otatools, cil_map, vendor_version, genfs_version, work_dir=None):
     """Recompiles precompiled_sepolicy with secilc from otatools if available."""
     if not otatools:
         return None
@@ -343,37 +367,12 @@ def recompile_precompiled_sepolicy(otatools, cil_map, work_dir=None):
     with tempfile.TemporaryDirectory(dir=work_dir) as tmp:
         tmp_path = Path(tmp)
         cil_paths = []
-        ordered_keys = [
-            "SYSTEM/etc/selinux/plat_sepolicy.cil",
-            "SYSTEM/etc/selinux/mapping/",
-            "VENDOR/etc/selinux/plat_pub_versioned.cil",
-            "SYSTEM_EXT/etc/selinux/system_ext_sepolicy.cil",
-            "SYSTEM_EXT/etc/selinux/mapping/",
-            "PRODUCT/etc/selinux/product_sepolicy.cil",
-            "PRODUCT/etc/selinux/mapping/",
-            "VENDOR/etc/selinux/vendor_sepolicy.cil",
-            "ODM/etc/selinux/odm_sepolicy.cil",
-        ]
-        included = set()
-        for key in ordered_keys:
-            if key.endswith("/"):
-                for name, data in sorted(cil_map.items()):
-                    if name.startswith(key) and name.endswith(".cil") and name not in included:
-                        f = tmp_path / Path(name).name
-                        f.write_bytes(data)
-                        cil_paths.append(str(f))
-                        included.add(name)
-            elif key in cil_map and key not in included:
-                f = tmp_path / Path(key).name
-                f.write_bytes(cil_map[key])
-                cil_paths.append(str(f))
-                included.add(key)
-        for name, data in sorted(cil_map.items()):
-            if name.endswith(".cil") and name not in included:
-                f = tmp_path / Path(name).name
-                f.write_bytes(data)
-                cil_paths.append(str(f))
-                included.add(name)
+        for key in policy_sources(cil_map, vendor_version, genfs_version):
+            # Kept under the partition's path: the mapping files share one name.
+            f = tmp_path / key
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(cil_map[key])
+            cil_paths.append(str(f))
 
         out_policy = tmp_path / "precompiled_sepolicy"
         cmd = [
@@ -426,6 +425,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             cil_map["SYSTEM/etc/selinux/plat_sepolicy.cil"] = new_plat_bytes
 
             mapping_bytes = b""
+            vers = None
             if "VENDOR/etc/selinux/plat_sepolicy_vers.txt" in names:
                 vers = zin.read("VENDOR/etc/selinux/plat_sepolicy_vers.txt").decode().strip()
                 mapping_key = f"SYSTEM/etc/selinux/mapping/{vers}.cil"
@@ -438,7 +438,12 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                         break
 
             new_sha256 = compute_plat_sepolicy_sha256(new_plat_bytes, mapping_bytes)
-            recompiled_policy = recompile_precompiled_sepolicy(otatools, cil_map)
+            # init reads the genfs version from the vendor and uses this one when it is absent.
+            genfs_version = "202404"
+            if "VENDOR/etc/selinux/genfs_labels_version.txt" in names:
+                genfs_version = zin.read("VENDOR/etc/selinux/genfs_labels_version.txt").decode().strip()
+            if vers:
+                recompiled_policy = recompile_precompiled_sepolicy(otatools, cil_map, vers, genfs_version)
 
         for info in zin.infolist():
             name = info.filename
