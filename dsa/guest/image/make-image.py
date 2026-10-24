@@ -235,6 +235,10 @@ FSTAB_DIRS = {
 GFXSTREAM_LIBRARY = "VENDOR/lib64/libOpenglSystemCommon.so"
 VULKAN_RANCHU_LIBRARY = "VENDOR/lib64/hw/vulkan.ranchu.so"
 
+CONSOLE_LOGCAT_RC = "VENDOR/etc/init/dsa-console-logcat.rc"
+# The console logcat runs as logd, and ueventd makes the serial port root's alone.
+CONSOLE_UEVENTD_LINE = "/dev/ttyS0 0660 system logd"
+
 
 def update_vendor_file_contexts(fc_text):
     """Adds same_process_hal_file contexts for guest graphics libraries if not present."""
@@ -255,6 +259,7 @@ def update_vendor_filesystem_config(fs_config_text):
     entries = [
         ("vendor/lib64/hw/vulkan.ranchu.so", "vendor/lib64/hw/vulkan.ranchu.so 0 0 644 capabilities=0x0"),
         ("vendor/lib64/libOpenglSystemCommon.so", "vendor/lib64/libOpenglSystemCommon.so 0 0 644 capabilities=0x0"),
+        ("vendor/etc/init/dsa-console-logcat.rc", "vendor/etc/init/dsa-console-logcat.rc 0 0 644 capabilities=0x0"),
     ]
     for path, rule in entries:
         if not any(line.startswith(path + " ") for line in lines):
@@ -400,6 +405,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
     """Copies target_files, removing the shell apps and the published kernel modules,
     switching to a user build and adding the Hyper-V mount table."""
     fstab = (HERE / "fstab.dsa").read_bytes()
+    console_logcat = (HERE / "console-logcat.rc").read_bytes()
     graphics_payload = Path(graphics_library).read_bytes() if graphics_library else None
     vulkan_payload = Path(vulkan_driver).read_bytes() if vulkan_driver else None
     replaced_graphics_payload = False
@@ -494,12 +500,15 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     if name == "META/vendor_filesystem_config.txt":
                         text = update_vendor_filesystem_config(text)
                     data = text.encode()
+                elif name == "VENDOR/etc/ueventd.rc":
+                    data = data.rstrip(b"\n") + b"\n" + CONSOLE_UEVENTD_LINE.encode() + b"\n"
                 elif name in ("VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"):
                     data = update_vendor_file_contexts(data.decode()).encode()
             info.compress_type = zipfile.ZIP_STORED
             zout.writestr(info, data)
         for directory in FSTAB_DIRS:
             zout.writestr(directory + "fstab.dsa", fstab)
+        zout.writestr(CONSOLE_LOGCAT_RC, console_logcat)
         if vulkan_payload is not None and not replaced_vulkan_payload:
             zout.writestr(VULKAN_RANCHU_LIBRARY, vulkan_payload)
             replaced_vulkan_payload = True
