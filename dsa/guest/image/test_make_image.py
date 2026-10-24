@@ -1,7 +1,10 @@
 """Regression tests for the guest image layout helpers."""
 
+import gzip
 import importlib.util
+import json
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -254,6 +257,89 @@ class ImageLayoutTests(unittest.TestCase):
 
         data_partitions = [name for name, _ in make_image.DATA_PARTITIONS]
         self.assertEqual(data_partitions, ["metadata", "userdata"])
+
+
+    def test_pr3_kernel_cmdline_selects_guest_graphics_stack(self):
+        cmdline = make_image.kernel_cmdline("blkdevparts=sda:1@0(misc)")
+        self.assertIn("androidboot.hardware.gltransport=hvsocket", cmdline)
+        self.assertIn("androidboot.hardware.egl=angle", cmdline)
+        self.assertIn("androidboot.hardware.vulkan=ranchu", cmdline)
+        self.assertIn("androidboot.hardware.gralloc=minigbm", cmdline)
+        self.assertIn("androidboot.cpuvulkan.version=0", cmdline)
+
+    def test_pr3_edit_props_sets_graphics_properties(self):
+        props = make_image.edit_props("ro.debuggable=1\n")
+        self.assertIn("ro.hardware.egl=angle\n", props)
+        self.assertIn("ro.hardware.vulkan=ranchu\n", props)
+        self.assertIn("ro.hardware.gralloc=minigbm\n", props)
+        self.assertIn("ro.cpuvulkan.version=0\n", props)
+
+    def test_pr3_modify_installs_vulkan_and_opengl_libraries_and_filesystem_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            gl_replacement = root / "libOpenglSystemCommon.so"
+            gl_replacement.write_bytes(b"hyper-v-gl")
+            vk_replacement = root / "vulkan.ranchu.so"
+            vk_replacement.write_bytes(b"hyper-v-vk")
+
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("VENDOR/lib64/libOpenglSystemCommon.so", b"cuttlefish-gl")
+                archive.writestr("SYSTEM/build.prop", b"ro.debuggable=1\n")
+                archive.writestr("VENDOR/build.prop", b"ro.hardware=cutf_cvm\n")
+                archive.writestr("VENDOR/etc/selinux/vendor_file_contexts", "/vendor(/.*)? u:object_r:vendor_file:s0\n")
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/etc/fstab.dsa 0 0 644 capabilities=0x0\n")
+
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, graphics_library=gl_replacement, vulkan_driver=vk_replacement)
+
+            with zipfile.ZipFile(modified) as archive:
+                names = archive.namelist()
+                self.assertIn("VENDOR/lib64/libOpenglSystemCommon.so", names)
+                self.assertIn("VENDOR/lib64/hw/vulkan.ranchu.so", names)
+                self.assertEqual(archive.read("VENDOR/lib64/libOpenglSystemCommon.so"), b"hyper-v-gl")
+                self.assertEqual(archive.read("VENDOR/lib64/hw/vulkan.ranchu.so"), b"hyper-v-vk")
+
+                fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
+                self.assertIn("vendor/lib64/hw/vulkan.ranchu.so 0 0 644 capabilities=0x0", fs_config)
+                self.assertIn("vendor/lib64/libOpenglSystemCommon.so 0 0 644 capabilities=0x0", fs_config)
+
+                fc = archive.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
+                self.assertIn("vulkan\\.ranchu\\.so", fc)
+                self.assertIn("same_process_hal_file", fc)
+                self.assertIn("libOpenglSystemCommon\\.so", fc)
+
+
+    def test_pr3_check_image_verifies_graphics_stack(self):
+        check_script = Path(__file__).with_name("check-image.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_dir = root / "image"
+            img_dir.mkdir()
+            keys_dir = root / "keys"
+            keys_dir.mkdir()
+            (keys_dir / "test.x509.pem").write_text("-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n")
+
+            manifest = {
+                "files": {},
+                "kernel_cmdline": "console=ttyS0 init=/init",
+            }
+            (img_dir / "image.json").write_text(json.dumps(manifest))
+            (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
+
+            with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
+                archive.writestr("META/apkcerts.txt", "")
+
+            proc = subprocess.run(
+                [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("vulkan.ranchu.so is missing", proc.stdout)
+            self.assertIn("libOpenglSystemCommon.so is missing", proc.stdout)
+            self.assertIn("androidboot.hardware.gltransport=hvsocket", proc.stdout)
 
 
 if __name__ == "__main__":

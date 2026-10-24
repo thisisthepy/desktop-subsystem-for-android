@@ -87,6 +87,13 @@ USER_PROPS = {
     "ro.force.debuggable": "0",
 }
 
+GRAPHICS_PROPS = {
+    "ro.hardware.egl": "angle",
+    "ro.hardware.vulkan": "ranchu",
+    "ro.hardware.gralloc": "minigbm",
+    "ro.cpuvulkan.version": "0",
+}
+
 # Cuttlefish ships selectable vendor APEX implementations. Its launcher passes
 # the selections in bootconfig. DSA does not run that launcher, so choose the
 # implementations that can start without Cuttlefish remote services before
@@ -190,15 +197,16 @@ def removed(name):
 
 
 def edit_props(text):
+    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS}
     out = []
     for line in text.splitlines():
         key = line.split("=", 1)[0]
-        if key in USER_PROPS:
+        if key in props_to_apply:
             continue
         if key.endswith("build.type"):
             line = f"{key}=user"
         out.append(line)
-    out += [f"{k}={v}" for k, v in USER_PROPS.items()]
+    out += [f"{k}={v}" for k, v in props_to_apply.items()]
     return "\n".join(out) + "\n"
 
 
@@ -220,6 +228,33 @@ FSTAB_DIRS = {
 # Supplying it at image-build time keeps the signed target_files archive as the single
 # source from which AVB-protected partitions are generated.
 GFXSTREAM_LIBRARY = "VENDOR/lib64/libOpenglSystemCommon.so"
+VULKAN_RANCHU_LIBRARY = "VENDOR/lib64/hw/vulkan.ranchu.so"
+
+
+def update_vendor_file_contexts(fc_text):
+    """Adds same_process_hal_file contexts for guest graphics libraries if not present."""
+    lines = fc_text.splitlines()
+    entries = [
+        (r"/vendor/lib64/hw/vulkan\.ranchu\.so", "/vendor/lib64/hw/vulkan\\.ranchu\\.so u:object_r:same_process_hal_file:s0"),
+        (r"/vendor/lib64/libOpenglSystemCommon\.so", "/vendor/lib64/libOpenglSystemCommon\\.so u:object_r:same_process_hal_file:s0"),
+    ]
+    for pattern, rule in entries:
+        if not any(pattern in line for line in lines):
+            lines.append(rule)
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def update_vendor_filesystem_config(fs_config_text):
+    """Adds filesystem configuration entries for guest graphics libraries if not present."""
+    lines = fs_config_text.splitlines()
+    entries = [
+        ("vendor/lib64/hw/vulkan.ranchu.so", "vendor/lib64/hw/vulkan.ranchu.so 0 0 644 capabilities=0x0"),
+        ("vendor/lib64/libOpenglSystemCommon.so", "vendor/lib64/libOpenglSystemCommon.so 0 0 644 capabilities=0x0"),
+    ]
+    for path, rule in entries:
+        if not any(line.startswith(path + " ") for line in lines):
+            lines.append(rule)
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 # Minimal socket permissions needed by guest gfxstream client connections.
@@ -357,14 +392,14 @@ def recompile_precompiled_sepolicy(otatools, cil_map, work_dir=None):
         return None
 
 
-def modify(source, dest, graphics_library=None, otatools=None):
+def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=None):
     """Copies target_files, removing the shell apps and the published kernel modules,
     switching to a user build and adding the Hyper-V mount table."""
     fstab = (HERE / "fstab.dsa").read_bytes()
-    graphics_payload = None
-    if graphics_library:
-        graphics_payload = Path(graphics_library).read_bytes()
+    graphics_payload = Path(graphics_library).read_bytes() if graphics_library else None
+    vulkan_payload = Path(vulkan_driver).read_bytes() if vulkan_driver else None
     replaced_graphics_payload = False
+    replaced_vulkan_payload = False
     kept_modules = re.compile(r"^(VENDOR_BOOT/RAMDISK|VENDOR_DLKM|SYSTEM_DLKM)/lib/modules/.*\.ko$")
 
     fragment_text = SEPOLICY_FRAGMENT.read_text() if SEPOLICY_FRAGMENT.exists() else ""
@@ -423,10 +458,11 @@ def modify(source, dest, graphics_library=None, otatools=None):
             elif name == GFXSTREAM_LIBRARY and graphics_payload is not None:
                 data = graphics_payload
                 replaced_graphics_payload = True
+            elif name == VULKAN_RANCHU_LIBRARY and vulkan_payload is not None:
+                data = vulkan_payload
+                replaced_vulkan_payload = True
             else:
-                data = graphics_payload if name == GFXSTREAM_LIBRARY and graphics_payload is not None else zin.read(name)
-                if name == GFXSTREAM_LIBRARY and graphics_payload is not None:
-                    replaced_graphics_payload = True
+                data = zin.read(name)
                 if name in PROP_FILES:
                     data = edit_props(data.decode()).encode()
                 elif name.endswith("lib/modules/modules.load") or name.endswith("lib/modules/modules.dep"):
@@ -445,11 +481,23 @@ def modify(source, dest, graphics_library=None, otatools=None):
                             else:
                                 prefix = directory.lower()
                             text += f"{prefix}fstab.dsa 0 0 644 capabilities=0x0\n"
+                    if name == "META/vendor_filesystem_config.txt":
+                        text = update_vendor_filesystem_config(text)
                     data = text.encode()
+                elif name in ("VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"):
+                    data = update_vendor_file_contexts(data.decode()).encode()
             info.compress_type = zipfile.ZIP_STORED
             zout.writestr(info, data)
         for directory in FSTAB_DIRS:
             zout.writestr(directory + "fstab.dsa", fstab)
+        if vulkan_payload is not None and not replaced_vulkan_payload:
+            zout.writestr(VULKAN_RANCHU_LIBRARY, vulkan_payload)
+            replaced_vulkan_payload = True
+        if "VENDOR/etc/selinux/vendor_file_contexts" not in names:
+            zout.writestr(
+                "VENDOR/etc/selinux/vendor_file_contexts",
+                update_vendor_file_contexts("").encode(),
+            )
     if graphics_payload is not None and not replaced_graphics_payload:
         dest.unlink(missing_ok=True)
         raise ValueError(f"target_files does not contain {GFXSTREAM_LIBRARY}")
@@ -647,6 +695,11 @@ def kernel_cmdline(partition_cmdline):
         "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",
         "androidboot.hardware=cutf_cvm", "androidboot.verifiedbootstate=orange",
         "androidboot.vbmeta.device_state=unlocked",
+        "androidboot.hardware.gltransport=hvsocket",
+        "androidboot.hardware.egl=angle",
+        "androidboot.hardware.vulkan=ranchu",
+        "androidboot.hardware.gralloc=minigbm",
+        "androidboot.cpuvulkan.version=0",
         *(f"androidboot.vendor.apex.{module}={apex}"
           for module, apex in VENDOR_APEX_BOOTCONFIG.items()),
     ])
@@ -662,6 +715,10 @@ def main():
                         "without it the host's own kernel is used")
     parser.add_argument("--graphics-library", type=Path,
                         help="a libOpenglSystemCommon.so built for the selected guest")
+    parser.add_argument("--vulkan-driver", type=Path,
+                        help="a vulkan.ranchu.so built for the selected guest")
+    parser.add_argument("--graphics-dir", type=Path,
+                        help="a directory containing guest graphics libraries (vulkan.ranchu.so, libOpenglSystemCommon.so)")
     args = parser.parse_args()
 
     spec = next(i for i in json.loads((HERE / "inputs.json").read_text())["images"] if i["android_major"] == args.major)
@@ -684,8 +741,20 @@ def main():
     temp.mkdir()
     env = dict(os.environ, PATH=f"{otatools / 'bin'}:{os.environ['PATH']}", TMPDIR=str(temp))
 
+    graphics_library = args.graphics_library
+    vulkan_driver = args.vulkan_driver
+    if args.graphics_dir:
+        if not graphics_library and (args.graphics_dir / "libOpenglSystemCommon.so").exists():
+            graphics_library = args.graphics_dir / "libOpenglSystemCommon.so"
+        if not vulkan_driver and (args.graphics_dir / "vulkan.ranchu.so").exists():
+            vulkan_driver = args.graphics_dir / "vulkan.ranchu.so"
+    elif graphics_library and not vulkan_driver:
+        sibling = graphics_library.parent / "vulkan.ranchu.so"
+        if sibling.exists():
+            vulkan_driver = sibling
+
     modified = work / "modified.zip"
-    modify(target_files, modified, args.graphics_library, otatools=otatools)
+    modify(target_files, modified, graphics_library=graphics_library, vulkan_driver=vulkan_driver, otatools=otatools)
 
     signed = work / "signed.zip"
     run(otatools / "bin/sign_target_files_apks", "-p", otatools, *key_arguments(modified, str(keys)), modified, signed, env=env)
