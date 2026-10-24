@@ -37,6 +37,7 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertIn("drivers/hv/vmbus_drv.c", patch)
         self.assertIn("vmbus_root_device = &pdev->dev;", patch)
         self.assertIn('device_rename(&pdev->dev, "vmbus")', patch)
+        self.assertIn("device_move(&pdev->dev, &platform_bus, DPM_ORDER_NONE)", patch)
 
 
 if __name__ == "__main__":
