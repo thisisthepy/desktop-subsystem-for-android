@@ -22,6 +22,12 @@ class AndroidKernelConfigTests(unittest.TestCase):
         config = CONFIG.read_text()
         self.assertIn("CONFIG_CRYPTO_HCTR2=y", config)
 
+    def test_fr1_dm_verity_can_check_blake2b_hash_trees_in_first_stage(self):
+        # The image's system_ext hash tree uses blake2b-256; first stage init sets up its
+        # verity device before any module can load, so the hash must be built in.
+        config = CONFIG.read_text()
+        self.assertIn("CONFIG_CRYPTO_BLAKE2B=y", config)
+
     def test_pr3_hyper_v_socket_transport_is_built_into_the_guest_kernel(self):
         config = CONFIG.read_text()
         self.assertIn("CONFIG_VSOCKETS=y", config)
