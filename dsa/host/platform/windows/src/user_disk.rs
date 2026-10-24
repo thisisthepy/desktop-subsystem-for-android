@@ -139,11 +139,17 @@ pub fn bring_disk_to(disk: &Path, template: &Path, version: &str) -> Result<(), 
         prepare_user_disk(disk, 0, Some(template))?;
         return record_disk_image_version(disk, version);
     }
+    if template.file_name().and_then(|n| n.to_str()) == Some("data.vhdx") {
+        // Even at the version it holds: a disk brought to a two-disk image before stale
+        // partitions were removed is recorded at that image already.
+        fit_to_data_template(disk, template, version)?;
+        if held.as_deref() == Some(version) {
+            return Ok(());
+        }
+        return record_disk_image_version(disk, version);
+    }
     if held.as_deref() == Some(version) {
         return Ok(());
-    }
-    if template.file_name().and_then(|n| n.to_str()) == Some("data.vhdx") {
-        return record_disk_image_version(disk, version);
     }
     let from = AttachedDisk::attach(template, true)?;
     let to = AttachedDisk::attach(disk, false)?;
@@ -189,6 +195,73 @@ pub fn bring_disk_to(disk: &Path, template: &Path, version: &str) -> Result<(), 
     drop(to);
     drop(from);
     record_disk_image_version(disk, version)
+}
+
+/// Gives the user's disk the partitions of the image's data template, and only those.
+///
+/// A disk made for an image that kept Android on it still holds Android's partitions, and
+/// Android, which finds partitions by name, would boot from those instead of the image's
+/// own disk: they are taken out, and the data partitions stay where they are, with the
+/// user's data. A disk that lacks a partition the template has (made from an older
+/// template) becomes a copy of the template if Android never wrote to it; one with data
+/// cannot be relaid without losing it, and is left as it is.
+fn fit_to_data_template(disk: &Path, template: &Path, version: &str) -> Result<(), String> {
+    if !is_vhdx(disk)? || !is_vhdx(template)? {
+        return Ok(());
+    }
+    let wanted: Vec<String> = {
+        let from = AttachedDisk::attach(template, true)?;
+        let mut source = from.open(false)?;
+        crate::gpt::partitions(&mut source)
+            .map_err(|e| format!("reading {}: {e}", template.display()))?
+            .into_iter()
+            .map(|p| p.name)
+            .collect()
+    };
+    let to = AttachedDisk::attach(disk, false)?;
+    let mut target = to.open(true)?;
+    let have = crate::gpt::partitions(&mut target)
+        .map_err(|e| format!("reading {}: {e}", disk.display()))?;
+    let missing: Vec<&str> = wanted
+        .iter()
+        .filter(|name| !have.iter().any(|p| &p.name == *name))
+        .map(String::as_str)
+        .collect();
+    if !missing.is_empty() {
+        let unused = crate::gpt::partition_is_blank(&mut target, "userdata")
+            .map_err(|e| format!("reading {}: {e}", disk.display()))?;
+        if !unused {
+            return Err(format!(
+                "Android {version} needs a disk with a {} partition, which {} does not                  have, and the disk holds Android data, so it is left as it is",
+                missing.join(", "),
+                disk.display()
+            ));
+        }
+        drop(target);
+        drop(to);
+        std::fs::remove_file(disk)
+            .map_err(|e| format!("replacing the unused {}: {e}", disk.display()))?;
+        return prepare_user_disk(disk, 0, Some(template));
+    }
+    if have.iter().all(|p| wanted.contains(&p.name)) {
+        return Ok(());
+    }
+    let keep: Vec<&str> = wanted.iter().map(String::as_str).collect();
+    crate::gpt::keep_only(&mut target, &keep).map_err(|e| {
+        format!(
+            "removing the old Android partitions from {}: {e}",
+            disk.display()
+        )
+    })?;
+    Ok(())
+}
+
+/// Whether `path` is a VHDX file, which starts with its signature.
+fn is_vhdx(path: &Path) -> Result<bool, String> {
+    let mut signature = [0u8; 8];
+    let mut file =
+        std::fs::File::open(path).map_err(|e| format!("opening {}: {e}", path.display()))?;
+    Ok(io::Read::read_exact(&mut file, &mut signature).is_ok() && &signature == b"vhdxfile")
 }
 
 fn is_blank_disk(disk: &Path) -> Result<bool, String> {

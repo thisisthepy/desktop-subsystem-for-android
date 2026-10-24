@@ -177,3 +177,98 @@ pub fn copy_partitions(
     }
     to.flush()
 }
+
+/// CRC-32 (IEEE, reflected), the checksum of a GPT header and of its entries.
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for &b in bytes {
+        crc ^= b as u32;
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+/// Removes every partition of `disk` not named in `names` from its partition table, the
+/// primary one and the backup, and returns the names it removed. The partitions it keeps
+/// stay where they are, with what they hold.
+///
+/// A disk made for an image that kept Android on the user's disk still has Android's
+/// partitions after its image moves Android to a disk of its own. Android finds partitions
+/// by name, so the stale ones would stand in for the image's.
+pub fn keep_only(disk: &mut (impl Read + Write + Seek), names: &[&str]) -> io::Result<Vec<String>> {
+    let mut header = [0u8; SECTOR as usize];
+    disk.seek(SeekFrom::Start(SECTOR))?;
+    disk.read_exact(&mut header)?;
+    if &header[0..8] != b"EFI PART" {
+        return Err(invalid("the disk has no GUID partition table"));
+    }
+    partitions(disk)?;
+    let entries_lba = u64::from_le_bytes(header[72..80].try_into().unwrap());
+    let count = u32::from_le_bytes(header[80..84].try_into().unwrap()) as usize;
+    let entry_size = u32::from_le_bytes(header[84..88].try_into().unwrap()) as usize;
+    let bytes = (count * entry_size).div_ceil(SECTOR as usize) * SECTOR as usize;
+    let mut table = vec![0u8; bytes];
+    disk.seek(SeekFrom::Start(entries_lba * SECTOR))?;
+    disk.read_exact(&mut table)?;
+
+    let mut dropped = Vec::new();
+    for entry in table.chunks_mut(entry_size).take(count) {
+        if entry[0..16].iter().all(|&b| b == 0) {
+            continue;
+        }
+        let units: Vec<u16> = entry[56..128]
+            .chunks(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .take_while(|&u| u != 0)
+            .collect();
+        let name = String::from_utf16_lossy(&units);
+        if !names.contains(&name.as_str()) {
+            entry.fill(0);
+            dropped.push(name);
+        }
+    }
+    if dropped.is_empty() {
+        return Ok(dropped);
+    }
+    let entries_crc = crc32(&table[..count * entry_size]);
+
+    // The primary header names where its backup is; a table without one (only ever made
+    // by hand) has only the primary to change.
+    let backup_lba = u64::from_le_bytes(header[32..40].try_into().unwrap());
+    let mut headers = vec![(SECTOR, header)];
+    if backup_lba > 1 {
+        let mut backup = [0u8; SECTOR as usize];
+        let at = backup_lba
+            .checked_mul(SECTOR)
+            .ok_or_else(|| invalid("backup partition table location overflows"))?;
+        disk.seek(SeekFrom::Start(at))?;
+        if disk.read_exact(&mut backup).is_ok() && &backup[0..8] == b"EFI PART" {
+            headers.push((at, backup));
+        }
+    }
+    for (at, mut header) in headers {
+        let entries_at = u64::from_le_bytes(header[72..80].try_into().unwrap())
+            .checked_mul(SECTOR)
+            .ok_or_else(|| invalid("partition table location overflows"))?;
+        disk.seek(SeekFrom::Start(entries_at))?;
+        disk.write_all(&table)?;
+        let size = match u32::from_le_bytes(header[12..16].try_into().unwrap()) as usize {
+            0 => 92,
+            n => n.min(SECTOR as usize),
+        };
+        header[88..92].copy_from_slice(&entries_crc.to_le_bytes());
+        header[16..20].fill(0);
+        let crc = crc32(&header[..size]);
+        header[16..20].copy_from_slice(&crc.to_le_bytes());
+        disk.seek(SeekFrom::Start(at))?;
+        disk.write_all(&header)?;
+    }
+    disk.flush()?;
+    Ok(dropped)
+}
