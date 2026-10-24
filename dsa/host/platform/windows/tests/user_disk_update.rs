@@ -270,3 +270,102 @@ fn fr14_a_disk_from_a_one_disk_image_loses_androids_partitions_and_keeps_its_dat
     );
     assert!(read_partition(&user, "metadata").iter().all(|&b| b == 0x6d));
 }
+
+#[test]
+fn fr14_a_disk_already_recorded_at_the_two_disk_image_still_loses_androids_partitions() {
+    if std::env::var_os("DSA_SERVICE_TESTS").is_none() {
+        eprintln!("skipped: set DSA_SERVICE_TESTS=1 to attach disks");
+        return;
+    }
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("recorded-two-disks-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    // A version of DSA that did not remove them recorded the disk at the new image.
+    let user = dir.join("S-1-5-21-1-2-3-1001").join("data.vhdx");
+    make_disk_with(
+        &user,
+        &LAYOUT,
+        |name| if name == "userdata" { 0x77 } else { 0x11 },
+    );
+    record_disk_image_version(&user, "v2").unwrap();
+    let template = dir.join("v2").join("data.vhdx");
+    make_disk_with(&template, &[("metadata", 2048), ("userdata", 8192)], |_| 0);
+
+    bring_disk_to(&user, &template, "v2").unwrap();
+
+    let names: Vec<String> = {
+        let attached = AttachedDisk::attach(&user, true).unwrap();
+        let mut disk = attached.open(false).unwrap();
+        partitions(&mut disk)
+            .unwrap()
+            .into_iter()
+            .map(|p| p.name)
+            .collect()
+    };
+    assert_eq!(names, ["metadata", "userdata"]);
+    assert!(read_partition(&user, "userdata").iter().all(|&b| b == 0x77));
+}
+
+#[test]
+fn fr14_an_unused_data_disk_without_a_partition_the_template_has_becomes_the_template() {
+    if std::env::var_os("DSA_SERVICE_TESTS").is_none() {
+        eprintln!("skipped: set DSA_SERVICE_TESTS=1 to attach disks");
+        return;
+    }
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("data-disk-gains-misc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let data_layout = [("misc", 2048), ("metadata", 2048), ("userdata", 8192)];
+    // A data disk from an image whose template had no misc, never booted into.
+    let user = dir.join("S-1-5-21-1-2-3-1001").join("data.vhdx");
+    make_disk_with(&user, &data_layout[1..], |_| 0);
+    record_disk_image_version(&user, "v1").unwrap();
+    let template = dir.join("v2").join("data.vhdx");
+    make_disk_with(&template, &data_layout, |_| 0);
+
+    bring_disk_to(&user, &template, "v2").unwrap();
+
+    let names: Vec<String> = {
+        let attached = AttachedDisk::attach(&user, true).unwrap();
+        let mut disk = attached.open(false).unwrap();
+        partitions(&mut disk)
+            .unwrap()
+            .into_iter()
+            .map(|p| p.name)
+            .collect()
+    };
+    assert_eq!(names, ["misc", "metadata", "userdata"]);
+    assert_eq!(disk_image_version(&user).as_deref(), Some("v2"));
+}
+
+#[test]
+fn fr14_a_used_data_disk_without_a_partition_the_template_has_is_left_as_it_is() {
+    if std::env::var_os("DSA_SERVICE_TESTS").is_none() {
+        eprintln!("skipped: set DSA_SERVICE_TESTS=1 to attach disks");
+        return;
+    }
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("used-data-disk-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let user = dir.join("S-1-5-21-1-2-3-1001").join("data.vhdx");
+    make_disk_with(&user, &[("metadata", 2048), ("userdata", 8192)], |name| {
+        if name == "userdata" {
+            0x77
+        } else {
+            0
+        }
+    });
+    record_disk_image_version(&user, "v1").unwrap();
+    let template = dir.join("v2").join("data.vhdx");
+    make_disk_with(
+        &template,
+        &[("misc", 2048), ("metadata", 2048), ("userdata", 8192)],
+        |_| 0,
+    );
+
+    let error = bring_disk_to(&user, &template, "v2").unwrap_err();
+
+    assert!(error.contains("misc"), "{error}");
+    assert!(read_partition(&user, "userdata").iter().all(|&b| b == 0x77));
+    assert_eq!(disk_image_version(&user).as_deref(), Some("v1"));
+}
