@@ -7,3 +7,9 @@
 (allow hal_graphics_allocator_server self (vsock_socket (create connect read write getattr setopt getopt shutdown)))
 (allow hal_graphics_composer_server self (vsock_socket (create connect read write getattr setopt getopt shutdown)))
 (allow bootanim self (vsock_socket (create connect read write getattr setopt getopt shutdown)))
+
+; The allocator (minigbm) allocates buffers on the guest's DRM device, which is
+; vgem under Hyper-V and labelled graphics_device, not the gpu_device the
+; Cuttlefish policy grants it.
+(allow hal_graphics_allocator_server graphics_device (dir (search)))
+(allow hal_graphics_allocator_server graphics_device (chr_file (open read write ioctl getattr map)))
