@@ -33,10 +33,16 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertIn("CONFIG_VSOCKETS=y", config)
         self.assertIn("CONFIG_HYPERV_VSOCKETS=y", config)
 
-    def test_pr3_vgem_is_built_into_the_guest_kernel_for_minigbm(self):
+    def test_pr3_vgem_is_built_into_the_guest_kernel(self):
         config = CONFIG.read_text()
         self.assertIn("CONFIG_DRM=y", config)
         self.assertIn("CONFIG_DRM_VGEM=y", config)
+
+    def test_pr3_minigbm_has_a_drm_device_it_can_allocate_from(self):
+        # The image's minigbm has no vgem backend; on a VM without virtio-gpu it allocates
+        # dumb buffers from a vkms card node, which must exist before the allocator starts.
+        config = CONFIG.read_text()
+        self.assertIn("CONFIG_DRM_VKMS=y", config)
 
     def test_fr1_vmbus_root_device_is_platform_device_patch(self):
         patch = (PATCHES / "vmbus-platform-device.patch").read_text()
