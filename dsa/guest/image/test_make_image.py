@@ -173,6 +173,17 @@ class ImageLayoutTests(unittest.TestCase):
                 # When otatools is not supplied, precompiled_sepolicy is removed so the device compiles at boot
                 self.assertNotIn("VENDOR/etc/selinux/precompiled_sepolicy", archive.namelist())
 
+    def test_pr3_the_graphics_allocator_can_open_the_drm_device(self):
+        plat_cil = "(typeattribute hal_graphics_allocator_server)\n(type graphics_device)\n"
+        patched = make_image.patch_plat_sepolicy(plat_cil, make_image.SEPOLICY_FRAGMENT.read_text())
+        rule = next(
+            (l for l in patched.splitlines() if l.startswith("(allow hal_graphics_allocator_server graphics_device (chr_file")),
+            None,
+        )
+        self.assertIsNotNone(rule, "the allocator has no rule for the DRM device")
+        for perm in ("open", "read", "write", "ioctl"):
+            self.assertIn(perm, rule)
+
     def test_pr3_neverallow_is_narrowed_only_for_vsock_socket(self):
         cil = (
             "(neverallow all_untrusted_apps base_typeattr_1 (vsock_socket (ioctl read write create getattr "
