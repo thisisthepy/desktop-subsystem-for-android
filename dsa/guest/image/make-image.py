@@ -14,10 +14,12 @@ It takes the pinned target_files and otatools (fetch.sh downloads them) and:
 
 The results go to dsa/target/image/<version>/:
 
-- disk.vhdx: a new user's Android disk (dynamic, so it holds only what is written): the
-  super partition with Android itself, its verified boot data (the vbmeta images, and the
-  boot images verified boot checks: boot, init_boot, vendor_boot), and empty misc, metadata
-  and userdata partitions that Android formats on first boot;
+- system.vhdx: the read-only system disk every user's VM shares (dynamic, so it holds only
+  what is written): the super partition with Android itself and its verified boot data
+  (the vbmeta images, and the boot images verified boot checks: boot, init_boot,
+  vendor_boot);
+- data.vhdx: the template of a user's data disk: empty misc, metadata and userdata
+  partitions, which Android writes and formats on first boot;
 - initrd.img: the vendor and generic ramdisks, which the VM boots with DSA's kernel;
 - image.json: the version, the kernel command line the VM needs, and the files' SHA-256.
 """
@@ -48,7 +50,6 @@ SUPER_UUID = "6b1ad5ad-0d5a-4dd3-9a6b-5a0a1d5a5a17"
 MISC_UUID = "811d3bbb-a7ff-437a-857f-f54af996b190"
 DISK_SIZE = 64 << 30
 SYSTEM_SMALL_PARTITIONS = [
-    ("misc", 1 << 20),
     ("vbmeta_a", 1 << 20),
     ("vbmeta_system_a", 1 << 20),
     ("vbmeta_system_dlkm_a", 1 << 20),
@@ -64,7 +65,11 @@ SYSTEM_SMALL_PARTITIONS = [
 ]
 SMALL_PARTITIONS = SYSTEM_SMALL_PARTITIONS
 
+# The user's data disk, the one the VM can write. misc is here and not on the read-only
+# system disk because the boot control HAL writes the boot state into it, and aborts when
+# it cannot.
 DATA_PARTITIONS = [
+    ("misc", 1 << 20),
     ("metadata", 64 << 20),
     ("userdata", 0),
 ]
@@ -639,8 +644,6 @@ def system_disk(images, otatools, work, out):
     number = 1
     for name, size in SYSTEM_SMALL_PARTITIONS:
         cmd += [f"--new={number}:0:+{size // 1024}K", f"--change-name={number}:{name}"]
-        if name == "misc":
-            cmd += [f"--partition-guid={number}:{MISC_UUID}"]
         number += 1
     cmd += [f"--new={number}:0:+{super_raw.stat().st_size // 1024}K", f"--change-name={number}:super", f"--partition-guid={number}:{SUPER_UUID}", str(raw)]
     run(*cmd)
@@ -665,21 +668,21 @@ def system_disk(images, otatools, work, out):
     out.unlink(missing_ok=True)
     run(shutil.which("qemu-img") or "qemu-img", "convert", "-f", "raw", "-O", "vhdx", "-o", "subformat=dynamic", "-S", "4k", raw, out)
     raw.unlink()
-    return command_line_partitions(partitions, {"misc": MISC_UUID})
+    return command_line_partitions(partitions)
 
 
 def data_disk(otatools, work, out):
-    """Emits an empty dynamic data disk template containing metadata and userdata partitions."""
+    """Emits an empty dynamic data disk template with the DATA_PARTITIONS."""
     raw = work / "data.raw"
     make_raw_disk(raw, DISK_SIZE)
     sgdisk = shutil.which("sgdisk") or str(otatools / "bin/sgdisk")
-    cmd = [
-        sgdisk, "--clear",
-        "--new=1:0:+64M", "--change-name=1:metadata",
-        "--new=2:0:0", "--change-name=2:userdata",
-        str(raw),
-    ]
-    run(*cmd)
+    cmd = [sgdisk, "--clear"]
+    for number, (name, size) in enumerate(DATA_PARTITIONS, start=1):
+        end = f"+{size // 1024}K" if size else "0"
+        cmd += [f"--new={number}:0:{end}", f"--change-name={number}:{name}"]
+        if name == "misc":
+            cmd += [f"--partition-guid={number}:{MISC_UUID}"]
+    run(*cmd, str(raw))
     materialize_backup_gpt(raw)
     out.unlink(missing_ok=True)
     run(shutil.which("qemu-img") or "qemu-img", "convert", "-f", "raw", "-O", "vhdx", "-o", "subformat=dynamic", "-S", "4k", raw, out)
