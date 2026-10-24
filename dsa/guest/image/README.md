@@ -13,6 +13,7 @@ them with the project's keys.
 | `make-image.py` | Changes, re-signs and lays out the image |
 | `check-image.py` | Checks a made image |
 | `fstab.dsa` | The guest's mount table on Hyper-V |
+| `console-logcat.rc` | The service that writes Android's log to the serial console |
 
 ```
 dsa/guest/image/fetch.sh 17
@@ -33,6 +34,9 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
 - `fstab.dsa` replaces the mount table. All partitions are on the user's one Android
   disk, found by the super partition's UUID, because Android creates its partition links
   for Hyper-V's SCSI disks only on that disk.
+- Android's log (`logcat`) goes to the serial console, which the host keeps as the VM's
+  console log (`C:\ProgramData\DSA\logs\android-*.log` on Windows). Cuttlefish writes it to a
+  virtio console, which Hyper-V does not have, and a user build has no adb to read it with.
 - Every APK, APEX and verified boot image is re-signed. The published build is signed with
   AOSP's test keys, whose private halves are public.
 
