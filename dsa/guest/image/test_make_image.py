@@ -246,6 +246,67 @@ class ImageLayoutTests(unittest.TestCase):
                     b"recompiled-sepolicy-binary",
                 )
 
+    def test_pr3_precompiled_sepolicy_is_compiled_from_the_files_init_would_use(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            secilc = root / "otatools/bin/secilc"
+            secilc.parent.mkdir(parents=True)
+            secilc.write_text("#!/bin/sh\nexit 0\n")
+            secilc.chmod(0o755)
+
+            # The partitions each carry a mapping file named after the same version, and the
+            # build carries mapping and genfs files for versions this vendor does not use.
+            cil = {
+                "SYSTEM/etc/selinux/plat_sepolicy.cil": "plat",
+                "SYSTEM/etc/selinux/mapping/202504.cil": "plat mapping",
+                "SYSTEM/etc/selinux/mapping/202504.compat.cil": "plat compat",
+                "SYSTEM/etc/selinux/mapping/202404.cil": "old plat mapping",
+                "SYSTEM/etc/selinux/plat_sepolicy_genfs_202504.cil": "genfs 202504",
+                "SYSTEM/etc/selinux/plat_sepolicy_genfs_202604.cil": "genfs 202604",
+                "SYSTEM_EXT/etc/selinux/system_ext_sepolicy.cil": "system_ext",
+                "SYSTEM_EXT/etc/selinux/mapping/202504.cil": "system_ext mapping",
+                "PRODUCT/etc/selinux/product_sepolicy.cil": "product",
+                "PRODUCT/etc/selinux/mapping/202504.cil": "product mapping",
+                "VENDOR/etc/selinux/plat_pub_versioned.cil": "pub versioned",
+                "VENDOR/etc/selinux/vendor_sepolicy.cil": "vendor",
+                "ODM/etc/selinux/odm_sepolicy.cil": "odm",
+            }
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                for name, text in cil.items():
+                    archive.writestr(name, text)
+                archive.writestr("VENDOR/etc/selinux/plat_sepolicy_vers.txt", "202504\n")
+                archive.writestr("VENDOR/etc/selinux/genfs_labels_version.txt", "202504\n")
+                archive.writestr("ODM/etc/selinux/precompiled_sepolicy", b"old-policy")
+
+            compiled = []
+            with patch("subprocess.run") as mock_run:
+                def fake_run(cmd, *a, **kw):
+                    out = cmd.index("-o")
+                    inputs = [arg for arg in cmd[1:] if arg.endswith(".cil")]
+                    compiled.extend(Path(arg).read_text() for arg in inputs)
+                    Path(cmd[out + 1]).write_bytes(b"policy")
+                    return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+                mock_run.side_effect = fake_run
+                make_image.modify(source, root / "modified.zip", otatools=root / "otatools")
+
+            self.assertTrue(compiled[0].startswith("plat"))
+            self.assertEqual(
+                compiled[1:],
+                [
+                    "plat mapping",
+                    "plat compat",
+                    "system_ext",
+                    "system_ext mapping",
+                    "product",
+                    "product mapping",
+                    "pub versioned",
+                    "vendor",
+                    "odm",
+                    "genfs 202504",
+                ],
+            )
+
 
     def test_fr1_two_disk_layout_separates_system_and_data_partitions(self):
         system_partitions = [name for name, _ in make_image.SYSTEM_SMALL_PARTITIONS]
