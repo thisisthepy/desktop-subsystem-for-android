@@ -249,14 +249,20 @@ class ImageLayoutTests(unittest.TestCase):
 
     def test_fr1_two_disk_layout_separates_system_and_data_partitions(self):
         system_partitions = [name for name, _ in make_image.SYSTEM_SMALL_PARTITIONS]
-        self.assertIn("misc", system_partitions)
         self.assertIn("vbmeta_a", system_partitions)
         self.assertIn("boot_a", system_partitions)
         self.assertNotIn("metadata", system_partitions)
         self.assertNotIn("userdata", system_partitions)
 
         data_partitions = [name for name, _ in make_image.DATA_PARTITIONS]
-        self.assertEqual(data_partitions, ["metadata", "userdata"])
+        self.assertEqual(data_partitions, ["misc", "metadata", "userdata"])
+
+    def test_fr1_misc_is_on_the_writable_data_disk(self):
+        # The boot control HAL writes the boot state into misc and aborts when it cannot,
+        # and the system disk is attached read-only.
+        system_partitions = [name for name, _ in make_image.SYSTEM_SMALL_PARTITIONS]
+        self.assertNotIn("misc", system_partitions)
+        self.assertIn("misc", [name for name, _ in make_image.DATA_PARTITIONS])
 
 
     def test_pr3_kernel_cmdline_selects_guest_graphics_stack(self):
