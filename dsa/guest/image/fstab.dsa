@@ -1,5 +1,5 @@
-# The guest's mount table on Hyper-V. Every partition is on the user's one Android disk,
-# which first-stage init finds by its fixed misc partition UUID (androidboot.boot_part_uuid).
+# The guest's mount table on Hyper-V. Android and its verified boot data are on the shared
+# read-only system disk; misc, metadata and userdata are on the user's data disk.
 # First stage init creates /dev/block/by-name links only for the partitions listed here
 # with first_stage_mount.
 # Not mounted in a normal boot (recoveryonly), but listed so that first stage init creates

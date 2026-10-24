@@ -40,10 +40,12 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
 
 In `dsa/target/image/<version>/`:
 
-- `disk.vhdx`: the template of a user's Android disk (dynamic). It holds `super` with
-  Android, its verified boot data, and empty `misc`, `metadata` and `userdata`, which
-  Android formats on first boot. The service copies it for a new user, and on an update
-  writes the new image's Android partitions into each user's disk.
+- `system.vhdx`: the read-only system disk (dynamic). It holds `super` with Android and
+  its verified boot data, and every user's VM attaches it as it is.
+- `data.vhdx`: the template of a user's data disk (dynamic). It holds empty `misc`,
+  `metadata` and `userdata`, which Android writes and formats on first boot. `misc` is
+  here because the boot control HAL writes the boot state into it. The service copies the
+  template for a new user and keeps each user's disk across updates.
 - `initrd.img`: the vendor ramdisk followed by the generic one.
 - `bzImage`, with `--kernel`: the guest kernel (`dsa/kernel/`). The host boots an image's
   own kernel when it has one, so a kernel update ships with the image.
