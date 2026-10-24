@@ -143,6 +143,7 @@ pub fn bring_disk_to(disk: &Path, template: &Path, version: &str) -> Result<(), 
         return Ok(());
     }
     if template.file_name().and_then(|n| n.to_str()) == Some("data.vhdx") {
+        drop_partitions_not_in(disk, template)?;
         return record_disk_image_version(disk, version);
     }
     let from = AttachedDisk::attach(template, true)?;
@@ -189,6 +190,50 @@ pub fn bring_disk_to(disk: &Path, template: &Path, version: &str) -> Result<(), 
     drop(to);
     drop(from);
     record_disk_image_version(disk, version)
+}
+
+/// Takes from the user's disk every partition the image's data template does not have.
+/// A disk made for an image that kept Android on it still holds Android's partitions,
+/// and Android, which finds partitions by name, would boot from those instead of the
+/// image's own disk. The data partitions stay where they are, with the user's data.
+fn drop_partitions_not_in(disk: &Path, template: &Path) -> Result<(), String> {
+    if !is_vhdx(disk)? || !is_vhdx(template)? {
+        return Ok(());
+    }
+    let keep: Vec<String> = {
+        let from = AttachedDisk::attach(template, true)?;
+        let mut source = from.open(false)?;
+        crate::gpt::partitions(&mut source)
+            .map_err(|e| format!("reading {}: {e}", template.display()))?
+            .into_iter()
+            .map(|p| p.name)
+            .collect()
+    };
+    let to = AttachedDisk::attach(disk, false)?;
+    let mut target = to.open(true)?;
+    if crate::gpt::partitions(&mut target)
+        .map_err(|e| format!("reading {}: {e}", disk.display()))?
+        .iter()
+        .all(|p| keep.contains(&p.name))
+    {
+        return Ok(());
+    }
+    let keep: Vec<&str> = keep.iter().map(String::as_str).collect();
+    crate::gpt::keep_only(&mut target, &keep).map_err(|e| {
+        format!(
+            "removing the old Android partitions from {}: {e}",
+            disk.display()
+        )
+    })?;
+    Ok(())
+}
+
+/// Whether `path` is a VHDX file, which starts with its signature.
+fn is_vhdx(path: &Path) -> Result<bool, String> {
+    let mut signature = [0u8; 8];
+    let mut file =
+        std::fs::File::open(path).map_err(|e| format!("opening {}: {e}", path.display()))?;
+    Ok(io::Read::read_exact(&mut file, &mut signature).is_ok() && &signature == b"vhdxfile")
 }
 
 fn is_blank_disk(disk: &Path) -> Result<bool, String> {
