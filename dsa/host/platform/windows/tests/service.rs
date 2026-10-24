@@ -24,6 +24,21 @@ fn sc(args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
+/// Registers the service `name` and returns its guard, which deletes it. Success is read
+/// from the exit code: sc.exe words its result in the system's language.
+fn create_service(name: &str, bin_path: &str) -> Installed {
+    let output = Command::new("sc.exe")
+        .args(["create", name, "binPath=", bin_path, "start=", "demand"])
+        .output()
+        .expect("running sc.exe");
+    assert!(
+        output.status.success(),
+        "sc create: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    Installed(name.to_string())
+}
+
 fn wait_until(what: &str, timeout: Duration, mut done: impl FnMut() -> bool) {
     let deadline = Instant::now() + timeout;
     while !done() {
@@ -90,9 +105,7 @@ fn pr5_the_installed_service_serves_each_caller_their_own_android() {
         config.display()
     );
 
-    let created = sc(&["create", &name, "binPath=", &bin_path, "start=", "demand"]);
-    assert!(created.contains("SUCCESS"), "sc create: {created}");
-    let service = Installed(name.clone());
+    let service = create_service(&name, &bin_path);
     let started = sc(&["start", &name]);
     assert!(
         started.contains("RUNNING") || started.contains("START_PENDING"),
@@ -309,9 +322,7 @@ fn fr15_the_installed_service_runs_a_signed_setup_and_reports_when_it_fails() {
         env!("CARGO_BIN_EXE_dsa-hostd"),
         config_path.display()
     );
-    let created = sc(&["create", &name, "binPath=", &bin_path, "start=", "demand"]);
-    assert!(created.contains("SUCCESS"), "sc create: {created}");
-    let _service = Installed(name.clone());
+    let _service = create_service(&name, &bin_path);
     sc(&["start", &name]);
 
     let mut connector = NamedPipeConnector { name: pipe };
