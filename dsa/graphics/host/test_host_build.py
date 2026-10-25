@@ -52,6 +52,21 @@ class HostGraphicsBuildTests(unittest.TestCase):
         self.assertIn("host/vulkan/VkCommonOperations.h", text)
         self.assertIn("getQueueLock", text)
 
+    def test_pr3_host_renderer_can_be_asked_for_the_gpu_that_drives_the_display(self):
+        script = FETCH_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('"0007-*.patch"', script)
+        patch = (HERE.parent / "patches" / "0007-select-the-gpu-the-embedder-asks-for.patch")
+        text = patch.read_text(encoding="utf-8")
+        self.assertIn("host/vulkan/VkCommonOperations.cpp", text)
+        self.assertIn("idProps.deviceLUID, preference.luid, VK_LUID_SIZE", text)
+        self.assertIn("void setGpuPreference(const GpuPreference& preference)", text)
+        header = (HERE / "dsa_gfx_backend.h").read_text(encoding="utf-8")
+        self.assertIn("dsa_gfx_select_gpu", header)
+        self.assertIn("dsa_gfx_get_gpu_info", header)
+        source = (HERE / "dsa_gfx_backend.cpp").read_text(encoding="utf-8")
+        self.assertIn("gfxstream::vk::setGpuPreference(preference)", source)
+        self.assertIn("gfxstream::vk::gpuPreferenceMatched()", source)
+
     def test_fr3_each_display_is_copied_into_its_window_on_the_gpu(self):
         header = (HERE / "dsa_gfx_backend.h").read_text(encoding="utf-8")
         self.assertIn("dsa_gfx_set_display_callbacks", header)

@@ -130,6 +130,42 @@ sign-in. One copy runs per session, and it ends at sign-out. It writes its messa
   stretched to fill it until Android draws one at the new size.
 - Without a GPU device, the windows still open and close with their tasks but stay
   empty, and the log says why.
+- The renderer runs on the GPU that drives the primary monitor, so frames never cross
+  from one GPU to another and a laptop's discrete GPU stays asleep. The renderer uses one
+  GPU, so a window on a monitor that another GPU drives is still rendered there, and
+  Windows copies its frames across. When no Vulkan GPU matches (in a remote desktop
+  session, for example), the renderer picks one itself, preferring a discrete GPU.
+
+### Choosing the render GPU
+
+`%LOCALAPPDATA%\DSA\compositor.json` holds the compositor's settings for each user. It
+is optional; without it every setting has its default.
+
+```json
+{ "render_gpu": "discrete" }
+```
+
+`render_gpu` is one of:
+
+- `display` (the default): the GPU that drives the primary monitor;
+- `integrated`: the first integrated GPU;
+- `discrete`: the first discrete GPU, for example for games;
+- any other text: the first GPU whose name contains it, ignoring case, such as `"RTX"`
+  or `"Arc"`.
+
+The renderer chooses its GPU when it starts, so a change takes effect the next time
+`dsa-compositor` starts (sign out and back in). A setting that cannot be read is logged
+and the default is used. Unknown keys are an error, so a misspelt setting is reported.
+
+The log says what was asked for and what the renderer chose:
+
+```text
+render GPU setting display: asking the renderer for Intel(R) Arc(TM) Graphics (LUID 00000000:00019bec), which drives the primary monitor; task windows on other monitors are rendered there too
+rendering on Intel(R) Arc(TM) Graphics (LUID 00000000:00019bec), the GPU asked for
+```
+
+When nothing matches, the second line says that the renderer ranked the GPUs itself, and
+why.
 
 `dsa launch <package>` starts an app in a window of its own, and `dsa tasks` lists the
 tasks that have one.
