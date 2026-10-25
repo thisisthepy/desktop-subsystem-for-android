@@ -9,6 +9,7 @@ use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::session::{
     GuestLauncher, Session, SessionConfig, SessionError, SessionEvent, SessionState, StopReason,
 };
+use dsa_host_core::tasks::{Bounds, Task, TaskEvent, TaskRequest};
 use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{envelope::Body, Envelope, RejectReason, Role};
 use dsa_protocol::encode;
@@ -655,4 +656,203 @@ fn pr6_the_previous_boots_secret_does_not_open_the_next_boot() {
         "{refusal:?}"
     );
     assert_eq!(session.state(), SessionState::Starting);
+}
+
+fn send_body(agent: &mut Box<dyn Connection>, body: Body) {
+    agent
+        .send(&encode(&Envelope { body: Some(body) }))
+        .expect("the agent sends");
+}
+
+fn task_updated(task_id: i32, label: &str) -> Body {
+    Body::TaskUpdated(dsa_protocol::control::TaskUpdated {
+        task_id,
+        bounds: Some(dsa_protocol::control::Rect {
+            left: 10,
+            top: 20,
+            right: 410,
+            bottom: 820,
+        }),
+        package_name: "com.example.clock".into(),
+        label: label.into(),
+        focused: true,
+    })
+}
+
+fn clock(task_id: i32, label: &str) -> Task {
+    Task {
+        task_id,
+        bounds: Bounds {
+            left: 10,
+            top: 20,
+            right: 410,
+            bottom: 820,
+        },
+        package_name: "com.example.clock".into(),
+        label: label.into(),
+        focused: true,
+    }
+}
+
+fn active_session() -> (Session, Box<dyn Connection>, FakeLauncher) {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    (session, agent, launcher)
+}
+
+#[test]
+fn fr3_task_messages_from_the_guest_reach_a_watcher() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_tasks();
+    assert!(watch.current.is_empty());
+
+    send_body(&mut agent, task_updated(7, "Clock"));
+    send_body(
+        &mut agent,
+        Body::TaskFrames(dsa_protocol::control::TaskFrames {
+            task_id: 7,
+            display_id: 2,
+        }),
+    );
+    send_body(
+        &mut agent,
+        Body::TaskRemoved(dsa_protocol::control::TaskRemoved { task_id: 7 }),
+    );
+
+    let events: Vec<TaskEvent> = (0..3)
+        .map(|_| watch.events.recv_timeout(WAIT).expect("a task event"))
+        .collect();
+    assert_eq!(
+        events,
+        vec![
+            TaskEvent::Updated(clock(7, "Clock")),
+            TaskEvent::Frames {
+                task_id: 7,
+                display_id: 2
+            },
+            TaskEvent::Removed { task_id: 7 },
+        ]
+    );
+    assert!(session.tasks().is_empty());
+}
+
+#[test]
+fn fr3_a_late_watcher_starts_from_the_tasks_that_exist_now() {
+    let (session, mut agent, _launcher) = active_session();
+    let early = session.watch_tasks();
+    send_body(&mut agent, task_updated(3, "Clock"));
+    send_body(&mut agent, task_updated(3, "Alarm"));
+    send_body(
+        &mut agent,
+        Body::TaskFrames(dsa_protocol::control::TaskFrames {
+            task_id: 3,
+            display_id: 5,
+        }),
+    );
+    for _ in 0..3 {
+        early.events.recv_timeout(WAIT).expect("a task event");
+    }
+
+    let late = session.watch_tasks();
+    assert_eq!(
+        late.current,
+        vec![
+            TaskEvent::Updated(clock(3, "Alarm")),
+            TaskEvent::Frames {
+                task_id: 3,
+                display_id: 5
+            },
+        ]
+    );
+    assert_eq!(session.tasks(), vec![clock(3, "Alarm")]);
+}
+
+#[test]
+fn fr3_closing_a_task_and_launching_an_app_reach_the_guest() {
+    let (session, mut agent, _launcher) = active_session();
+    session
+        .request(TaskRequest::Close { task_id: 7 })
+        .expect("the close is sent");
+    session
+        .request(TaskRequest::Launch {
+            package_name: "com.example.clock".into(),
+        })
+        .expect("the launch is sent");
+
+    let first = dsa_protocol::decode(&agent.recv(Some(WAIT)).unwrap()).unwrap();
+    assert_eq!(
+        first.body,
+        Some(Body::CloseTask(dsa_protocol::control::CloseTask {
+            task_id: 7
+        }))
+    );
+    let second = dsa_protocol::decode(&agent.recv(Some(WAIT)).unwrap()).unwrap();
+    assert_eq!(
+        second.body,
+        Some(Body::LaunchApp(dsa_protocol::control::LaunchApp {
+            package_name: "com.example.clock".into()
+        }))
+    );
+}
+
+#[test]
+fn fr3_a_request_while_the_guest_is_not_running_says_so() {
+    let launcher = FakeLauncher::default();
+    let (session, _connector) = session_with(launcher, WAIT);
+    assert_eq!(
+        session.request(TaskRequest::Launch {
+            package_name: "com.example.clock".into()
+        }),
+        Err(SessionError::NotActive(SessionState::Stopped))
+    );
+}
+
+#[test]
+fn nfr5_a_guest_that_dies_removes_every_task_it_had() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_tasks();
+    send_body(&mut agent, task_updated(1, "Clock"));
+    send_body(&mut agent, task_updated(2, "Maps"));
+    for _ in 0..2 {
+        watch.events.recv_timeout(WAIT).expect("a task event");
+    }
+
+    agent.close();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    let removed: Vec<TaskEvent> = (0..2)
+        .map(|_| watch.events.recv_timeout(WAIT).expect("a removal"))
+        .collect();
+    assert_eq!(
+        removed,
+        vec![
+            TaskEvent::Removed { task_id: 1 },
+            TaskEvent::Removed { task_id: 2 }
+        ]
+    );
+    assert!(session.tasks().is_empty());
+    assert!(session.watch_tasks().current.is_empty());
+}
+
+#[test]
+fn nfr5_a_repeated_task_message_is_handed_on_once() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_tasks();
+    send_body(&mut agent, task_updated(1, "Clock"));
+    send_body(&mut agent, task_updated(1, "Clock"));
+    send_body(&mut agent, task_updated(1, "Clock 2"));
+    assert_eq!(
+        watch.events.recv_timeout(WAIT).unwrap(),
+        TaskEvent::Updated(clock(1, "Clock"))
+    );
+    assert_eq!(
+        watch.events.recv_timeout(WAIT).unwrap(),
+        TaskEvent::Updated(clock(1, "Clock 2"))
+    );
+    assert!(watch
+        .events
+        .recv_timeout(Duration::from_millis(100))
+        .is_err());
 }

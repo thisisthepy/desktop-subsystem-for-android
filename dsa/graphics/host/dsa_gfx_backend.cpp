@@ -4,6 +4,7 @@
  */
 
 #include "dsa_gfx_backend.h"
+#include "dsa_gfx_display.h"
 
 #include <algorithm>
 #include <atomic>
@@ -93,6 +94,7 @@ extern "C" DSA_GFX_EXPORT void dsa_gfx_teardown(void) {
     if (!s_initialized.load(std::memory_order_acquire)) {
         return;
     }
+    dsa_gfx_display_shutdown();
     stream_renderer_teardown();
     s_initialized.store(false, std::memory_order_release);
 }

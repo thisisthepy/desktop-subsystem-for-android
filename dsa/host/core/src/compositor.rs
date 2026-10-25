@@ -1,9 +1,12 @@
-//! Platform-neutral graphics stream bookkeeping, renderer interfaces, and task registry.
+//! Platform-neutral graphics stream bookkeeping, renderer interfaces, and the rules for
+//! task windows.
 //!
 //! The compositor receives guest graphics streams over the transport and delegates them
-//! to a [`GraphicsRenderer`].
+//! to a [`GraphicsRenderer`]. [`task_windows`] decides which window each task has and
+//! which window each display's frames go to; the platform only carries it out.
 
-use std::collections::HashMap;
+pub mod task_windows;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -174,62 +177,5 @@ impl StreamTracker {
 
     pub fn total_active(&self) -> usize {
         self.command_active() + self.process_pipe_active()
-    }
-}
-
-/// Metadata about an Android task window.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskInfo {
-    pub task_id: u32,
-    pub title: String,
-    pub width: u32,
-    pub height: u32,
-}
-
-/// Registry of active guest tasks and their windows.
-#[derive(Debug, Default)]
-pub struct TaskRegistry {
-    tasks: Mutex<HashMap<u32, TaskInfo>>,
-}
-
-impl TaskRegistry {
-    pub fn new() -> TaskRegistry {
-        TaskRegistry::default()
-    }
-
-    /// Registers or updates a task.
-    pub fn register_task(&self, task: TaskInfo) {
-        let mut tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
-        tasks.insert(task.task_id, task);
-    }
-
-    /// Removes a task by ID and returns its info if it was present.
-    pub fn remove_task(&self, task_id: u32) -> Option<TaskInfo> {
-        let mut tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
-        tasks.remove(&task_id)
-    }
-
-    /// Returns task info if registered.
-    pub fn get_task(&self, task_id: u32) -> Option<TaskInfo> {
-        let tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
-        tasks.get(&task_id).cloned()
-    }
-
-    /// Returns all registered tasks.
-    pub fn tasks(&self) -> Vec<TaskInfo> {
-        let tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
-        tasks.values().cloned().collect()
-    }
-
-    /// Returns true when no tasks are registered.
-    pub fn is_empty(&self) -> bool {
-        let tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
-        tasks.is_empty()
-    }
-
-    /// Returns the number of registered tasks.
-    pub fn len(&self) -> usize {
-        let tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
-        tasks.len()
     }
 }

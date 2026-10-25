@@ -16,7 +16,8 @@ them with the project's keys.
 | `console-logcat.rc` | The service that writes Android's log to the serial console |
 | `unavailable-features.xml` | Hardware features the VM lacks, withdrawn from the system |
 | `dsa-channeld.rc` | The service that runs the control channel daemon |
-| `sepolicy/` | Policy added to the image: vsock for graphics, and the control daemon's domain |
+| `dsa-channel-manifest.xml` | The vendor manifest entry declaring the daemon's binder service |
+| `sepolicy/` | Policy added to the image: vsock for graphics, and the control daemon's domain and binder service |
 
 ```
 dsa/guest/image/fetch.sh 17
@@ -43,6 +44,11 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
 - The control channel daemon (`/vendor/bin/dsa-channeld`) is added and runs in its own
   SELinux domain, the only one that may read `/proc/bootconfig`, where the host puts the
   boot's secret. It connects to the host, which makes the session active.
+- The daemon registers the binder service `io.github.thisisthepy.dsa.channel.IChannel/default`,
+  which the agent and the hwcomposer call. `dsa-channel-manifest.xml` declares it in the
+  vendor manifest, because servicemanager refuses a stable service no manifest declares.
+  `vendor_service_contexts` labels it, and the policy lets only the daemon register it and
+  only `system_app`, `platform_app` and the hwcomposer find it, call it and be called back.
 - The agent (`dsa/guest/agent/`) is added as a privileged app in
   `/system_ext/priv-app/DsaAgent/`, with its privileged permission list, and is signed with
   the platform key. It tells the host about each app task, so each gets its own window.

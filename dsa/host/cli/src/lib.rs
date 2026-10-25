@@ -5,10 +5,15 @@
 //! dsa start [--wait]
 //! dsa stop [--wait]
 //! dsa update [--wait]
+//! dsa launch <package>
+//! dsa tasks
 //! ```
 //!
 //! It acts on the Android of the user who runs it: the service learns that user from the
 //! operating system, so there is no option to name another one.
+//!
+//! `dsa launch` starts an app in a window of its own, named by its package (such as
+//! `com.android.settings`). `dsa tasks` lists the app tasks Android shows as windows.
 //!
 //! `dsa update` installs the newest version of DSA now instead of when no Android is
 //! running. It stops every user's Android, since the service restarts. With `--wait` it
@@ -24,13 +29,13 @@ use std::fmt::Write as _;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dsa_host_core::host_api::{ClientError, HostApiClient, Status};
+use dsa_host_core::host_api::{ClientError, HostApiClient, Status, TaskList};
 use dsa_host_core::session::SessionState;
 use dsa_transport::Connector;
 
 pub const USAGE: &str =
-    "usage: dsa <status | start | stop | update> [--wait] [--timeout <seconds>] \
-                         [--pipe <name> | --socket <path>]";
+    "usage: dsa <status | start | stop | update | launch <package> | tasks> [--wait] \
+                         [--timeout <seconds>] [--pipe <name> | --socket <path>]";
 
 /// What to ask the service.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +44,10 @@ pub enum Command {
     Start,
     Stop,
     Update,
+    /// Start an app in a window of its own; the package is in [`Invocation::package`].
+    Launch,
+    /// List the app tasks Android shows as windows.
+    Tasks,
 }
 
 /// What can start a host service or ensure it is running.
@@ -86,6 +95,17 @@ pub struct Invocation {
     pub timeout: Duration,
     /// Where the service is, when not at the usual place.
     pub endpoint: Option<String>,
+    /// The app to launch, for `dsa launch`.
+    pub package: Option<String>,
+}
+
+/// Whether `name` can be an Android package name: dot-separated parts of letters, digits
+/// and underscores.
+fn is_package_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.split('.').all(|part| {
+            !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
 }
 
 /// Parses the arguments after the program name.
@@ -94,16 +114,31 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut wait = false;
     let mut timeout = Duration::from_secs(120);
     let mut endpoint = None;
+    let mut package = None;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "status" | "start" | "stop" | "update" if command.is_none() => {
+            "status" | "start" | "stop" | "update" | "launch" | "tasks" if command.is_none() => {
                 command = Some(match arg.as_str() {
                     "status" => Command::Status,
                     "start" => Command::Start,
                     "update" => Command::Update,
+                    "launch" => Command::Launch,
+                    "tasks" => Command::Tasks,
                     _ => Command::Stop,
                 });
+            }
+            name if command == Some(Command::Launch)
+                && package.is_none()
+                && !name.starts_with('-') =>
+            {
+                if !is_package_name(name) {
+                    return Err(format!(
+                        "{name:?} is not a package name; name the app by its package, such as \
+                         com.android.settings"
+                    ));
+                }
+                package = Some(name.to_string());
             }
             "--wait" => wait = true,
             "--timeout" => {
@@ -120,12 +155,53 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             other => return Err(format!("unexpected {other:?}\n{USAGE}")),
         }
     }
+    let command = command.ok_or(USAGE)?;
+    if command == Command::Launch && package.is_none() {
+        return Err(format!(
+            "dsa launch needs the package of the app to start, such as com.android.settings\n\
+             {USAGE}"
+        ));
+    }
     Ok(Invocation {
-        command: command.ok_or(USAGE)?,
+        command,
         wait,
         timeout,
         endpoint,
+        package,
     })
+}
+
+/// One line for each task of `list`, or a line saying there are none.
+pub fn describe_tasks(list: &TaskList) -> String {
+    if list.tasks.is_empty() {
+        return "Android has no app tasks".into();
+    }
+    let lines: Vec<String> = list
+        .tasks
+        .iter()
+        .map(|task| {
+            let mut line = format!(
+                "Task {}: {} ({}), {}x{}",
+                task.task_id,
+                if task.label.is_empty() {
+                    &task.package_name
+                } else {
+                    &task.label
+                },
+                task.package_name,
+                task.bounds.width(),
+                task.bounds.height()
+            );
+            if let Some((_, display_id)) = list.frames.iter().find(|(id, _)| *id == task.task_id) {
+                let _ = write!(line, ", display {display_id}");
+            }
+            if task.focused {
+                line.push_str(", focused");
+            }
+            line
+        })
+        .collect();
+    lines.join("\n")
 }
 
 /// A line describing `status`, and one more for each piece of news about an update.
@@ -263,6 +339,15 @@ pub fn run_with_starter(
         Command::Start => client.start(),
         Command::Stop => client.stop(),
         Command::Update => return update(invocation, client, connector),
+        Command::Launch => {
+            let package = invocation.package.as_deref().unwrap_or_default();
+            client.launch_app(package).map_err(|e| e.to_string())?;
+            return Ok(format!("Launching {package}"));
+        }
+        Command::Tasks => {
+            let list = client.tasks().map_err(|e| e.to_string())?;
+            return Ok(describe_tasks(&list));
+        }
     }
     .map_err(|e| e.to_string())?;
     if !invocation.wait || invocation.command == Command::Status {

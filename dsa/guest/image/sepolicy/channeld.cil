@@ -1,8 +1,9 @@
 ; Desktop Subsystem for Android (DSA)
 ; The guest's control channel daemon (/vendor/bin/dsa-channeld): init starts it in its own
 ; domain, it reads the boot's secret from /proc/bootconfig and connects to the host over
-; vsock. No other domain gains anything here; apps in particular still cannot read
-; /proc/bootconfig, which is what keeps the secret the daemon's alone.
+; vsock. It serves the agent and the hwcomposer over binder, so those domains may call it
+; and it may call them back; nothing else is granted to any other domain. Apps in particular
+; still cannot read /proc/bootconfig, which is what keeps the secret the daemon's alone.
 
 (type dsa_channeld)
 (roletype object_r dsa_channeld)
@@ -32,3 +33,33 @@
 
 ; The control channel.
 (allow dsa_channeld self (vsock_socket (create connect read write getattr setopt getopt shutdown)))
+
+; The binder service the agent and the hwcomposer reach the daemon through,
+; io.github.thisisthepy.dsa.channel.IChannel/default on /dev/binder, which
+; vendor_service_contexts labels dsa_channel_service. Only the daemon may register it.
+(type dsa_channel_service)
+(roletype object_r dsa_channel_service)
+(typeattributeset service_manager_type (dsa_channel_service))
+(typeattributeset hal_service_type (dsa_channel_service))
+
+(allow dsa_channeld binder_device (chr_file (ioctl read write open getattr map)))
+(allow dsa_channeld servicemanager (binder (call transfer)))
+(allow servicemanager dsa_channeld (binder (call transfer)))
+; servicemanager reads the caller's context to check it.
+(allow servicemanager dsa_channeld (dir (search)))
+(allow servicemanager dsa_channeld (file (read open)))
+(allow servicemanager dsa_channeld (process (getattr)))
+(allow dsa_channeld dsa_channel_service (service_manager (add find)))
+
+; Its clients: the agent, a platform-signed system app (system_app with the system user ID,
+; platform_app without), and the hwcomposer. They find the service and call it; the daemon
+; calls back the listeners they hand it.
+(allow system_app dsa_channel_service (service_manager (find)))
+(allow platform_app dsa_channel_service (service_manager (find)))
+(allow hal_graphics_composer_server dsa_channel_service (service_manager (find)))
+(allow system_app dsa_channeld (binder (call transfer)))
+(allow platform_app dsa_channeld (binder (call transfer)))
+(allow hal_graphics_composer_server dsa_channeld (binder (call transfer)))
+(allow dsa_channeld system_app (binder (call transfer)))
+(allow dsa_channeld platform_app (binder (call transfer)))
+(allow dsa_channeld hal_graphics_composer_server (binder (call transfer)))

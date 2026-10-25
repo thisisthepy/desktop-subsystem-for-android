@@ -332,6 +332,13 @@ UNAVAILABLE_FEATURES = "VENDOR/etc/permissions/dsa-unavailable-features.xml"
 CHANNELD_BINARY = "VENDOR/bin/dsa-channeld"
 CHANNELD_RC = "VENDOR/etc/init/dsa-channeld.rc"
 CHANNELD_CONTEXT = "/vendor/bin/dsa-channeld u:object_r:dsa_channeld_exec:s0"
+# The binder service the daemon serves the agent and the hwcomposer through: the vendor
+# manifest declares it, which servicemanager requires of a VINTF-stable service, and
+# vendor_service_contexts gives it the label the policy grants on.
+CHANNEL_INSTANCE = "io.github.thisisthepy.dsa.channel.IChannel/default"
+CHANNEL_MANIFEST = "VENDOR/etc/vintf/manifest/dsa-channel.xml"
+VENDOR_SERVICE_CONTEXTS = "VENDOR/etc/selinux/vendor_service_contexts"
+CHANNEL_SERVICE_CONTEXT = f"{CHANNEL_INSTANCE} u:object_r:dsa_channel_service:s0"
 # The agent: a privileged app in system_ext, signed with the platform key, which reports
 # each app task to the host and starts and ends tasks for it. The framework refuses to boot
 # when a privileged app requests a privileged permission its allowlist does not grant.
@@ -377,6 +384,14 @@ def update_vendor_file_contexts(fc_text, channeld=False):
         if not any(pattern in line for line in lines):
             lines.append(rule)
     return "\n".join(lines) + ("\n" if lines else "")
+
+
+def update_vendor_service_contexts(text):
+    """Labels the daemon's binder service in vendor_service_contexts if it is not yet."""
+    lines = text.splitlines()
+    if not any(line.split()[:1] == [CHANNEL_INSTANCE] for line in lines):
+        lines.append(CHANNEL_SERVICE_CONTEXT)
+    return "\n".join(lines) + "\n"
 
 
 # The partitions' file contexts, in the order the Android build joins them into
@@ -429,6 +444,10 @@ def update_vendor_filesystem_config(fs_config_text, channeld=False):
         entries += [
             ("vendor/bin/dsa-channeld", "vendor/bin/dsa-channeld 0 2000 755 capabilities=0x0"),
             ("vendor/etc/init/dsa-channeld.rc", "vendor/etc/init/dsa-channeld.rc 0 0 644 capabilities=0x0"),
+            ("vendor/etc/vintf/manifest/dsa-channel.xml",
+             "vendor/etc/vintf/manifest/dsa-channel.xml 0 0 644 capabilities=0x0"),
+            ("vendor/etc/selinux/vendor_service_contexts",
+             "vendor/etc/selinux/vendor_service_contexts 0 0 644 capabilities=0x0"),
         ]
     for path, rule in entries:
         if not any(line.startswith(path + " ") for line in lines):
@@ -708,6 +727,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     data = data.rstrip(b"\n") + b"\n" + CONSOLE_UEVENTD_LINE.encode() + b"\n"
                 elif name in ("VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"):
                     data = update_vendor_file_contexts(data.decode(), channeld_payload is not None).encode()
+                elif name == VENDOR_SERVICE_CONTEXTS and channeld_payload is not None:
+                    data = update_vendor_service_contexts(data.decode()).encode()
             info.compress_type = zipfile.ZIP_STORED
             zout.writestr(info, data)
         for directory in FSTAB_DIRS:
@@ -717,6 +738,9 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         if channeld_payload is not None:
             zout.writestr(CHANNELD_BINARY, channeld_payload)
             zout.writestr(CHANNELD_RC, (HERE / "dsa-channeld.rc").read_bytes())
+            zout.writestr(CHANNEL_MANIFEST, (HERE / "dsa-channel-manifest.xml").read_bytes())
+            if VENDOR_SERVICE_CONTEXTS not in names:
+                zout.writestr(VENDOR_SERVICE_CONTEXTS, update_vendor_service_contexts(""))
         if agent_payload is not None:
             zout.writestr(AGENT_APK, agent_payload)
             zout.writestr(AGENT_PERMISSIONS, AGENT_PERMISSIONS_SOURCE.read_bytes())
