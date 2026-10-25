@@ -25,6 +25,24 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertIn(".unlocked_ioctl\t= shmem_file_ioctl,", patch)
         self.assertIn("config MEMFD_ASHMEM_SHIM", patch)
 
+    def test_fr1_netd_firewall_and_traffic_rules_are_built_in(self):
+        # The image ships no kernel modules, and netd exits when it cannot create the
+        # iptables filter and mangle tables; init then restarts zygote with it.
+        config = CONFIG.read_text()
+        for option in [
+            "CONFIG_IP_NF_FILTER=y",
+            "CONFIG_IP_NF_MANGLE=y",
+            "CONFIG_IP_NF_NAT=y",
+            "CONFIG_IP6_NF_FILTER=y",
+            "CONFIG_IP6_NF_MANGLE=y",
+            "CONFIG_NETFILTER_XT_MATCH_CONNMARK=y",
+            "CONFIG_NETFILTER_XT_TARGET_MARK=y",
+            "CONFIG_NETFILTER_XT_TARGET_IDLETIMER=y",
+            "CONFIG_NET_SCH_INGRESS=y",
+            "CONFIG_XFRM_USER=y",
+        ]:
+            self.assertIn(option, config)
+
     def test_fr1_binder_device_nodes_are_created_for_android_init(self):
         config = CONFIG.read_text()
         self.assertIn('CONFIG_ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder"', config)
