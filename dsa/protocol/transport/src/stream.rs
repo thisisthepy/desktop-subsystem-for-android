@@ -9,7 +9,7 @@ use std::io::{self, Read, Write};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::{check_frame_len, Connection, TransportError};
+use crate::{check_frame_len, Connection, FrameSender, TransportError};
 
 const HEADER_LEN: usize = 4;
 
@@ -20,6 +20,14 @@ pub trait StreamSocket: Read + Write + Send {
 
     /// Shuts the socket down in both directions, so the peer sees end of stream.
     fn shutdown(&mut self);
+
+    /// A second handle on the same socket, for a writer on another thread than the reader.
+    fn try_clone(&self) -> io::Result<Self>
+    where
+        Self: Sized,
+    {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
 }
 
 /// A [`Connection`] that frames messages over a [`StreamSocket`].
@@ -173,9 +181,16 @@ impl<S: StreamSocket> RawStreamConnection<S> {
             closed: false,
         }
     }
+
+    fn shut_down(&mut self) {
+        if !self.closed {
+            self.socket.shutdown();
+            self.closed = true;
+        }
+    }
 }
 
-impl<S: StreamSocket> Connection for RawStreamConnection<S> {
+impl<S: StreamSocket + 'static> Connection for RawStreamConnection<S> {
     fn send(&mut self, frame: &[u8]) -> Result<(), TransportError> {
         if self.closed {
             return Err(TransportError::Closed);
@@ -225,16 +240,36 @@ impl<S: StreamSocket> Connection for RawStreamConnection<S> {
     }
 
     fn close(&mut self) {
-        if !self.closed {
-            self.socket.shutdown();
-            self.closed = true;
+        self.shut_down();
+    }
+
+    fn try_clone_sender(&self) -> Option<Box<dyn FrameSender>> {
+        if self.closed {
+            return None;
         }
+        let socket = self.socket.try_clone().ok()?;
+        Some(Box::new(RawStreamSender { socket }))
+    }
+}
+
+/// The sending half of a [`RawStreamConnection`], on a second handle to its socket.
+/// Dropping it leaves the connection open.
+pub struct RawStreamSender<S: StreamSocket> {
+    socket: S,
+}
+
+impl<S: StreamSocket> FrameSender for RawStreamSender<S> {
+    fn send(&mut self, frame: &[u8]) -> Result<(), TransportError> {
+        self.socket
+            .write_all(frame)
+            .and_then(|()| self.socket.flush())
+            .map_err(TransportError::from)
     }
 }
 
 impl<S: StreamSocket> Drop for RawStreamConnection<S> {
     fn drop(&mut self) {
-        self.close();
+        self.shut_down();
     }
 }
 

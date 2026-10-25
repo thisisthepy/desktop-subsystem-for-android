@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dsa_host_core::compositor::{GraphicsRenderer, GraphicsStreamKind};
-use dsa_transport::Connection;
+use dsa_transport::{Connection, FrameSender};
 use windows_sys::Win32::Foundation::HMODULE;
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 
@@ -197,13 +197,18 @@ impl GfxBackend for NativeBackend {
 
 struct StreamContext<'a> {
     connection: Mutex<&'a mut dyn Connection>,
+    /// Writes go here when the transport can share the connection, so a reply does not
+    /// wait for the reader's `recv` to time out.
+    sender: Option<Mutex<Box<dyn FrameSender>>>,
     pending: Mutex<Vec<u8>>,
 }
 
 impl<'a> StreamContext<'a> {
     fn new(connection: &'a mut dyn Connection) -> Self {
+        let sender = connection.try_clone_sender().map(Mutex::new);
         StreamContext {
             connection: Mutex::new(connection),
+            sender,
             pending: Mutex::new(Vec::new()),
         }
     }
@@ -264,12 +269,19 @@ unsafe extern "C" fn stream_write_trampoline(
         return 0;
     }
     let ctx = &*(user_data as *const StreamContext);
-    let mut conn = match ctx.connection.lock() {
-        Ok(guard) => guard,
-        Err(_) => return -1,
-    };
     let slice = std::slice::from_raw_parts(buf as *const u8, count);
-    match conn.send(slice) {
+    let sent = if let Some(sender) = &ctx.sender {
+        match sender.lock() {
+            Ok(mut sender) => sender.send(slice),
+            Err(_) => return -1,
+        }
+    } else {
+        match ctx.connection.lock() {
+            Ok(mut conn) => conn.send(slice),
+            Err(_) => return -1,
+        }
+    };
+    match sent {
         Ok(()) => count as c_int,
         Err(_) => -1,
     }
