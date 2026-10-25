@@ -137,6 +137,28 @@ VENDOR_APEX_BOOTCONFIG = {
 }
 
 
+def aosp_test_certificates(otatools, root):
+    """Lays AOSP's test certificates out at the paths META/apkcerts.txt names them by.
+
+    sign_target_files_apks replaces those certificates with ours in every
+    mac_permissions.xml, opening them relative to where it runs, and skips any it cannot
+    open without a word. Running it in the returned folder lets it find them; otatools
+    ships them under build/target, while apkcerts.txt names build/make/target.
+    """
+    otatools = Path(otatools)
+    found = sorted(otatools.rglob("product/security/platform.x509.pem"))
+    if not found:
+        raise RuntimeError(f"{otatools} has no AOSP test certificates (product/security/platform.x509.pem)")
+    root = Path(root)
+    for prefix in ["build/make/target/product/security", "build/target/product/security"]:
+        dest = root / prefix
+        dest.mkdir(parents=True, exist_ok=True)
+        for cert in found[0].parent.iterdir():
+            if cert.is_file():
+                shutil.copy2(cert, dest / cert.name)
+    return root
+
+
 def run(*cmd, **kw):
     print("+", " ".join(str(c) for c in cmd), flush=True)
     subprocess.run([str(c) for c in cmd], check=True, **kw)
@@ -816,7 +838,12 @@ def main():
     modify(target_files, modified, graphics_library=graphics_library, vulkan_driver=vulkan_driver, otatools=otatools)
 
     signed = work / "signed.zip"
-    run(otatools / "bin/sign_target_files_apks", "-p", otatools, *key_arguments(modified, str(keys)), modified, signed, env=env)
+    # It runs where AOSP's certificates sit at the paths apkcerts.txt names, so every path
+    # passed to it is absolute.
+    aosp_root = aosp_test_certificates(otatools, work / "aosp-certificates")
+    run(otatools.resolve() / "bin/sign_target_files_apks", "-p", otatools.resolve(),
+        *key_arguments(modified, str(Path(keys).resolve())), modified.resolve(), signed.resolve(),
+        env=env, cwd=aosp_root)
     modified.unlink()
     run(otatools / "bin/add_img_to_target_files", "-p", otatools, "-a", signed, env=env)
 
