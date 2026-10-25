@@ -10,6 +10,7 @@ use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::session::{GuestLauncher, Session, SessionConfig, SessionState};
 use dsa_host_windows::guid::Guid;
 use dsa_host_windows::vm_listener::{VmBoundListener, VmIdSlot};
+use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::Role;
 use dsa_protocol::handshake::{guest_connect, local_hello};
 use dsa_transport::memory::{self, MemoryConnector};
@@ -21,10 +22,13 @@ const WAIT: Duration = Duration::from_secs(10);
 struct FakeVm {
     slot: VmIdSlot,
     starts: u32,
+    /// The running boot's secret, as the guest's daemon would read it.
+    secret: Arc<Mutex<Option<BootSecret>>>,
 }
 
 impl GuestLauncher for FakeVm {
-    fn start(&mut self) -> Result<(), String> {
+    fn start(&mut self, secret: &BootSecret) -> Result<(), String> {
+        *self.secret.lock().unwrap() = Some(secret.clone());
         self.starts += 1;
         *self.slot.lock().unwrap() = Some(Guid::new(self.starts, 0, 0, [0; 8]));
         Ok(())
@@ -35,13 +39,18 @@ impl GuestLauncher for FakeVm {
     }
 }
 
-/// The connector of the most recent binding, which is where "the guest" connects.
-type Bindings = Arc<Mutex<Vec<(Guid, MemoryConnector)>>>;
+/// Where "the guest" reaches the host: the connector of each binding, and the secret the
+/// most recent start handed it.
+#[derive(Clone, Default)]
+struct Bindings {
+    connectors: Arc<Mutex<Vec<(Guid, MemoryConnector)>>>,
+    secret: Arc<Mutex<Option<BootSecret>>>,
+}
 
 fn host() -> (Session, VmIdSlot, Bindings) {
     let slot: VmIdSlot = Arc::default();
-    let bindings: Bindings = Arc::default();
-    let record = Arc::clone(&bindings);
+    let bindings = Bindings::default();
+    let record = Arc::clone(&bindings.connectors);
     let listener = VmBoundListener::new(
         Arc::clone(&slot),
         Box::new(move |vm_id| {
@@ -53,6 +62,7 @@ fn host() -> (Session, VmIdSlot, Bindings) {
     let launcher = FakeVm {
         slot: Arc::clone(&slot),
         starts: 0,
+        secret: Arc::clone(&bindings.secret),
     };
     let config = SessionConfig {
         connect_timeout: WAIT,
@@ -72,15 +82,18 @@ fn guest(bindings: &Bindings, vm: u32) -> Box<dyn Connection> {
     let expected = Guid::new(vm, 0, 0, [0; 8]);
     for _ in 0..1000 {
         if let Some((_, connector)) = bindings
+            .connectors
             .lock()
             .unwrap()
             .iter_mut()
             .find(|(id, _)| *id == expected)
         {
             let mut connection = connector.connect(WAIT).unwrap();
+            let secret = bindings.secret.lock().unwrap().clone();
             guest_connect(
                 connection.as_mut(),
                 &local_hello(Role::Guest, "dsa-guestd test"),
+                &secret.expect("the VM was started"),
                 WAIT,
             )
             .unwrap();
@@ -120,6 +133,7 @@ fn fr2_after_a_restart_the_host_listens_on_the_new_vm() {
     let _second = guest(&bindings, 2);
     assert!(session.wait_for(SessionState::Active, WAIT));
     let ids: Vec<u32> = bindings
+        .connectors
         .lock()
         .unwrap()
         .iter()

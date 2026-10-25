@@ -5,7 +5,8 @@ package io.github.thisisthepy.dsa.control.v1;
 
 /**
  * <pre>
- * The first frame on a new connection, sent by the guest.
+ * The first frame on a new connection, sent by the guest. The host checks it, then asks the
+ * guest to prove it knows this boot's secret (AuthChallenge, AuthProof) before it answers.
  * </pre>
  *
  * Protobuf type {@code dsa.control.v1.Hello}
@@ -288,7 +289,8 @@ public  final class Hello extends
 
   /**
    * <pre>
-   * The first frame on a new connection, sent by the guest.
+   * The first frame on a new connection, sent by the guest. The host checks it, then asks the
+   * guest to prove it knows this boot's secret (AuthChallenge, AuthProof) before it answers.
    * </pre>
    *
    * Protobuf type {@code dsa.control.v1.Hello}

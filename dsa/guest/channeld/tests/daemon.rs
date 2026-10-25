@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use dsa_guest_channeld::{connect, run, ChannelError, ChannelEvent, RetryPolicy};
+use dsa_guest_channeld::{connect, run, ChannelError, ChannelEvent, Credentials, RetryPolicy};
+use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{RejectReason, Role};
 use dsa_protocol::handshake::{host_accept, local_hello};
 use dsa_transport::memory::{self, MemoryConnector, MemoryListener};
@@ -23,6 +24,18 @@ fn fast() -> RetryPolicy {
     }
 }
 
+/// The secret the host gave this boot.
+fn secret() -> BootSecret {
+    BootSecret::from_bytes([0x11; 32])
+}
+
+fn credentials(hello: dsa_protocol::control::Hello) -> Credentials {
+    Credentials {
+        hello,
+        secret: secret(),
+    }
+}
+
 fn guest_hello() -> dsa_protocol::control::Hello {
     local_hello(Role::Guest, "dsa-channeld test")
 }
@@ -33,6 +46,7 @@ fn host_accepts(listener: &mut MemoryListener) -> Box<dyn Connection> {
     host_accept(
         connection.as_mut(),
         &local_hello(Role::Host, "dsa-hostd test"),
+        &secret(),
         WAIT,
     )
     .expect("accepted");
@@ -73,7 +87,7 @@ fn fr2_the_daemon_connects_once_the_host_listens() {
     let host = thread::spawn(move || host_accepts(&mut listener));
     let stop = AtomicBool::new(false);
     let (_connection, host_hello) =
-        connect(&mut flaky, &guest_hello(), fast(), &stop).expect("connects");
+        connect(&mut flaky, &credentials(guest_hello()), fast(), &stop).expect("connects");
     assert_eq!(host_hello.build, "dsa-hostd test");
     assert_eq!(
         attempts.load(Ordering::Relaxed),
@@ -89,14 +103,14 @@ fn fr2_a_refusing_host_is_not_retried() {
     let host = thread::spawn(move || {
         let mut connection = listener.accept(WAIT).unwrap();
         let host = local_hello(Role::Host, "dsa-hostd test");
-        let _ = host_accept(connection.as_mut(), &host, WAIT);
+        let _ = host_accept(connection.as_mut(), &host, &secret(), WAIT);
         // A second attempt would show up here.
         listener.accept(Duration::from_millis(200)).is_ok()
     });
     let mut stale = guest_hello();
     stale.schema_hash = vec![0x11; 32];
     let stop = AtomicBool::new(false);
-    match connect(&mut connector, &stale, fast(), &stop) {
+    match connect(&mut connector, &credentials(stale.clone()), fast(), &stop) {
         Err(ChannelError::Refused { reason, detail }) => {
             assert_eq!(reason, RejectReason::SchemaHashMismatch);
             assert!(detail.contains("different protocol definition"), "{detail}");
@@ -128,7 +142,7 @@ fn fr2_stopping_ends_the_retries() {
         })
     };
     assert_eq!(
-        connect(&mut flaky, &guest_hello(), fast(), &stop).err(),
+        connect(&mut flaky, &credentials(guest_hello()), fast(), &stop).err(),
         Some(ChannelError::Stopped)
     );
     stopper.join().unwrap();
@@ -146,7 +160,7 @@ fn fr2_frames_flow_both_ways_and_a_lost_channel_is_reconnected() {
         thread::spawn(move || {
             run(
                 &mut connector,
-                &guest_hello(),
+                &credentials(guest_hello()),
                 fast(),
                 &to_guest_tx,
                 &from_guest_rx,

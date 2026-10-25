@@ -34,7 +34,8 @@ enum Role {
   ROLE_GUEST = 2;
 }
 
-// The first frame on a new connection, sent by the guest.
+// The first frame on a new connection, sent by the guest. The host checks it, then asks the
+// guest to prove it knows this boot's secret (AuthChallenge, AuthProof) before it answers.
 message Hello {
   // ProtocolVersion.PROTOCOL_VERSION_CURRENT of the sender's build.
   uint32 protocol_version = 1;
@@ -57,6 +58,8 @@ enum RejectReason {
   REJECT_REASON_SCHEMA_HASH_MISMATCH = 2;
   REJECT_REASON_UNEXPECTED_ROLE = 3;
   REJECT_REASON_MALFORMED_HELLO = 4;
+  // The guest did not prove it knows this boot's secret.
+  REJECT_REASON_AUTHENTICATION_FAILED = 5;
 }
 
 // The host's answer when it refuses the guest. The host closes the connection after it.
@@ -67,11 +70,27 @@ message HelloRejected {
   Hello host = 3;
 }
 
+// The host's second frame, once the guest's Hello matches: a fresh random value for this
+// connection alone.
+message AuthChallenge {
+  // 32 random bytes.
+  bytes nonce = 1;
+}
+
+// The guest's answer to AuthChallenge. The secret itself never crosses the connection.
+message AuthProof {
+  // HMAC-SHA256 of the challenge's nonce, keyed with the secret the host gave this boot
+  // (32 bytes).
+  bytes mac = 1;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
     Hello hello = 1;
     HelloAccepted hello_accepted = 2;
     HelloRejected hello_rejected = 3;
+    AuthChallenge auth_challenge = 4;
+    AuthProof auth_proof = 5;
   }
 }

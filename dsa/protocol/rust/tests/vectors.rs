@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use dsa_protocol::control::{
-    envelope::Body, Envelope, Hello, HelloAccepted, HelloRejected, RejectReason, Role,
+    envelope::Body, AuthChallenge, AuthProof, Envelope, Hello, HelloAccepted, HelloRejected,
+    RejectReason, Role,
 };
 use dsa_protocol::{decode, encode};
 
@@ -62,6 +63,26 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                 reason: RejectReason::SchemaHashMismatch as i32,
                 detail: "스키마가 다릅니다 (schema differs)".into(),
                 host: Some(host_hello()),
+            })),
+        ),
+        (
+            "auth_challenge",
+            wrap(Body::AuthChallenge(AuthChallenge {
+                nonce: (0x40u8..0x60).collect(),
+            })),
+        ),
+        (
+            "auth_proof",
+            wrap(Body::AuthProof(AuthProof {
+                mac: (0x60u8..0x80).collect(),
+            })),
+        ),
+        (
+            "hello_rejected_authentication",
+            wrap(Body::HelloRejected(HelloRejected {
+                reason: RejectReason::AuthenticationFailed as i32,
+                detail: "no proof".into(),
+                host: None,
             })),
         ),
     ])

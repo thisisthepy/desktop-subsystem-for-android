@@ -17,6 +17,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use dsa_protocol::auth::BootSecret;
 use dsa_transport::{Connection, Listener, TransportError};
 
 /// Where the session is in its life.
@@ -124,7 +125,10 @@ pub struct SessionEvent {
 /// Starts and stops the guest container. Implemented per platform.
 pub trait GuestLauncher: Send + 'static {
     /// Starts the container. Returns once it has been started; the agent connects later.
-    fn start(&mut self) -> Result<(), String>;
+    ///
+    /// `secret` is new for this start. The launcher hands it to the guest where only the
+    /// guest's control daemon can read it, never where an app could, and keeps no copy.
+    fn start(&mut self, secret: &BootSecret) -> Result<(), String>;
 
     /// Stops the container. Returns `Ok` only once every process in it has ended, and an
     /// error if that did not happen within `timeout`.
@@ -152,10 +156,35 @@ pub trait GuestLauncher: Send + 'static {
 
 /// Checks a new control channel connection before the session trusts it.
 ///
-/// The protocol implements this: it exchanges the protocol version and schema hash and
-/// refuses a peer built from a different definition. It must bound its own waiting.
+/// The protocol implements this: it exchanges the protocol version and schema hash,
+/// refuses a peer built from a different definition, and has the peer prove it knows the
+/// secret the launcher gave this boot. It must bound its own waiting.
 pub trait Handshake: Send + 'static {
-    fn accept(&mut self, connection: &mut dyn Connection) -> Result<(), String>;
+    fn accept(
+        &mut self,
+        connection: &mut dyn Connection,
+        secret: &BootSecret,
+    ) -> Result<(), Refusal>;
+}
+
+/// Why a handshake refused a connection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    /// The guest's daemon cannot work with this host, for example because it was built
+    /// from a different protocol definition. Waiting longer cannot help, so the start fails.
+    Incompatible(String),
+    /// The connection is not the guest's daemon: it did not prove it knows this boot's
+    /// secret, or it broke off. Any app in the guest can open such a connection, so it is
+    /// closed and the session goes on waiting for the daemon.
+    NotTheGuest(String),
+}
+
+impl fmt::Display for Refusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Refusal::Incompatible(why) | Refusal::NotTheGuest(why) => f.write_str(why),
+        }
+    }
 }
 
 /// Timing for a session.
@@ -271,6 +300,7 @@ impl Session {
             commands: command_rx,
             incoming: Arc::clone(&incoming),
             connection: None,
+            secret: None,
             shutting_down: false,
         };
         let worker = thread::Builder::new()
@@ -389,6 +419,8 @@ struct Worker {
     #[allow(dead_code)]
     incoming: Arc<Mutex<Option<Sender<Vec<u8>>>>>,
     connection: Option<Box<dyn Connection>>,
+    /// The running boot's secret, made anew at each start.
+    secret: Option<BootSecret>,
     shutting_down: bool,
 }
 
@@ -468,7 +500,19 @@ impl Worker {
 
     fn start(&mut self) {
         self.shared.set(SessionState::Starting, None);
-        if let Err(why) = self.launcher.start() {
+        let secret = match BootSecret::generate() {
+            Ok(secret) => secret,
+            Err(why) => {
+                self.shared.set(
+                    SessionState::Stopped,
+                    Some(StopReason::GuestFailedToStart(why)),
+                );
+                return;
+            }
+        };
+        let started = self.launcher.start(&secret);
+        self.secret = Some(secret);
+        if let Err(why) = started {
             // The launcher may have got part of the way; make sure nothing is left behind.
             let _ = self.launcher.stop(self.config.stop_timeout);
             self.shared.set(
@@ -512,19 +556,28 @@ impl Worker {
                 return;
             }
             match self.listener.accept((deadline - now).min(POLL * 5)) {
-                Ok(mut connection) => match self.handshake.accept(connection.as_mut()) {
-                    Ok(()) => {
-                        self.connection = Some(connection);
-                        self.shared.set_vm_id(self.launcher.vm_id());
-                        self.shared.set(SessionState::Active, None);
-                        return;
+                Ok(mut connection) => {
+                    let Some(secret) = self.secret.as_ref() else {
+                        unreachable!("start() sets the secret before it listens");
+                    };
+                    match self.handshake.accept(connection.as_mut(), secret) {
+                        Ok(()) => {
+                            self.connection = Some(connection);
+                            self.shared.set_vm_id(self.launcher.vm_id());
+                            self.shared.set(SessionState::Active, None);
+                            return;
+                        }
+                        Err(Refusal::NotTheGuest(why)) => {
+                            connection.close();
+                            eprintln!("control channel: refused a connection: {why}");
+                        }
+                        Err(Refusal::Incompatible(why)) => {
+                            connection.close();
+                            self.stop(StopReason::HandshakeRejected(why));
+                            return;
+                        }
                     }
-                    Err(why) => {
-                        connection.close();
-                        self.stop(StopReason::HandshakeRejected(why));
-                        return;
-                    }
-                },
+                }
                 Err(TransportError::Timeout) => {}
                 Err(error) => {
                     self.stop(StopReason::ListenerFailed(error.to_string()));
@@ -580,7 +633,9 @@ impl Worker {
                     Ok(envelope) => match envelope.body {
                         Some(dsa_protocol::control::envelope::Body::Hello(_))
                         | Some(dsa_protocol::control::envelope::Body::HelloAccepted(_))
-                        | Some(dsa_protocol::control::envelope::Body::HelloRejected(_)) => {
+                        | Some(dsa_protocol::control::envelope::Body::HelloRejected(_))
+                        | Some(dsa_protocol::control::envelope::Body::AuthChallenge(_))
+                        | Some(dsa_protocol::control::envelope::Body::AuthProof(_)) => {
                             eprintln!(
                                 "control channel: dropping unexpected handshake message on active session"
                             );

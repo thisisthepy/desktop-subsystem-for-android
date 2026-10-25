@@ -3,11 +3,17 @@
 //! With a console log, each boot's serial console is kept in that file (see
 //! `console_pipe`), the session hears at once when the VM exits during boot, and a start
 //! that fails reports the console's last lines.
+//!
+//! Each boot's secret reaches the guest as a bootconfig appended to a copy of the image's
+//! initrd. The copy exists only while the VM starts: the VM has read it by the time it runs,
+//! and it is deleted then.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use dsa_host_core::bootconfig;
 use dsa_host_core::session::GuestLauncher;
+use dsa_protocol::auth::{bootconfig_entry, BootSecret};
 
 use crate::console_log::{boot_header, ConsoleLog};
 use crate::console_pipe::ConsoleCapture;
@@ -42,6 +48,32 @@ pub struct AndroidVmLauncher {
     console: Option<ConsoleCapture>,
     /// What the last finished boot's console says, for a start that failed.
     console_report: Option<String>,
+    /// Where each boot's initrd, with its secret, is written while the VM starts.
+    boot_dir: PathBuf,
+}
+
+/// A file that is removed when this is dropped.
+struct TransientFile(PathBuf);
+
+impl Drop for TransientFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Writes `initrd` with `secret` appended as bootconfig to `path`, readable only by the
+/// account the host runs as until the VM is let in.
+fn write_boot_initrd(
+    initrd: &Path,
+    secret: &BootSecret,
+    path: &Path,
+) -> Result<TransientFile, String> {
+    let image = std::fs::read(initrd)
+        .map_err(|e| format!("could not read the initrd {}: {e}", initrd.display()))?;
+    let file = TransientFile(path.to_path_buf());
+    std::fs::write(path, bootconfig::append(&image, &bootconfig_entry(secret)))
+        .map_err(|e| format!("could not write the boot's initrd {}: {e}", path.display()))?;
+    Ok(file)
 }
 
 impl AndroidVmLauncher {
@@ -61,7 +93,14 @@ impl AndroidVmLauncher {
             console_log: None,
             console: None,
             console_report: None,
+            boot_dir: std::env::temp_dir(),
         }
+    }
+
+    /// Writes each boot's initrd into `dir` instead of the temporary folder.
+    pub fn with_boot_dir(mut self, dir: PathBuf) -> AndroidVmLauncher {
+        self.boot_dir = dir;
+        self
     }
 
     /// Keeps every boot's serial console in the file at `path`, and reports its last lines
@@ -129,7 +168,7 @@ impl AndroidVmLauncher {
 }
 
 impl GuestLauncher for AndroidVmLauncher {
-    fn start(&mut self) -> Result<(), String> {
+    fn start(&mut self, secret: &BootSecret) -> Result<(), String> {
         if self.system.is_some() {
             return Err("the Android VM is already running".into());
         }
@@ -138,6 +177,22 @@ impl GuestLauncher for AndroidVmLauncher {
         self.end_console(Duration::ZERO);
         self.console_report = None;
         let mut config = (self.config)()?;
+        let Some(initrd) = config.initrd.clone() else {
+            return Err(
+                "the Android VM has no initrd, which is what carries the boot's secret to \
+                 the guest"
+                    .into(),
+            );
+        };
+        // Removed on every way out of this function: by then the VM has read it or will
+        // never run.
+        let boot_initrd = write_boot_initrd(
+            &initrd,
+            secret,
+            &self.boot_dir.join(format!("{}.initrd", self.id)),
+        )?;
+        config.initrd = Some(boot_initrd.0.clone());
+        config.kernel_cmdline = format!("{} {}", config.kernel_cmdline, bootconfig::CMDLINE_FLAG);
         config.console_pipe = self.begin_console(&config);
         let document = config
             .to_hcs_document()
@@ -147,12 +202,14 @@ impl GuestLauncher for AndroidVmLauncher {
             ComputeSystem::create(&self.id, &document, CALL_TIMEOUT).map_err(|e| e.to_string())?;
         // The VM opens its disk when it starts. A disk in the user's profile admits only the
         // user, SYSTEM and administrators, so the VM is let in to that one file first.
-        grant_vm_access(&self.id, &config.data_disk).map_err(|e| {
-            format!(
-                "the Android VM could not be given access to {}: {e}",
-                config.data_disk.display()
-            )
-        })?;
+        for path in [&config.data_disk, &boot_initrd.0] {
+            grant_vm_access(&self.id, path).map_err(|e| {
+                format!(
+                    "the Android VM could not be given access to {}: {e}",
+                    path.display()
+                )
+            })?;
+        }
         // On any failure below the system is dropped, which closes the handle and so
         // removes the VM.
         system.start(CALL_TIMEOUT).map_err(|e| e.to_string())?;

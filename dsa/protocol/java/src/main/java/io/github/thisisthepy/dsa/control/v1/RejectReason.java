@@ -32,6 +32,14 @@ public enum RejectReason
    * <code>REJECT_REASON_MALFORMED_HELLO = 4;</code>
    */
   REJECT_REASON_MALFORMED_HELLO(4),
+  /**
+   * <pre>
+   * The guest did not prove it knows this boot's secret.
+   * </pre>
+   *
+   * <code>REJECT_REASON_AUTHENTICATION_FAILED = 5;</code>
+   */
+  REJECT_REASON_AUTHENTICATION_FAILED(5),
   UNRECOGNIZED(-1),
   ;
 
@@ -55,6 +63,14 @@ public enum RejectReason
    * <code>REJECT_REASON_MALFORMED_HELLO = 4;</code>
    */
   public static final int REJECT_REASON_MALFORMED_HELLO_VALUE = 4;
+  /**
+   * <pre>
+   * The guest did not prove it knows this boot's secret.
+   * </pre>
+   *
+   * <code>REJECT_REASON_AUTHENTICATION_FAILED = 5;</code>
+   */
+  public static final int REJECT_REASON_AUTHENTICATION_FAILED_VALUE = 5;
 
 
   @java.lang.Override
@@ -83,6 +99,7 @@ public enum RejectReason
       case 2: return REJECT_REASON_SCHEMA_HASH_MISMATCH;
       case 3: return REJECT_REASON_UNEXPECTED_ROLE;
       case 4: return REJECT_REASON_MALFORMED_HELLO;
+      case 5: return REJECT_REASON_AUTHENTICATION_FAILED;
       default: return null;
     }
   }

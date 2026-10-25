@@ -18,6 +18,7 @@ mod schema {
     include!("generated/schema.rs");
 }
 
+pub mod auth;
 pub mod handshake;
 pub mod host_api;
 

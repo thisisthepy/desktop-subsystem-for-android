@@ -9,7 +9,8 @@ use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::session::{
     GuestLauncher, Session, SessionConfig, SessionError, SessionEvent, SessionState, StopReason,
 };
-use dsa_protocol::control::{envelope::Body, Envelope, Role};
+use dsa_protocol::auth::BootSecret;
+use dsa_protocol::control::{envelope::Body, Envelope, RejectReason, Role};
 use dsa_protocol::encode;
 use dsa_protocol::handshake::{guest_connect, local_hello, HandshakeError};
 use dsa_transport::memory::{self, MemoryConnector};
@@ -31,6 +32,10 @@ struct Guest {
     /// How many times the session asked for the diagnostics, and whether the guest was
     /// already stopped each time.
     diagnostics_asked: Vec<bool>,
+    /// The secret each start handed the guest, in order.
+    secrets: Vec<BootSecret>,
+    /// The running boot's secret, as only the guest's daemon would know it.
+    secret: Option<BootSecret>,
 }
 
 #[derive(Clone, Default)]
@@ -40,16 +45,33 @@ impl FakeLauncher {
     fn processes(&self) -> usize {
         self.0.lock().unwrap().processes
     }
+
+    /// Waits for the running boot's secret, which the session hands the launcher as it starts.
+    fn secret(&self) -> BootSecret {
+        let deadline = std::time::Instant::now() + WAIT;
+        loop {
+            if let Some(secret) = self.0.lock().unwrap().secret.clone() {
+                return secret;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the guest was never started"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
 }
 
 impl GuestLauncher for FakeLauncher {
-    fn start(&mut self) -> Result<(), String> {
+    fn start(&mut self, secret: &BootSecret) -> Result<(), String> {
         let mut guest = self.0.lock().unwrap();
         guest.starts += 1;
+        guest.secrets.push(secret.clone());
         if let Some(why) = guest.fail_start.clone() {
             return Err(why);
         }
         guest.processes = 3;
+        guest.secret = Some(secret.clone());
         Ok(())
     }
 
@@ -62,6 +84,7 @@ impl GuestLauncher for FakeLauncher {
                     return Err(why);
                 }
                 if guest.processes == 0 {
+                    guest.secret = None;
                     return Ok(());
                 }
                 guest.processes -= 1;
@@ -110,12 +133,15 @@ fn states(events: &[SessionEvent]) -> Vec<SessionState> {
     events.iter().map(|event| event.state).collect()
 }
 
-/// Connects as the guest's channel daemon would: the transport, then the handshake.
-fn connect_agent(connector: &mut MemoryConnector) -> Box<dyn Connection> {
+/// Connects as the guest's channel daemon would: the transport, then the handshake with the
+/// secret the launcher gave this boot.
+fn connect_agent(connector: &mut MemoryConnector, launcher: &FakeLauncher) -> Box<dyn Connection> {
+    let secret = launcher.secret();
     let mut agent = connector.connect(WAIT).expect("the agent connects");
     guest_connect(
         agent.as_mut(),
         &local_hello(Role::Guest, "dsa-guestd test"),
+        &secret,
         WAIT,
     )
     .expect("the host accepts the agent");
@@ -152,7 +178,7 @@ fn fr2_the_session_is_active_once_the_agent_connects() {
     session.start();
     assert!(session.wait_for(SessionState::Starting, WAIT));
 
-    let _agent = connect_agent(&mut connector);
+    let _agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
     assert_eq!(launcher.processes(), 3, "the guest was started");
     assert_eq!(
@@ -195,7 +221,7 @@ fn fr2_stop_reports_stopped_only_after_every_guest_process_has_ended() {
     let launcher = FakeLauncher::default();
     let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
-    let _agent = connect_agent(&mut connector);
+    let _agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
 
     let events = session.events();
@@ -214,7 +240,7 @@ fn fr2_a_stop_that_leaves_processes_running_is_not_reported_as_stopped() {
     let launcher = FakeLauncher::default();
     let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
-    let _agent = connect_agent(&mut connector);
+    let _agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
 
     launcher.0.lock().unwrap().fail_stop = Some("lxc-stop timed out".into());
@@ -267,7 +293,7 @@ fn fr2_an_agent_from_a_different_protocol_definition_is_refused_and_the_guest_st
     let mut agent = connector.connect(WAIT).expect("the agent connects");
     let mut hello = local_hello(Role::Guest, "dsa-guestd other");
     hello.schema_hash = vec![0x5a; 32];
-    let refusal = guest_connect(agent.as_mut(), &hello, WAIT);
+    let refusal = guest_connect(agent.as_mut(), &hello, &launcher.secret(), WAIT);
     assert!(
         matches!(refusal, Err(HandshakeError::Rejected { .. })),
         "the agent is told it was refused: {refusal:?}"
@@ -309,7 +335,7 @@ fn fr2_a_lost_control_channel_stops_the_session_and_says_so() {
     let launcher = FakeLauncher::default();
     let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
-    let agent = connect_agent(&mut connector);
+    let agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
 
     drop(agent);
@@ -327,7 +353,7 @@ fn fr2_a_stopped_session_can_start_again() {
     let (session, mut connector) = session_with(launcher.clone(), WAIT);
     for _ in 0..2 {
         session.start();
-        let _agent = connect_agent(&mut connector);
+        let _agent = connect_agent(&mut connector, &launcher);
         assert!(session.wait_for(SessionState::Active, WAIT));
         session.stop();
         assert!(session.wait_for(SessionState::Stopped, WAIT));
@@ -337,13 +363,14 @@ fn fr2_a_stopped_session_can_start_again() {
 
 #[test]
 fn fr2_the_host_can_send_frames_while_active() {
-    let (session, mut connector) = session_with(FakeLauncher::default(), WAIT);
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
     assert_eq!(
         session.send(b"too early".to_vec()),
         Err(SessionError::NotActive(SessionState::Stopped))
     );
     session.start();
-    let mut agent = connect_agent(&mut connector);
+    let mut agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
 
     session.send(b"from the host".to_vec()).unwrap();
@@ -355,7 +382,7 @@ fn nfr5_a_malformed_control_frame_is_dropped_and_the_session_stays_active() {
     let launcher = FakeLauncher::default();
     let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
-    let mut agent = connect_agent(&mut connector);
+    let mut agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
 
     // A malformed frame arrives after handshake: it is discarded and the session stays active.
@@ -377,7 +404,7 @@ fn nfr5_an_unexpected_message_is_dropped_and_logged() {
     let launcher = FakeLauncher::default();
     let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
-    let mut agent = connect_agent(&mut connector);
+    let mut agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
 
     // A Hello after handshake has already completed is unexpected.
@@ -404,7 +431,7 @@ fn nfr5_a_guest_that_dies_leaves_the_host_alive_and_can_start_again() {
     let launcher = FakeLauncher::default();
     let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
-    let agent = connect_agent(&mut connector);
+    let agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
 
     // Guest VM dies and drops its channel.
@@ -418,7 +445,7 @@ fn nfr5_a_guest_that_dies_leaves_the_host_alive_and_can_start_again() {
 
     // Host remains alive and the session can be started again.
     session.start();
-    let _second_agent = connect_agent(&mut connector);
+    let _second_agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
     assert_eq!(launcher.processes(), 3);
 }
@@ -428,7 +455,7 @@ fn fr2_dropping_an_active_session_stops_the_guest() {
     let launcher = FakeLauncher::default();
     let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
-    let _agent = connect_agent(&mut connector);
+    let _agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
     drop(session);
     assert_eq!(launcher.processes(), 0);
@@ -540,10 +567,92 @@ fn fr2_a_stop_on_request_does_not_ask_for_boot_diagnostics() {
     launcher.0.lock().unwrap().diagnostics = Some("not wanted".into());
     let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
-    let _agent = connect_agent(&mut connector);
+    let _agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
     session.stop();
     assert!(session.wait_for(SessionState::Stopped, WAIT));
     assert_eq!(session.last_reason(), Some(StopReason::Requested));
     assert!(launcher.0.lock().unwrap().diagnostics_asked.is_empty());
+}
+
+#[test]
+fn pr6_each_start_hands_the_guest_a_new_secret() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let first = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    drop(first);
+
+    session.start();
+    let _second = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    let secrets = launcher.0.lock().unwrap().secrets.clone();
+    assert_eq!(secrets.len(), 2);
+    assert_ne!(secrets[0], secrets[1]);
+}
+
+#[test]
+fn pr6_a_connection_without_the_boot_secret_is_refused_and_the_daemon_still_gets_in() {
+    // Any app in the guest can reach the control port. It must neither get in nor be able
+    // to make the start fail.
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let real = launcher.secret();
+    let mut impostor = connector.connect(WAIT).expect("the impostor connects");
+    let refusal = guest_connect(
+        impostor.as_mut(),
+        &local_hello(Role::Guest, "an app"),
+        &BootSecret::from_bytes([0x42; 32]),
+        WAIT,
+    );
+    match refusal {
+        Err(HandshakeError::Rejected { reason, .. }) => {
+            assert_eq!(reason, RejectReason::AuthenticationFailed)
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert_eq!(impostor.recv(Some(WAIT)), Err(TransportError::Closed));
+    assert_eq!(session.state(), SessionState::Starting);
+
+    let _agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(launcher.secret(), real);
+}
+
+#[test]
+fn pr6_the_previous_boots_secret_does_not_open_the_next_boot() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let old = launcher.secret();
+    let agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    drop(agent);
+
+    session.start();
+    launcher.secret();
+    let mut replay = connector.connect(WAIT).expect("connects");
+    let refusal = guest_connect(
+        replay.as_mut(),
+        &local_hello(Role::Guest, "dsa-guestd test"),
+        &old,
+        WAIT,
+    );
+    assert!(
+        matches!(
+            refusal,
+            Err(HandshakeError::Rejected {
+                reason: RejectReason::AuthenticationFailed,
+                ..
+            })
+        ),
+        "{refusal:?}"
+    );
+    assert_eq!(session.state(), SessionState::Starting);
 }
