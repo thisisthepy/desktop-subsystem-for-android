@@ -186,7 +186,9 @@ fn pr3_a_raw_stream_sends_while_another_thread_waits_to_receive() {
     let mut guest = TcpStream::connect(listener.local_addr().unwrap()).expect("connect");
     let (accepted, _) = listener.accept().expect("accept");
     let mut host = RawStreamConnection::new(Tcp(accepted));
-    let mut sender = host.try_clone_sender().expect("a raw stream can share its socket");
+    let mut sender = host
+        .try_clone_sender()
+        .expect("a raw stream can share its socket");
 
     let reader = std::thread::spawn(move || host.recv(Some(Duration::from_secs(5))));
     std::thread::sleep(Duration::from_millis(100));
@@ -194,9 +196,15 @@ fn pr3_a_raw_stream_sends_while_another_thread_waits_to_receive() {
     let started = std::time::Instant::now();
     sender.send(b"reply").expect("send while the reader waits");
     let mut reply = [0u8; 5];
-    guest.read_exact(&mut reply).expect("the guest gets the reply");
+    guest
+        .read_exact(&mut reply)
+        .expect("the guest gets the reply");
     assert_eq!(&reply, b"reply");
-    assert!(started.elapsed() < Duration::from_secs(1), "{:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
 
     guest.write_all(b"next").expect("guest writes");
     assert_eq!(reader.join().unwrap().expect("the reader gets it"), b"next");

@@ -181,6 +181,13 @@ impl<S: StreamSocket> RawStreamConnection<S> {
             closed: false,
         }
     }
+
+    fn shut_down(&mut self) {
+        if !self.closed {
+            self.socket.shutdown();
+            self.closed = true;
+        }
+    }
 }
 
 impl<S: StreamSocket + 'static> Connection for RawStreamConnection<S> {
@@ -233,10 +240,7 @@ impl<S: StreamSocket + 'static> Connection for RawStreamConnection<S> {
     }
 
     fn close(&mut self) {
-        if !self.closed {
-            self.socket.shutdown();
-            self.closed = true;
-        }
+        self.shut_down();
     }
 
     fn try_clone_sender(&self) -> Option<Box<dyn FrameSender>> {
@@ -265,7 +269,7 @@ impl<S: StreamSocket> FrameSender for RawStreamSender<S> {
 
 impl<S: StreamSocket> Drop for RawStreamConnection<S> {
     fn drop(&mut self) {
-        self.close();
+        self.shut_down();
     }
 }
 
