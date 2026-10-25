@@ -23,10 +23,12 @@ struct BufferRef {
     uint32_t id = 0;
     uint32_t width = 0;
     uint32_t height = 0;
+    // The DRM format minigbm chose for it.
+    uint32_t format = 0;
 
     bool valid() const { return id != 0; }
     bool operator==(const BufferRef& o) const {
-        return id == o.id && width == o.width && height == o.height;
+        return id == o.id && width == o.width && height == o.height && format == o.format;
     }
 };
 

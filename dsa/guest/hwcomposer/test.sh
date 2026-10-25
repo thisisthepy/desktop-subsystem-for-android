@@ -28,6 +28,10 @@ mkdir -p "$out"
     -o "$out/task_layout_test"
 "$out/task_layout_test"
 
+"$cxx" "${flags[@]}" -I"$here/tests" -I"$here/../../graphics/include" \
+    "$here/tests/shared_color_buffer_test.cpp" -o "$out/shared_color_buffer_test"
+"$out/shared_color_buffer_test"
+
 # The generated codec is not ours to warn about.
 "$cxx" -std=c++17 -I"$protocol/cpp/generated" "${protobuf[@]}" -c \
     "$protocol/cpp/generated/control.pb.cc" -o "$out/control.pb.o"

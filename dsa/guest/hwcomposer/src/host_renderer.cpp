@@ -99,9 +99,11 @@ uint32_t HostRenderer::openSharedColorBuffer(const BufferRef& buffer) {
     if (rc->rcOpenColorBuffer2(rc, handle) == 0 && connected()) {
         return handle;
     }
-    // No process has used the buffer yet.
+    // No process has used the buffer yet. It gets the buffer's own format, the one every
+    // other process (the app's Vulkan driver among them) would give it.
     rc->rcCreateColorBufferWithHandle(rc, buffer.width ? buffer.width : 1,
-                                      buffer.height ? buffer.height : 1, kGlRgba, handle);
+                                      buffer.height ? buffer.height : 1,
+                                      dsa_shared_color_buffer_gl_format(buffer.format), handle);
     if (rc->rcOpenColorBuffer2(rc, handle) != 0 || !connected()) {
         HWC_LOGE("the host has no ColorBuffer %#x for gralloc buffer %u", handle, buffer.id);
         return 0;

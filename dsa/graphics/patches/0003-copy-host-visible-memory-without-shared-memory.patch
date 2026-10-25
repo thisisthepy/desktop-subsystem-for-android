@@ -188,3 +188,60 @@ index 1462a7bf02f..2222d637ea2 100644
  
          uint64_t blobId = 0;
          uint64_t allocationSize = 0;
+diff --git a/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp b/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp
+index 4329fac..808614c 100644
+--- a/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp
++++ b/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp
+@@ -31,6 +31,7 @@
+ 
+ #include "VkEncoder.h"
+ 
++#include <algorithm>
+ #include <memory>
+ #include <optional>
+ #include <string>
+@@ -2225,27 +2226,28 @@ VkResult VkEncoder::vkInvalidateMappedMemoryRanges(VkDevice device, uint32_t mem
+     VkResult vkInvalidateMappedMemoryRanges_VkResult_return = (VkResult)0;
+     stream->read(&vkInvalidateMappedMemoryRanges_VkResult_return, sizeof(VkResult));
+     if (!sResourceTracker->usingDirectMapping()) {
++        // The host sends each range's size, then that many bytes. The guest must read
++        // exactly what the host sent, whatever it expected: the host's allocation can be
++        // larger than the one the application asked for, and every reply after this one
++        // would be read from the wrong place if a single byte were left behind.
+         for (uint32_t i = 0; i < memoryRangeCount; ++i) {
+-            auto range = pMemoryRanges[i];
+             auto memory = pMemoryRanges[i].memory;
+-            auto size = pMemoryRanges[i].size;
+             auto offset = pMemoryRanges[i].offset;
+             uint64_t streamSize = 0;
+-            if (!memory) {
+-                stream->read(&streamSize, sizeof(uint64_t));
+-                continue;
+-            };
+-            auto hostPtr = sResourceTracker->getMappedPointer(memory);
+-            auto actualSize =
+-                size == VK_WHOLE_SIZE ? sResourceTracker->getMappedSize(memory) : size;
+-            if (!hostPtr) {
+-                stream->read(&streamSize, sizeof(uint64_t));
+-                continue;
+-            };
+-            streamSize = actualSize;
+             stream->read(&streamSize, sizeof(uint64_t));
+-            uint8_t* targetRange = hostPtr + offset;
+-            stream->read(targetRange, actualSize);
++            uint8_t* hostPtr = memory ? sResourceTracker->getMappedPointer(memory) : nullptr;
++            const uint64_t mappedSize = memory ? sResourceTracker->getMappedSize(memory) : 0;
++            uint64_t copied = 0;
++            if (hostPtr && offset < mappedSize) {
++                copied = std::min<uint64_t>(streamSize, mappedSize - offset);
++                if (copied) stream->read(hostPtr + offset, copied);
++            }
++            uint8_t discard[4096];
++            for (uint64_t left = streamSize - copied; left != 0;) {
++                const uint64_t chunk = std::min<uint64_t>(left, sizeof(discard));
++                stream->read(discard, chunk);
++                left -= chunk;
++            }
+         }
+     }
+     ++encodeCount;
