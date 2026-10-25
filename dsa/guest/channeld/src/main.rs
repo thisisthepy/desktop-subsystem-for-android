@@ -33,8 +33,10 @@ macro_rules! say {
 mod daemon {
     use std::sync::atomic::AtomicBool;
     use std::sync::mpsc;
+    use std::sync::Arc;
     use std::thread;
 
+    use dsa_guest_channeld::router::Router;
     use dsa_guest_channeld::{ChannelEvent, Credentials, RetryPolicy};
     use dsa_guest_transport::vsock::{VsockConnector, VMADDR_CID_HOST};
     use dsa_protocol::auth::{secret_from_bootconfig, BOOTCONFIG_KEY};
@@ -82,6 +84,25 @@ mod daemon {
         Ok(options)
     }
 
+    /// Registers the binder service the guest's clients call. Without it the daemon still
+    /// holds the connection, so the host sees the guest, but no app task gets a window.
+    #[cfg(target_os = "android")]
+    fn serve_clients(router: &Arc<Router>) {
+        match dsa_guest_channeld::binder::serve(Arc::clone(router)) {
+            Ok(()) => say!(
+                "serving {} to the guest's clients",
+                dsa_guest_channeld::aidl::INSTANCE
+            ),
+            Err(why) => say!("the guest's clients cannot reach the daemon: {why}"),
+        }
+    }
+
+    /// A Linux system other than Android has no servicemanager to register with.
+    #[cfg(not(target_os = "android"))]
+    fn serve_clients(_router: &Arc<Router>) {
+        say!("no binder service off Android; only the connection runs");
+    }
+
     pub fn run() -> i32 {
         let options = match options() {
             Ok(options) => options,
@@ -119,26 +140,29 @@ mod daemon {
             port: options.port,
         };
 
-        // Nobody in the guest takes the host's frames yet; the agent and the hwcomposer will
-        // reach this daemon over binder. Until then they are counted and dropped.
+        // The guest's clients (the agent and the hwcomposer) reach the daemon over binder.
+        // Frames they send go to the host through `to_host`; the host's frames go to them.
+        let (to_host, from_guest) = mpsc::channel::<Vec<u8>>();
+        let router = Arc::new(Router::new(to_host));
         let (to_guest, from_host) = mpsc::channel::<Vec<u8>>();
-        thread::spawn(move || {
-            let mut dropped = 0u64;
-            for _ in from_host {
-                dropped += 1;
-                if dropped.is_power_of_two() {
-                    say!("{dropped} frames from the host had no taker");
+        {
+            let router = Arc::clone(&router);
+            thread::spawn(move || {
+                for frame in from_host {
+                    router.from_host(&frame);
                 }
-            }
-        });
-        // Kept so the daemon's own end of the channel stays open.
-        let (_to_host, from_guest) = mpsc::channel::<Vec<u8>>();
+            });
+        }
+        serve_clients(&router);
         let (events, event_rx) = mpsc::channel();
         thread::spawn(move || {
             for event in event_rx {
                 match event {
                     ChannelEvent::Connected { host_build } => {
-                        say!("connected to the host ({host_build})")
+                        say!("connected to the host ({host_build})");
+                        // A host that connects again, or a new host, learns the tasks the
+                        // guest already has; the clients report a task only when it changes.
+                        router.host_connected();
                     }
                     ChannelEvent::Lost(why) => {
                         say!("lost the host ({why}); connecting again")
