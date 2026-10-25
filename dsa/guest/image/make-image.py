@@ -45,10 +45,16 @@ REPO = HERE.parents[2]
 # The host is the shell: no launcher, no SystemUI, no keyboard app in the guest.
 REMOVED_APPS = ["Launcher3QuickStep", "SystemUI", "LatinIME"]
 
-# Vendor HALs whose devices a Hyper-V VM does not have: oemlock and UWB talk to the host
-# over Cuttlefish's virtio consoles, and Thread needs a radio. They abort in a loop, and
-# system_server waits for the oemlock HAL, which their APEXes declare, forever.
-REMOVED_APEXES = ["com.google.cf.oemlock", "com.android.hardware.uwb", "com.android.hardware.threadnetwork"]
+# Vendor HALs whose devices a Hyper-V VM does not have: oemlock, UWB and Bluetooth talk to
+# the host over Cuttlefish's virtio consoles, and Thread needs a radio. They abort in a loop,
+# and system_server waits for the oemlock HAL, which their APEXes declare, forever. Without
+# its HAL the Bluetooth app aborts too, waiting for the controller, each time it restarts.
+REMOVED_APEXES = [
+    "com.google.cf.oemlock",
+    "com.android.hardware.uwb",
+    "com.google.cf.bt",
+    "com.android.hardware.threadnetwork",
+]
 
 # The user's disk. The super partition's UUID is how first-stage init finds the disk, so it
 # is fixed and passed on the kernel command line.

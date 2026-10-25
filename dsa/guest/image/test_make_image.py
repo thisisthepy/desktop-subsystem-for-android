@@ -368,12 +368,15 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertNotIn(port, {5000, 5566, 5567})
 
     def test_fr1_hals_whose_devices_hyperv_lacks_are_not_in_the_image(self):
-        # The oemlock, UWB and Thread HALs need Cuttlefish's virtio consoles or radios and
-        # abort in a loop; system_server waits for the declared oemlock HAL forever.
+        # The oemlock, UWB, Bluetooth and Thread HALs need Cuttlefish's virtio consoles or
+        # radios and abort in a loop; system_server waits for the declared oemlock HAL forever.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "target-files.zip"
-            removed = ["com.google.cf.oemlock", "com.android.hardware.uwb", "com.android.hardware.threadnetwork"]
+            removed = [
+                "com.google.cf.oemlock", "com.android.hardware.uwb", "com.google.cf.bt",
+                "com.android.hardware.threadnetwork",
+            ]
             with zipfile.ZipFile(source, "w") as archive:
                 for apex in removed + ["com.android.hardware.boot"]:
                     archive.writestr(f"VENDOR/apex/{apex}.apex", b"apex")
