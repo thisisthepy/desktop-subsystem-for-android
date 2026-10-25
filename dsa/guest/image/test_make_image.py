@@ -366,6 +366,33 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertGreaterEqual(port, 1024)
         self.assertNotIn(port, {5000, 5566, 5567})
 
+    def test_fr1_hals_whose_devices_hyperv_lacks_are_not_in_the_image(self):
+        # The oemlock, UWB and Thread HALs need Cuttlefish's virtio consoles or radios and
+        # abort in a loop; system_server waits for the declared oemlock HAL forever.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            removed = ["com.google.cf.oemlock", "com.android.hardware.uwb", "com.android.hardware.threadnetwork"]
+            with zipfile.ZipFile(source, "w") as archive:
+                for apex in removed + ["com.android.hardware.boot"]:
+                    archive.writestr(f"VENDOR/apex/{apex}.apex", b"apex")
+                archive.writestr("META/apexkeys.txt", "".join(
+                    f'name="{apex}.apex" public_key="k.avbpubkey" private_key="k.pem" container_certificate="c.x509.pem" container_private_key="c.pk8" partition="vendor"\n'
+                    for apex in removed + ["com.android.hardware.boot"]
+                ))
+
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+
+            with zipfile.ZipFile(modified) as archive:
+                names = archive.namelist()
+                keys = archive.read("META/apexkeys.txt").decode()
+            for apex in removed:
+                self.assertNotIn(f"VENDOR/apex/{apex}.apex", names)
+                self.assertNotIn(f'name="{apex}.apex"', keys)
+            self.assertIn("VENDOR/apex/com.android.hardware.boot.apex", names)
+            self.assertIn('name="com.android.hardware.boot.apex"', keys)
+
     def test_pr3_edit_props_sets_graphics_properties(self):
         props = make_image.edit_props("ro.debuggable=1\n")
         self.assertIn("ro.hardware.egl=angle\n", props)
