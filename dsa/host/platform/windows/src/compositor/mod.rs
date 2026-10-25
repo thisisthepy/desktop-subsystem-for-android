@@ -194,9 +194,16 @@ impl Compositor {
 
                     match client.status() {
                         Ok(status) => {
-                            let new_id = if status.state == SessionState::Active
-                                || status.state == SessionState::Dozing
-                            {
+                            // The guest renders (surfaceflinger, the boot animation)
+                            // while it boots, before the agent connects, so the
+                            // listeners stay bound whenever the VM is running.
+                            let new_id = if matches!(
+                                status.state,
+                                SessionState::Starting
+                                    | SessionState::Active
+                                    | SessionState::Dozing
+                                    | SessionState::Frozen
+                            ) {
                                 client
                                     .vm_id()
                                     .ok()
