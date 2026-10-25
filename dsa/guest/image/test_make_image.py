@@ -546,6 +546,28 @@ class ImageLayoutTests(unittest.TestCase):
                 self.assertIn("(allow dsa_channeld self (vsock_socket (create connect", policy)
                 self.assertNotRegex(policy, r"\(allow (appdomain|untrusted_app)\S* proc_bootconfig")
 
+    def test_pr6_the_daemon_label_reaches_the_file_contexts_the_images_are_built_from(self):
+        # mkfs.erofs labels the vendor image from META/file_contexts.bin. Left as it was,
+        # the daemon came out as vendor_file and init refused to start it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            daemon = root / "dsa-channeld"
+            daemon.write_bytes(b"daemon")
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_file_contexts", "/system/bin/init u:object_r:init_exec:s0\n")
+                archive.writestr("VENDOR/etc/selinux/vendor_file_contexts", "/vendor/bin/sh u:object_r:vendor_shell_exec:s0\n")
+                archive.writestr("META/file_contexts.bin", b"\x8a\xff\x7c\xf9 compiled")
+
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, channeld=daemon)
+
+            with zipfile.ZipFile(modified) as archive:
+                lines = archive.read("META/file_contexts.bin").decode().splitlines()
+            self.assertEqual(lines[0], "/system/bin/init u:object_r:init_exec:s0")
+            self.assertIn("/vendor/bin/sh u:object_r:vendor_shell_exec:s0", lines)
+            self.assertIn("/vendor/bin/dsa-channeld u:object_r:dsa_channeld_exec:s0", lines)
+
     def test_pr6_without_a_control_daemon_the_image_has_none(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
