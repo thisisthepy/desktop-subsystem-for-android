@@ -30,6 +30,7 @@ public  final class Envelope extends
     TASK_FRAMES(8),
     CLOSE_TASK(9),
     LAUNCH_APP(10),
+    APP_INFO(15),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -55,6 +56,7 @@ public  final class Envelope extends
         case 8: return TASK_FRAMES;
         case 9: return CLOSE_TASK;
         case 10: return LAUNCH_APP;
+        case 15: return APP_INFO;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -571,6 +573,56 @@ public  final class Envelope extends
    */
   private void clearLaunchApp() {
     if (bodyCase_ == 10) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int APP_INFO_FIELD_NUMBER = 15;
+  /**
+   * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+   */
+  @java.lang.Override
+  public boolean hasAppInfo() {
+    return bodyCase_ == 15;
+  }
+  /**
+   * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.AppInfo getAppInfo() {
+    if (bodyCase_ == 15) {
+       return (io.github.thisisthepy.dsa.control.v1.AppInfo) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.AppInfo.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+   */
+  private void setAppInfo(io.github.thisisthepy.dsa.control.v1.AppInfo value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 15;
+  }
+  /**
+   * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+   */
+  private void mergeAppInfo(io.github.thisisthepy.dsa.control.v1.AppInfo value) {
+    value.getClass();
+  if (bodyCase_ == 15 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.AppInfo.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.AppInfo.newBuilder((io.github.thisisthepy.dsa.control.v1.AppInfo) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 15;
+  }
+  /**
+   * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+   */
+  private void clearAppInfo() {
+    if (bodyCase_ == 15) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -1167,6 +1219,54 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+     */
+    @java.lang.Override
+    public boolean hasAppInfo() {
+      return instance.hasAppInfo();
+    }
+    /**
+     * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.AppInfo getAppInfo() {
+      return instance.getAppInfo();
+    }
+    /**
+     * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+     */
+    public Builder setAppInfo(io.github.thisisthepy.dsa.control.v1.AppInfo value) {
+      copyOnWrite();
+      instance.setAppInfo(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+     */
+    public Builder setAppInfo(
+        io.github.thisisthepy.dsa.control.v1.AppInfo.Builder builderForValue) {
+      copyOnWrite();
+      instance.setAppInfo(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+     */
+    public Builder mergeAppInfo(io.github.thisisthepy.dsa.control.v1.AppInfo value) {
+      copyOnWrite();
+      instance.mergeAppInfo(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+     */
+    public Builder clearAppInfo() {
+      copyOnWrite();
+      instance.clearAppInfo();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -1195,11 +1295,12 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.TaskFrames.class,
             io.github.thisisthepy.dsa.control.v1.CloseTask.class,
             io.github.thisisthepy.dsa.control.v1.LaunchApp.class,
+            io.github.thisisthepy.dsa.control.v1.AppInfo.class,
           };
           java.lang.String info =
-              "\u0000\n\u0001\u0000\u0001\n\n\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003" +
-              "<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<" +
-              "\u0000";
+              "\u0000\u000b\u0001\u0000\u0001\u000f\u000b\u0000\u0000\u0000\u0001<\u0000\u0002<" +
+              "\u0000\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000" +
+              "\t<\u0000\n<\u0000\u000f<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

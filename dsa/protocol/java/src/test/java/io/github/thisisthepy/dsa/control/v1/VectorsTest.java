@@ -96,6 +96,13 @@ public final class VectorsTest {
         cases.put("launch_app", Envelope.newBuilder()
                 .setLaunchApp(LaunchApp.newBuilder().setPackageName("com.example.notes"))
                 .build());
+        cases.put("app_info", Envelope.newBuilder()
+                .setAppInfo(AppInfo.newBuilder()
+                        .setPackageName("com.example.notes")
+                        .setLabel("Notes")
+                        .setIconPng(ByteString.copyFrom(
+                                new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a})))
+                .build());
         cases.put("hello_rejected_authentication", Envelope.newBuilder()
                 .setHelloRejected(HelloRejected.newBuilder()
                         .setReason(RejectReason.REJECT_REASON_AUTHENTICATION_FAILED)

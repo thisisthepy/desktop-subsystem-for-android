@@ -117,10 +117,24 @@ pub struct TaskFrames {
     #[prost(uint32, tag = "2")]
     pub display_id: u32,
 }
+/// The name and launcher icon of an app the caller's Android has a task of. Sent before the
+/// app's first task, and again when either changes.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AppInfo {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+    /// The app's own name, as a launcher shows it.
+    #[prost(string, tag = "2")]
+    pub label: ::prost::alloc::string::String,
+    /// The app's launcher icon, as a square PNG image of at most 256 pixels on a side. Empty
+    /// when Android gave none.
+    #[prost(bytes = "vec", tag = "3")]
+    pub icon_png: ::prost::alloc::vec::Vec<u8>,
+}
 /// A change to the tasks of the caller's Android, sent after the answer to WatchTasks.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TaskEvent {
-    #[prost(oneof = "task_event::Body", tags = "1, 2, 3")]
+    #[prost(oneof = "task_event::Body", tags = "1, 2, 3, 4")]
     pub body: ::core::option::Option<task_event::Body>,
 }
 /// Nested message and enum types in `TaskEvent`.
@@ -133,6 +147,8 @@ pub mod task_event {
         Removed(super::TaskRemoved),
         #[prost(message, tag = "3")]
         Frames(super::TaskFrames),
+        #[prost(message, tag = "4")]
+        App(super::AppInfo),
     }
 }
 /// The answer to ListTasks and WatchTasks: the tasks there are now.
@@ -145,6 +161,9 @@ pub struct Tasks {
     /// appear here before it appears in `tasks`.
     #[prost(message, repeated, tag = "2")]
     pub frames: ::prost::alloc::vec::Vec<TaskFrames>,
+    /// The name and icon of each app that has a task, in package order.
+    #[prost(message, repeated, tag = "3")]
+    pub apps: ::prost::alloc::vec::Vec<AppInfo>,
 }
 /// The answer to a request that has nothing to report but that it was carried out.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]

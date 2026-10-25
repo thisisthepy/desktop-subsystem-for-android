@@ -131,6 +131,19 @@ message LaunchApp {
   string package_name = 1;
 }
 
+// Guest to host, from the agent: the name and launcher icon of an app the host shows a task
+// of. The host's window for the app carries them, in the taskbar and the task list. The
+// agent sends it before the first TaskUpdated of the app's package on each connection, and
+// again when the app's name or icon changes.
+message AppInfo {
+  string package_name = 1;
+  // The app's own name, as a launcher shows it.
+  string label = 2;
+  // The app's launcher icon, as a square PNG image of at most 256 pixels on a side. Empty
+  // when the app has no icon the agent could draw.
+  bytes icon_png = 3;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -144,5 +157,6 @@ message Envelope {
     TaskFrames task_frames = 8;
     CloseTask close_task = 9;
     LaunchApp launch_app = 10;
+    AppInfo app_info = 15;
   }
 }

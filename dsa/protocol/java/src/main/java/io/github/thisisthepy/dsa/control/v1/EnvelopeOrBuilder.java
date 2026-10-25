@@ -117,5 +117,16 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.LaunchApp getLaunchApp();
 
+  /**
+   * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+   * @return Whether the appInfo field is set.
+   */
+  boolean hasAppInfo();
+  /**
+   * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+   * @return The appInfo.
+   */
+  io.github.thisisthepy.dsa.control.v1.AppInfo getAppInfo();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

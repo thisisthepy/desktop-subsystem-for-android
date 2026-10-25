@@ -109,10 +109,26 @@ pub struct LaunchApp {
     #[prost(string, tag = "1")]
     pub package_name: ::prost::alloc::string::String,
 }
+/// Guest to host, from the agent: the name and launcher icon of an app the host shows a task
+/// of. The host's window for the app carries them, in the taskbar and the task list. The
+/// agent sends it before the first TaskUpdated of the app's package on each connection, and
+/// again when the app's name or icon changes.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AppInfo {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+    /// The app's own name, as a launcher shows it.
+    #[prost(string, tag = "2")]
+    pub label: ::prost::alloc::string::String,
+    /// The app's launcher icon, as a square PNG image of at most 256 pixels on a side. Empty
+    /// when the app has no icon the agent could draw.
+    #[prost(bytes = "vec", tag = "3")]
+    pub icon_png: ::prost::alloc::vec::Vec<u8>,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Envelope {
-    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10")]
+    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15")]
     pub body: ::core::option::Option<envelope::Body>,
 }
 /// Nested message and enum types in `Envelope`.
@@ -139,6 +155,8 @@ pub mod envelope {
         CloseTask(super::CloseTask),
         #[prost(message, tag = "10")]
         LaunchApp(super::LaunchApp),
+        #[prost(message, tag = "15")]
+        AppInfo(super::AppInfo),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
