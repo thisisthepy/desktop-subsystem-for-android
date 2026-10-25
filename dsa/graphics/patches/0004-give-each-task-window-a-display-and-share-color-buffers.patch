@@ -1,0 +1,59 @@
+diff --git a/host/FrameBuffer.cpp b/host/FrameBuffer.cpp
+index c8cdcaa87..0a8e4a283 100644
+--- a/host/FrameBuffer.cpp
++++ b/host/FrameBuffer.cpp
+@@ -1176,12 +1176,11 @@ void FrameBuffer::createColorBufferWithResourceHandle(int p_width, int p_height,
+ 
+         AutoLock colorBufferMapLock(m_colorBufferMapLock);
+ 
+-        // Check for handle collision
++        // Every DSA guest process that uses one gralloc buffer derives the same handle from
++        // it and creates the ColorBuffer when it cannot open it. Two processes can race to
++        // create it; the second finds it made and opens it, so this is not an error.
+         if (m_colorbuffers.count(handle) != 0) {
+-            // emugl::emugl_crash_reporter(
+-            //     "FATAL: color buffer with handle %u already exists",
+-            //     handle);
+-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER));
++            return;
+         }
+ 
+         createColorBufferWithResourceHandleLocked(p_width, p_height, p_internalFormat,
+diff --git a/host/GfxStreamAgents.cpp b/host/GfxStreamAgents.cpp
+index 2aaadc37f..8b5094d9b 100644
+--- a/host/GfxStreamAgents.cpp
++++ b/host/GfxStreamAgents.cpp
+@@ -33,6 +33,8 @@
+ #endif
+ 
+ static std::map<uint32_t, android::MultiDisplayInfo> mMultiDisplay;
++// The most displays DSA's hwcomposer creates by ID: display 0 and one per task window.
++static constexpr uint32_t kDsaMaxDisplays = 64;
+ 
+ using namespace android;
+ 
+@@ -150,14 +152,21 @@ static const QAndroidMultiDisplayAgent sMultiDisplayAgent = {
+                 ERR("cannot create display, null displayId pointer");
+                 return -1;
+             }
++            if (mMultiDisplay.find(*displayId) != mMultiDisplay.end()) {
++                return 0;
++            }
++            // DSA's hwcomposer asks for one display per Android task (one per host window),
++            // by ID, so the emulator's limit of eleven displays does not hold for those.
++            if (*displayId != MultiDisplay::s_invalidIdMultiDisplay &&
++                *displayId < kDsaMaxDisplays && mMultiDisplay.size() < kDsaMaxDisplays) {
++                mMultiDisplay.emplace(*displayId, android::MultiDisplayInfo());
++                return 0;
++            }
+             if (mMultiDisplay.size() >= MultiDisplay::s_maxNumMultiDisplay) {
+                 ERR("cannot create more displays, exceeding limits %d",
+                         MultiDisplay::s_maxNumMultiDisplay);
+                 return -1;
+             }
+-            if (mMultiDisplay.find(*displayId) != mMultiDisplay.end()) {
+-                return 0;
+-            }
+             // displays created by internal rcCommands
+             if (*displayId == MultiDisplay::s_invalidIdMultiDisplay) {
+                 for (uint32_t i = MultiDisplay::s_displayIdInternalBegin; i < MultiDisplay::s_maxNumMultiDisplay; i++) {

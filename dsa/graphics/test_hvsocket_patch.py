@@ -7,6 +7,9 @@ from pathlib import Path
 PATCH_0001 = Path(__file__).resolve().parent / "patches" / "0001-add-hyper-v-socket-transport.patch"
 PATCH_0002 = Path(__file__).resolve().parent / "patches" / "0002-add-hyper-v-vulkan-and-gralloc.patch"
 PATCH_0003 = Path(__file__).resolve().parent / "patches" / "0003-copy-host-visible-memory-without-shared-memory.patch"
+PATCH_0004 = Path(__file__).resolve().parent / "patches" / "0004-give-each-task-window-a-display-and-share-color-buffers.patch"
+SHARED_HANDLE = Path(__file__).resolve().parent / "include" / "dsa_shared_color_buffer.h"
+VULKAN_CMAKE = Path(__file__).resolve().parent / "cmake" / "vulkan.cmake"
 HOST_BACKEND = Path(__file__).resolve().parent / "host" / "dsa_gfx_backend.cpp"
 FETCH = Path(__file__).resolve().parent / "fetch.sh"
 
@@ -54,6 +57,30 @@ class HvSocketPatchTests(unittest.TestCase):
         self.assertIn("cb->hostHandle", patch)
         self.assertIn("Hyper-V", patch)
 
+
+    def test_fr3_every_process_reaches_the_same_host_color_buffer(self):
+        # The app draws a buffer, SurfaceFlinger and the hwcomposer show it: all three must
+        # reach one host ColorBuffer, so its handle comes from the buffer's ID, opened if
+        # another process made it and created only if none has.
+        patch = PATCH_0002.read_text()
+        self.assertIn('#include "dsa_shared_color_buffer.h"', patch)
+        self.assertIn("dsa_shared_color_buffer_handle(bufferId)", patch)
+        self.assertIn("rcOpenColorBuffer2(rcEnc, hostHandle) != 0", patch)
+        self.assertIn("rcCreateColorBufferWithHandle(rcEnc, width, height, kGlFormatRGBA, hostHandle)", patch)
+        header = SHARED_HANDLE.read_text()
+        self.assertIn("DSA_SHARED_COLOR_BUFFER_BIT 0x80000000u", header)
+        self.assertIn("${CMAKE_CURRENT_SOURCE_DIR}/../include", VULKAN_CMAKE.read_text())
+
+    def test_fr3_the_host_accepts_a_color_buffer_two_processes_create(self):
+        # Two processes can race to create the shared ColorBuffer; the host must not abort.
+        patch = PATCH_0004.read_text()
+        self.assertIn("-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER));", patch)
+        self.assertIn("+            return;", patch)
+
+    def test_fr3_the_host_gives_every_task_window_a_display(self):
+        patch = PATCH_0004.read_text()
+        self.assertIn("kDsaMaxDisplays = 64", patch)
+        self.assertIn('"$patch_dir"/0004-*.patch', FETCH.read_text())
 
     def test_pr3_host_visible_memory_works_without_shared_memory(self):
         # A Hyper-V VM has no goldfish address space and no virtio-gpu blobs, so the guest

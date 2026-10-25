@@ -28,7 +28,7 @@ git -C "$source" reset --hard "$revision"
 git -C "$source" clean -fdx
 
 shopt -s nullglob
-gfxstream_patches=("$patch_dir"/0001-*.patch)
+gfxstream_patches=("$patch_dir"/0001-*.patch "$patch_dir"/0004-*.patch)
 if ((${#gfxstream_patches[@]})); then
     git -C "$source" apply --recount --check "${gfxstream_patches[@]}"
     git -C "$source" apply --recount "${gfxstream_patches[@]}"
