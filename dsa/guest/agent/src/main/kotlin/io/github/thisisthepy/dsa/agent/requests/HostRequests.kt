@@ -1,6 +1,7 @@
 package io.github.thisisthepy.dsa.agent.requests
 
 import com.google.protobuf.InvalidProtocolBufferException
+import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.control.v1.Envelope
 
 /** What the agent does to the guest's tasks on the host's behalf. */
@@ -14,6 +15,12 @@ interface TaskActions {
 
     /** Ends the task. False when the framework has no such task or refused. */
     fun closeTask(taskId: Int): Boolean
+
+    /**
+     * Asks the window manager to give the task [bounds] on the guest display. It may apply
+     * them later. False when the framework refused.
+     */
+    fun moveTask(taskId: Int, bounds: TaskBounds): Boolean
 }
 
 /** What became of one frame from the channel. */

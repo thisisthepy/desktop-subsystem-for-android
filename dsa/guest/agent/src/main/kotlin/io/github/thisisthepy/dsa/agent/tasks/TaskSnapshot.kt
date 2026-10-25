@@ -2,6 +2,9 @@ package io.github.thisisthepy.dsa.agent.tasks
 
 /** A rectangle in guest display pixels: left and top inclusive, right and bottom exclusive. */
 data class TaskBounds(val left: Int, val top: Int, val right: Int, val bottom: Int) {
+    /** Whether it covers no pixel: the framework has not given the task bounds. */
+    fun isEmpty() = right <= left || bottom <= top
+
     companion object {
         val EMPTY = TaskBounds(0, 0, 0, 0)
     }

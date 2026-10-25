@@ -39,6 +39,12 @@ display. When several tasks contain it (one window over another), the layer goes
    task's layers are adjacent in z order;
 3. otherwise the smallest of those tasks, then the lowest task ID.
 
+Task bounds never overlap in practice: Android's freeform launch puts every new task at
+the same place, and two tasks at the same place cannot be told apart, so the agent moves
+tasks apart and reports the bounds a task is moving to. A task that moves keeps its host
+display; a new size resizes it. Until the task's surface reaches its new place, no task
+contains it and it is not sent.
+
 A layer no task contains is never sent: the wallpaper, display-wide backgrounds and dim
 layers, and anything that straddles a window's edge. Sending it would put pixels that
 belong to no window, or to another one, into a host window. A popup that reaches outside
