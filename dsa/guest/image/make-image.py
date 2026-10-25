@@ -291,8 +291,20 @@ CONSOLE_UEVENTD_LINE = "/dev/ttyS0 0660 system logd"
 
 
 def update_vendor_file_contexts(fc_text):
-    """Adds same_process_hal_file contexts for guest graphics libraries if not present."""
-    lines = fc_text.splitlines()
+    """Adds same_process_hal_file contexts for guest graphics libraries if not present, and
+    opens the DRM cards to every graphics client.
+
+    Cuttlefish keeps its cards (graphics_device) to the composer and has clients map
+    buffers through virtio-gpu's render node. Under Hyper-V, minigbm's mapper, which runs
+    in every process that maps a graphics buffer, opens the vkms card instead, so the cards
+    get the label clients may open. The lines are rewritten in place: a second
+    specification for the same path would conflict.
+    """
+    lines = [
+        line.replace("u:object_r:graphics_device:s0", "u:object_r:gpu_device:s0")
+        if line.startswith("/dev/dri/card") else line
+        for line in fc_text.splitlines()
+    ]
     entries = [
         (r"/vendor/lib64/hw/vulkan\.ranchu\.so", "/vendor/lib64/hw/vulkan\\.ranchu\\.so u:object_r:same_process_hal_file:s0"),
         (r"/vendor/lib64/libOpenglSystemCommon\.so", "/vendor/lib64/libOpenglSystemCommon\\.so u:object_r:same_process_hal_file:s0"),
