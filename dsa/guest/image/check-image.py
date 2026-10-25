@@ -108,6 +108,28 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         problems.append("META/file_contexts.bin does not label dsa-channeld, so the vendor image leaves it "
                         "vendor_file and init refuses to start it")
 
+    # The binder service the agent and the hwcomposer reach the daemon through.
+    # servicemanager refuses it unless the vendor manifest declares it, and checks who may
+    # add and find it against the label vendor_service_contexts gives it.
+    channel = "io.github.thisisthepy.dsa.channel.IChannel/default"
+    if "VENDOR/etc/vintf/manifest/dsa-channel.xml" not in names:
+        problems.append("VENDOR/etc/vintf/manifest/dsa-channel.xml is missing, so servicemanager refuses "
+                        "the daemon's binder service")
+    elif "<fqname>IChannel/default</fqname>" not in z.read("VENDOR/etc/vintf/manifest/dsa-channel.xml").decode():
+        problems.append("dsa-channel.xml does not declare IChannel/default")
+    service_contexts = (z.read("VENDOR/etc/selinux/vendor_service_contexts").decode()
+                        if "VENDOR/etc/selinux/vendor_service_contexts" in names else "")
+    if f"{channel} u:object_r:dsa_channel_service:s0" not in service_contexts.splitlines():
+        problems.append(f"vendor_service_contexts does not label {channel} dsa_channel_service, so "
+                        "the agent and the hwcomposer cannot find the daemon")
+    if "SYSTEM/etc/selinux/plat_sepolicy.cil" in names:
+        plat_sepolicy = z.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+        if "(allow dsa_channeld dsa_channel_service (service_manager (add" not in plat_sepolicy:
+            problems.append("plat_sepolicy.cil does not let dsa_channeld register its binder service")
+        for client in ["system_app", "platform_app", "hal_graphics_composer_server"]:
+            if f"(allow {client} dsa_channel_service (service_manager (find)))" not in plat_sepolicy:
+                problems.append(f"plat_sepolicy.cil does not let {client} find the daemon's binder service")
+
     if "VENDOR/etc/selinux/vendor_file_contexts" in names:
         vendor_fc = z.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
         for expected in ["vulkan", "libOpenglSystemCommon"]:

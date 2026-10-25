@@ -548,6 +548,78 @@ class ImageLayoutTests(unittest.TestCase):
                 self.assertIn("(allow dsa_channeld self (vsock_socket (create connect", policy)
                 self.assertNotRegex(policy, r"\(allow (appdomain|untrusted_app)\S* proc_bootconfig")
 
+    def test_fr3_the_channel_service_is_declared_labelled_and_allowed(self):
+        # The agent and the hwcomposer reach the daemon over binder. servicemanager refuses
+        # a VINTF-stable service the vendor manifest does not declare, and checks every
+        # registration and lookup against the label vendor_service_contexts gives it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            daemon = root / "dsa-channeld"
+            daemon.write_bytes(b"daemon")
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+                archive.writestr(
+                    "VENDOR/etc/selinux/vendor_service_contexts",
+                    "android.hardware.graphics.composer3.IComposer/default u:object_r:hal_graphics_composer_service:s0\n",
+                )
+
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, channeld=daemon)
+
+            with zipfile.ZipFile(modified) as archive:
+                manifest = archive.read("VENDOR/etc/vintf/manifest/dsa-channel.xml").decode()
+                self.assertIn('<hal format="aidl">', manifest)
+                self.assertIn("<name>io.github.thisisthepy.dsa.channel</name>", manifest)
+                self.assertIn("<version>1</version>", manifest)
+                self.assertIn("<fqname>IChannel/default</fqname>", manifest)
+                contexts = archive.read("VENDOR/etc/selinux/vendor_service_contexts").decode().splitlines()
+                self.assertIn(
+                    "android.hardware.graphics.composer3.IComposer/default u:object_r:hal_graphics_composer_service:s0",
+                    contexts,
+                )
+                self.assertIn(
+                    "io.github.thisisthepy.dsa.channel.IChannel/default u:object_r:dsa_channel_service:s0",
+                    contexts,
+                )
+                fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
+                self.assertIn("vendor/etc/vintf/manifest/dsa-channel.xml 0 0 644 capabilities=0x0", fs_config)
+                policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+                self.assertIn("(typeattributeset service_manager_type (dsa_channel_service))", policy)
+                self.assertIn("(allow dsa_channeld dsa_channel_service (service_manager (add find)))", policy)
+                self.assertIn("(allow dsa_channeld servicemanager (binder (call transfer)))", policy)
+                for client in ["system_app", "platform_app", "hal_graphics_composer_server"]:
+                    self.assertIn(f"(allow {client} dsa_channel_service (service_manager (find)))", policy)
+                    self.assertIn(f"(allow {client} dsa_channeld (binder (call transfer)))", policy)
+                    # The listener callbacks go the other way.
+                    self.assertIn(f"(allow dsa_channeld {client} (binder (call transfer)))", policy)
+                # Only the daemon registers the service.
+                self.assertEqual(policy.count("(service_manager (add"), 1)
+
+    def test_fr3_the_channel_service_is_labelled_without_vendor_service_contexts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            daemon = root / "dsa-channeld"
+            daemon.write_bytes(b"daemon")
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, channeld=daemon)
+            with zipfile.ZipFile(modified) as archive:
+                self.assertEqual(
+                    archive.read("VENDOR/etc/selinux/vendor_service_contexts").decode(),
+                    "io.github.thisisthepy.dsa.channel.IChannel/default u:object_r:dsa_channel_service:s0\n",
+                )
+
+    def test_fr3_the_service_name_matches_the_aidl_package(self):
+        aidl = Path(__file__).parents[1] / "aidl/io/github/thisisthepy/dsa/channel/IChannel.aidl"
+        package = next(
+            line.split()[1].rstrip(";") for line in aidl.read_text().splitlines() if line.startswith("package ")
+        )
+        self.assertEqual(make_image.CHANNEL_INSTANCE, f"{package}.IChannel/default")
+
     def test_pr6_the_daemon_label_reaches_the_file_contexts_the_images_are_built_from(self):
         # mkfs.erofs labels the vendor image from META/file_contexts.bin. Left as it was,
         # the daemon came out as vendor_file and init refused to start it.
@@ -581,6 +653,8 @@ class ImageLayoutTests(unittest.TestCase):
             with zipfile.ZipFile(modified) as archive:
                 self.assertNotIn("VENDOR/bin/dsa-channeld", archive.namelist())
                 self.assertNotIn("VENDOR/etc/init/dsa-channeld.rc", archive.namelist())
+                self.assertNotIn("VENDOR/etc/vintf/manifest/dsa-channel.xml", archive.namelist())
+                self.assertNotIn("VENDOR/etc/selinux/vendor_service_contexts", archive.namelist())
                 self.assertNotIn("dsa_channeld", archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode())
 
     def test_fr1_signing_finds_the_certificates_it_replaces(self):
@@ -699,6 +773,9 @@ class ImageLayoutTests(unittest.TestCase):
             self.assertIn("androidboot.hardware.gltransport=hvsocket", proc.stdout)
             # Without the daemon nothing in the guest connects to the host's control channel.
             self.assertIn("VENDOR/bin/dsa-channeld is missing", proc.stdout)
+            # Without the manifest and the label, the agent and the hwcomposer cannot reach it.
+            self.assertIn("dsa-channel.xml is missing", proc.stdout)
+            self.assertIn("vendor_service_contexts does not label", proc.stdout)
 
 
 if __name__ == "__main__":
