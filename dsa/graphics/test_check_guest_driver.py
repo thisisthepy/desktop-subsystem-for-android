@@ -1,7 +1,9 @@
 """Tests for the check that the guest Vulkan driver can load on the image it ships in."""
 
 import importlib.util
+import io
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -73,6 +75,19 @@ class GuestDriverCheckTests(unittest.TestCase):
             "liblog.so": library(defined={"__android_log_print"}),
         }
         self.assertEqual(check.problems(driver, image), [])
+
+    def test_pr3_symlinked_libraries_are_looked_up_where_they_really_are(self):
+        # target_files stores a symlink as its target path, so SYSTEM/lib64/libc.so is
+        # text pointing into the runtime APEX; bionic's real copy is in bootstrap/.
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as z:
+            z.writestr("SYSTEM/lib64/libc.so", "/apex/com.android.runtime/lib64/bionic/libc.so")
+            z.writestr("SYSTEM/lib64/bootstrap/libc.so", b"ELF-bionic")
+            z.writestr("VENDOR/lib64/libdrm.so", b"ELF-drm")
+        with zipfile.ZipFile(buffer) as z:
+            self.assertEqual(check.find_library(z, "libc.so"), b"ELF-bionic")
+            self.assertEqual(check.find_library(z, "libdrm.so"), b"ELF-drm")
+            self.assertIsNone(check.find_library(z, "libmissing.so"))
 
 
 if __name__ == "__main__":

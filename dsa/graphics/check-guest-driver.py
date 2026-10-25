@@ -86,20 +86,36 @@ def read_library(data):
     return lib
 
 
+def find_library(z, name):
+    """The contents of the image's copy of a library, or None if it has none.
+
+    target_files stores a symbolic link as the path it points to, so an entry that is not
+    an ELF file is a link (SYSTEM/lib64/libc.so points into the runtime APEX); the search
+    goes on to the next directory.
+    """
+    members = set(z.namelist())
+    for directory in LIBRARY_DIRS:
+        path = directory + name
+        if path in members:
+            data = z.read(path)
+            if data.startswith(b"ELF"):
+                return data
+    return None
+
+
 def image_libraries(target_files, names):
     """The image's libraries that the driver may load, read as they are needed."""
     libs = {}
     with zipfile.ZipFile(target_files) as z:
-        members = set(z.namelist())
         queue = list(names)
         while queue:
             name = queue.pop(0)
             if name in libs:
                 continue
-            path = next((d + name for d in LIBRARY_DIRS if d + name in members), None)
-            if path is None:
+            data = find_library(z, name)
+            if data is None:
                 continue
-            libs[name] = read_library(z.read(path))
+            libs[name] = read_library(data)
             queue += libs[name].needed
     return libs
 
