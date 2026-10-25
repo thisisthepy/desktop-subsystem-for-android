@@ -48,6 +48,107 @@ pub struct UpdateProgram {}
 /// Asks for the runtime ID of the caller's Android VM.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetVmId {}
+/// Asks for the app tasks of the caller's Android, each of which the compositor shows as one
+/// window.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListTasks {}
+/// Asks for the app tasks of the caller's Android, and for every change to them from then
+/// on. The service answers with Tasks, then sends a TaskEvent for each change. The watch
+/// lasts across restarts of the Android: when it stops, its tasks are removed.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WatchTasks {}
+/// The user closed a task's window: asks the caller's Android to end the task.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CloseTask {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+}
+/// Asks the caller's Android to start an app's launcher activity as a new task in its own
+/// window.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LaunchApp {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+}
+/// A rectangle in Android display pixels: left and top inclusive, right and bottom
+/// exclusive.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Rect {
+    #[prost(int32, tag = "1")]
+    pub left: i32,
+    #[prost(int32, tag = "2")]
+    pub top: i32,
+    #[prost(int32, tag = "3")]
+    pub right: i32,
+    #[prost(int32, tag = "4")]
+    pub bottom: i32,
+}
+/// One app task of the caller's Android. Every field is sent each time, so the latest one
+/// replaces what came before.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Task {
+    /// Android's task ID, unique while the task lives.
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    /// Where the task is on Android's display.
+    #[prost(message, optional, tag = "2")]
+    pub bounds: ::core::option::Option<Rect>,
+    /// The package of the task's root activity.
+    #[prost(string, tag = "3")]
+    pub package_name: ::prost::alloc::string::String,
+    /// The title the task's window shows.
+    #[prost(string, tag = "4")]
+    pub label: ::prost::alloc::string::String,
+    /// Whether the task has input focus in Android.
+    #[prost(bool, tag = "5")]
+    pub focused: bool,
+}
+/// The task ended.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TaskRemoved {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+}
+/// The frames of the task now arrive on the graphics stream as posts to `display_id`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TaskFrames {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub display_id: u32,
+}
+/// A change to the tasks of the caller's Android, sent after the answer to WatchTasks.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TaskEvent {
+    #[prost(oneof = "task_event::Body", tags = "1, 2, 3")]
+    pub body: ::core::option::Option<task_event::Body>,
+}
+/// Nested message and enum types in `TaskEvent`.
+pub mod task_event {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Body {
+        #[prost(message, tag = "1")]
+        Updated(super::Task),
+        #[prost(message, tag = "2")]
+        Removed(super::TaskRemoved),
+        #[prost(message, tag = "3")]
+        Frames(super::TaskFrames),
+    }
+}
+/// The answer to ListTasks and WatchTasks: the tasks there are now.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Tasks {
+    /// In task ID order.
+    #[prost(message, repeated, tag = "1")]
+    pub tasks: ::prost::alloc::vec::Vec<Task>,
+    /// The display of each task whose frames have been placed, in task ID order. A task may
+    /// appear here before it appears in `tasks`.
+    #[prost(message, repeated, tag = "2")]
+    pub frames: ::prost::alloc::vec::Vec<TaskFrames>,
+}
+/// The answer to a request that has nothing to report but that it was carried out.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Done {}
 /// The caller's Android as the service sees it.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Status {
@@ -89,16 +190,16 @@ pub struct Error {
 }
 /// A request from the client. The service answers each with one Response carrying the same
 /// id, in the order the requests arrived.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Request {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "request::Body", tags = "2, 3, 4, 5, 6")]
+    #[prost(oneof = "request::Body", tags = "2, 3, 4, 5, 6, 7, 8, 9, 10")]
     pub body: ::core::option::Option<request::Body>,
 }
 /// Nested message and enum types in `Request`.
 pub mod request {
-    #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Body {
         #[prost(message, tag = "2")]
         GetStatus(super::GetStatus),
@@ -110,18 +211,26 @@ pub mod request {
         UpdateProgram(super::UpdateProgram),
         #[prost(message, tag = "6")]
         GetVmId(super::GetVmId),
+        #[prost(message, tag = "7")]
+        ListTasks(super::ListTasks),
+        #[prost(message, tag = "8")]
+        WatchTasks(super::WatchTasks),
+        #[prost(message, tag = "9")]
+        CloseTask(super::CloseTask),
+        #[prost(message, tag = "10")]
+        LaunchApp(super::LaunchApp),
     }
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Response {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "response::Body", tags = "2, 3, 4, 5")]
+    #[prost(oneof = "response::Body", tags = "2, 3, 4, 5, 6, 7")]
     pub body: ::core::option::Option<response::Body>,
 }
 /// Nested message and enum types in `Response`.
 pub mod response {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Body {
         #[prost(message, tag = "2")]
         Status(super::Status),
@@ -131,17 +240,21 @@ pub mod response {
         ProgramUpdate(super::ProgramUpdate),
         #[prost(message, tag = "5")]
         VmId(super::VmId),
+        #[prost(message, tag = "6")]
+        Tasks(super::Tasks),
+        #[prost(message, tag = "7")]
+        Done(super::Done),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
-    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5")]
+    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5, 6")]
     pub body: ::core::option::Option<envelope::Body>,
 }
 /// Nested message and enum types in `Envelope`.
 pub mod envelope {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Body {
         #[prost(message, tag = "1")]
         Hello(super::Hello),
@@ -153,6 +266,8 @@ pub mod envelope {
         Request(super::Request),
         #[prost(message, tag = "5")]
         Response(super::Response),
+        #[prost(message, tag = "6")]
+        TaskEvent(super::TaskEvent),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -304,6 +419,8 @@ pub enum ErrorCode {
     /// DSA could not be updated: updates are off, the program list or the setup file did not
     /// check out, or setup could not start. The detail says which.
     UpdateFailed = 3,
+    /// The request needs the caller's Android to be running, and it is not.
+    NotRunning = 4,
 }
 impl ErrorCode {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -316,6 +433,7 @@ impl ErrorCode {
             Self::UnknownRequest => "ERROR_CODE_UNKNOWN_REQUEST",
             Self::Unavailable => "ERROR_CODE_UNAVAILABLE",
             Self::UpdateFailed => "ERROR_CODE_UPDATE_FAILED",
+            Self::NotRunning => "ERROR_CODE_NOT_RUNNING",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -325,6 +443,7 @@ impl ErrorCode {
             "ERROR_CODE_UNKNOWN_REQUEST" => Some(Self::UnknownRequest),
             "ERROR_CODE_UNAVAILABLE" => Some(Self::Unavailable),
             "ERROR_CODE_UPDATE_FAILED" => Some(Self::UpdateFailed),
+            "ERROR_CODE_NOT_RUNNING" => Some(Self::NotRunning),
             _ => None,
         }
     }

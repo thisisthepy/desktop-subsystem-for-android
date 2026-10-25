@@ -86,7 +86,9 @@ if(TARGET gfxstream_backend_static)
 endif()
 
 if(TARGET gfxstream_backend)
-    target_sources(gfxstream_backend PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/dsa_gfx_backend.cpp")
+    target_sources(gfxstream_backend PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/dsa_gfx_backend.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/dsa_gfx_display.cpp")
     target_include_directories(gfxstream_backend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 

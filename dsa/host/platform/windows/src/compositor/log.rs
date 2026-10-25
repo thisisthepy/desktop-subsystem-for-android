@@ -86,3 +86,11 @@ fn humantime_now() -> String {
         Err(_) => "0 UTC".to_string(),
     }
 }
+
+/// Writes `message` to `logger`, or to standard error when there is no log file.
+pub fn note(logger: Option<&CompositorLogger>, message: &str) {
+    match logger {
+        Some(logger) => logger.log(message),
+        None => eprintln!("dsa-compositor: {message}"),
+    }
+}
