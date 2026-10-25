@@ -100,6 +100,18 @@ pub trait Connection: Send {
     /// Closes the connection. The peer's next `recv` reports [`TransportError::Closed`].
     /// Dropping a connection closes it too.
     fn close(&mut self);
+
+    /// A second handle that sends on this connection, so one thread can send while another
+    /// waits in `recv`. `None` when the transport cannot share the connection.
+    fn try_clone_sender(&self) -> Option<Box<dyn FrameSender>> {
+        None
+    }
+}
+
+/// The sending half of a [`Connection`], from [`Connection::try_clone_sender`].
+pub trait FrameSender: Send {
+    /// Sends one frame, as [`Connection::send`] does.
+    fn send(&mut self, frame: &[u8]) -> Result<(), TransportError>;
 }
 
 /// The accepting side: where the host waits for the guest to connect.

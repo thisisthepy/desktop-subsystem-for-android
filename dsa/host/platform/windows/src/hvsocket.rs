@@ -17,10 +17,12 @@ use dsa_transport::stream::{
 use dsa_transport::{Connection, Connector, Listener, TransportError};
 use windows_sys::Win32::Networking::WinSock::{
     accept, bind, closesocket, connect, ioctlsocket, listen, recv, send, setsockopt, shutdown,
-    socket, WSAGetLastError, WSAPoll, WSAStartup, FIONBIO, INVALID_SOCKET, POLLRDNORM, SD_BOTH,
-    SOCKADDR, SOCKET, SOCKET_ERROR, SOCK_STREAM, SOMAXCONN, WSADATA, WSAEAFNOSUPPORT,
-    WSAEPROTONOSUPPORT, WSAESOCKTNOSUPPORT, WSAPOLLFD,
+    socket, WSADuplicateSocketW, WSAGetLastError, WSAPoll, WSASocketW, WSAStartup, FIONBIO,
+    FROM_PROTOCOL_INFO, INVALID_SOCKET, POLLRDNORM, SD_BOTH, SOCKADDR, SOCKET, SOCKET_ERROR,
+    SOCK_STREAM, SOMAXCONN, WSADATA, WSAEAFNOSUPPORT, WSAEPROTONOSUPPORT, WSAESOCKTNOSUPPORT,
+    WSAPOLLFD, WSAPROTOCOL_INFOW,
 };
+use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 
 use crate::guid::Guid;
 
@@ -202,6 +204,35 @@ impl StreamSocket for HvSocket {
     fn shutdown(&mut self) {
         // SAFETY: shutting down an owned socket.
         unsafe { shutdown(self.raw, SD_BOTH) };
+    }
+
+    fn try_clone(&self) -> io::Result<HvSocket> {
+        // SAFETY: an all-zero WSAPROTOCOL_INFOW is a valid out-parameter.
+        let mut info: WSAPROTOCOL_INFOW = unsafe { zeroed() };
+        // SAFETY: duplicating an owned socket into this same process.
+        if unsafe { WSADuplicateSocketW(self.raw, GetCurrentProcessId(), &mut info) }
+            == SOCKET_ERROR
+        {
+            return Err(last_error());
+        }
+        // SAFETY: info describes the socket duplicated above.
+        let raw = unsafe {
+            WSASocketW(
+                FROM_PROTOCOL_INFO,
+                FROM_PROTOCOL_INFO,
+                FROM_PROTOCOL_INFO,
+                &info,
+                0,
+                0,
+            )
+        };
+        if raw == INVALID_SOCKET {
+            return Err(last_error());
+        }
+        Ok(HvSocket {
+            raw,
+            read_timeout: self.read_timeout,
+        })
     }
 }
 
