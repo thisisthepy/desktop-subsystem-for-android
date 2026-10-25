@@ -38,17 +38,18 @@ git -C "$source" rev-parse HEAD
 
 scratch_dir="$(cd "$(dirname "$source")" && pwd)"
 
-# Pinned Mesa dependency for the guest Vulkan driver and connection manager:
+# Pinned Mesa dependency for the guest Vulkan driver. The whole tree: Mesa's Meson build
+# generates and compiles the shared Vulkan code the driver links.
 mesa_dir="$scratch_dir/mesa3d"
 mesa_revision="224e91e39836d3ca31f80df2e0379e55c70574f8"
 if [[ ! -d "$mesa_dir/.git" ]]; then
-    git clone --filter=blob:none --sparse https://android.googlesource.com/platform/external/mesa3d "$mesa_dir"
+    git clone --filter=blob:none --no-checkout https://android.googlesource.com/platform/external/mesa3d "$mesa_dir"
 fi
+git -C "$mesa_dir" sparse-checkout disable
 git -C "$mesa_dir" fetch --depth=1 origin "$mesa_revision"
 git -C "$mesa_dir" checkout --detach "$mesa_revision"
 git -C "$mesa_dir" reset --hard "$mesa_revision"
 git -C "$mesa_dir" clean -fdx
-git -C "$mesa_dir" sparse-checkout set include src/c11 src/compiler src/gfxstream/guest src/util src/vulkan
 
 mesa_patches=("$patch_dir"/0002-*.patch)
 if ((${#mesa_patches[@]})); then
@@ -57,6 +58,14 @@ if ((${#mesa_patches[@]})); then
 fi
 
 git -C "$mesa_dir" rev-parse HEAD
+
+# This Mesa has no libdrm wrap, and the Android target has no system libdrm to find.
+cat > "$mesa_dir/subprojects/libdrm.wrap" <<'WRAP'
+[wrap-git]
+url = https://gitlab.freedesktop.org/mesa/drm.git
+revision = libdrm-2.4.124
+depth = 1
+WRAP
 
 # Shallow dependencies required to build the guest OpenglSystemCommon and Vulkan libraries:
 minigbm_dir="$scratch_dir/minigbm"
@@ -87,6 +96,14 @@ if [[ ! -d "$system_logging_dir/.git" ]]; then
 fi
 git -C "$system_logging_dir" sparse-checkout set liblog/include
 
+# The platform's AHardwareBuffer and ANativeWindow headers. Mesa's Android stubs predate
+# the calls the gfxstream gralloc and window code make.
+frameworks_native_dir="$scratch_dir/frameworks_native"
+if [[ ! -d "$frameworks_native_dir/.git" ]]; then
+    git clone --depth=1 --filter=blob:none --sparse https://android.googlesource.com/platform/frameworks/native "$frameworks_native_dir"
+fi
+git -C "$frameworks_native_dir" sparse-checkout set libs/nativewindow/include libs/nativebase/include libs/arect/include
+
 # Shallow dependencies required to build the host gfxstream renderer:
 aemu_dir="$scratch_dir/aemu"
 aemu_revision="3ff20aed307f55bc4ae865373d07bf76c9efa43c"
@@ -102,76 +119,3 @@ if [[ ! -d "$angle_dir/.git" ]]; then
     git clone --depth=1 --filter=blob:none --sparse https://android.googlesource.com/platform/external/angle "$angle_dir"
 fi
 git -C "$angle_dir" sparse-checkout set include
-
-# Generate Vulkan headers if generator script is present
-gen_dir="$scratch_dir/gen"
-mkdir -p "$gen_dir"
-if [[ -f "$mesa_dir/src/vulkan/util/vk_entrypoints_gen.py" ]]; then
-    python_cmd=()
-    if command -v uv >/dev/null 2>&1; then
-        python_cmd=(uv run --with mako python)
-    elif python3 -c "import mako" >/dev/null 2>&1; then
-        python_cmd=(python3)
-    fi
-
-    if ((${#python_cmd[@]})); then
-        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_entrypoints_gen.py" \
-            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
-            --proto --weak \
-            --out-h "$gen_dir/gfxstream_vk_entrypoints.h" \
-            --out-c "$gen_dir/gfxstream_vk_entrypoints.c" \
-            --prefix gfxstream_vk --beta false
-
-        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_dispatch_table_gen.py" \
-            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
-            --out-h "$gen_dir/vk_dispatch_table.h" \
-            --out-c "$gen_dir/vk_dispatch_table.c" \
-            --beta false
-
-        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_extensions_gen.py" \
-            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
-            --out-h "$gen_dir/vk_extensions.h" \
-            --out-c "$gen_dir/vk_extensions.c"
-
-        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_cmd_queue_gen.py" \
-            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
-            --out-h "$gen_dir/vk_cmd_queue.h" \
-            --out-c "$gen_dir/vk_cmd_queue.c" \
-            --beta false
-
-        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_physical_device_features_gen.py" \
-            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
-            --out-h "$gen_dir/vk_physical_device_features.h" \
-            --out-c "$gen_dir/vk_physical_device_features.c" \
-            --beta false
-
-        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_physical_device_properties_gen.py" \
-            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
-            --out-h "$gen_dir/vk_physical_device_properties.h" \
-            --out-c "$gen_dir/vk_physical_device_properties.c" \
-            --beta false
-
-        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/gen_enum_to_str.py" \
-            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
-            --outdir "$gen_dir" \
-            --beta false
-
-        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_struct_type_cast_gen.py" \
-            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
-            --outdir "$gen_dir" \
-            --beta false
-
-        "${python_cmd[@]}" "$mesa_dir/src/vulkan/util/vk_dispatch_trampolines_gen.py" \
-            --xml "$mesa_dir/src/vulkan/registry/vk.xml" \
-            --out-h "$gen_dir/vk_dispatch_trampolines.h" \
-            --out-c "$gen_dir/vk_dispatch_trampolines.c" \
-            --beta false
-
-        if [[ -f "$mesa_dir/src/compiler/spirv/spirv_info_gen.py" ]]; then
-            "${python_cmd[@]}" "$mesa_dir/src/compiler/spirv/spirv_info_gen.py" \
-                --json "$mesa_dir/src/compiler/spirv/spirv.core.grammar.json" \
-                --out-h "$gen_dir/spirv_info.h" \
-                --out-c "$gen_dir/spirv_info.c"
-        fi
-    fi
-fi

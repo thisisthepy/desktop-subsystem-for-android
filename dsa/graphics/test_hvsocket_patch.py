@@ -36,6 +36,13 @@ class HvSocketPatchTests(unittest.TestCase):
         self.assertIn('transport == "hvsocket"', patch)
         self.assertIn("GFXSTREAM_TRANSPORT_HYPERV_SOCKET", patch)
 
+    def test_pr3_android_driver_selects_hvsocket_from_property(self):
+        # On Android the Vulkan driver takes its transport from gfxstream's render
+        # control, not from Mesa's Linux stub.
+        patch = PATCH_0001.read_text()
+        self.assertIn("guest/renderControl_enc/GfxStreamRenderControl.cpp", patch)
+        self.assertIn("return GFXSTREAM_TRANSPORT_HYPERV_SOCKET;", patch)
+
     def test_pr3_gralloc_creates_host_color_buffer_without_virtio_gpu(self):
         patch = PATCH_0002.read_text()
         self.assertIn("rcCreateColorBuffer", patch)
