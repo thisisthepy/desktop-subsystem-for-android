@@ -95,6 +95,16 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     if "VENDOR/lib64/libOpenglSystemCommon.so" not in names:
         problems.append("VENDOR/lib64/libOpenglSystemCommon.so is missing from the image")
 
+    # The control channel daemon, which makes the session active, and its own domain: the
+    # only one that may read the boot's secret.
+    if "VENDOR/bin/dsa-channeld" not in names:
+        problems.append("VENDOR/bin/dsa-channeld is missing from the image")
+    if "VENDOR/etc/init/dsa-channeld.rc" not in names:
+        problems.append("VENDOR/etc/init/dsa-channeld.rc is missing, so init never starts the daemon")
+    if "SYSTEM/etc/selinux/plat_sepolicy.cil" in names and "dsa_channeld" not in z.read(
+            "SYSTEM/etc/selinux/plat_sepolicy.cil").decode():
+        problems.append("plat_sepolicy.cil has no dsa_channeld domain, so init cannot start the daemon")
+
     if "VENDOR/etc/selinux/vendor_file_contexts" in names:
         vendor_fc = z.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
         for expected in ["vulkan", "libOpenglSystemCommon"]:

@@ -113,9 +113,34 @@ jobs:
           path: .scratch/kernel-out/bzImage
           if-no-files-found: error
 
+  channeld:
+    name: Build the guest control daemon
+    if: inputs.rebuild_images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
+
+      - name: Build dsa-channeld for the guest
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: bash dsa/guest/channeld/build-android.sh .scratch/channeld
+
+      - name: Keep the daemon
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-channeld
+          path: .scratch/channeld/dsa-channeld
+          if-no-files-found: error
+
   image:
     name: Make and publish the guest image (ubuntu-latest, Android ${{ matrix.android }})
-    needs: [kernel, guest-graphics]
+    needs: [kernel, guest-graphics, channeld]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
@@ -157,6 +182,12 @@ jobs:
           name: guest-gfxstream-hvsocket
           path: .scratch/guest-graphics
 
+      - name: Download the guest control daemon
+        uses: actions/download-artifact@v4
+        with:
+          name: guest-channeld
+          path: .scratch/channeld
+
       - name: Fetch the pinned inputs
         run: dsa/guest/image/fetch.sh ${{ matrix.android }}
 
@@ -187,6 +218,7 @@ jobs:
           uv run dsa/guest/image/make-image.py --major ${{ matrix.android }}
           --keys .scratch/image-keys --kernel .scratch/kernel-out/bzImage
           --graphics-dir .scratch/guest-graphics
+          --channeld .scratch/channeld/dsa-channeld
 
       - name: Check the image
         run: uv run dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys

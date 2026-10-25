@@ -1,0 +1,32 @@
+; Desktop Subsystem for Android (DSA)
+; The guest's control channel daemon (/vendor/bin/dsa-channeld): init starts it in its own
+; domain, it reads the boot's secret from /proc/bootconfig and connects to the host over
+; vsock. No other domain gains anything here; apps in particular still cannot read
+; /proc/bootconfig, which is what keeps the secret the daemon's alone.
+
+(type dsa_channeld)
+(roletype object_r dsa_channeld)
+(typeattributeset domain (dsa_channeld))
+
+(type dsa_channeld_exec)
+(roletype object_r dsa_channeld_exec)
+(typeattributeset file_type (dsa_channeld_exec))
+(typeattributeset exec_type (dsa_channeld_exec))
+(typeattributeset vendor_file_type (dsa_channeld_exec))
+
+; init starts it and it moves into its own domain.
+(typetransition init dsa_channeld_exec process dsa_channeld)
+(allow init dsa_channeld_exec (file (read getattr map execute open)))
+(allow init dsa_channeld (process (transition siginh rlimitinh)))
+(dontaudit init dsa_channeld (process (noatsecure)))
+(allow dsa_channeld dsa_channeld_exec (file (entrypoint read getattr map execute open)))
+(allow dsa_channeld init (fd (use)))
+
+; Its messages go to the kernel log through the descriptor init opens for it.
+(allow dsa_channeld kmsg_device (chr_file (write append getattr)))
+
+; The boot's secret.
+(allow dsa_channeld proc_bootconfig (file (read open getattr)))
+
+; The control channel.
+(allow dsa_channeld self (vsock_socket (create connect read write getattr setopt getopt shutdown)))

@@ -490,6 +490,55 @@ class ImageLayoutTests(unittest.TestCase):
                 fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
                 self.assertIn("vendor/etc/init/dsa-console-logcat.rc 0 0 644 capabilities=0x0", fs_config)
 
+    def test_pr6_the_control_daemon_is_installed_in_its_own_domain(self):
+        # The daemon reads the boot's secret from /proc/bootconfig, so it needs a domain
+        # allowed to; no app domain gains that.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            daemon = root / "dsa-channeld"
+            daemon.write_bytes(b"\x7fELF daemon")
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n(typeattribute appdomain)\n")
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+                archive.writestr("VENDOR/etc/selinux/vendor_file_contexts", "/vendor/bin/sh u:object_r:vendor_shell_exec:s0\n")
+                archive.writestr("META/vendor_file_contexts", "/vendor/bin/sh u:object_r:vendor_shell_exec:s0\n")
+
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, channeld=daemon)
+
+            with zipfile.ZipFile(modified) as archive:
+                self.assertEqual(archive.read("VENDOR/bin/dsa-channeld"), b"\x7fELF daemon")
+                rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
+                self.assertIn("service dsa_channeld /vendor/bin/dsa-channeld", rc)
+                self.assertIn("stdio_to_kmsg", rc)
+                fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
+                self.assertIn("vendor/bin/dsa-channeld 0 2000 755 capabilities=0x0", fs_config)
+                self.assertIn("vendor/etc/init/dsa-channeld.rc 0 0 644 capabilities=0x0", fs_config)
+                for contexts in ["VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"]:
+                    self.assertIn(
+                        "/vendor/bin/dsa-channeld u:object_r:dsa_channeld_exec:s0",
+                        archive.read(contexts).decode(),
+                    )
+                policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+                self.assertIn("(typetransition init dsa_channeld_exec process dsa_channeld)", policy)
+                self.assertIn("(allow dsa_channeld proc_bootconfig (file (read open getattr)))", policy)
+                self.assertIn("(allow dsa_channeld self (vsock_socket (create connect", policy)
+                self.assertNotRegex(policy, r"\(allow (appdomain|untrusted_app)\S* proc_bootconfig")
+
+    def test_pr6_without_a_control_daemon_the_image_has_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+            with zipfile.ZipFile(modified) as archive:
+                self.assertNotIn("VENDOR/bin/dsa-channeld", archive.namelist())
+                self.assertNotIn("VENDOR/etc/init/dsa-channeld.rc", archive.namelist())
+                self.assertNotIn("dsa_channeld", archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode())
+
     def test_fr1_signing_finds_the_certificates_it_replaces(self):
         # sign_target_files_apks swaps AOSP's certificates for ours in mac_permissions.xml,
         # reading them at the paths META/apkcerts.txt names, relative to where it runs, and
@@ -604,6 +653,8 @@ class ImageLayoutTests(unittest.TestCase):
             self.assertIn("vulkan.ranchu.so is missing", proc.stdout)
             self.assertIn("libOpenglSystemCommon.so is missing", proc.stdout)
             self.assertIn("androidboot.hardware.gltransport=hvsocket", proc.stdout)
+            # Without the daemon nothing in the guest connects to the host's control channel.
+            self.assertIn("VENDOR/bin/dsa-channeld is missing", proc.stdout)
 
 
 if __name__ == "__main__":
