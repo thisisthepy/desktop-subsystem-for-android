@@ -504,6 +504,7 @@ impl Ui {
                         width,
                         height,
                         focused,
+                        ..
                     } => self.open_window(task_id, &title, (width, height), focused),
                     WindowChange::Retitle { task_id, title } => {
                         if let Some(window) = self.open.get(&task_id) {
