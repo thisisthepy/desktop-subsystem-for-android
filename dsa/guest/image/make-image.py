@@ -44,6 +44,11 @@ REPO = HERE.parents[2]
 # The host is the shell: no launcher, no SystemUI, no keyboard app in the guest.
 REMOVED_APPS = ["Launcher3QuickStep", "SystemUI", "LatinIME"]
 
+# Vendor HALs whose devices a Hyper-V VM does not have: oemlock and UWB talk to the host
+# over Cuttlefish's virtio consoles, and Thread needs a radio. They abort in a loop, and
+# system_server waits for the oemlock HAL, which their APEXes declare, forever.
+REMOVED_APEXES = ["com.google.cf.oemlock", "com.android.hardware.uwb", "com.android.hardware.threadnetwork"]
+
 # The user's disk. The super partition's UUID is how first-stage init finds the disk, so it
 # is fixed and passed on the kernel command line.
 SUPER_UUID = "6b1ad5ad-0d5a-4dd3-9a6b-5a0a1d5a5a17"
@@ -211,8 +216,10 @@ def command_line_partitions(partitions, uuids=None):
 
 
 def removed(name):
-    """Whether a target_files member belongs to an app the guest must not have."""
-    return any(f"/{app}/" in name for app in REMOVED_APPS)
+    """Whether a target_files member belongs to an app or a HAL the guest must not have."""
+    return any(f"/{app}/" in name for app in REMOVED_APPS) or any(
+        name in (f"VENDOR/apex/{apex}.apex", f"VENDOR/apex/{apex}.capex") for apex in REMOVED_APEXES
+    )
 
 
 def edit_props(text):
@@ -497,6 +504,11 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     data = edit_props(data.decode()).encode()
                 elif name.endswith("lib/modules/modules.load") or name.endswith("lib/modules/modules.dep"):
                     data = b""
+                elif name == "META/apexkeys.txt":
+                    data = b"".join(
+                        line + b"\n" for line in data.splitlines()
+                        if not any(f'name="{a}.apex"' in line.decode() for a in REMOVED_APEXES)
+                    )
                 elif name == "META/apkcerts.txt":
                     data = b"".join(
                         line + b"\n" for line in data.splitlines() if not any(f'name="{a}.apk"' in line.decode() for a in REMOVED_APPS)

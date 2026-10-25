@@ -28,6 +28,9 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
 
 - The launcher, SystemUI and the keyboard app are removed: the desktop is the shell, and
   text input goes through the host's input method.
+- The oemlock, UWB and Thread HAL APEXes are removed. Their devices (Cuttlefish's virtio
+  consoles, radios) do not exist on Hyper-V, they abort in a loop, and system_server waits
+  for the oemlock HAL forever.
 - The build becomes a user build: not debuggable, adb only when authorised.
 - The published kernel modules are dropped. They belong to Google's kernel; DSA boots its
   own kernel with the drivers built in.
