@@ -96,6 +96,16 @@ class HvSocketPatchTests(unittest.TestCase):
         self.assertIn("VK_MEMORY_PROPERTY_HOST_CACHED_BIT", patch)
         self.assertIn('"$patch_dir"/0003-*.patch', FETCH.read_text())
 
+    def test_pr3_guest_reads_back_exactly_the_memory_the_host_sends(self):
+        # The host's allocation is aligned up from the application's, so it can send more
+        # bytes than the guest expected. Reading fewer leaves the rest in the stream, and
+        # every later reply is read from the wrong place: zero memory types, NULL handles.
+        patch = PATCH_0003.read_text()
+        self.assertIn("-            streamSize = actualSize;", patch)
+        self.assertIn("copied = std::min<uint64_t>(streamSize, mappedSize - offset);", patch)
+        self.assertIn("for (uint64_t left = streamSize - copied; left != 0;)", patch)
+        self.assertIn("-            stream->read(targetRange, actualSize);", patch)
+
     def test_nfr5_host_rejects_vulkan_handles_it_does_not_have(self):
         # A guest call naming an image, buffer or memory the host does not have fails for
         # that guest; it never reaches the GPU driver and never aborts the renderer.
