@@ -34,6 +34,7 @@ use super::store::{download_checked, DownloadFailure, Expected, Fetch};
 use super::{from_hex, to_hex};
 use crate::host_api::{ProgramUpdate, UpdateProgram, UserAndroid, UserAndroids};
 use crate::session::SessionState;
+use crate::tasks::{TaskRequest, TaskRequestError, TaskWatch};
 
 /// Runs a setup file.
 pub trait ProgramInstaller: Send + Sync {
@@ -705,5 +706,11 @@ impl UserAndroid for WithProgramStatus {
     }
     fn vm_id(&self) -> Option<String> {
         self.android.vm_id()
+    }
+    fn watch_tasks(&self) -> Option<TaskWatch> {
+        self.android.watch_tasks()
+    }
+    fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
+        self.android.request(request)
     }
 }

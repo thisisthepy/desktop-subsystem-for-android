@@ -1,8 +1,8 @@
 //! The Desktop Subsystem for Android user-session compositor for Windows.
 //!
 //! Runs in the user session without a console window, accepts guest graphics streams
-//! on Hyper-V sockets (ports 5566 and 5567), reconnects when the VM restarts, and exits
-//! cleanly on sign-out.
+//! on Hyper-V sockets (ports 5566 and 5567), shows one window per Android task with that
+//! task's frames, reconnects when the VM restarts, and exits cleanly on sign-out.
 #![windows_subsystem = "windows"]
 
 #[cfg(not(windows))]
@@ -49,7 +49,7 @@ fn main() {
     let _signout = SignOutListener::start(Arc::clone(&stop));
 
     let renderer = Arc::new(GfxstreamAdapter::new(None));
-    let mut compositor = Compositor::new(config, renderer);
+    let mut compositor = Compositor::new(config, renderer.clone()).with_display_presenter(renderer);
     if let Some(log) = logger {
         compositor = compositor.with_logger(log);
     }

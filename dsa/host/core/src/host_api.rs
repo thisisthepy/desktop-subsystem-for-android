@@ -5,9 +5,14 @@
 //! it) and acts on that user's Android only. Nothing a client sends can name another user.
 //! A connection that breaks the rules is closed; the service and its other connections go
 //! on.
+//!
+//! A client that asks to watch the tasks of its Android ([`HostApiClient::watch_tasks`])
+//! gets the tasks there are now, and then the connection carries every change to them, as
+//! the compositor needs to keep one window per task.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -21,7 +26,8 @@ use dsa_protocol::host_api::{
 use dsa_transport::local::{LocalListener, Peer};
 use dsa_transport::{Connection, Connector, TransportError};
 
-use crate::session::{Session, SessionState};
+use crate::session::{Session, SessionError, SessionState};
+use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskWatch};
 
 /// One user's Android, as the service drives it.
 pub trait UserAndroid: Send + Sync {
@@ -37,6 +43,18 @@ pub trait UserAndroid: Send + Sync {
     /// The runtime ID of the VM (such as a GUID on Windows), if running.
     fn vm_id(&self) -> Option<String> {
         None
+    }
+    /// The app tasks of this Android now, and every change to them from now on. `None` when
+    /// this Android does not report its tasks.
+    fn watch_tasks(&self) -> Option<TaskWatch> {
+        None
+    }
+    /// Asks this Android to close a task or to launch an app.
+    fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
+        let _ = request;
+        Err(TaskRequestError::Failed(
+            "this Android does not take requests about its tasks".into(),
+        ))
     }
 }
 
@@ -62,6 +80,17 @@ impl UserAndroid for Session {
     }
     fn vm_id(&self) -> Option<String> {
         Session::vm_id(self)
+    }
+    fn watch_tasks(&self) -> Option<TaskWatch> {
+        Some(Session::watch_tasks(self))
+    }
+    fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
+        Session::request(self, request).map_err(|error| match error {
+            SessionError::NotActive(state) => TaskRequestError::NotRunning(format!(
+                "Android is {state}, not running; start it first (dsa start)"
+            )),
+            other => TaskRequestError::Failed(other.to_string()),
+        })
     }
 }
 
@@ -184,6 +213,101 @@ fn to_wire(state: SessionState) -> types::SessionState {
     }
 }
 
+fn task_to_wire(task: Task) -> types::Task {
+    types::Task {
+        task_id: task.task_id,
+        bounds: Some(types::Rect {
+            left: task.bounds.left,
+            top: task.bounds.top,
+            right: task.bounds.right,
+            bottom: task.bounds.bottom,
+        }),
+        package_name: task.package_name,
+        label: task.label,
+        focused: task.focused,
+    }
+}
+
+fn task_from_wire(task: types::Task) -> Task {
+    let bounds = task.bounds.unwrap_or_default();
+    Task {
+        task_id: task.task_id,
+        bounds: Bounds {
+            left: bounds.left,
+            top: bounds.top,
+            right: bounds.right,
+            bottom: bounds.bottom,
+        },
+        package_name: task.package_name,
+        label: task.label,
+        focused: task.focused,
+    }
+}
+
+fn event_to_wire(event: TaskEvent) -> types::TaskEvent {
+    use types::task_event::Body as Event;
+    let body = match event {
+        TaskEvent::Updated(task) => Event::Updated(task_to_wire(task)),
+        TaskEvent::Removed { task_id } => Event::Removed(types::TaskRemoved { task_id }),
+        TaskEvent::Frames {
+            task_id,
+            display_id,
+        } => Event::Frames(types::TaskFrames {
+            task_id,
+            display_id,
+        }),
+    };
+    types::TaskEvent { body: Some(body) }
+}
+
+fn event_from_wire(event: types::TaskEvent) -> Option<TaskEvent> {
+    use types::task_event::Body as Event;
+    Some(match event.body? {
+        Event::Updated(task) => TaskEvent::Updated(task_from_wire(task)),
+        Event::Removed(removed) => TaskEvent::Removed {
+            task_id: removed.task_id,
+        },
+        Event::Frames(frames) => TaskEvent::Frames {
+            task_id: frames.task_id,
+            display_id: frames.display_id,
+        },
+    })
+}
+
+/// The tasks of `events`, as a list of tasks and a list of their displays.
+fn tasks_to_wire(events: Vec<TaskEvent>) -> types::Tasks {
+    let mut tasks = types::Tasks::default();
+    for event in events {
+        match event {
+            TaskEvent::Updated(task) => tasks.tasks.push(task_to_wire(task)),
+            TaskEvent::Frames {
+                task_id,
+                display_id,
+            } => tasks.frames.push(types::TaskFrames {
+                task_id,
+                display_id,
+            }),
+            TaskEvent::Removed { .. } => {}
+        }
+    }
+    tasks
+}
+
+fn tasks_from_wire(tasks: types::Tasks) -> TaskList {
+    TaskList {
+        tasks: tasks.tasks.into_iter().map(task_from_wire).collect(),
+        frames: tasks
+            .frames
+            .into_iter()
+            .map(|frames| (frames.task_id, frames.display_id))
+            .collect(),
+    }
+}
+
+/// How often a watching connection looks for its client having gone away while no task
+/// changes.
+const WATCH_POLL: Duration = Duration::from_millis(100);
+
 fn from_wire(state: i32) -> Option<SessionState> {
     match types::SessionState::try_from(state).ok()? {
         types::SessionState::Unspecified => None,
@@ -283,9 +407,77 @@ impl HostApiService {
                     return;
                 }
             };
+            if let Some(request::Body::WatchTasks(_)) = request.body {
+                return self.watch_tasks(connection, &peer, request.id);
+            }
             let response = self.answer(&peer, request);
             if send(&mut *connection, Body::Response(response)).is_err() {
                 return;
+            }
+        }
+    }
+
+    /// Answers a WatchTasks request with the tasks there are now, then sends every change
+    /// until the client goes away.
+    fn watch_tasks(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
+        let watch = match self.androids.android(&peer.user) {
+            Err(why) => Err(error(ErrorCode::Unavailable, why)),
+            Ok(android) => android.watch_tasks().ok_or_else(|| {
+                error(
+                    ErrorCode::Unavailable,
+                    "this Android does not report its tasks".into(),
+                )
+            }),
+        };
+        let watch = match watch {
+            Ok(watch) => watch,
+            Err(body) => {
+                let _ = send(
+                    &mut *connection,
+                    Body::Response(Response {
+                        id,
+                        body: Some(body),
+                    }),
+                );
+                return;
+            }
+        };
+        let answer = Response {
+            id,
+            body: Some(response::Body::Tasks(tasks_to_wire(watch.current))),
+        };
+        if send(&mut *connection, Body::Response(answer)).is_err() {
+            return;
+        }
+        loop {
+            match watch.events.recv_timeout(WATCH_POLL) {
+                Ok(event) => {
+                    let pending = std::iter::once(event).chain(watch.events.try_iter());
+                    for event in pending {
+                        let frame = Body::TaskEvent(event_to_wire(event));
+                        if send(&mut *connection, frame).is_err() {
+                            return;
+                        }
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    connection.close();
+                    return;
+                }
+            }
+            match connection.recv(Some(Duration::from_millis(1))) {
+                Err(TransportError::Timeout) => {}
+                Err(_) => return,
+                Ok(_) => {
+                    eprintln!(
+                        "local API: a client of {} sent a frame on a connection that watches \
+                         tasks; closing its connection",
+                        peer.user
+                    );
+                    connection.close();
+                    return;
+                }
             }
         }
     }
@@ -305,6 +497,27 @@ impl HostApiService {
                     vm_id: android.vm_id().unwrap_or_default(),
                 }),
             },
+            Some(request::Body::ListTasks(_)) => match self.androids.android(&peer.user) {
+                Err(why) => error(ErrorCode::Unavailable, why),
+                Ok(android) => response::Body::Tasks(tasks_to_wire(
+                    android
+                        .watch_tasks()
+                        .map(|watch| watch.current)
+                        .unwrap_or_default(),
+                )),
+            },
+            Some(request::Body::CloseTask(close)) => self.request(
+                peer,
+                TaskRequest::Close {
+                    task_id: close.task_id,
+                },
+            ),
+            Some(request::Body::LaunchApp(launch)) => self.request(
+                peer,
+                TaskRequest::Launch {
+                    package_name: launch.package_name,
+                },
+            ),
             Some(body) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => {
@@ -312,8 +525,12 @@ impl HostApiService {
                         request::Body::GetStatus(_) => {}
                         request::Body::StartSession(_) => android.start(),
                         request::Body::StopSession(_) => android.stop(),
-                        request::Body::UpdateProgram(_) => unreachable!("answered above"),
-                        request::Body::GetVmId(_) => unreachable!("answered above"),
+                        request::Body::UpdateProgram(_)
+                        | request::Body::GetVmId(_)
+                        | request::Body::ListTasks(_)
+                        | request::Body::WatchTasks(_)
+                        | request::Body::CloseTask(_)
+                        | request::Body::LaunchApp(_) => unreachable!("answered above"),
                     }
                     response::Body::Status(types::Status {
                         state: to_wire(android.state()) as i32,
@@ -331,6 +548,18 @@ impl HostApiService {
 }
 
 impl HostApiService {
+    fn request(&self, peer: &Peer, request: TaskRequest) -> response::Body {
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        match android.request(request) {
+            Ok(()) => response::Body::Done(types::Done {}),
+            Err(TaskRequestError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(TaskRequestError::Failed(why)) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
     fn update_program(&self, peer: &Peer) -> response::Body {
         let Some(program) = &self.program else {
             return error(
@@ -363,6 +592,31 @@ pub struct Status {
     pub last_reason: Option<String>,
     /// News about the Android image, such as an update waiting for the next start.
     pub update_notice: Option<String>,
+}
+
+/// The tasks of the caller's Android as the service reported them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TaskList {
+    /// In task ID order.
+    pub tasks: Vec<Task>,
+    /// The display of each task whose frames have been placed, as `(task_id, display_id)`,
+    /// in task ID order.
+    pub frames: Vec<(i32, u32)>,
+}
+
+impl TaskList {
+    /// The events that bring an empty list of tasks to this one.
+    pub fn events(&self) -> Vec<TaskEvent> {
+        let tasks = self.tasks.iter().cloned().map(TaskEvent::Updated);
+        let frames = self
+            .frames
+            .iter()
+            .map(|(task_id, display_id)| TaskEvent::Frames {
+                task_id: *task_id,
+                display_id: *display_id,
+            });
+        tasks.chain(frames).collect()
+    }
 }
 
 /// Why a local API call failed.
@@ -457,6 +711,50 @@ impl HostApiClient {
         }
     }
 
+    /// The app tasks of the caller's Android.
+    pub fn tasks(&mut self) -> Result<TaskList, ClientError> {
+        match self.exchange(request::Body::ListTasks(types::ListTasks {}), self.timeout)? {
+            response::Body::Tasks(tasks) => Ok(tasks_from_wire(tasks)),
+            _ => Err(ClientError::Malformed("expected the list of tasks".into())),
+        }
+    }
+
+    /// Asks the caller's Android to end a task, as when the user closes its window.
+    pub fn close_task(&mut self, task_id: i32) -> Result<(), ClientError> {
+        self.done(request::Body::CloseTask(types::CloseTask { task_id }))
+    }
+
+    /// Asks the caller's Android to start an app in a new task of its own.
+    pub fn launch_app(&mut self, package_name: &str) -> Result<(), ClientError> {
+        self.done(request::Body::LaunchApp(types::LaunchApp {
+            package_name: package_name.into(),
+        }))
+    }
+
+    /// Watches the app tasks of the caller's Android. The connection carries nothing else
+    /// from here on, so the client is used up.
+    pub fn watch_tasks(mut self) -> Result<TaskStream, ClientError> {
+        match self.exchange(
+            request::Body::WatchTasks(types::WatchTasks {}),
+            self.timeout,
+        )? {
+            response::Body::Tasks(tasks) => Ok(TaskStream {
+                connection: self.connection,
+                current: tasks_from_wire(tasks),
+            }),
+            _ => Err(ClientError::Malformed("expected the list of tasks".into())),
+        }
+    }
+
+    fn done(&mut self, body: request::Body) -> Result<(), ClientError> {
+        match self.exchange(body, self.timeout)? {
+            response::Body::Done(_) => Ok(()),
+            _ => Err(ClientError::Malformed(
+                "expected the answer that the request was carried out".into(),
+            )),
+        }
+    }
+
     fn call(&mut self, body: request::Body) -> Result<Status, ClientError> {
         match self.exchange(body, self.timeout)? {
             response::Body::Status(status) => Ok(Status {
@@ -510,6 +808,46 @@ impl HostApiClient {
             }),
             Some(body) => Ok(body),
             None => Err(ClientError::Malformed("an empty response".into())),
+        }
+    }
+}
+
+/// The tasks of the caller's Android and every change to them, from
+/// [`HostApiClient::watch_tasks`].
+pub struct TaskStream {
+    connection: Box<dyn Connection>,
+    current: TaskList,
+}
+
+impl TaskStream {
+    /// The tasks there were when the watch began.
+    pub fn current(&self) -> &TaskList {
+        &self.current
+    }
+
+    /// The next change, waiting at most `timeout`. `Ok(None)` means none came in time; an
+    /// error means the watch has ended, and a new connection is needed for another.
+    pub fn next(&mut self, timeout: Duration) -> Result<Option<TaskEvent>, ClientError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let frame = match self.connection.recv(Some(remaining)) {
+                Ok(frame) => frame,
+                Err(TransportError::Timeout) => return Ok(None),
+                Err(error) => return Err(ClientError::Transport(error)),
+            };
+            match decode(&frame) {
+                Ok(Envelope {
+                    body: Some(Body::TaskEvent(event)),
+                }) => match event_from_wire(event) {
+                    Some(event) => return Ok(Some(event)),
+                    // A kind of change this client does not know: a newer service told it
+                    // something it can do nothing with.
+                    None => continue,
+                },
+                Ok(_) => return Err(ClientError::Malformed("expected a task event".into())),
+                Err(error) => return Err(ClientError::Malformed(error.to_string())),
+            }
         }
     }
 }

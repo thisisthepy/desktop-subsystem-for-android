@@ -9,7 +9,7 @@ use std::time::Duration;
 use dsa_host_core::compositor::{FakeRenderer, GraphicsRenderer, GraphicsStreamKind};
 use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid};
 use dsa_host_core::session::SessionState;
-use dsa_host_windows::compositor::adapter::GfxstreamAdapter;
+use dsa_host_windows::compositor::adapter::{DisplayPresenter, DisplaySink, GfxstreamAdapter};
 use dsa_host_windows::compositor::log::CompositorLogger;
 use dsa_host_windows::compositor::single_instance::SingleInstanceMutex;
 use dsa_host_windows::compositor::{Compositor, CompositorConfig};
@@ -515,4 +515,23 @@ fn pr3_compositor_serves_a_gfxstream_client() {
 
     pipe_conn.close();
     pipe_server_thread.join().expect("pipe server thread exit");
+
+    // 3. Display presentation: the backend takes the compositor's sink, and lets it go.
+    struct NoWindows;
+    impl DisplaySink for NoWindows {
+        fn target(&self, _: u32, _: u32, _: u32) -> Option<isize> {
+            None
+        }
+        fn frame(&self, _: u32) {}
+    }
+    adapter
+        .present_displays(Some(Arc::new(NoWindows)))
+        .expect("the backend presents displays");
+    eprintln!(
+        "the renderer's GPU LUID: {:?}",
+        DisplayPresenter::adapter_luid(&*adapter)
+    );
+    adapter
+        .present_displays(None)
+        .expect("the backend stops presenting displays");
 }
