@@ -108,6 +108,23 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         problems.append("META/file_contexts.bin does not label dsa-channeld, so the vendor image leaves it "
                         "vendor_file and init refuses to start it")
 
+    # DSA's composer, which sends the host each task's frames: with Cuttlefish's in its place,
+    # no task window ever gets one.
+    if "VENDOR/bin/hw/dsa-hwcomposer" not in names:
+        problems.append("VENDOR/bin/hw/dsa-hwcomposer is missing from the image")
+    if "VENDOR/etc/init/dsa-hwcomposer.rc" not in names:
+        problems.append("VENDOR/etc/init/dsa-hwcomposer.rc is missing, so init never starts the composer")
+    composer_manifest = "VENDOR/etc/vintf/manifest/dsa-hwcomposer.xml"
+    if composer_manifest not in names:
+        problems.append(f"{composer_manifest} is missing, so the composer HAL is not declared")
+    elif "<fqname>IComposer/default</fqname>" not in z.read(composer_manifest).decode():
+        problems.append("dsa-hwcomposer.xml does not declare IComposer/default")
+    for apex in ["com.android.hardware.graphics.composer.ranchu", "com.android.hardware.graphics.composer.drm_hwcomposer"]:
+        if f"VENDOR/apex/{apex}.apex" in names:
+            problems.append(f"{apex} is still in the image and would serve the composer HAL too")
+    if "META/file_contexts.bin" in names and b"/vendor/bin/hw/dsa-hwcomposer" not in z.read("META/file_contexts.bin"):
+        problems.append("META/file_contexts.bin does not label dsa-hwcomposer, so init refuses to start it")
+
     if "VENDOR/etc/selinux/vendor_file_contexts" in names:
         vendor_fc = z.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
         for expected in ["vulkan", "libOpenglSystemCommon"]:
@@ -166,6 +183,13 @@ for boot_arg in [
 ]:
     if boot_arg not in manifest["kernel_cmdline"]:
         problems.append(f"the kernel command line does not contain {boot_arg}")
+# The freeform display DSA's composer sets up, and nothing left over from Cuttlefish's.
+for boot_arg in ["androidboot.dsa.display_width=", "androidboot.dsa.display_height=", "androidboot.dsa.display_dpi="]:
+    if boot_arg not in manifest["kernel_cmdline"]:
+        problems.append(f"the kernel command line does not contain {boot_arg}")
+for boot_arg in ["androidboot.hardware.hwcomposer.mode=", "androidboot.vendor.apex.com.android.hardware.graphics.composer="]:
+    if boot_arg in manifest["kernel_cmdline"]:
+        problems.append(f"the kernel command line still sets {boot_arg} for Cuttlefish's composer")
 
 def ramdisk_entries(data):
     """Name to mode of every entry in a ramdisk of gzip'd newc cpio archives."""

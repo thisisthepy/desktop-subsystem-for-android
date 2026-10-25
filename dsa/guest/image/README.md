@@ -22,7 +22,9 @@ them with the project's keys.
 dsa/guest/image/fetch.sh 17
 dsa/guest/image/make-keys.sh .scratch/image-keys
 ANDROID_NDK_HOME=/path/to/ndk dsa/guest/channeld/build-android.sh .scratch/channeld
-uv run dsa/guest/image/make-image.py --major 17 --keys .scratch/image-keys --channeld .scratch/channeld/dsa-channeld
+dsa/guest/hwcomposer/build.sh .scratch .scratch/build-hwcomposer
+uv run dsa/guest/image/make-image.py --major 17 --keys .scratch/image-keys --channeld .scratch/channeld/dsa-channeld \
+    --hwcomposer .scratch/build-hwcomposer/dsa-hwcomposer
 uv run dsa/guest/image/check-image.py dsa/target/image/17.0.0-16373615 .scratch/image-keys
 ```
 
@@ -41,6 +43,11 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
 - The control channel daemon (`/vendor/bin/dsa-channeld`) is added and runs in its own
   SELinux domain, the only one that may read `/proc/bootconfig`, where the host puts the
   boot's secret. It connects to the host, which makes the session active.
+- DSA's composer HAL (`/vendor/bin/hw/dsa-hwcomposer`, from `dsa/guest/hwcomposer/`)
+  replaces Cuttlefish's two composer APEXes when `--hwcomposer` names it. It sends the host
+  each task's frames rather than one picture of the whole display. The kernel command line
+  sets its display (`androidboot.dsa.display_width`, `_height`, `_dpi`) and drops the
+  settings only Cuttlefish's composer read.
 - The published kernel modules are dropped. They belong to Google's kernel; DSA boots its
   own kernel with the drivers built in.
 - `fstab.dsa` replaces the mount table. All partitions are on the user's one Android

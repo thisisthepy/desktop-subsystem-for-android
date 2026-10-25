@@ -583,6 +583,85 @@ class ImageLayoutTests(unittest.TestCase):
                 self.assertNotIn("VENDOR/etc/init/dsa-channeld.rc", archive.namelist())
                 self.assertNotIn("dsa_channeld", archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode())
 
+    def test_fr3_the_dsa_hwcomposer_replaces_the_cuttlefish_composer(self):
+        # Cuttlefish's composer composes the whole display; DSA's sends the host each task's
+        # frames. Both composer APEXes go, so nothing else serves the composer HAL.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            hwcomposer = root / "dsa-hwcomposer"
+            hwcomposer.write_bytes(b"\x7fELF hwcomposer")
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+                archive.writestr("VENDOR/apex/com.android.hardware.graphics.composer.ranchu.apex", b"apex")
+                archive.writestr("VENDOR/apex/com.android.hardware.graphics.composer.drm_hwcomposer.apex", b"apex")
+                archive.writestr("VENDOR/apex/com.android.hardware.gatekeeper.nonsecure.apex", b"apex")
+                archive.writestr(
+                    "META/apexkeys.txt",
+                    'name="com.android.hardware.graphics.composer.ranchu.apex" public_key="a"\n'
+                    'name="com.android.hardware.gatekeeper.nonsecure.apex" public_key="b"\n',
+                )
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+                archive.writestr("VENDOR/etc/selinux/vendor_file_contexts", "/vendor/bin/sh u:object_r:vendor_shell_exec:s0\n")
+                archive.writestr("META/vendor_file_contexts", "/vendor/bin/sh u:object_r:vendor_shell_exec:s0\n")
+
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, hwcomposer=hwcomposer)
+
+            with zipfile.ZipFile(modified) as archive:
+                names = archive.namelist()
+                self.assertNotIn("VENDOR/apex/com.android.hardware.graphics.composer.ranchu.apex", names)
+                self.assertNotIn("VENDOR/apex/com.android.hardware.graphics.composer.drm_hwcomposer.apex", names)
+                self.assertIn("VENDOR/apex/com.android.hardware.gatekeeper.nonsecure.apex", names)
+                apexkeys = archive.read("META/apexkeys.txt").decode()
+                self.assertNotIn("graphics.composer", apexkeys)
+                self.assertIn("gatekeeper", apexkeys)
+                self.assertEqual(archive.read("VENDOR/bin/hw/dsa-hwcomposer"), b"\x7fELF hwcomposer")
+                rc = archive.read("VENDOR/etc/init/dsa-hwcomposer.rc").decode()
+                self.assertIn("service vendor.dsa-hwcomposer /vendor/bin/hw/dsa-hwcomposer", rc)
+                self.assertIn("onrestart restart surfaceflinger", rc)
+                manifest = archive.read("VENDOR/etc/vintf/manifest/dsa-hwcomposer.xml").decode()
+                self.assertIn("<name>android.hardware.graphics.composer3</name>", manifest)
+                self.assertIn("<version>4</version>", manifest)
+                self.assertIn("<fqname>IComposer/default</fqname>", manifest)
+                fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
+                self.assertIn("vendor/bin/hw/dsa-hwcomposer 0 2000 755 capabilities=0x0", fs_config)
+                self.assertIn("vendor/etc/init/dsa-hwcomposer.rc 0 0 644 capabilities=0x0", fs_config)
+                self.assertIn("vendor/etc/vintf/manifest/dsa-hwcomposer.xml 0 0 644 capabilities=0x0", fs_config)
+                for contexts in ["VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"]:
+                    self.assertIn(
+                        "/vendor/bin/hw/dsa-hwcomposer u:object_r:hal_graphics_composer_default_exec:s0",
+                        archive.read(contexts).decode(),
+                    )
+
+    def test_fr3_without_the_dsa_hwcomposer_the_cuttlefish_composer_stays(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+                archive.writestr("VENDOR/apex/com.android.hardware.graphics.composer.ranchu.apex", b"apex")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+            with zipfile.ZipFile(modified) as archive:
+                self.assertIn("VENDOR/apex/com.android.hardware.graphics.composer.ranchu.apex", archive.namelist())
+                self.assertNotIn("VENDOR/bin/hw/dsa-hwcomposer", archive.namelist())
+
+    def test_fr3_the_kernel_command_line_sets_up_the_dsa_hwcomposer(self):
+        cmdline = make_image.kernel_cmdline("blkdevparts=sda:1@0(misc)", hwcomposer=True)
+        # Cuttlefish's composer, and the settings it alone reads, are gone.
+        self.assertNotIn("hwcomposer.mode=noop", cmdline)
+        self.assertNotIn("display_finder_mode", cmdline)
+        self.assertNotIn("androidboot.vendor.apex.com.android.hardware.graphics.composer=", cmdline)
+        # The one freeform display every task window lives on.
+        self.assertIn("androidboot.dsa.display_width=1920", cmdline)
+        self.assertIn("androidboot.dsa.display_height=1080", cmdline)
+        self.assertIn("androidboot.dsa.display_dpi=160", cmdline)
+        self.assertIn(
+            "androidboot.vendor.apex.com.android.hardware.gatekeeper=com.android.hardware.gatekeeper.nonsecure",
+            cmdline,
+        )
+
     def test_fr1_signing_finds_the_certificates_it_replaces(self):
         # sign_target_files_apks swaps AOSP's certificates for ours in mac_permissions.xml,
         # reading them at the paths META/apkcerts.txt names, relative to where it runs, and
@@ -699,6 +778,9 @@ class ImageLayoutTests(unittest.TestCase):
             self.assertIn("androidboot.hardware.gltransport=hvsocket", proc.stdout)
             # Without the daemon nothing in the guest connects to the host's control channel.
             self.assertIn("VENDOR/bin/dsa-channeld is missing", proc.stdout)
+            # Without DSA's composer no task window ever gets a frame.
+            self.assertIn("VENDOR/bin/hw/dsa-hwcomposer is missing", proc.stdout)
+            self.assertIn("androidboot.dsa.display_width", proc.stdout)
 
 
 if __name__ == "__main__":

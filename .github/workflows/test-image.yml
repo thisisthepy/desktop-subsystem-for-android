@@ -12,6 +12,8 @@ on:
       - "dsa/graphics/**"
       - "dsa/kernel/**"
       - "dsa/guest/channeld/**"
+      - "dsa/guest/hwcomposer/**"
+      - "dsa/guest/aidl/**"
       - "dsa/guest/transport/**"
       - "dsa/protocol/**"
       - ".github/workflows/test-image.yml"
@@ -113,9 +115,42 @@ jobs:
           path: .scratch/channeld/dsa-channeld
           if-no-files-found: error
 
+  hwcomposer:
+    name: Build the guest hwcomposer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
+
+      # aidl comes from the runner's Android SDK build-tools.
+      - name: Build dsa-hwcomposer for the guest
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: bash dsa/guest/hwcomposer/build.sh .scratch .scratch/build-hwcomposer
+
+      - name: Verify the binary links only the platform's C libraries
+        run: |
+          target=".scratch/build-hwcomposer/dsa-hwcomposer"
+          readelf -h "$target" | grep -Fq 'Advanced Micro Devices X86-64'
+          needed=$(readelf -d "$target" | sed -nE 's/.*NEEDED.*\[(.*)\]/\1/p' | sort | xargs)
+          echo "needs: $needed"
+          test "$needed" = "libbinder_ndk.so libc.so libdl.so liblog.so"
+
+      - name: Keep the hwcomposer
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-hwcomposer
+          path: .scratch/build-hwcomposer/dsa-hwcomposer
+          if-no-files-found: error
+
   image:
     name: Make and check the guest image (ubuntu-latest, Android ${{ matrix.android }})
-    needs: [guest-graphics, channeld]
+    needs: [guest-graphics, channeld, hwcomposer]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -195,11 +230,22 @@ jobs:
           name: guest-channeld
           path: .scratch/channeld
 
+      - name: Download the guest hwcomposer
+        uses: actions/download-artifact@v4
+        with:
+          name: guest-hwcomposer
+          path: .scratch/hwcomposer
+
+      - name: Check the hwcomposer starts on the image
+        run: |
+          uv run dsa/graphics/check-guest-driver.py --executable .scratch/hwcomposer/dsa-hwcomposer .scratch/aosp-inputs/*/*target_files*.zip
+
       - name: Make the image
         run: |
           args=(--major "${{ matrix.android }}" --keys .scratch/image-keys)
           args+=(--graphics-dir .scratch/guest-graphics --graphics-library .scratch/guest-graphics/libOpenglSystemCommon.so)
           args+=(--channeld .scratch/channeld/dsa-channeld)
+          args+=(--hwcomposer .scratch/hwcomposer/dsa-hwcomposer)
           uv run dsa/guest/image/make-image.py "${args[@]}"
 
       - name: Check the image
