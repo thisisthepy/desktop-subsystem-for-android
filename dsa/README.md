@@ -18,6 +18,7 @@ cargo test --workspace
 | `host/platform/linux/`, `host/platform/macos/` | | Other hosts | planned, not started |
 | `graphics/` | C++ | Vulkan remoting on the host, starting from gfxstream | planned |
 | `guest/` | Kotlin, C++, Rust | The agent (a system app), the hwcomposer, HAL clients, the image configuration | planned |
+| `guest/agent/` | Kotlin | The agent, a platform-signed system app: makes the display freeform, reports app tasks to the host, launches and ends tasks on the host's request | in progress: built into the image; not yet checked on a booted guest |
 | `guest/transport/` | Rust | The guest side of the control channel, over vsock, for the guest's channel daemon | in progress |
 | `guest/channeld/` | Rust | The guest's control channel daemon: reads the boot's secret, connects to the host, passes the handshake, carries frames, reconnects | in progress: runs in the image and holds the connection; serving the agent and hwcomposer over binder is not done yet |
 | `kernel/` | config, shell | The guest kernel configuration, with binder built in, and its build | planned |
