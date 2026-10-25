@@ -1,0 +1,7 @@
+# The guest's control channel daemon: holds the connection to the host. init restarts it
+# if it exits; it exits only when the boot has no secret or the host refuses this guest.
+service dsa_channeld /vendor/bin/dsa-channeld
+    class core
+    user system
+    group system
+    stdio_to_kmsg
