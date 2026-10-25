@@ -1,8 +1,9 @@
 diff --git a/guest/OpenglSystemCommon/Android.bp b/guest/OpenglSystemCommon/Android.bp
-index 5fecdd2..f37168f 100644
+index 8ec4dad95..1e29d0bc5 100644
 --- a/guest/OpenglSystemCommon/Android.bp
 +++ b/guest/OpenglSystemCommon/Android.bp
-@@ -91,6 +91,7 @@ cc_defaults {
+@@ -92,6 +92,7 @@ cc_defaults {
+     srcs: [
          "FormatConversions.cpp",
          "HostConnection.cpp",
 +        "HvSocketStream.cpp",
@@ -10,10 +11,10 @@ index 5fecdd2..f37168f 100644
          "QemuPipeStream.cpp",
          "ThreadInfo.cpp",
 diff --git a/guest/OpenglSystemCommon/HostConnection.cpp b/guest/OpenglSystemCommon/HostConnection.cpp
-index 3361cd5..78b0c9e 100644
+index 1d0cb849b..713d8fe1b 100644
 --- a/guest/OpenglSystemCommon/HostConnection.cpp
 +++ b/guest/OpenglSystemCommon/HostConnection.cpp
-@@ -20,6 +20,7 @@
+@@ -18,6 +18,7 @@
  #include "GoldfishAddressSpaceStream.h"
  #include "VirtioGpuAddressSpaceStream.h"
  #include "aemu/base/threads/AndroidThread.h"
@@ -21,7 +22,7 @@ index 3361cd5..78b0c9e 100644
  #if defined(__ANDROID__)
  #include "android-base/properties.h"
  #endif
-@@ -78,6 +79,9 @@ static HostConnectionType getConnectionTypeFromProperty(enum VirtGpuCapset capset) {
+@@ -105,6 +106,9 @@ static HostConnectionType getConnectionTypeFromProperty(enum VirtGpuCapset capse
      if (transport == "pipe") {
          return HOST_CONNECTION_QEMU_PIPE;
      }
@@ -30,7 +31,8 @@ index 3361cd5..78b0c9e 100644
 +    }
  
      if (transport == "virtio-gpu-asg" || transport == "virtio-gpu-pipe") {
-@@ -169,6 +173,18 @@ std::unique_ptr<HostConnection> HostConnection::connect(enum VirtGpuCapset capset) {
+         std::string egl;
+@@ -221,6 +225,19 @@ std::unique_ptr<HostConnection> HostConnection::connect(enum VirtGpuCapset capse
              con->m_rendernodeFd = deviceHandle;
              break;
          }
@@ -51,61 +53,23 @@ index 3361cd5..78b0c9e 100644
              break;
      }
 diff --git a/guest/OpenglSystemCommon/HostConnection.h b/guest/OpenglSystemCommon/HostConnection.h
-index 2941e18..f399e07 100644
+index 6435bf463..a5e7af04f 100644
 --- a/guest/OpenglSystemCommon/HostConnection.h
 +++ b/guest/OpenglSystemCommon/HostConnection.h
-@@ -44,6 +44,7 @@ enum HostConnectionType {
+@@ -43,6 +43,7 @@ enum HostConnectionType {
      HOST_CONNECTION_ADDRESS_SPACE = 2,
      HOST_CONNECTION_VIRTIO_GPU_PIPE = 3,
      HOST_CONNECTION_VIRTIO_GPU_ADDRESS_SPACE = 4,
 +    HOST_CONNECTION_HYPERV_SOCKET = 5,
  };
-diff --git a/guest/OpenglSystemCommon/HvSocketStream.h b/guest/OpenglSystemCommon/HvSocketStream.h
-new file mode 100644
-index 0000000..6a216d3
---- /dev/null
-+++ b/guest/OpenglSystemCommon/HvSocketStream.h
-@@ -0,0 +1,33 @@
-+/*
-+ * Copyright 2026 The DSA Authors
-+ * SPDX-License-Identifier: Apache-2.0
-+ */
-+#pragma once
-+
-+#include <cstddef>
-+#include <cstdint>
-+
-+#include "gfxstream/guest/IOStream.h"
-+
-+// An IOStream over Linux AF_VSOCK. Hyper-V maps this guest endpoint to the Windows
-+// host's AF_HYPERV listener, so no virtio-gpu device or guest DRM node is required.
-+class HvSocketStream final : public gfxstream::guest::IOStream {
-+public:
-+    explicit HvSocketStream(size_t buffer_size, uint32_t port = 5566);
-+    ~HvSocketStream() override;
-+
-+    int connect(const char* service_name = nullptr);
-+    uint64_t processPipeInit();
-+    void* allocBuffer(size_t minimum_size);
-+    int commitBuffer(size_t size);
-+    const unsigned char* readFully(void* buffer, size_t size);
-+    const unsigned char* commitBufferAndReadFully(size_t write_size, void* buffer, size_t read_size);
-+    const unsigned char* read(void* buffer, size_t* size);
-+    int writeFully(const void* buffer, size_t size);
-+
-+private:
-+    bool connected() const;
-+    int fd_;
-+    uint32_t port_;
-+    size_t buffer_size_;
-+    unsigned char* buffer_;
-+};
+ 
+ class HostConnection
 diff --git a/guest/OpenglSystemCommon/HvSocketStream.cpp b/guest/OpenglSystemCommon/HvSocketStream.cpp
 new file mode 100644
-index 0000000..4debf68
+index 000000000..395ad9722
 --- /dev/null
 +++ b/guest/OpenglSystemCommon/HvSocketStream.cpp
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,145 @@
 +/*
 + * Copyright 2026 The DSA Authors
 + * SPDX-License-Identifier: Apache-2.0
@@ -251,12 +215,51 @@ index 0000000..4debf68
 +        return nullptr;
 +    }
 +}
+diff --git a/guest/OpenglSystemCommon/HvSocketStream.h b/guest/OpenglSystemCommon/HvSocketStream.h
+new file mode 100644
+index 000000000..88bee7cca
+--- /dev/null
++++ b/guest/OpenglSystemCommon/HvSocketStream.h
+@@ -0,0 +1,34 @@
++/*
++ * Copyright 2026 The DSA Authors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++
++#include "gfxstream/guest/IOStream.h"
++
++// An IOStream over Linux AF_VSOCK. Hyper-V maps this guest endpoint to the Windows
++// host's AF_HYPERV listener, so no virtio-gpu device or guest DRM node is required.
++class HvSocketStream final : public gfxstream::guest::IOStream {
++public:
++    explicit HvSocketStream(size_t buffer_size, uint32_t port = 5566);
++    ~HvSocketStream() override;
++
++    int connect(const char* service_name = nullptr);
++    uint64_t processPipeInit();
++    void* allocBuffer(size_t minimum_size);
++    int commitBuffer(size_t size);
++    const unsigned char* readFully(void* buffer, size_t size);
++    const unsigned char* commitBufferAndReadFully(size_t write_size, void* buffer, size_t read_size);
++    const unsigned char* read(void* buffer, size_t* size);
++    int writeFully(const void* buffer, size_t size);
++
++private:
++    bool connected() const;
++    int fd_;
++    uint32_t port_;
++    size_t buffer_size_;
++    unsigned char* buffer_;
++};
 diff --git a/guest/OpenglSystemCommon/ProcessPipe.cpp b/guest/OpenglSystemCommon/ProcessPipe.cpp
-index 30b8d8e7..b443e54e 100644
+index 30b8d8e7d..b443e54ef 100644
 --- a/guest/OpenglSystemCommon/ProcessPipe.cpp
 +++ b/guest/OpenglSystemCommon/ProcessPipe.cpp
-@@ -26,10 +26,13 @@
- #ifndef __Fuchsia__
+@@ -27,10 +27,13 @@
  
  #include "QemuPipeStream.h"
  #include "VirtioGpuPipeStream.h"
@@ -269,6 +272,7 @@ index 30b8d8e7..b443e54e 100644
 +static constexpr unsigned int kProcessPipePort = 5567;
  
  #endif  // !__Fuchsia__
+ // sProcUID is a unique ID per process assigned by the host.
 @@ -67,6 +70,11 @@ static void processPipeDoInit(uint32_t noRenderControlEnc) {
              sProcUID = sVirtioGpuPipeStream->processPipeInit();
              break;
@@ -281,10 +285,26 @@ index 30b8d8e7..b443e54e 100644
      }
  #endif
  }
-@@ -91,5 +99,5 @@ bool processPipeInit(int streamHandle, HostConnectionType connType, uint32_t noR
+@@ -89,7 +97,7 @@ bool processPipeInit(int streamHandle, HostConnectionType connType, uint32_t noR
+             }
+ 
  #ifndef __Fuchsia__
 -            if (!sQemuPipeStream && !sVirtioGpuPipeStream) {
 +            if (!sQemuPipeStream && !sVirtioGpuPipeStream && !sHvSocketStream) {
                  return false;
              }
  #endif
+diff --git a/guest/renderControl_enc/GfxStreamRenderControl.cpp b/guest/renderControl_enc/GfxStreamRenderControl.cpp
+index 1d4ec0fe3..e4b1c706f 100644
+--- a/guest/renderControl_enc/GfxStreamRenderControl.cpp
++++ b/guest/renderControl_enc/GfxStreamRenderControl.cpp
+@@ -51,6 +51,9 @@ GfxStreamTransportType renderControlGetTransport() {
+     if (transport == "pipe") {
+         return GFXSTREAM_TRANSPORT_QEMU_PIPE;
+     }
++    if (transport == "hvsocket") {
++        return GFXSTREAM_TRANSPORT_HYPERV_SOCKET;
++    }
+ 
+     if (transport == "virtio-gpu-asg" || transport == "virtio-gpu-pipe") {
+         std::string egl;

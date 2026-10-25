@@ -34,8 +34,14 @@ class GfxstreamFetchTests(unittest.TestCase):
         self.assertIn("https://android.googlesource.com/platform/system/libbase", script)
         self.assertIn("https://android.googlesource.com/platform/system/core", script)
         self.assertIn("https://android.googlesource.com/platform/system/logging", script)
-        self.assertIn("src/vulkan", script)
         self.assertIn("cros_gralloc", script)
+
+    def test_pr3_fetches_the_whole_mesa_tree_for_its_meson_build(self):
+        script = FETCH.read_text(encoding="utf-8")
+        self.assertIn('git -C "$mesa_dir" sparse-checkout disable', script)
+        self.assertIn("subprojects/libdrm.wrap", script)
+        self.assertIn("https://android.googlesource.com/platform/frameworks/native", script)
+        self.assertIn("libs/nativewindow/include", script)
 
     def test_pr3_fetches_host_dependencies(self):
         script = FETCH.read_text(encoding="utf-8")
