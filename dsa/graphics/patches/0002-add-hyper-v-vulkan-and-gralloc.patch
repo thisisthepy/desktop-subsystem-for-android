@@ -1,20 +1,21 @@
 diff --git a/src/gfxstream/guest/android/GrallocMinigbm.cpp b/src/gfxstream/guest/android/GrallocMinigbm.cpp
-index 0401a87..e3c90b0 100644
+index 0401a87..7466fa3 100644
 --- a/src/gfxstream/guest/android/GrallocMinigbm.cpp
 +++ b/src/gfxstream/guest/android/GrallocMinigbm.cpp
-@@ -5,6 +5,11 @@
+@@ -5,6 +5,12 @@
  
  #include "GrallocMinigbm.h"
  
 +#include "GfxStreamConnectionManager.h"
 +#include "GfxStreamRenderControl.h"
 +#include "ExtendedRenderControl.h"
++#include "dsa_shared_color_buffer.h"
 +#include <gralloc_cb_bp.h>
 +
  #include <cros_gralloc/cros_gralloc_handle.h>
  #include <stdlib.h>
  #include <sys/user.h>
-@@ -71,7 +76,36 @@ int MinigbmGralloc::allocate(uint32_t width, uint32_t height, uint32_t format, u
+@@ -71,7 +77,36 @@ int MinigbmGralloc::allocate(uint32_t width, uint32_t height, uint32_t format, u
  
  void MinigbmGralloc::acquire(AHardwareBuffer* ahb) { AHardwareBuffer_acquire(ahb); }
  
@@ -52,7 +53,7 @@ index 0401a87..e3c90b0 100644
  
  int MinigbmGralloc::lock(AHardwareBuffer* ahb, uint8_t** ptr) {
      return AHardwareBuffer_lock(ahb, AHARDWAREBUFFER_USAGE_CPU_READ_RARELY, -1, nullptr,
-@@ -86,22 +120,68 @@ int MinigbmGralloc::lockPlanes(AHardwareBuffer* ahb, std::vector<LockedPlane>* a
+@@ -86,22 +121,76 @@ int MinigbmGralloc::lockPlanes(AHardwareBuffer* ahb, std::vector<LockedPlane>* a
  int MinigbmGralloc::unlock(AHardwareBuffer* ahb) { return AHardwareBuffer_unlock(ahb, nullptr); }
  
  uint32_t MinigbmGralloc::getHostHandle(const native_handle_t* handle) {
@@ -86,9 +87,12 @@ index 0401a87..e3c90b0 100644
 -    auto resource = mDevice->importBlob(hnd);
 -    if (!resource) {
 +    // In a Hyper-V VM, minigbm handles cannot be imported via virtgpu blob ioctls because
-+    // there is no virtio-gpu device. When a gralloc buffer has no host handle, allocate a
-+    // host ColorBuffer through renderControl (rcCreateColorBuffer) on first use and cache
-+    // the handle per buffer id; release with rcCloseColorBuffer when the buffer goes away.
++    // there is no virtio-gpu device. Every process that uses one gralloc buffer (the app
++    // that draws it, SurfaceFlinger, the hwcomposer) must still reach the same host
++    // ColorBuffer, so its handle is derived from the buffer ID the allocator writes into
++    // the gralloc handle (dsa_shared_color_buffer.h). The first process to use the buffer
++    // creates the ColorBuffer with that handle; the others open it. Each process holds one
++    // reference, cached per buffer ID and dropped with rcCloseColorBuffer on release.
 +    const uint32_t bufferId = cros_handle->id;
 +    {
 +        std::lock_guard<std::mutex> lock(mColorBufferMutex);
@@ -116,9 +120,14 @@ index 0401a87..e3c90b0 100644
 +    constexpr uint32_t kGlFormatRGBA = 0x1908;
 +    const uint32_t width = cros_handle->width ? cros_handle->width : 1;
 +    const uint32_t height = cros_handle->height ? cros_handle->height : 1;
-+    uint32_t hostHandle = rcEnc->rcCreateColorBuffer(rcEnc, width, height, kGlFormatRGBA);
-+    if (hostHandle == 0) {
-+        return 0;
++    const uint32_t hostHandle = dsa_shared_color_buffer_handle(bufferId);
++    if (rcEnc->rcOpenColorBuffer2(rcEnc, hostHandle) != 0) {
++        rcEnc->rcCreateColorBufferWithHandle(rcEnc, width, height, kGlFormatRGBA, hostHandle);
++        if (rcEnc->rcOpenColorBuffer2(rcEnc, hostHandle) != 0) {
++            mesa_loge("%s: the host has no ColorBuffer %u for buffer %u", __func__, hostHandle,
++                      bufferId);
++            return 0;
++        }
 +    }
 +
 +    {

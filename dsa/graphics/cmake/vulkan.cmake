@@ -100,6 +100,7 @@ set_target_properties(nativewindow_stub PROPERTIES
 add_library(vulkan.ranchu SHARED ${VK_RANCHU_SOURCES})
 
 target_include_directories(vulkan.ranchu PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${MESA_GUEST}/vulkan
     ${MESA_GUEST}/vulkan_enc
     ${MESA_GUEST}/android

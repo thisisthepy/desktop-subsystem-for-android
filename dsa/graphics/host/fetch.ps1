@@ -33,11 +33,13 @@ git -C $GfxstreamDir reset --hard $GfxstreamRevision
 git -C $GfxstreamDir clean -fdx
 
 # Apply the checked-in gfxstream patches. 0002 and 0003 patch Mesa for the guest and do not
-# belong to this tree. The host renderer cannot build without 0004, so a patch that does
-# not apply stops the fetch.
+# belong to this tree. The host renderer cannot build without 0004, and without 0005 it
+# aborts when two guest processes create one shared ColorBuffer and refuses more than
+# eleven task windows, so a patch that does not apply stops the fetch.
 $PatchDir = Join-Path $RepoRoot "dsa/graphics/patches"
 $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
-    @(Get-ChildItem -Path $PatchDir -Filter "0004-*.patch")
+    @(Get-ChildItem -Path $PatchDir -Filter "0004-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0005-*.patch")
 foreach ($Patch in $Patches) {
     Write-Host "Applying patch: $($Patch.Name)"
     git -C $GfxstreamDir apply --recount $Patch.FullName
