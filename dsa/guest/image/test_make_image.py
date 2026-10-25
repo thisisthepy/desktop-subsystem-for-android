@@ -4,6 +4,7 @@ import base64
 import gzip
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -657,6 +658,105 @@ class ImageLayoutTests(unittest.TestCase):
                 self.assertNotIn("VENDOR/etc/selinux/vendor_service_contexts", archive.namelist())
                 self.assertNotIn("dsa_channeld", archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode())
 
+    def _target_files_with_system_ext(self, root):
+        source = root / "target-files.zip"
+        with zipfile.ZipFile(source, "w") as archive:
+            archive.writestr(
+                "META/apkcerts.txt",
+                'name="Settings.apk" certificate="build/make/target/product/security/platform.x509.pem" '
+                'private_key="build/make/target/product/security/platform.pk8" partition="system_ext"\n',
+            )
+            archive.writestr("META/apexkeys.txt", "")
+            archive.writestr(
+                "META/system_ext_filesystem_config.txt",
+                "system_ext/priv-app 0 0 755 capabilities=0x0\n",
+            )
+        return source
+
+    def test_fr3_the_agent_is_installed_as_a_privileged_app(self):
+        # The agent reads every app's tasks and starts and ends them, which only a privileged
+        # app may; the framework refuses to boot if its privileged permissions are not listed.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = self._target_files_with_system_ext(root)
+            agent = root / "agent.apk"
+            agent.write_bytes(b"PK agent")
+
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, agent=agent)
+
+            with zipfile.ZipFile(modified) as archive:
+                self.assertEqual(archive.read("SYSTEM_EXT/priv-app/DsaAgent/DsaAgent.apk"), b"PK agent")
+                permissions = archive.read("SYSTEM_EXT/etc/permissions/privapp-permissions-dsa-agent.xml").decode()
+                self.assertIn('<privapp-permissions package="io.github.thisisthepy.dsa.agent">', permissions)
+                fs_config = archive.read("META/system_ext_filesystem_config.txt").decode().splitlines()
+                self.assertIn("system_ext/priv-app 0 0 755 capabilities=0x0", fs_config)
+                self.assertIn("system_ext/priv-app/DsaAgent 0 0 755 capabilities=0x0", fs_config)
+                self.assertIn("system_ext/priv-app/DsaAgent/DsaAgent.apk 0 0 644 capabilities=0x0", fs_config)
+                self.assertIn(
+                    "system_ext/etc/permissions/privapp-permissions-dsa-agent.xml 0 0 644 capabilities=0x0",
+                    fs_config,
+                )
+
+    def test_fr3_the_agent_is_signed_with_the_platform_key(self):
+        # A platform app may use the framework interfaces the agent needs. sign_target_files_apks
+        # signs each app with the key apkcerts.txt names, and refuses an app it names none for.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = self._target_files_with_system_ext(root)
+            agent = root / "agent.apk"
+            agent.write_bytes(b"PK agent")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, agent=agent)
+
+            with zipfile.ZipFile(modified) as archive:
+                lines = archive.read("META/apkcerts.txt").decode().splitlines()
+            entry = [line for line in lines if line.startswith('name="DsaAgent.apk"')]
+            self.assertEqual(
+                entry,
+                ['name="DsaAgent.apk" certificate="build/make/target/product/security/platform.x509.pem" '
+                 'private_key="build/make/target/product/security/platform.pk8" partition="system_ext"'],
+            )
+            self.assertEqual(len(lines), 2)
+            # The platform certificate is one of the standard ones -d replaces with ours, so
+            # no -k option sends the agent to another key.
+            args = make_image.key_arguments(modified, "/keys")
+            overrides = [args[i + 1] for i, arg in enumerate(args) if arg == "-k"]
+            self.assertFalse(any(o.startswith("build/make/target/product/security/platform=") for o in overrides))
+
+    def test_fr3_the_privileged_permission_list_names_every_permission_the_agent_requests(self):
+        agent = make_image.REPO / "dsa/guest/agent"
+        manifest = (agent / "src/main/AndroidManifest.xml").read_text()
+        listed = (agent / "privapp-permissions-dsa-agent.xml").read_text()
+        requested = set(re.findall(r'<uses-permission android:name="([^"]+)"', manifest))
+        granted = set(re.findall(r'<permission name="([^"]+)"', listed))
+        self.assertTrue(requested)
+        self.assertEqual(requested, granted)
+        self.assertEqual(make_image.AGENT_PERMISSIONS_SOURCE.read_text(), listed)
+
+    def test_fr3_an_agent_needs_a_system_ext_partition(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("META/apkcerts.txt", "")
+            agent = root / "agent.apk"
+            agent.write_bytes(b"PK agent")
+            modified = root / "modified.zip"
+            with self.assertRaises(ValueError):
+                make_image.modify(source, modified, agent=agent)
+            self.assertFalse(modified.exists())
+
+    def test_fr3_without_an_agent_the_image_has_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = self._target_files_with_system_ext(root)
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+            with zipfile.ZipFile(modified) as archive:
+                self.assertFalse(any("DsaAgent" in name for name in archive.namelist()))
+                self.assertNotIn("DsaAgent", archive.read("META/apkcerts.txt").decode())
+
     def test_fr1_signing_finds_the_certificates_it_replaces(self):
         # sign_target_files_apks swaps AOSP's certificates for ours in mac_permissions.xml,
         # reading them at the paths META/apkcerts.txt names, relative to where it runs, and
@@ -776,6 +876,38 @@ class ImageLayoutTests(unittest.TestCase):
             # Without the manifest and the label, the agent and the hwcomposer cannot reach it.
             self.assertIn("dsa-channel.xml is missing", proc.stdout)
             self.assertIn("vendor_service_contexts does not label", proc.stdout)
+            # Without the agent the host never learns of a task, so no window opens.
+            self.assertIn("SYSTEM_EXT/priv-app/DsaAgent/DsaAgent.apk is missing", proc.stdout)
+
+    def test_fr3_check_image_rejects_an_agent_not_signed_with_the_platform_key(self):
+        check_script = Path(__file__).with_name("check-image.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_dir = root / "image"
+            img_dir.mkdir()
+            keys_dir = root / "keys"
+            keys_dir.mkdir()
+            for role in ["platform", "releasekey"]:
+                body = base64.b64encode(f"our {role} certificate".encode()).decode()
+                (keys_dir / f"{role}.x509.pem").write_text(
+                    f"-----BEGIN CERTIFICATE-----\n{body}\n-----END CERTIFICATE-----\n"
+                )
+            (img_dir / "image.json").write_text(json.dumps({"files": {}, "kernel_cmdline": ""}))
+            (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
+            with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
+                archive.writestr("META/apkcerts.txt", "")
+                archive.writestr("SYSTEM_EXT/priv-app/DsaAgent/DsaAgent.apk", b"signing block: our releasekey certificate")
+                archive.writestr("SYSTEM_EXT/etc/permissions/privapp-permissions-dsa-agent.xml", "<permissions/>")
+
+            proc = subprocess.run(
+                [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("DsaAgent.apk is not signed with our platform key", proc.stdout)
+            self.assertNotIn("DsaAgent.apk is missing", proc.stdout)
+            self.assertNotIn("privapp-permissions-dsa-agent.xml is missing", proc.stdout)
 
 
 if __name__ == "__main__":

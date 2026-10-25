@@ -1,7 +1,8 @@
 # Makes the guest images from the pinned AOSP build inputs (dsa/guest/image/inputs.json)
 # and checks them: the shell apps are gone, the build is not debuggable, nothing is signed
-# with AOSP's test keys, and the user disk template and ramdisk match image.json. Each run
-# signs with a throwaway key set; a release signs with the project's keys.
+# with AOSP's test keys, the agent is there and signed with the platform key, and the user
+# disk template and ramdisk match image.json. Each run signs with a throwaway key set; a
+# release signs with the project's keys.
 
 name: Image test
 
@@ -13,6 +14,8 @@ on:
       - "dsa/kernel/**"
       - "dsa/guest/channeld/**"
       - "dsa/guest/transport/**"
+      - "dsa/guest/agent/**"
+      - "dsa/guest/aidl/**"
       - "dsa/protocol/**"
       - ".github/workflows/test-image.yml"
       - "scripts/tests/image-graphics-workflow.test.sh"
@@ -113,9 +116,37 @@ jobs:
           path: .scratch/channeld/dsa-channeld
           if-no-files-found: error
 
+  agent:
+    name: Build the guest agent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up a JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build the agent
+        working-directory: dsa/guest/agent
+        run: ./gradlew --no-daemon assembleRelease
+
+      # Unsigned: make-image.py signs it with the platform key.
+      - name: Keep the agent
+        run: |
+          mkdir -p .scratch/agent
+          cp dsa/guest/agent/build/outputs/apk/release/dsa-agent-release-unsigned.apk .scratch/agent/DsaAgent.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-agent
+          path: .scratch/agent/DsaAgent.apk
+          if-no-files-found: error
+
   image:
     name: Make and check the guest image (ubuntu-latest, Android ${{ matrix.android }})
-    needs: [guest-graphics, channeld]
+    needs: [guest-graphics, channeld, agent]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -195,11 +226,18 @@ jobs:
           name: guest-channeld
           path: .scratch/channeld
 
+      - name: Download the guest agent
+        uses: actions/download-artifact@v4
+        with:
+          name: guest-agent
+          path: .scratch/agent
+
       - name: Make the image
         run: |
           args=(--major "${{ matrix.android }}" --keys .scratch/image-keys)
           args+=(--graphics-dir .scratch/guest-graphics --graphics-library .scratch/guest-graphics/libOpenglSystemCommon.so)
           args+=(--channeld .scratch/channeld/dsa-channeld)
+          args+=(--agent .scratch/agent/DsaAgent.apk)
           uv run dsa/guest/image/make-image.py "${args[@]}"
 
       - name: Check the image

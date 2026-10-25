@@ -8,6 +8,8 @@ It takes the pinned target_files and otatools (fetch.sh downloads them) and:
 2. switches the build to user (not debuggable, adb authorised only);
 3. drops the published kernel modules (they belong to Google's kernel, and DSA ships its
    own kernel with the drivers built in) and installs the Hyper-V mount table;
+   with --channeld and --agent, it adds the control channel daemon and the agent, the
+   platform app that reports each app task to the host;
 4. re-signs every APK, APEX and verified boot image with the keys in --keys, because the
    published build is signed with AOSP's test keys, whose private halves are public;
 5. builds the images, and lays them out on the template of a user's Android disk.
@@ -337,6 +339,22 @@ CHANNEL_INSTANCE = "io.github.thisisthepy.dsa.channel.IChannel/default"
 CHANNEL_MANIFEST = "VENDOR/etc/vintf/manifest/dsa-channel.xml"
 VENDOR_SERVICE_CONTEXTS = "VENDOR/etc/selinux/vendor_service_contexts"
 CHANNEL_SERVICE_CONTEXT = f"{CHANNEL_INSTANCE} u:object_r:dsa_channel_service:s0"
+# The agent: a privileged app in system_ext, signed with the platform key, which reports
+# each app task to the host and starts and ends tasks for it. The framework refuses to boot
+# when a privileged app requests a privileged permission its allowlist does not grant.
+AGENT_APK = "SYSTEM_EXT/priv-app/DsaAgent/DsaAgent.apk"
+AGENT_PERMISSIONS = "SYSTEM_EXT/etc/permissions/privapp-permissions-dsa-agent.xml"
+AGENT_PERMISSIONS_SOURCE = REPO / "dsa/guest/agent/privapp-permissions-dsa-agent.xml"
+AGENT_APKCERTS = (
+    'name="DsaAgent.apk" certificate="build/make/target/product/security/platform.x509.pem" '
+    'private_key="build/make/target/product/security/platform.pk8" partition="system_ext"'
+)
+SYSTEM_EXT_FS_CONFIG = "META/system_ext_filesystem_config.txt"
+AGENT_FS_CONFIG = [
+    "system_ext/priv-app/DsaAgent 0 0 755 capabilities=0x0",
+    "system_ext/priv-app/DsaAgent/DsaAgent.apk 0 0 644 capabilities=0x0",
+    "system_ext/etc/permissions/privapp-permissions-dsa-agent.xml 0 0 644 capabilities=0x0",
+]
 # The console logcat runs as logd, and ueventd makes the serial port root's alone.
 CONSOLE_UEVENTD_LINE = "/dev/ttyS0 0660 system logd"
 
@@ -400,6 +418,16 @@ def compile_file_contexts(otatools, text):
         source.write_text(text)
         run(compiler, "-o", out, source)
         return out.read_bytes()
+
+
+def add_filesystem_config(fs_config_text, rules):
+    """Adds each rule (path uid gid mode capabilities) whose path the configuration lacks."""
+    lines = fs_config_text.splitlines()
+    for rule in rules:
+        path = rule.split(" ", 1)[0]
+        if not any(line.startswith(path + " ") for line in lines):
+            lines.append(rule)
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def update_vendor_filesystem_config(fs_config_text, channeld=False):
@@ -562,15 +590,16 @@ def recompile_precompiled_sepolicy(otatools, cil_map, vendor_version, genfs_vers
         return None
 
 
-def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=None, channeld=None):
+def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=None, channeld=None, agent=None):
     """Copies target_files, removing the shell apps and the published kernel modules,
-    switching to a user build and adding the Hyper-V mount table, and the control channel
-    daemon when `channeld` names one."""
+    switching to a user build and adding the Hyper-V mount table, the control channel
+    daemon when `channeld` names one, and the agent when `agent` names its APK."""
     fstab = (HERE / "fstab.dsa").read_bytes()
     console_logcat = (HERE / "console-logcat.rc").read_bytes()
     graphics_payload = Path(graphics_library).read_bytes() if graphics_library else None
     vulkan_payload = Path(vulkan_driver).read_bytes() if vulkan_driver else None
     channeld_payload = Path(channeld).read_bytes() if channeld else None
+    agent_payload = Path(agent).read_bytes() if agent else None
     replaced_graphics_payload = False
     replaced_vulkan_payload = False
     kept_modules = re.compile(r"^(VENDOR_BOOT/RAMDISK|VENDOR_DLKM|SYSTEM_DLKM)/lib/modules/.*\.ko$")
@@ -580,6 +609,12 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
     new_plat_bytes = None
     new_sha256 = None
     recompiled_policy = None
+
+    if agent_payload is not None:
+        with zipfile.ZipFile(source) as z:
+            if SYSTEM_EXT_FS_CONFIG not in z.namelist():
+                raise ValueError(f"target_files has no {SYSTEM_EXT_FS_CONFIG}, so there is no system_ext "
+                                 "partition to install the agent in")
 
     with zipfile.ZipFile(source) as zin, zipfile.ZipFile(dest, "w", zipfile.ZIP_STORED, allowZip64=True) as zout:
         names = set(zin.namelist())
@@ -668,8 +703,13 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     )
                 elif name == "META/apkcerts.txt":
                     data = b"".join(
-                        line + b"\n" for line in data.splitlines() if not any(f'name="{a}.apk"' in line.decode() for a in REMOVED_APPS)
+                        line + b"\n" for line in data.splitlines()
+                        if not any(f'name="{a}.apk"' in line.decode() for a in REMOVED_APPS + ["DsaAgent"])
                     )
+                    if agent_payload is not None:
+                        data += AGENT_APKCERTS.encode() + b"\n"
+                elif name == SYSTEM_EXT_FS_CONFIG and agent_payload is not None:
+                    data = add_filesystem_config(data.decode(), AGENT_FS_CONFIG).encode()
                 elif name in FSTAB_DIRS.values():
                     text = data.decode()
                     for directory, config in FSTAB_DIRS.items():
@@ -701,6 +741,9 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             zout.writestr(CHANNEL_MANIFEST, (HERE / "dsa-channel-manifest.xml").read_bytes())
             if VENDOR_SERVICE_CONTEXTS not in names:
                 zout.writestr(VENDOR_SERVICE_CONTEXTS, update_vendor_service_contexts(""))
+        if agent_payload is not None:
+            zout.writestr(AGENT_APK, agent_payload)
+            zout.writestr(AGENT_PERMISSIONS, AGENT_PERMISSIONS_SOURCE.read_bytes())
         if vulkan_payload is not None and not replaced_vulkan_payload:
             zout.writestr(VULKAN_RANCHU_LIBRARY, vulkan_payload)
             replaced_vulkan_payload = True
@@ -937,6 +980,9 @@ def main():
                         help="a vulkan.ranchu.so built for the selected guest")
     parser.add_argument("--channeld", type=Path,
                         help="the guest's control channel daemon (dsa-channeld) built for the guest")
+    parser.add_argument("--agent", type=Path,
+                        help="the guest agent's APK (DsaAgent), unsigned or signed with any key; "
+                        "the image signs it with the platform key")
     parser.add_argument("--graphics-dir", type=Path,
                         help="a directory containing guest graphics libraries (vulkan.ranchu.so, libOpenglSystemCommon.so)")
     args = parser.parse_args()
@@ -975,7 +1021,7 @@ def main():
 
     modified = work / "modified.zip"
     modify(target_files, modified, graphics_library=graphics_library, vulkan_driver=vulkan_driver,
-           otatools=otatools, channeld=args.channeld)
+           otatools=otatools, channeld=args.channeld, agent=args.agent)
 
     signed = work / "signed.zip"
     # It runs where AOSP's certificates sit at the paths apkcerts.txt names, so every path
