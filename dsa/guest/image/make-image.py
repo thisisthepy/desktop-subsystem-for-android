@@ -322,6 +322,8 @@ GFXSTREAM_LIBRARY = "VENDOR/lib64/libOpenglSystemCommon.so"
 VULKAN_RANCHU_LIBRARY = "VENDOR/lib64/hw/vulkan.ranchu.so"
 
 CONSOLE_LOGCAT_RC = "VENDOR/etc/init/dsa-console-logcat.rc"
+# Features the VM lacks; SystemConfig drops them wherever else they are declared.
+UNAVAILABLE_FEATURES = "VENDOR/etc/permissions/dsa-unavailable-features.xml"
 
 # The guest's control channel daemon, its init script, and the policy that gives it a domain
 # of its own: the one that may read the boot's secret from /proc/bootconfig.
@@ -366,6 +368,8 @@ def update_vendor_filesystem_config(fs_config_text, channeld=False):
         ("vendor/lib64/hw/vulkan.ranchu.so", "vendor/lib64/hw/vulkan.ranchu.so 0 0 644 capabilities=0x0"),
         ("vendor/lib64/libOpenglSystemCommon.so", "vendor/lib64/libOpenglSystemCommon.so 0 0 644 capabilities=0x0"),
         ("vendor/etc/init/dsa-console-logcat.rc", "vendor/etc/init/dsa-console-logcat.rc 0 0 644 capabilities=0x0"),
+        ("vendor/etc/permissions/dsa-unavailable-features.xml",
+         "vendor/etc/permissions/dsa-unavailable-features.xml 0 0 644 capabilities=0x0"),
     ]
     if channeld:
         entries += [
@@ -631,6 +635,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         for directory in FSTAB_DIRS:
             zout.writestr(directory + "fstab.dsa", fstab)
         zout.writestr(CONSOLE_LOGCAT_RC, console_logcat)
+        zout.writestr(UNAVAILABLE_FEATURES, (HERE / "unavailable-features.xml").read_bytes())
         if channeld_payload is not None:
             zout.writestr(CHANNELD_BINARY, channeld_payload)
             zout.writestr(CHANNELD_RC, (HERE / "dsa-channeld.rc").read_bytes())
