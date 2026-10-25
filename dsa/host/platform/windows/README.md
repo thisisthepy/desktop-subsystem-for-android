@@ -1,7 +1,8 @@
 # host/platform/windows
 
-The Windows host: the Android VM, its control channel over Hyper-V sockets, and
-`dsa-hostd`, which runs both.
+The Windows host: the Android VM, its control channel over Hyper-V sockets,
+`dsa-hostd`, which runs both, and `dsa-compositor`, which shows each Android task in a
+window of its own.
 
 ## dsa-hostd
 
@@ -107,3 +108,28 @@ up to date, from a second signed list that the same `trusted_keys` sign:
 - `"program": false` in `update` turns it off. The program list is then never fetched.
   A path instead of a URL reads the lists from a folder, such as a mirror on a network
   drive.
+
+## dsa-compositor
+
+`dsa-compositor.exe` runs in each signed-in user's session; the installer starts it at
+sign-in. One copy runs per session, and it ends at sign-out. It writes its messages to
+`%LOCALAPPDATA%\DSA\logs\dsa-compositor.log`.
+
+- It shows one window per Android app task, and nothing else. It watches the user's
+  tasks through the service's local API, opens a window for each task, titled by the
+  task's label and sized by the task's size in Android, and closes it when the task
+  ends. Closing a window asks Android to end its task.
+- It accepts the guest's graphics streams on Hyper-V sockets, ports 5566 and 5567, and
+  hands them to `gfxstream_backend.dll`, which is installed beside it. The renderer
+  copies each task's frames into that task's window on the GPU, through Direct3D 11 and
+  DirectComposition; no frame passes through the CPU.
+- Frames reach a window only for a display that Android named as a task's. Frames for any
+  other display, such as Android's whole screen, are dropped, so no window shows more
+  than one app.
+- The windows are per-monitor DPI aware. While a window is resized, its last frame is
+  stretched to fill it until Android draws one at the new size.
+- Without a GPU device, the windows still open and close with their tasks but stay
+  empty, and the log says why.
+
+`dsa launch <package>` starts an app in a window of its own, and `dsa tasks` lists the
+tasks that have one.
