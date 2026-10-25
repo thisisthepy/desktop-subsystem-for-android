@@ -1,15 +1,17 @@
-//! The compositor's use of the local API for tasks: it watches the guest's tasks, and asks
-//! the guest to end a task whose window the user closed.
+//! The compositor's use of the local API for tasks: it watches the guest's tasks, asks the
+//! guest to end a task whose window the user closed, and passes on the pointer input in
+//! the task windows.
 //!
-//! Neither part names a window, so both run against the in-memory transport in tests.
+//! None of these parts names a window, so all run against the in-memory transport in tests.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use dsa_host_core::host_api::HostApiClient;
+use dsa_host_core::host_api::{HostApiClient, InputStream};
+use dsa_host_core::input::PointerEvent;
 use dsa_host_core::tasks::TaskRequest;
 use dsa_transport::Connector;
 
@@ -27,6 +29,10 @@ const RETRY: Duration = Duration::from_millis(500);
 
 /// How often the watch looks at `stop` while no task changes.
 const POLL: Duration = Duration::from_millis(200);
+
+/// How long the input waits before trying the service again. Input that arrives meanwhile
+/// is dropped rather than held, so a press is never delivered long after it happened.
+const INPUT_RETRY: Duration = Duration::from_millis(500);
 
 /// Watches the guest's tasks until `stop` is set, handing every change to `deliver`.
 ///
@@ -136,6 +142,58 @@ pub fn serve_requests(
                 if !deliver(UiEvent::CloseFailed(task_id)) {
                     return;
                 }
+            }
+        }
+    }
+}
+
+/// Passes every pointer event from the task windows to the guest until `events` closes.
+///
+/// The events go on one connection that streams input, so none waits for an answer. When
+/// the service cannot be reached, the events are dropped and the connection is tried again
+/// after a short wait; a connection that breaks is made again at once, for the same event.
+pub fn serve_input(
+    mut connector: Box<dyn Connector>,
+    events: Receiver<PointerEvent>,
+    logger: Option<Arc<CompositorLogger>>,
+) {
+    let mut stream: Option<InputStream> = None;
+    let mut retry_at: Option<Instant> = None;
+    let mut last_error = String::new();
+    while let Ok(event) = events.recv() {
+        for _ in 0..2 {
+            if stream.is_none() {
+                if retry_at.is_some_and(|at| Instant::now() < at) {
+                    break;
+                }
+                match HostApiClient::connect(&mut *connector, BUILD, ANSWER)
+                    .and_then(|client| client.stream_input())
+                {
+                    Ok(connected) => {
+                        stream = Some(connected);
+                        retry_at = None;
+                        last_error.clear();
+                    }
+                    Err(error) => {
+                        let error = error.to_string();
+                        if error != last_error {
+                            note(
+                                logger.as_deref(),
+                                &format!("pointer input cannot reach Android: {error}"),
+                            );
+                            last_error = error;
+                        }
+                        retry_at = Some(Instant::now() + INPUT_RETRY);
+                        break;
+                    }
+                }
+            }
+            let Some(connected) = stream.as_mut() else {
+                break;
+            };
+            match connected.send(&event) {
+                Ok(()) => break,
+                Err(_) => stream = None,
             }
         }
     }

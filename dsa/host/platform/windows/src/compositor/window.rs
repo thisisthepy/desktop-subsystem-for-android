@@ -6,7 +6,9 @@
 //! the wake-ups, so they arrive even while Windows runs its own loop for a live resize.
 //!
 //! The rules (which task has a window, which display goes to which window) are
-//! `TaskWindows`'s; this module only carries out the changes it returns.
+//! `TaskWindows`'s; this module only carries out the changes it returns. Each window hands
+//! its mouse, touch and pen messages to its `PointerWindow` (`pointer`), which sends the
+//! task's pointer events on.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -15,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use dsa_host_core::compositor::task_windows::{fit_within, TaskWindows, WindowChange};
+use dsa_host_core::input::PointerEvent;
 use dsa_host_core::tasks::{TaskEvent, TaskRequest};
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, RECT, WPARAM,
@@ -40,6 +43,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use super::frames::FrameRouter;
 use super::log::{note, CompositorLogger};
+use super::pointer::PointerWindow;
 use super::present::{Gpu, WindowPresenter};
 
 /// What other threads tell the UI thread.
@@ -139,6 +143,8 @@ impl Drop for UiHandle {
 pub struct UiSetup {
     /// Where the requests to end a task go when the user closes its window.
     pub requests: Sender<TaskRequest>,
+    /// Where the pointer input in every task window goes.
+    pub input: Sender<PointerEvent>,
     /// The routes of each display's frames, which the UI thread keeps up to date.
     pub router: Arc<FrameRouter<WindowPresenter>>,
     /// The GPU devices, or `None` when frames cannot be shown (the windows still open).
@@ -184,6 +190,7 @@ struct WindowData {
     task_id: i32,
     message_window: HWND,
     presenter: RefCell<Option<Arc<WindowPresenter>>>,
+    pointer: PointerWindow,
 }
 
 /// The UI thread's state, reached from the message window's procedure.
@@ -337,6 +344,11 @@ unsafe extern "system" fn task_window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if let Some(data) = window_data(hwnd) {
+        if let Some(result) = data.pointer.handle(hwnd, message, wparam, lparam) {
+            return result;
+        }
+    }
     match message {
         WM_NCCREATE => {
             let create = &*(lparam as *const CREATESTRUCTW);
@@ -516,6 +528,9 @@ impl Ui {
                         height,
                     } => {
                         if let Some(window) = self.open.get(&task_id) {
+                            if let Some(data) = window_data(window.hwnd) {
+                                data.pointer.task_resized((width, height));
+                            }
                             let dpi = GetDpiForWindow(window.hwnd).max(96);
                             let client =
                                 fit_within((width, height), usable_client_area(window.hwnd, dpi));
@@ -552,6 +567,7 @@ impl Ui {
             task_id,
             message_window: self.message_window,
             presenter: RefCell::new(None),
+            pointer: PointerWindow::new(task_id, size, self.setup.input.clone()),
         });
         let data = Box::into_raw(data);
         let class = wide(TASK_CLASS);
