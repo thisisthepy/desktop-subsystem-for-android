@@ -62,5 +62,60 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.AuthProof getAuthProof();
 
+  /**
+   * <code>.dsa.control.v1.TaskUpdated task_updated = 6;</code>
+   * @return Whether the taskUpdated field is set.
+   */
+  boolean hasTaskUpdated();
+  /**
+   * <code>.dsa.control.v1.TaskUpdated task_updated = 6;</code>
+   * @return The taskUpdated.
+   */
+  io.github.thisisthepy.dsa.control.v1.TaskUpdated getTaskUpdated();
+
+  /**
+   * <code>.dsa.control.v1.TaskRemoved task_removed = 7;</code>
+   * @return Whether the taskRemoved field is set.
+   */
+  boolean hasTaskRemoved();
+  /**
+   * <code>.dsa.control.v1.TaskRemoved task_removed = 7;</code>
+   * @return The taskRemoved.
+   */
+  io.github.thisisthepy.dsa.control.v1.TaskRemoved getTaskRemoved();
+
+  /**
+   * <code>.dsa.control.v1.TaskFrames task_frames = 8;</code>
+   * @return Whether the taskFrames field is set.
+   */
+  boolean hasTaskFrames();
+  /**
+   * <code>.dsa.control.v1.TaskFrames task_frames = 8;</code>
+   * @return The taskFrames.
+   */
+  io.github.thisisthepy.dsa.control.v1.TaskFrames getTaskFrames();
+
+  /**
+   * <code>.dsa.control.v1.CloseTask close_task = 9;</code>
+   * @return Whether the closeTask field is set.
+   */
+  boolean hasCloseTask();
+  /**
+   * <code>.dsa.control.v1.CloseTask close_task = 9;</code>
+   * @return The closeTask.
+   */
+  io.github.thisisthepy.dsa.control.v1.CloseTask getCloseTask();
+
+  /**
+   * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+   * @return Whether the launchApp field is set.
+   */
+  boolean hasLaunchApp();
+  /**
+   * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+   * @return The launchApp.
+   */
+  io.github.thisisthepy.dsa.control.v1.LaunchApp getLaunchApp();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

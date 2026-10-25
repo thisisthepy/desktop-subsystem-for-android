@@ -90,6 +90,92 @@ struct AuthProofDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 AuthProofDefaultTypeInternal _AuthProof_default_instance_;
+PROTOBUF_CONSTEXPR Rect::Rect(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.left_)*/0
+  , /*decltype(_impl_.top_)*/0
+  , /*decltype(_impl_.right_)*/0
+  , /*decltype(_impl_.bottom_)*/0
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct RectDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR RectDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~RectDefaultTypeInternal() {}
+  union {
+    Rect _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 RectDefaultTypeInternal _Rect_default_instance_;
+PROTOBUF_CONSTEXPR TaskUpdated::TaskUpdated(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.package_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.label_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.bounds_)*/nullptr
+  , /*decltype(_impl_.task_id_)*/0
+  , /*decltype(_impl_.focused_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct TaskUpdatedDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR TaskUpdatedDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~TaskUpdatedDefaultTypeInternal() {}
+  union {
+    TaskUpdated _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 TaskUpdatedDefaultTypeInternal _TaskUpdated_default_instance_;
+PROTOBUF_CONSTEXPR TaskRemoved::TaskRemoved(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.task_id_)*/0
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct TaskRemovedDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR TaskRemovedDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~TaskRemovedDefaultTypeInternal() {}
+  union {
+    TaskRemoved _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 TaskRemovedDefaultTypeInternal _TaskRemoved_default_instance_;
+PROTOBUF_CONSTEXPR TaskFrames::TaskFrames(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.task_id_)*/0
+  , /*decltype(_impl_.display_id_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct TaskFramesDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR TaskFramesDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~TaskFramesDefaultTypeInternal() {}
+  union {
+    TaskFrames _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 TaskFramesDefaultTypeInternal _TaskFrames_default_instance_;
+PROTOBUF_CONSTEXPR CloseTask::CloseTask(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.task_id_)*/0
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct CloseTaskDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR CloseTaskDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~CloseTaskDefaultTypeInternal() {}
+  union {
+    CloseTask _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 CloseTaskDefaultTypeInternal _CloseTask_default_instance_;
+PROTOBUF_CONSTEXPR LaunchApp::LaunchApp(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.package_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct LaunchAppDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR LaunchAppDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~LaunchAppDefaultTypeInternal() {}
+  union {
+    LaunchApp _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 LaunchAppDefaultTypeInternal _LaunchApp_default_instance_;
 PROTOBUF_CONSTEXPR Envelope::Envelope(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.body_)*/{}
@@ -1475,6 +1561,1401 @@ std::string AuthProof::GetTypeName() const {
 
 // ===================================================================
 
+class Rect::_Internal {
+ public:
+};
+
+Rect::Rect(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.Rect)
+}
+Rect::Rect(const Rect& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  Rect* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.left_){}
+    , decltype(_impl_.top_){}
+    , decltype(_impl_.right_){}
+    , decltype(_impl_.bottom_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.left_, &from._impl_.left_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.bottom_) -
+    reinterpret_cast<char*>(&_impl_.left_)) + sizeof(_impl_.bottom_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.Rect)
+}
+
+inline void Rect::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.left_){0}
+    , decltype(_impl_.top_){0}
+    , decltype(_impl_.right_){0}
+    , decltype(_impl_.bottom_){0}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+Rect::~Rect() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.Rect)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void Rect::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void Rect::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void Rect::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.Rect)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&_impl_.left_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.bottom_) -
+      reinterpret_cast<char*>(&_impl_.left_)) + sizeof(_impl_.bottom_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* Rect::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 left = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.left_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // int32 top = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.top_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // int32 right = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.right_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // int32 bottom = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.bottom_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* Rect::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.Rect)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 left = 1;
+  if (this->_internal_left() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_left(), target);
+  }
+
+  // int32 top = 2;
+  if (this->_internal_top() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(2, this->_internal_top(), target);
+  }
+
+  // int32 right = 3;
+  if (this->_internal_right() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(3, this->_internal_right(), target);
+  }
+
+  // int32 bottom = 4;
+  if (this->_internal_bottom() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(4, this->_internal_bottom(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.Rect)
+  return target;
+}
+
+size_t Rect::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.Rect)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // int32 left = 1;
+  if (this->_internal_left() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_left());
+  }
+
+  // int32 top = 2;
+  if (this->_internal_top() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_top());
+  }
+
+  // int32 right = 3;
+  if (this->_internal_right() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_right());
+  }
+
+  // int32 bottom = 4;
+  if (this->_internal_bottom() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_bottom());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void Rect::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const Rect*>(
+      &from));
+}
+
+void Rect::MergeFrom(const Rect& from) {
+  Rect* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.Rect)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_left() != 0) {
+    _this->_internal_set_left(from._internal_left());
+  }
+  if (from._internal_top() != 0) {
+    _this->_internal_set_top(from._internal_top());
+  }
+  if (from._internal_right() != 0) {
+    _this->_internal_set_right(from._internal_right());
+  }
+  if (from._internal_bottom() != 0) {
+    _this->_internal_set_bottom(from._internal_bottom());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void Rect::CopyFrom(const Rect& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.Rect)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool Rect::IsInitialized() const {
+  return true;
+}
+
+void Rect::InternalSwap(Rect* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(Rect, _impl_.bottom_)
+      + sizeof(Rect::_impl_.bottom_)
+      - PROTOBUF_FIELD_OFFSET(Rect, _impl_.left_)>(
+          reinterpret_cast<char*>(&_impl_.left_),
+          reinterpret_cast<char*>(&other->_impl_.left_));
+}
+
+std::string Rect::GetTypeName() const {
+  return "dsa.control.v1.Rect";
+}
+
+
+// ===================================================================
+
+class TaskUpdated::_Internal {
+ public:
+  static const ::dsa::control::v1::Rect& bounds(const TaskUpdated* msg);
+};
+
+const ::dsa::control::v1::Rect&
+TaskUpdated::_Internal::bounds(const TaskUpdated* msg) {
+  return *msg->_impl_.bounds_;
+}
+TaskUpdated::TaskUpdated(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.TaskUpdated)
+}
+TaskUpdated::TaskUpdated(const TaskUpdated& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  TaskUpdated* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.package_name_){}
+    , decltype(_impl_.label_){}
+    , decltype(_impl_.bounds_){nullptr}
+    , decltype(_impl_.task_id_){}
+    , decltype(_impl_.focused_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.package_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_package_name().empty()) {
+    _this->_impl_.package_name_.Set(from._internal_package_name(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.label_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.label_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_label().empty()) {
+    _this->_impl_.label_.Set(from._internal_label(), 
+      _this->GetArenaForAllocation());
+  }
+  if (from._internal_has_bounds()) {
+    _this->_impl_.bounds_ = new ::dsa::control::v1::Rect(*from._impl_.bounds_);
+  }
+  ::memcpy(&_impl_.task_id_, &from._impl_.task_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.focused_) -
+    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.focused_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.TaskUpdated)
+}
+
+inline void TaskUpdated::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.package_name_){}
+    , decltype(_impl_.label_){}
+    , decltype(_impl_.bounds_){nullptr}
+    , decltype(_impl_.task_id_){0}
+    , decltype(_impl_.focused_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.package_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.label_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.label_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+TaskUpdated::~TaskUpdated() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.TaskUpdated)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void TaskUpdated::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.package_name_.Destroy();
+  _impl_.label_.Destroy();
+  if (this != internal_default_instance()) delete _impl_.bounds_;
+}
+
+void TaskUpdated::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void TaskUpdated::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.TaskUpdated)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.package_name_.ClearToEmpty();
+  _impl_.label_.ClearToEmpty();
+  if (GetArenaForAllocation() == nullptr && _impl_.bounds_ != nullptr) {
+    delete _impl_.bounds_;
+  }
+  _impl_.bounds_ = nullptr;
+  ::memset(&_impl_.task_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.focused_) -
+      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.focused_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* TaskUpdated::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 task_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.task_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.Rect bounds = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          ptr = ctx->ParseMessage(_internal_mutable_bounds(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // string package_name = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
+          auto str = _internal_mutable_package_name();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // string label = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          auto str = _internal_mutable_label();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // bool focused = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 40)) {
+          _impl_.focused_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* TaskUpdated::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.TaskUpdated)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_task_id(), target);
+  }
+
+  // .dsa.control.v1.Rect bounds = 2;
+  if (this->_internal_has_bounds()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(2, _Internal::bounds(this),
+        _Internal::bounds(this).GetCachedSize(), target, stream);
+  }
+
+  // string package_name = 3;
+  if (!this->_internal_package_name().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_package_name().data(), static_cast<int>(this->_internal_package_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.TaskUpdated.package_name");
+    target = stream->WriteStringMaybeAliased(
+        3, this->_internal_package_name(), target);
+  }
+
+  // string label = 4;
+  if (!this->_internal_label().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_label().data(), static_cast<int>(this->_internal_label().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.TaskUpdated.label");
+    target = stream->WriteStringMaybeAliased(
+        4, this->_internal_label(), target);
+  }
+
+  // bool focused = 5;
+  if (this->_internal_focused() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(5, this->_internal_focused(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.TaskUpdated)
+  return target;
+}
+
+size_t TaskUpdated::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.TaskUpdated)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string package_name = 3;
+  if (!this->_internal_package_name().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_package_name());
+  }
+
+  // string label = 4;
+  if (!this->_internal_label().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_label());
+  }
+
+  // .dsa.control.v1.Rect bounds = 2;
+  if (this->_internal_has_bounds()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *_impl_.bounds_);
+  }
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_task_id());
+  }
+
+  // bool focused = 5;
+  if (this->_internal_focused() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void TaskUpdated::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const TaskUpdated*>(
+      &from));
+}
+
+void TaskUpdated::MergeFrom(const TaskUpdated& from) {
+  TaskUpdated* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.TaskUpdated)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_package_name().empty()) {
+    _this->_internal_set_package_name(from._internal_package_name());
+  }
+  if (!from._internal_label().empty()) {
+    _this->_internal_set_label(from._internal_label());
+  }
+  if (from._internal_has_bounds()) {
+    _this->_internal_mutable_bounds()->::dsa::control::v1::Rect::MergeFrom(
+        from._internal_bounds());
+  }
+  if (from._internal_task_id() != 0) {
+    _this->_internal_set_task_id(from._internal_task_id());
+  }
+  if (from._internal_focused() != 0) {
+    _this->_internal_set_focused(from._internal_focused());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void TaskUpdated::CopyFrom(const TaskUpdated& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.TaskUpdated)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool TaskUpdated::IsInitialized() const {
+  return true;
+}
+
+void TaskUpdated::InternalSwap(TaskUpdated* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.package_name_, lhs_arena,
+      &other->_impl_.package_name_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.label_, lhs_arena,
+      &other->_impl_.label_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(TaskUpdated, _impl_.focused_)
+      + sizeof(TaskUpdated::_impl_.focused_)
+      - PROTOBUF_FIELD_OFFSET(TaskUpdated, _impl_.bounds_)>(
+          reinterpret_cast<char*>(&_impl_.bounds_),
+          reinterpret_cast<char*>(&other->_impl_.bounds_));
+}
+
+std::string TaskUpdated::GetTypeName() const {
+  return "dsa.control.v1.TaskUpdated";
+}
+
+
+// ===================================================================
+
+class TaskRemoved::_Internal {
+ public:
+};
+
+TaskRemoved::TaskRemoved(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.TaskRemoved)
+}
+TaskRemoved::TaskRemoved(const TaskRemoved& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  TaskRemoved* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _this->_impl_.task_id_ = from._impl_.task_id_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.TaskRemoved)
+}
+
+inline void TaskRemoved::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){0}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+TaskRemoved::~TaskRemoved() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.TaskRemoved)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void TaskRemoved::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void TaskRemoved::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void TaskRemoved::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.TaskRemoved)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.task_id_ = 0;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* TaskRemoved::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 task_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.task_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* TaskRemoved::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.TaskRemoved)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_task_id(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.TaskRemoved)
+  return target;
+}
+
+size_t TaskRemoved::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.TaskRemoved)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_task_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void TaskRemoved::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const TaskRemoved*>(
+      &from));
+}
+
+void TaskRemoved::MergeFrom(const TaskRemoved& from) {
+  TaskRemoved* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.TaskRemoved)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_task_id() != 0) {
+    _this->_internal_set_task_id(from._internal_task_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void TaskRemoved::CopyFrom(const TaskRemoved& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.TaskRemoved)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool TaskRemoved::IsInitialized() const {
+  return true;
+}
+
+void TaskRemoved::InternalSwap(TaskRemoved* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_.task_id_, other->_impl_.task_id_);
+}
+
+std::string TaskRemoved::GetTypeName() const {
+  return "dsa.control.v1.TaskRemoved";
+}
+
+
+// ===================================================================
+
+class TaskFrames::_Internal {
+ public:
+};
+
+TaskFrames::TaskFrames(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.TaskFrames)
+}
+TaskFrames::TaskFrames(const TaskFrames& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  TaskFrames* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){}
+    , decltype(_impl_.display_id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.task_id_, &from._impl_.task_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.display_id_) -
+    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.display_id_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.TaskFrames)
+}
+
+inline void TaskFrames::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){0}
+    , decltype(_impl_.display_id_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+TaskFrames::~TaskFrames() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.TaskFrames)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void TaskFrames::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void TaskFrames::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void TaskFrames::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.TaskFrames)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&_impl_.task_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.display_id_) -
+      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.display_id_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* TaskFrames::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 task_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.task_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 display_id = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.display_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* TaskFrames::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.TaskFrames)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_task_id(), target);
+  }
+
+  // uint32 display_id = 2;
+  if (this->_internal_display_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(2, this->_internal_display_id(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.TaskFrames)
+  return target;
+}
+
+size_t TaskFrames::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.TaskFrames)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_task_id());
+  }
+
+  // uint32 display_id = 2;
+  if (this->_internal_display_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_display_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void TaskFrames::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const TaskFrames*>(
+      &from));
+}
+
+void TaskFrames::MergeFrom(const TaskFrames& from) {
+  TaskFrames* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.TaskFrames)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_task_id() != 0) {
+    _this->_internal_set_task_id(from._internal_task_id());
+  }
+  if (from._internal_display_id() != 0) {
+    _this->_internal_set_display_id(from._internal_display_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void TaskFrames::CopyFrom(const TaskFrames& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.TaskFrames)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool TaskFrames::IsInitialized() const {
+  return true;
+}
+
+void TaskFrames::InternalSwap(TaskFrames* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(TaskFrames, _impl_.display_id_)
+      + sizeof(TaskFrames::_impl_.display_id_)
+      - PROTOBUF_FIELD_OFFSET(TaskFrames, _impl_.task_id_)>(
+          reinterpret_cast<char*>(&_impl_.task_id_),
+          reinterpret_cast<char*>(&other->_impl_.task_id_));
+}
+
+std::string TaskFrames::GetTypeName() const {
+  return "dsa.control.v1.TaskFrames";
+}
+
+
+// ===================================================================
+
+class CloseTask::_Internal {
+ public:
+};
+
+CloseTask::CloseTask(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.CloseTask)
+}
+CloseTask::CloseTask(const CloseTask& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  CloseTask* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _this->_impl_.task_id_ = from._impl_.task_id_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.CloseTask)
+}
+
+inline void CloseTask::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){0}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+CloseTask::~CloseTask() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.CloseTask)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void CloseTask::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void CloseTask::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void CloseTask::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.CloseTask)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.task_id_ = 0;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* CloseTask::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 task_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.task_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* CloseTask::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.CloseTask)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_task_id(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.CloseTask)
+  return target;
+}
+
+size_t CloseTask::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.CloseTask)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_task_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void CloseTask::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const CloseTask*>(
+      &from));
+}
+
+void CloseTask::MergeFrom(const CloseTask& from) {
+  CloseTask* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.CloseTask)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_task_id() != 0) {
+    _this->_internal_set_task_id(from._internal_task_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void CloseTask::CopyFrom(const CloseTask& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.CloseTask)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool CloseTask::IsInitialized() const {
+  return true;
+}
+
+void CloseTask::InternalSwap(CloseTask* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_.task_id_, other->_impl_.task_id_);
+}
+
+std::string CloseTask::GetTypeName() const {
+  return "dsa.control.v1.CloseTask";
+}
+
+
+// ===================================================================
+
+class LaunchApp::_Internal {
+ public:
+};
+
+LaunchApp::LaunchApp(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.LaunchApp)
+}
+LaunchApp::LaunchApp(const LaunchApp& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  LaunchApp* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.package_name_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.package_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_package_name().empty()) {
+    _this->_impl_.package_name_.Set(from._internal_package_name(), 
+      _this->GetArenaForAllocation());
+  }
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.LaunchApp)
+}
+
+inline void LaunchApp::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.package_name_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.package_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+LaunchApp::~LaunchApp() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.LaunchApp)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void LaunchApp::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.package_name_.Destroy();
+}
+
+void LaunchApp::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void LaunchApp::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.LaunchApp)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.package_name_.ClearToEmpty();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* LaunchApp::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // string package_name = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          auto str = _internal_mutable_package_name();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* LaunchApp::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.LaunchApp)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // string package_name = 1;
+  if (!this->_internal_package_name().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_package_name().data(), static_cast<int>(this->_internal_package_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.LaunchApp.package_name");
+    target = stream->WriteStringMaybeAliased(
+        1, this->_internal_package_name(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.LaunchApp)
+  return target;
+}
+
+size_t LaunchApp::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.LaunchApp)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string package_name = 1;
+  if (!this->_internal_package_name().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_package_name());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void LaunchApp::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const LaunchApp*>(
+      &from));
+}
+
+void LaunchApp::MergeFrom(const LaunchApp& from) {
+  LaunchApp* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.LaunchApp)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_package_name().empty()) {
+    _this->_internal_set_package_name(from._internal_package_name());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void LaunchApp::CopyFrom(const LaunchApp& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.LaunchApp)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool LaunchApp::IsInitialized() const {
+  return true;
+}
+
+void LaunchApp::InternalSwap(LaunchApp* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.package_name_, lhs_arena,
+      &other->_impl_.package_name_, rhs_arena
+  );
+}
+
+std::string LaunchApp::GetTypeName() const {
+  return "dsa.control.v1.LaunchApp";
+}
+
+
+// ===================================================================
+
 class Envelope::_Internal {
  public:
   static const ::dsa::control::v1::Hello& hello(const Envelope* msg);
@@ -1482,6 +2963,11 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::HelloRejected& hello_rejected(const Envelope* msg);
   static const ::dsa::control::v1::AuthChallenge& auth_challenge(const Envelope* msg);
   static const ::dsa::control::v1::AuthProof& auth_proof(const Envelope* msg);
+  static const ::dsa::control::v1::TaskUpdated& task_updated(const Envelope* msg);
+  static const ::dsa::control::v1::TaskRemoved& task_removed(const Envelope* msg);
+  static const ::dsa::control::v1::TaskFrames& task_frames(const Envelope* msg);
+  static const ::dsa::control::v1::CloseTask& close_task(const Envelope* msg);
+  static const ::dsa::control::v1::LaunchApp& launch_app(const Envelope* msg);
 };
 
 const ::dsa::control::v1::Hello&
@@ -1503,6 +2989,26 @@ Envelope::_Internal::auth_challenge(const Envelope* msg) {
 const ::dsa::control::v1::AuthProof&
 Envelope::_Internal::auth_proof(const Envelope* msg) {
   return *msg->_impl_.body_.auth_proof_;
+}
+const ::dsa::control::v1::TaskUpdated&
+Envelope::_Internal::task_updated(const Envelope* msg) {
+  return *msg->_impl_.body_.task_updated_;
+}
+const ::dsa::control::v1::TaskRemoved&
+Envelope::_Internal::task_removed(const Envelope* msg) {
+  return *msg->_impl_.body_.task_removed_;
+}
+const ::dsa::control::v1::TaskFrames&
+Envelope::_Internal::task_frames(const Envelope* msg) {
+  return *msg->_impl_.body_.task_frames_;
+}
+const ::dsa::control::v1::CloseTask&
+Envelope::_Internal::close_task(const Envelope* msg) {
+  return *msg->_impl_.body_.close_task_;
+}
+const ::dsa::control::v1::LaunchApp&
+Envelope::_Internal::launch_app(const Envelope* msg) {
+  return *msg->_impl_.body_.launch_app_;
 }
 void Envelope::set_allocated_hello(::dsa::control::v1::Hello* hello) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -1579,6 +3085,81 @@ void Envelope::set_allocated_auth_proof(::dsa::control::v1::AuthProof* auth_proo
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.auth_proof)
 }
+void Envelope::set_allocated_task_updated(::dsa::control::v1::TaskUpdated* task_updated) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (task_updated) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(task_updated);
+    if (message_arena != submessage_arena) {
+      task_updated = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, task_updated, submessage_arena);
+    }
+    set_has_task_updated();
+    _impl_.body_.task_updated_ = task_updated;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.task_updated)
+}
+void Envelope::set_allocated_task_removed(::dsa::control::v1::TaskRemoved* task_removed) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (task_removed) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(task_removed);
+    if (message_arena != submessage_arena) {
+      task_removed = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, task_removed, submessage_arena);
+    }
+    set_has_task_removed();
+    _impl_.body_.task_removed_ = task_removed;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.task_removed)
+}
+void Envelope::set_allocated_task_frames(::dsa::control::v1::TaskFrames* task_frames) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (task_frames) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(task_frames);
+    if (message_arena != submessage_arena) {
+      task_frames = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, task_frames, submessage_arena);
+    }
+    set_has_task_frames();
+    _impl_.body_.task_frames_ = task_frames;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.task_frames)
+}
+void Envelope::set_allocated_close_task(::dsa::control::v1::CloseTask* close_task) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (close_task) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(close_task);
+    if (message_arena != submessage_arena) {
+      close_task = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, close_task, submessage_arena);
+    }
+    set_has_close_task();
+    _impl_.body_.close_task_ = close_task;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.close_task)
+}
+void Envelope::set_allocated_launch_app(::dsa::control::v1::LaunchApp* launch_app) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (launch_app) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(launch_app);
+    if (message_arena != submessage_arena) {
+      launch_app = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, launch_app, submessage_arena);
+    }
+    set_has_launch_app();
+    _impl_.body_.launch_app_ = launch_app;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.launch_app)
+}
 Envelope::Envelope(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
@@ -1619,6 +3200,31 @@ Envelope::Envelope(const Envelope& from)
     case kAuthProof: {
       _this->_internal_mutable_auth_proof()->::dsa::control::v1::AuthProof::MergeFrom(
           from._internal_auth_proof());
+      break;
+    }
+    case kTaskUpdated: {
+      _this->_internal_mutable_task_updated()->::dsa::control::v1::TaskUpdated::MergeFrom(
+          from._internal_task_updated());
+      break;
+    }
+    case kTaskRemoved: {
+      _this->_internal_mutable_task_removed()->::dsa::control::v1::TaskRemoved::MergeFrom(
+          from._internal_task_removed());
+      break;
+    }
+    case kTaskFrames: {
+      _this->_internal_mutable_task_frames()->::dsa::control::v1::TaskFrames::MergeFrom(
+          from._internal_task_frames());
+      break;
+    }
+    case kCloseTask: {
+      _this->_internal_mutable_close_task()->::dsa::control::v1::CloseTask::MergeFrom(
+          from._internal_close_task());
+      break;
+    }
+    case kLaunchApp: {
+      _this->_internal_mutable_launch_app()->::dsa::control::v1::LaunchApp::MergeFrom(
+          from._internal_launch_app());
       break;
     }
     case BODY_NOT_SET: {
@@ -1693,6 +3299,36 @@ void Envelope::clear_body() {
       }
       break;
     }
+    case kTaskUpdated: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.task_updated_;
+      }
+      break;
+    }
+    case kTaskRemoved: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.task_removed_;
+      }
+      break;
+    }
+    case kTaskFrames: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.task_frames_;
+      }
+      break;
+    }
+    case kCloseTask: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.close_task_;
+      }
+      break;
+    }
+    case kLaunchApp: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.launch_app_;
+      }
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -1753,6 +3389,46 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
       case 5:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
           ptr = ctx->ParseMessage(_internal_mutable_auth_proof(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.TaskUpdated task_updated = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 50)) {
+          ptr = ctx->ParseMessage(_internal_mutable_task_updated(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.TaskRemoved task_removed = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 58)) {
+          ptr = ctx->ParseMessage(_internal_mutable_task_removed(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.TaskFrames task_frames = 8;
+      case 8:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 66)) {
+          ptr = ctx->ParseMessage(_internal_mutable_task_frames(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.CloseTask close_task = 9;
+      case 9:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 74)) {
+          ptr = ctx->ParseMessage(_internal_mutable_close_task(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.LaunchApp launch_app = 10;
+      case 10:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 82)) {
+          ptr = ctx->ParseMessage(_internal_mutable_launch_app(), ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -1821,6 +3497,41 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::auth_proof(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.TaskUpdated task_updated = 6;
+  if (_internal_has_task_updated()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(6, _Internal::task_updated(this),
+        _Internal::task_updated(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.TaskRemoved task_removed = 7;
+  if (_internal_has_task_removed()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(7, _Internal::task_removed(this),
+        _Internal::task_removed(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.TaskFrames task_frames = 8;
+  if (_internal_has_task_frames()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(8, _Internal::task_frames(this),
+        _Internal::task_frames(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.CloseTask close_task = 9;
+  if (_internal_has_close_task()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(9, _Internal::close_task(this),
+        _Internal::close_task(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.LaunchApp launch_app = 10;
+  if (_internal_has_launch_app()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(10, _Internal::launch_app(this),
+        _Internal::launch_app(this).GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -1873,6 +3584,41 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.auth_proof_);
       break;
     }
+    // .dsa.control.v1.TaskUpdated task_updated = 6;
+    case kTaskUpdated: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.task_updated_);
+      break;
+    }
+    // .dsa.control.v1.TaskRemoved task_removed = 7;
+    case kTaskRemoved: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.task_removed_);
+      break;
+    }
+    // .dsa.control.v1.TaskFrames task_frames = 8;
+    case kTaskFrames: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.task_frames_);
+      break;
+    }
+    // .dsa.control.v1.CloseTask close_task = 9;
+    case kCloseTask: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.close_task_);
+      break;
+    }
+    // .dsa.control.v1.LaunchApp launch_app = 10;
+    case kLaunchApp: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.launch_app_);
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -1922,6 +3668,31 @@ void Envelope::MergeFrom(const Envelope& from) {
     case kAuthProof: {
       _this->_internal_mutable_auth_proof()->::dsa::control::v1::AuthProof::MergeFrom(
           from._internal_auth_proof());
+      break;
+    }
+    case kTaskUpdated: {
+      _this->_internal_mutable_task_updated()->::dsa::control::v1::TaskUpdated::MergeFrom(
+          from._internal_task_updated());
+      break;
+    }
+    case kTaskRemoved: {
+      _this->_internal_mutable_task_removed()->::dsa::control::v1::TaskRemoved::MergeFrom(
+          from._internal_task_removed());
+      break;
+    }
+    case kTaskFrames: {
+      _this->_internal_mutable_task_frames()->::dsa::control::v1::TaskFrames::MergeFrom(
+          from._internal_task_frames());
+      break;
+    }
+    case kCloseTask: {
+      _this->_internal_mutable_close_task()->::dsa::control::v1::CloseTask::MergeFrom(
+          from._internal_close_task());
+      break;
+    }
+    case kLaunchApp: {
+      _this->_internal_mutable_launch_app()->::dsa::control::v1::LaunchApp::MergeFrom(
+          from._internal_launch_app());
       break;
     }
     case BODY_NOT_SET: {
@@ -1978,6 +3749,30 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::AuthChallenge >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::AuthProof*
 Arena::CreateMaybeMessage< ::dsa::control::v1::AuthProof >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::AuthProof >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::Rect*
+Arena::CreateMaybeMessage< ::dsa::control::v1::Rect >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::Rect >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::TaskUpdated*
+Arena::CreateMaybeMessage< ::dsa::control::v1::TaskUpdated >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::TaskUpdated >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::TaskRemoved*
+Arena::CreateMaybeMessage< ::dsa::control::v1::TaskRemoved >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::TaskRemoved >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::TaskFrames*
+Arena::CreateMaybeMessage< ::dsa::control::v1::TaskFrames >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::TaskFrames >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::CloseTask*
+Arena::CreateMaybeMessage< ::dsa::control::v1::CloseTask >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::CloseTask >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::LaunchApp*
+Arena::CreateMaybeMessage< ::dsa::control::v1::LaunchApp >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::LaunchApp >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::Envelope*
 Arena::CreateMaybeMessage< ::dsa::control::v1::Envelope >(Arena* arena) {

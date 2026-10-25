@@ -84,6 +84,53 @@ message AuthProof {
   bytes mac = 1;
 }
 
+// A rectangle in guest display pixels: left and top inclusive, right and bottom exclusive.
+message Rect {
+  int32 left = 1;
+  int32 top = 2;
+  int32 right = 3;
+  int32 bottom = 4;
+}
+
+// Guest to host, from the agent: an app task the host shows as one window appeared, or
+// something the window shows about it changed. Every field is sent each time, so the host
+// keeps only the latest.
+message TaskUpdated {
+  // The guest's task ID, unique while the task lives.
+  int32 task_id = 1;
+  // Where the task's window is on the guest's freeform display.
+  Rect bounds = 2;
+  // The package of the task's root activity, for the window's icon and grouping.
+  string package_name = 3;
+  // The title the window shows.
+  string label = 4;
+  // Whether the task has input focus in the guest.
+  bool focused = 5;
+}
+
+// Guest to host, from the agent: the task ended; the host closes its window.
+message TaskRemoved {
+  int32 task_id = 1;
+}
+
+// Guest to host, from the hwcomposer: the frames of the task now arrive on the graphics
+// stream as posts to `display_id`. Sent when the pairing begins or changes.
+message TaskFrames {
+  int32 task_id = 1;
+  uint32 display_id = 2;
+}
+
+// Host to guest: the user closed the task's window; the agent ends the task.
+message CloseTask {
+  int32 task_id = 1;
+}
+
+// Host to guest: start the app's launcher activity as a new task in its own window. The
+// agent answers with TaskUpdated once the task is there.
+message LaunchApp {
+  string package_name = 1;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -92,5 +139,10 @@ message Envelope {
     HelloRejected hello_rejected = 3;
     AuthChallenge auth_challenge = 4;
     AuthProof auth_proof = 5;
+    TaskUpdated task_updated = 6;
+    TaskRemoved task_removed = 7;
+    TaskFrames task_frames = 8;
+    CloseTask close_task = 9;
+    LaunchApp launch_app = 10;
   }
 }
