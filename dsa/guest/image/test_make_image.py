@@ -361,9 +361,12 @@ class ImageLayoutTests(unittest.TestCase):
 
     def test_pr3_vulkan_loader_uses_the_vendor_driver_not_the_cuttlefish_apex(self):
         # With ro.vulkan.apex set, the loader takes Cuttlefish's driver from its APEX,
-        # which reaches the host only through virtio-gpu or the goldfish pipe.
+        # which reaches the host only through virtio-gpu or the goldfish pipe. The APEX's
+        # own init script sets it "on init", so dropping it from build.prop is not enough:
+        # build.prop, read first, claims the read-only property with no value.
         props = make_image.edit_props("ro.vulkan.apex=com.google.cf.vulkan\nro.debuggable=1\n")
-        self.assertNotIn("ro.vulkan.apex", props)
+        self.assertIn("ro.vulkan.apex=\n", props)
+        self.assertNotIn("com.google.cf.vulkan", props)
 
     def test_pr3_modify_installs_vulkan_and_opengl_libraries_and_filesystem_config(self):
         with tempfile.TemporaryDirectory() as tmp:

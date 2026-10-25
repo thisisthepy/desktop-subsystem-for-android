@@ -97,10 +97,14 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         if f"{prop}={val}" not in props and f"{prop}={val}" not in vendor_props:
             problems.append(f"neither SYSTEM nor VENDOR build.prop sets {prop}={val}")
 
-    # The loader would take Cuttlefish's APEX driver instead of the vendor one.
+    # With a value, the loader would take Cuttlefish's APEX driver instead of the vendor
+    # one. The APEX's init script sets it unless a build.prop has claimed it empty first.
     for name in sorted(n for n in names if n.endswith("build.prop") or n.endswith("prop.default")):
-        if any(line.startswith("ro.vulkan.apex=") for line in z.read(name).decode(errors="replace").splitlines()):
-            problems.append(f"{name} sets ro.vulkan.apex, so the Vulkan loader skips the vendor driver")
+        for line in z.read(name).decode(errors="replace").splitlines():
+            if line.startswith("ro.vulkan.apex=") and line != "ro.vulkan.apex=":
+                problems.append(f"{name} sets {line}, so the Vulkan loader skips the vendor driver")
+    if "ro.vulkan.apex=" not in vendor_props.splitlines():
+        problems.append("VENDOR/build.prop does not claim ro.vulkan.apex empty, so the Vulkan APEX sets it")
 
 disks_to_check = [d for d in ["system.vhdx", "data.vhdx"] if (image / d).exists()]
 if not disks_to_check and (image / "disk.vhdx").exists():
