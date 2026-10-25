@@ -34,7 +34,7 @@ background.
 |---|---|---|
 | Android | A lightweight VM of its own, created with the same Windows API as WSL and booting straight into Android. Your WSL setup is left untouched | planned |
 | Kernel | DSA ships the VM's kernel with binder built in; no kernel build for users | planned |
-| Windows | A custom hwcomposer hands each Android task to a host compositor, which owns one Win32 window per task. No WSLg, no RDP | planned |
+| Windows | A custom hwcomposer hands each Android task to the DSA Window Manager, which shows it in a Win32 window of the app's own small program, named and drawn as the app, so the taskbar and Task Manager show each app as itself. No WSLg, no RDP | planned |
 | Graphics | Every app's OpenGL ES runs through ANGLE on Vulkan, and Vulkan runs on the host GPU through remoting (starting from gfxstream) | planned |
 | Devices | Video codecs, audio and power move to the host as HAL services; the Android framework stays in the guest | planned |
 | Shell | No Android launcher, status bar or keyboard: the Start menu, the notification centre and the Windows IME take their place | planned |
@@ -44,7 +44,7 @@ background.
 ```
 [Android VM]                                    [Windows host: DSA service]
  app → SurfaceFlinger
-   → hwcomposer ─── window control, input ───── compositor: one Win32 window per task
+   → hwcomposer ─── window control, input ───── window manager → each app's program: one window per task
    → ANGLE → Vulkan ─── Vulkan remoting ───────→ host Vulkan
  agent ─── apps, notifications, intents, IME ──→ Start menu, notifications, TSF
  HAL clients ─── RPC Binder ──────────────────→ host codecs, audio, power

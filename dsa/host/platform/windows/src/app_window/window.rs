@@ -1,12 +1,11 @@
-//! The task windows: one native top-level window per guest app task.
+//! The app window host's task windows: native top-level windows, one per task of the app.
 //!
-//! All the windows live on one UI thread, which runs a message loop. Other threads reach it
-//! through a [`UiHandle`]: the task watcher sends the guest's task events, and the request
-//! thread says when a close did not reach the guest. A hidden message-only window receives
-//! the wake-ups, so they arrive even while Windows runs its own loop for a live resize.
-//!
-//! The rules (which task has a window, which display goes to which window) are
-//! `TaskWindows`'s; this module only carries out the changes it returns.
+//! All the windows live on one UI thread, which runs a message loop. The connection thread
+//! reaches it through a [`UiHandle`] with what the window manager says. A hidden message-only
+//! window receives the wake-ups, so they arrive even while Windows runs its own loop for a
+//! live resize. What the user does to a window goes back to the window manager as a
+//! [`FromHost`] report; even a close only reports, and the window closes when the window
+//! manager says so.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -14,8 +13,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use dsa_host_core::compositor::task_windows::{fit_within, TaskWindows, WindowChange};
-use dsa_host_core::tasks::{TaskEvent, TaskRequest};
+use dsa_host_core::compositor::task_windows::fit_within;
+use dsa_host_core::compositor::window_hosts::{FromHost, ToHost};
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, RECT, WPARAM,
 };
@@ -30,30 +29,17 @@ use windows_sys::Win32::UI::HiDpi::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-    GetWindowLongPtrW, LoadCursorW, PostMessageW, PostQuitMessage, RegisterClassExW,
+    GetWindowLongPtrW, LoadCursorW, LoadIconW, PostMessageW, PostQuitMessage, RegisterClassExW,
     SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW,
     CW_USEDEFAULT, GWLP_USERDATA, HWND_MESSAGE, IDC_ARROW, MSG, SIZE_MINIMIZED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOZORDER, SW_SHOW, SW_SHOWNOACTIVATE, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
-    WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SIZE,
-    WNDCLASSEXW, WS_EX_APPWINDOW, WS_EX_NOREDIRECTIONBITMAP, WS_OVERLAPPEDWINDOW,
+    SWP_NOMOVE, SWP_NOZORDER, SW_SHOW, SW_SHOWNOACTIVATE, WA_INACTIVE, WINDOW_EX_STYLE,
+    WINDOW_STYLE, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND, WM_NCCREATE,
+    WM_NCDESTROY, WM_PAINT, WM_SIZE, WNDCLASSEXW, WS_EX_APPWINDOW, WS_EX_NOREDIRECTIONBITMAP,
+    WS_OVERLAPPEDWINDOW,
 };
 
-use super::frames::FrameRouter;
-use super::log::{note, CompositorLogger};
-use super::present::{Gpu, WindowPresenter};
-
-/// What other threads tell the UI thread.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UiEvent {
-    /// A new watch began; these are the guest's tasks now.
-    Sync(Vec<TaskEvent>),
-    /// A change to the guest's tasks.
-    Task(TaskEvent),
-    /// The service cannot be reached, so the guest's tasks are unknown.
-    Lost,
-    /// The request to end a task whose window the user closed did not reach the guest.
-    CloseFailed(i32),
-}
+use crate::compositor::log::{note, CompositorLogger};
+use crate::compositor::present::{Gpu, WindowPresenter};
 
 /// A task window that is open, as tests and logs see it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,15 +49,23 @@ pub struct OpenWindow {
     pub hwnd: isize,
 }
 
-const WM_APP_EVENTS: u32 = WM_APP + 1;
-const WM_APP_USER_CLOSED: u32 = WM_APP + 2;
-const WM_APP_QUIT: u32 = WM_APP + 3;
+/// Where a report about a window goes: to the window manager.
+pub type Report = Arc<dyn Fn(FromHost) + Send + Sync>;
 
-const TASK_CLASS: &str = "DsaTaskWindow";
-const MESSAGE_CLASS: &str = "DsaWmMessages";
+/// The windows' presenters by task, which the connection thread shows frames through.
+pub type Presenters = Arc<Mutex<HashMap<i32, Arc<WindowPresenter>>>>;
+
+const WM_APP_COMMANDS: u32 = WM_APP + 1;
+const WM_APP_QUIT: u32 = WM_APP + 2;
+
+const TASK_CLASS: &str = "DsaAppWindow";
+const MESSAGE_CLASS: &str = "DsaAppWindowMessages";
 const TASK_STYLE: WINDOW_STYLE = WS_OVERLAPPEDWINDOW;
 // Without a redirection surface, everything in the client area comes from the visual.
 const TASK_EX_STYLE: WINDOW_EX_STYLE = WS_EX_NOREDIRECTIONBITMAP | WS_EX_APPWINDOW;
+
+/// The resource ID of the program's icon, which the windows show.
+const ICON_ID: usize = 1;
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16()
@@ -80,37 +74,21 @@ fn wide(text: &str) -> Vec<u16> {
         .collect()
 }
 
-/// How other threads reach the UI thread, and how to stop it.
+/// How the connection thread reaches the UI thread, and how to stop it.
 pub struct UiHandle {
     message_window: isize,
-    events: Sender<UiEvent>,
+    commands: Sender<ToHost>,
     thread: Option<JoinHandle<()>>,
 }
 
-/// A cloneable way to send [`UiEvent`]s to the UI thread.
-#[derive(Clone)]
-pub struct UiSender {
-    message_window: isize,
-    events: Sender<UiEvent>,
-}
-
-impl UiSender {
-    /// Hands `event` to the UI thread. Returns false once the UI thread has ended.
-    pub fn send(&self, event: UiEvent) -> bool {
-        if self.events.send(event).is_err() {
+impl UiHandle {
+    /// Hands `command` to the UI thread. Returns false once the UI thread has ended.
+    pub fn send(&self, command: ToHost) -> bool {
+        if self.commands.send(command).is_err() {
             return false;
         }
         // SAFETY: posting to a window of another thread; a stale handle only fails.
-        unsafe { PostMessageW(self.message_window as HWND, WM_APP_EVENTS, 0, 0) != 0 }
-    }
-}
-
-impl UiHandle {
-    pub fn sender(&self) -> UiSender {
-        UiSender {
-            message_window: self.message_window,
-            events: self.events.clone(),
-        }
+        unsafe { PostMessageW(self.message_window as HWND, WM_APP_COMMANDS, 0, 0) != 0 }
     }
 
     /// Closes every window and ends the UI thread.
@@ -137,29 +115,29 @@ impl Drop for UiHandle {
 
 /// What the UI thread is given to start.
 pub struct UiSetup {
-    /// Where the requests to end a task go when the user closes its window.
-    pub requests: Sender<TaskRequest>,
-    /// The routes of each display's frames, which the UI thread keeps up to date.
-    pub router: Arc<FrameRouter<WindowPresenter>>,
+    /// Where reports about the windows go.
+    pub report: Report,
     /// The GPU devices, or `None` when frames cannot be shown (the windows still open).
     pub gpu: Option<Arc<Gpu>>,
+    /// Where the UI thread keeps each window's presenter.
+    pub presenters: Presenters,
     pub logger: Option<Arc<CompositorLogger>>,
-    /// Where the UI thread lists the task windows that are open, in task ID order.
+    /// Where the UI thread lists the windows that are open, in task ID order.
     pub listing: Arc<Mutex<Vec<OpenWindow>>>,
 }
 
 /// Starts the UI thread. Returns once its message window exists.
 pub fn start(setup: UiSetup) -> Result<UiHandle, String> {
     let (ready_tx, ready_rx) = mpsc::channel();
-    let (events_tx, events_rx) = mpsc::channel();
+    let (commands_tx, commands_rx) = mpsc::channel();
     let thread = thread::Builder::new()
-        .name("dsa-wm-ui".into())
-        .spawn(move || run(setup, events_rx, ready_tx))
+        .name("dsa-app-window-ui".into())
+        .spawn(move || run(setup, commands_rx, ready_tx))
         .map_err(|e| format!("could not start the window thread: {e}"))?;
     match ready_rx.recv() {
         Ok(Ok(message_window)) => Ok(UiHandle {
             message_window,
-            events: events_tx,
+            commands: commands_tx,
             thread: Some(thread),
         }),
         Ok(Err(why)) => {
@@ -173,26 +151,18 @@ pub fn start(setup: UiSetup) -> Result<UiHandle, String> {
     }
 }
 
-/// One open task window.
-struct TaskWindow {
-    hwnd: HWND,
-    presenter: Option<Arc<WindowPresenter>>,
-}
-
 /// Kept in each task window's GWLP_USERDATA.
 struct WindowData {
     task_id: i32,
-    message_window: HWND,
+    report: Report,
     presenter: RefCell<Option<Arc<WindowPresenter>>>,
 }
 
 /// The UI thread's state, reached from the message window's procedure.
 struct Ui {
-    windows: TaskWindows,
-    open: HashMap<i32, TaskWindow>,
-    events: Receiver<UiEvent>,
+    open: HashMap<i32, HWND>,
+    commands: Receiver<ToHost>,
     setup: UiSetup,
-    message_window: HWND,
 }
 
 thread_local! {
@@ -206,19 +176,22 @@ fn register_class(
     let name = wide(name);
     // SAFETY: the class structure and its name live through the call.
     unsafe {
+        let module = GetModuleHandleW(std::ptr::null());
+        // The program's own icon: the app's, in an app's copy of this program.
+        let icon = LoadIconW(module, ICON_ID as *const u16);
         let class = WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             style: 0,
             lpfnWndProc: Some(procedure),
             cbClsExtra: 0,
             cbWndExtra: 0,
-            hInstance: GetModuleHandleW(std::ptr::null()),
-            hIcon: std::ptr::null_mut(),
+            hInstance: module,
+            hIcon: icon,
             hCursor: LoadCursorW(std::ptr::null_mut(), IDC_ARROW),
             hbrBackground: std::ptr::null_mut(),
             lpszMenuName: std::ptr::null(),
             lpszClassName: name.as_ptr(),
-            hIconSm: std::ptr::null_mut(),
+            hIconSm: icon,
         };
         if RegisterClassExW(&class) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS {
             return Err(format!(
@@ -230,7 +203,7 @@ fn register_class(
     Ok(())
 }
 
-fn run(setup: UiSetup, events: Receiver<UiEvent>, ready: Sender<Result<isize, String>>) {
+fn run(setup: UiSetup, commands: Receiver<ToHost>, ready: Sender<Result<isize, String>>) {
     // SAFETY: plain Win32 calls on this thread's own windows.
     unsafe {
         // Sizes are in real pixels on every monitor; a window that moves to a monitor of
@@ -259,18 +232,16 @@ fn run(setup: UiSetup, events: Receiver<UiEvent>, ready: Sender<Result<isize, St
         );
         if message_window.is_null() {
             let _ = ready.send(Err(format!(
-                "could not create the compositor's message window: {}",
+                "could not create the window host's message window: {}",
                 std::io::Error::last_os_error()
             )));
             return;
         }
         UI.with(|ui| {
             *ui.borrow_mut() = Some(Ui {
-                windows: TaskWindows::new(),
                 open: HashMap::new(),
-                events,
+                commands,
                 setup,
-                message_window,
             });
         });
         let _ = ready.send(Ok(message_window as isize));
@@ -283,8 +254,10 @@ fn run(setup: UiSetup, events: Receiver<UiEvent>, ready: Sender<Result<isize, St
 
         let ui = UI.with(|ui| ui.borrow_mut().take());
         if let Some(mut ui) = ui {
-            let changes = ui.windows.reset();
-            ui.carry_out(changes);
+            let open: Vec<i32> = ui.open.keys().copied().collect();
+            for task_id in open {
+                ui.close(task_id);
+            }
             ui.publish();
         }
         DestroyWindow(message_window);
@@ -298,15 +271,11 @@ unsafe extern "system" fn message_window_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match message {
-        WM_APP_EVENTS | WM_APP_USER_CLOSED => {
+        WM_APP_COMMANDS => {
             let handled = UI.with(|ui| match ui.try_borrow_mut() {
                 Ok(mut ui) => {
                     if let Some(ui) = ui.as_mut() {
-                        if message == WM_APP_EVENTS {
-                            ui.drain_events();
-                        } else {
-                            ui.user_closed(wparam as i32);
-                        }
+                        ui.drain_commands();
                     }
                     true
                 }
@@ -353,6 +322,11 @@ unsafe extern "system" fn task_window_proc(
                         // last frame is stretched to the new size before it is shown.
                         presenter.view_resized((width, height));
                     }
+                    (data.report)(FromHost::Resized {
+                        task_id: data.task_id,
+                        width,
+                        height,
+                    });
                 }
             }
             0
@@ -370,7 +344,22 @@ unsafe extern "system" fn task_window_proc(
                 suggested.bottom - suggested.top,
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
+            if let Some(data) = window_data(hwnd) {
+                (data.report)(FromHost::Dpi {
+                    task_id: data.task_id,
+                    dpi: (wparam & 0xffff) as u32,
+                });
+            }
             0
+        }
+        WM_ACTIVATE => {
+            if let Some(data) = window_data(hwnd) {
+                (data.report)(FromHost::Focus {
+                    task_id: data.task_id,
+                    focused: (wparam & 0xffff) as u32 != WA_INACTIVE,
+                });
+            }
+            DefWindowProcW(hwnd, message, wparam, lparam)
         }
         // Never painted white between frames: the visual covers the client area.
         WM_ERASEBKGND => 1,
@@ -381,15 +370,11 @@ unsafe extern "system" fn task_window_proc(
             0
         }
         WM_CLOSE => {
-            // The guest ends the task; the UI thread closes the window, outside this
-            // procedure.
+            // The window manager asks Android to end the task and closes the window.
             if let Some(data) = window_data(hwnd) {
-                PostMessageW(
-                    data.message_window,
-                    WM_APP_USER_CLOSED,
-                    data.task_id as u32 as usize,
-                    0,
-                );
+                (data.report)(FromHost::Closed {
+                    task_id: data.task_id,
+                });
             }
             0
         }
@@ -432,116 +417,90 @@ unsafe fn usable_client_area(hwnd: HWND, dpi: u32) -> (u32, u32) {
     )
 }
 
+/// Sizes `hwnd` so its client area is `size` pixels, or the largest of that shape that fits
+/// its monitor. Returns the client area it got.
+unsafe fn apply_size(hwnd: HWND, size: (u32, u32)) -> (u32, u32) {
+    // The task's size is in the guest's pixels, which are the window's pixels.
+    let dpi = GetDpiForWindow(hwnd).max(96);
+    let client = fit_within(size, usable_client_area(hwnd, dpi));
+    let (outer_width, outer_height) = outer_size(client, dpi);
+    SetWindowPos(
+        hwnd,
+        std::ptr::null_mut(),
+        0,
+        0,
+        outer_width,
+        outer_height,
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+    );
+    client
+}
+
 impl Ui {
     fn log(&self, message: &str) {
         note(self.setup.logger.as_deref(), message);
     }
 
-    fn drain_events(&mut self) {
-        while let Ok(event) = self.events.try_recv() {
-            let changes = match event {
-                UiEvent::Sync(current) => self.windows.sync(&current),
-                UiEvent::Task(event) => self.windows.apply(&event),
-                UiEvent::Lost => self.windows.reset(),
-                UiEvent::CloseFailed(task_id) => {
-                    self.log(&format!(
-                        "the request to end task {task_id} did not reach Android; its window \
-                         opens again"
-                    ));
-                    self.windows.close_failed(task_id)
-                }
-            };
-            self.carry_out(changes);
-        }
-        self.publish();
-    }
-
-    fn user_closed(&mut self, task_id: i32) {
-        match self.windows.user_closed(task_id) {
-            Some(request) => {
-                if self.setup.requests.send(request).is_err() {
-                    self.log("the request thread has ended; a closed window's task stays");
+    fn drain_commands(&mut self) {
+        while let Ok(command) = self.commands.try_recv() {
+            // SAFETY: plain Win32 calls on this thread's own windows.
+            unsafe {
+                match command {
+                    ToHost::Show {
+                        task_id,
+                        title,
+                        width,
+                        height,
+                        focused,
+                    } => self.open_window(task_id, &title, (width, height), focused),
+                    ToHost::Retitle { task_id, title } => {
+                        if let Some(hwnd) = self.open.get(&task_id) {
+                            SetWindowTextW(*hwnd, wide(&title).as_ptr());
+                        }
+                    }
+                    ToHost::Resize {
+                        task_id,
+                        width,
+                        height,
+                    } => {
+                        if let Some(hwnd) = self.open.get(&task_id) {
+                            apply_size(*hwnd, (width, height));
+                        }
+                    }
+                    ToHost::Close { task_id } => self.close(task_id),
                 }
             }
-            None => self.log(&format!("closing the window of unknown task {task_id}")),
         }
-        self.carry_out(vec![WindowChange::Close { task_id }]);
         self.publish();
     }
 
-    /// Tells the frame router and the listing which windows are open.
+    /// Lists the windows that are open.
     fn publish(&self) {
-        let routes: Vec<(u32, Arc<WindowPresenter>)> = self
-            .windows
-            .routes()
-            .into_iter()
-            .filter_map(|(display_id, task_id)| {
-                let presenter = self.open.get(&task_id)?.presenter.clone()?;
-                Some((display_id, presenter))
-            })
-            .collect();
-        self.setup.router.set_routes(routes);
         let mut listing: Vec<OpenWindow> = self
             .open
             .iter()
-            .map(|(task_id, window)| OpenWindow {
+            .map(|(task_id, hwnd)| OpenWindow {
                 task_id: *task_id,
-                hwnd: window.hwnd as isize,
+                hwnd: *hwnd as isize,
             })
             .collect();
         listing.sort_by_key(|window| window.task_id);
         *self.setup.listing.lock().unwrap_or_else(|e| e.into_inner()) = listing;
     }
 
-    fn carry_out(&mut self, changes: Vec<WindowChange>) {
-        for change in changes {
-            // SAFETY: plain Win32 calls on this thread's own windows.
-            unsafe {
-                match change {
-                    WindowChange::Open {
-                        task_id,
-                        title,
-                        width,
-                        height,
-                        focused,
-                        ..
-                    } => self.open_window(task_id, &title, (width, height), focused),
-                    WindowChange::Retitle { task_id, title } => {
-                        if let Some(window) = self.open.get(&task_id) {
-                            SetWindowTextW(window.hwnd, wide(&title).as_ptr());
-                        }
-                    }
-                    WindowChange::Resize {
-                        task_id,
-                        width,
-                        height,
-                    } => {
-                        if let Some(window) = self.open.get(&task_id) {
-                            let dpi = GetDpiForWindow(window.hwnd).max(96);
-                            let client =
-                                fit_within((width, height), usable_client_area(window.hwnd, dpi));
-                            let (outer_width, outer_height) = outer_size(client, dpi);
-                            SetWindowPos(
-                                window.hwnd,
-                                std::ptr::null_mut(),
-                                0,
-                                0,
-                                outer_width,
-                                outer_height,
-                                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
-                            );
-                        }
-                    }
-                    WindowChange::Close { task_id } => {
-                        if let Some(window) = self.open.remove(&task_id) {
-                            if let Some(presenter) = &window.presenter {
-                                presenter.close();
-                            }
-                            DestroyWindow(window.hwnd);
-                        }
-                    }
-                }
-            }
+    fn close(&mut self, task_id: i32) {
+        let presenter = self
+            .setup
+            .presenters
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&task_id);
+        if let Some(presenter) = presenter {
+            presenter.close();
+        }
+        if let Some(hwnd) = self.open.remove(&task_id) {
+            // SAFETY: a window of this thread.
+            unsafe { DestroyWindow(hwnd) };
         }
     }
 
@@ -549,12 +508,11 @@ impl Ui {
         if self.open.contains_key(&task_id) {
             return;
         }
-        let data = Box::new(WindowData {
+        let data = Box::into_raw(Box::new(WindowData {
             task_id,
-            message_window: self.message_window,
+            report: Arc::clone(&self.setup.report),
             presenter: RefCell::new(None),
-        });
-        let data = Box::into_raw(data);
+        }));
         let class = wide(TASK_CLASS);
         let hwnd = CreateWindowExW(
             TASK_EX_STYLE,
@@ -579,26 +537,9 @@ impl Ui {
             ));
             return;
         }
-        // The task's size is in the guest's pixels, which are the window's pixels.
-        let dpi = GetDpiForWindow(hwnd).max(96);
-        let client = fit_within(size, usable_client_area(hwnd, dpi));
-        let (outer_width, outer_height) = outer_size(client, dpi);
-        SetWindowPos(
-            hwnd,
-            std::ptr::null_mut(),
-            0,
-            0,
-            outer_width,
-            outer_height,
-            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
-        );
+        let client = apply_size(hwnd, size);
         let presenter = match &self.setup.gpu {
-            Some(gpu) => match WindowPresenter::new(
-                Arc::clone(gpu),
-                hwnd as isize,
-                client,
-                self.setup.logger.clone(),
-            ) {
+            Some(gpu) => match WindowPresenter::new(Arc::clone(gpu), hwnd as isize, client) {
                 Ok(presenter) => Some(presenter),
                 Err(why) => {
                     self.log(&format!(
@@ -612,7 +553,14 @@ impl Ui {
         if let Some(data) = window_data(hwnd) {
             *data.presenter.borrow_mut() = presenter.clone();
         }
+        if let Some(presenter) = presenter {
+            self.setup
+                .presenters
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(task_id, presenter);
+        }
         ShowWindow(hwnd, if focused { SW_SHOW } else { SW_SHOWNOACTIVATE });
-        self.open.insert(task_id, TaskWindow { hwnd, presenter });
+        self.open.insert(task_id, hwnd);
     }
 }

@@ -13,4 +13,6 @@ fn main() {
         Some(names::WINDOW_MANAGER_KO),
         ICON,
     );
+    // Each app's copy of the window host gets the app's name and icon instead.
+    embed("dsa-app-window", names::APP_WINDOW, None, ICON);
 }

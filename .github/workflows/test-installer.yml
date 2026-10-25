@@ -169,6 +169,7 @@ jobs:
             'dsa-hostd.exe' = 'Desktop Subsystem for Android Service'
             'dsa-wm.exe' = 'DSA Window Manager'
             'dsa.exe' = 'Desktop Subsystem for Android command line'
+            'dsa-app-window.exe' = 'DSA app window'
           }
           foreach ($name in $expected.Keys) {
             $info = (Get-Item "$env:PROGRAM_DIR\$name").VersionInfo
@@ -183,6 +184,9 @@ jobs:
 
       - name: fr3_window_manager_installed_and_registered
         run: |
+          if (-not (Test-Path "$env:PROGRAM_DIR\dsa-app-window.exe")) {
+            throw "dsa-app-window.exe, which each app's window program is made from, is not installed in $env:PROGRAM_DIR"
+          }
           if (-not (Test-Path "$env:PROGRAM_DIR\dsa-wm.exe")) {
             throw "dsa-wm.exe is not installed in $env:PROGRAM_DIR"
           }
@@ -437,6 +441,7 @@ jobs:
           if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
           if (Test-Path "$env:PROGRAM_DIR\dsa.exe") { throw "the program is still there" }
           if (Test-Path "$env:PROGRAM_DIR\dsa-wm.exe") { throw "dsa-wm.exe is still there" }
+          if (Test-Path "$env:PROGRAM_DIR\dsa-app-window.exe") { throw "dsa-app-window.exe is still there" }
           if (Test-Path "$env:PROGRAM_DIR\licenses") { throw "the licence folder is still there" }
           if (Test-Path "$env:DATA_DIR\images") { throw "the downloaded images are still there" }
           if (Test-Path "$env:DATA_DIR\updates") { throw "the downloaded setup files are still there" }

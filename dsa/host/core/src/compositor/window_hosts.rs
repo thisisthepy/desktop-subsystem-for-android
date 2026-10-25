@@ -26,13 +26,24 @@ use dsa_transport::Connection;
 use super::task_windows::WindowChange;
 use crate::tasks::AppInfo;
 
-/// Whether `name` is an Android package name: dot-separated parts of ASCII letters, digits
-/// and underscores. Only such a name becomes a file name for an app's window host.
+/// Whether `name` is an Android package name: two or more dot-separated parts, each an ASCII
+/// letter followed by letters, digits and underscores. Only such a name becomes a file name
+/// for an app's window host, so a name whose first part Windows reserves for a device
+/// (`con`, `nul`, `com1` and the like) is refused too.
 pub fn is_valid_package(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 255
-        && name.split('.').all(|part| {
-            !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    const DEVICES: [&str; 4] = ["con", "prn", "aux", "nul"];
+    let parts: Vec<&str> = name.split('.').collect();
+    let first = parts[0].to_ascii_lowercase();
+    let numbered_device = first.len() == 4
+        && (first.starts_with("com") || first.starts_with("lpt"))
+        && first.as_bytes()[3].is_ascii_digit();
+    name.len() <= 255
+        && parts.len() >= 2
+        && !DEVICES.contains(&first.as_str())
+        && !numbered_device
+        && parts.iter().all(|part| {
+            part.bytes().next().is_some_and(|b| b.is_ascii_alphabetic())
+                && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
         })
 }
 
@@ -918,7 +929,17 @@ mod tests {
     fn nfr5_a_window_host_cannot_name_a_package_that_is_not_one() {
         let now = Instant::now();
         let mut hosts = WindowHosts::new();
-        for bad in ["", "..\\evil", "a..b", "com.example/x", "C:\\x"] {
+        for bad in [
+            "",
+            "..\\evil",
+            "a..b",
+            "com.example/x",
+            "C:\\x",
+            "settings",
+            "con.example",
+            "COM1.x",
+            "1password.app",
+        ] {
             assert!(!is_valid_package(bad), "{bad}");
             assert!(matches!(
                 hosts.attached(HostId(1), bad, true, now)[..],
@@ -928,6 +949,7 @@ mod tests {
         }
         assert!(is_valid_package("com.android.settings"));
         assert!(is_valid_package("org.example_2.app"));
+        assert!(is_valid_package("com.example.app1"));
     }
 
     #[test]

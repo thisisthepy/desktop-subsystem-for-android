@@ -3,7 +3,8 @@
   The DSA package (MSI). build.ps1 builds it; see README.md.
 
   It installs dsa-hostd as the DsaHost service (SYSTEM, started automatically), the dsa
-  command on the system PATH, the service's configuration, the guest kernel and, when the
+  command on the system PATH, the DSA Window Manager (dsa-wm, started at each sign-in) and
+  the app window host it makes each app's window program from, the service's configuration, the guest kernel and, when the
   build has one, the first Android image. Uninstalling removes all of that, the Android
   images the service downloaded since, and the setup files it downloaded to update DSA.
   Each user's Android disk is in their own profile (%LOCALAPPDATA%\DSA), so it is not
@@ -121,6 +122,11 @@
             </Component>
             <Component Id="WindowManagerExe" Guid="*">
                 <File Id="WindowManagerExe" Source="$(SourceDir)\dsa-wm.exe" KeyPath="yes" />
+            </Component>
+            <!-- The app window host. The window manager copies it for each Android app into
+                 the user's profile (%LOCALAPPDATA%\DSA\apps), named and drawn as the app. -->
+            <Component Id="AppWindowExe" Guid="*">
+                <File Id="AppWindowExe" Source="$(SourceDir)\dsa-app-window.exe" KeyPath="yes" />
             </Component>
             <Component Id="GfxstreamBackendDll" Guid="*">
                 <File Id="GfxstreamBackendDll" Source="$(SourceDir)\gfxstream_backend.dll" KeyPath="yes" />
