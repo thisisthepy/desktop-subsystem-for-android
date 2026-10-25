@@ -126,8 +126,23 @@ sign-in. One copy runs per session, and it ends at sign-out. It writes its messa
 - Frames reach a window only for a display that Android named as a task's. Frames for any
   other display, such as Android's whole screen, are dropped, so no window shows more
   than one app.
-- The windows are per-monitor DPI aware. While a window is resized, its last frame is
-  stretched to fill it until Android draws one at the new size.
+- One Android pixel is one pixel of the window, so frames are shown 1:1 and stay sharp
+  at any monitor scale. Each task draws at the density of its window's monitor: 160 dpi at
+  100%, 240 at 150%, 320 at 200%. A window that opens on, or moves to, a monitor of
+  another scale asks Android for that density, and then for the size that keeps the app
+  the same size to the eye. Density is set per task, so windows on monitors of different
+  scales are each sharp.
+- Resizing a window asks Android to give its task the window's new client size. During a
+  live resize only the latest size is sent, not every size the edge passed through. The
+  window shows its last frame stretched over the new size until a frame of that size
+  arrives, then shows that frame 1:1. A window cannot grow past what Android's display
+  can hold (by default 1920x1080 pixels), because a larger window could only show its
+  frames stretched; maximising stops at that size too. If Android gives the task another
+  size than the window asked for, the window takes the task's size within 2 seconds.
+- Each window measures how long it waits for a frame of its new size after a resize, and
+  the log gets a summary (median, 95th percentile, longest, and how many took 100 ms or
+  more) every 20 resizes and when the window closes. A window still waiting after 2
+  seconds is logged as showing a stretched frame.
 - Without a GPU device, the windows still open and close with their tasks but stay
   empty, and the log says why.
 - The renderer runs on the GPU that drives the primary monitor, so frames never cross

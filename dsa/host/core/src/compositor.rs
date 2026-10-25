@@ -3,9 +3,13 @@
 //!
 //! The compositor receives guest graphics streams over the transport and delegates them
 //! to a [`GraphicsRenderer`]. [`task_windows`] decides which window each task has and
-//! which window each display's frames go to; the platform only carries it out.
+//! which window each display's frames go to, [`window_sizing`] how a window's size and
+//! scale reach its task, and [`resize_latency`] measures how long a resized window waits
+//! for a frame of its new size; the platform only carries it out.
 
+pub mod resize_latency;
 pub mod task_windows;
+pub mod window_sizing;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;

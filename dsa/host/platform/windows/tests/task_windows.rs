@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_host_core::compositor::window_sizing::{density_for_dpi, rescale};
 use dsa_host_core::compositor::FakeRenderer;
 use dsa_host_core::host_api::UserAndroid;
 use dsa_host_core::host_api_conformance::{FakeAndroid, FakeAndroids, RunningService};
@@ -20,6 +21,7 @@ use dsa_host_windows::compositor::{Compositor, CompositorConfig};
 use dsa_transport::local::{self, MemoryLocalConnector, Peer};
 use dsa_transport::{Connection, Connector, Listener, TransportError};
 use windows_sys::Win32::Foundation::{HWND, RECT};
+use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetWindowTextW, IsWindow, IsWindowVisible, PostMessageW, SetWindowPos,
     SWP_NOMOVE, SWP_NOZORDER, WM_CLOSE,
@@ -217,8 +219,13 @@ fn fr3_closing_a_task_window_asks_the_guest_to_end_the_task() {
 
     unsafe { PostMessageW(open[0].hwnd as HWND, WM_CLOSE, 0, 0) };
     wait_for("the close to reach the guest", || {
+        // The window also asked for its monitor's density when it opened.
         let requests = running.android.requests.lock().unwrap().clone();
-        (requests == vec![TaskRequest::Close { task_id: 7 }]).then_some(())
+        let closes: Vec<_> = requests
+            .into_iter()
+            .filter(|request| matches!(request, TaskRequest::Close { .. }))
+            .collect();
+        (closes == vec![TaskRequest::Close { task_id: 7 }]).then_some(())
     });
     windows_of(&running, 0);
     // The guest ends the task; nothing opens again.
@@ -308,6 +315,176 @@ fn fr3_only_a_tasks_own_display_reaches_its_window_and_the_whole_screen_never_do
     running.android.publish(TaskEvent::Removed { task_id: 1 });
     windows_of(&running, 0);
     assert_eq!(sink.target(3, 640, 480), None);
+}
+
+fn resize_to(hwnd: isize, width: i32, height: i32) {
+    unsafe {
+        SetWindowPos(
+            hwnd as HWND,
+            std::ptr::null_mut(),
+            0,
+            0,
+            width,
+            height,
+            SWP_NOMOVE | SWP_NOZORDER,
+        )
+    };
+}
+
+fn last_resize(running: &Running, task_id: i32) -> Option<(u32, u32)> {
+    running
+        .android
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find_map(|request| match request {
+            TaskRequest::Resize {
+                task_id: id,
+                width,
+                height,
+            } if *id == task_id => Some((*width, *height)),
+            _ => None,
+        })
+}
+
+fn resizes(running: &Running) -> usize {
+    running
+        .android
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|request| matches!(request, TaskRequest::Resize { .. }))
+        .count()
+}
+
+/// A task that draws at the density of the window's monitor, so the window opens at its size.
+fn task_at_monitor_density(task_id: i32, width: i32, height: i32) -> Task {
+    let mut task = task(task_id, "Notes", width, height);
+    task.density_dpi = density_for_dpi(dpi_of_new_windows());
+    task.max_width = 1920;
+    task.max_height = 1080;
+    task
+}
+
+/// The DPI a new top-level window gets on this machine.
+fn dpi_of_new_windows() -> u32 {
+    unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForSystem() }.max(96)
+}
+
+#[test]
+fn fr4_resizing_a_task_window_asks_the_guest_for_its_new_client_size() {
+    let running = start(None);
+    running.android.start();
+    running
+        .android
+        .publish(TaskEvent::Updated(task_at_monitor_density(1, 400, 300)));
+    let open = windows_of(&running, 1);
+
+    // The host's part of the wait: from the window's new size to the request reaching the
+    // service. The guest's part (relayout, redraw, compose) needs the real machine.
+    let mut waits = Vec::new();
+    for step in 0..20 {
+        let asked = Instant::now();
+        resize_to(open[0].hwnd, 600 + step * 7, 500 + step * 3);
+        let resized = asked.elapsed();
+        let (width, height) = client_size(open[0].hwnd);
+        let size = (width as u32, height as u32);
+        let deadline = Instant::now() + WAIT;
+        while last_resize(&running, 1) != Some(size) {
+            assert!(
+                Instant::now() < deadline,
+                "the new size never reached the guest"
+            );
+            thread::yield_now();
+        }
+        waits.push((resized, asked.elapsed()));
+    }
+    waits.sort_by_key(|(_, total)| *total);
+    let (resized, total) = waits[waits.len() / 2];
+    eprintln!(
+        "host side of a resize (median of 20): the window took the size in {} us, and the request reached the service {} us after the resize began (longest {} us)",
+        resized.as_micros(),
+        total.as_micros(),
+        waits[waits.len() - 1].1.as_micros()
+    );
+}
+
+#[test]
+fn fr4_a_live_resize_ends_with_the_guest_asked_for_the_last_size() {
+    let running = start(None);
+    running.android.start();
+    running
+        .android
+        .publish(TaskEvent::Updated(task_at_monitor_density(1, 400, 300)));
+    let open = windows_of(&running, 1);
+
+    let started = Instant::now();
+    for step in 0..60 {
+        resize_to(open[0].hwnd, 500 + step * 5, 420 + step * 3);
+    }
+    let (width, height) = client_size(open[0].hwnd);
+    let size = (width as u32, height as u32);
+    wait_for("the last size to reach the guest", || {
+        (last_resize(&running, 1) == Some(size)).then_some(())
+    });
+    let sent = resizes(&running);
+    assert!(sent <= 60, "{sent} requests for 60 sizes");
+    eprintln!(
+        "a 60-step live resize sent {sent} size requests; the last arrived {} ms after the first step",
+        started.elapsed().as_millis()
+    );
+}
+
+#[test]
+fn fr4_a_task_window_cannot_grow_past_what_the_guest_can_draw() {
+    let running = start(None);
+    running.android.start();
+    let mut small = task_at_monitor_density(1, 400, 300);
+    small.max_width = 500;
+    small.max_height = 420;
+    running.android.publish(TaskEvent::Updated(small));
+    let open = windows_of(&running, 1);
+
+    resize_to(open[0].hwnd, 1400, 1000);
+    let (width, height) = client_size(open[0].hwnd);
+    assert!(
+        width <= 500 && height <= 420,
+        "the client area grew to {width}x{height}"
+    );
+}
+
+#[test]
+fn fr4_a_task_window_opens_at_its_monitors_scale() {
+    let running = start(None);
+    running.android.start();
+    let mut notes = task(1, "Notes", 400, 300);
+    notes.density_dpi = 160;
+    notes.max_width = 1920;
+    notes.max_height = 1080;
+    running.android.publish(TaskEvent::Updated(notes));
+    let open = windows_of(&running, 1);
+    let dpi = unsafe { GetDpiForWindow(open[0].hwnd as HWND) }.max(96);
+    let wanted = density_for_dpi(dpi);
+
+    let (width, height) = rescale((400, 300), 160, wanted);
+    assert_eq!(client_size(open[0].hwnd), (width as i32, height as i32));
+    if wanted != 160 {
+        wait_for("the density to reach the guest", || {
+            let requests = running.android.requests.lock().unwrap().clone();
+            (requests.first()
+                == Some(&TaskRequest::SetDensity {
+                    task_id: 1,
+                    density_dpi: wanted,
+                }))
+            .then_some(())
+        });
+        wait_for("the size that goes with it", || {
+            (last_resize(&running, 1) == Some((width, height))).then_some(())
+        });
+    }
 }
 
 #[test]
