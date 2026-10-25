@@ -345,6 +345,12 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertIn("androidboot.hardware.gralloc=minigbm", cmdline)
         self.assertIn("androidboot.cpuvulkan.version=0", cmdline)
 
+    def test_fr1_android_shares_memory_through_memfd(self):
+        # libcutils falls back to /dev/ashmem unless sys.use_memfd is true, and the guest
+        # kernel has no ashmem driver.
+        props = make_image.edit_props("ro.debuggable=1\n")
+        self.assertIn("sys.use_memfd=true\n", props)
+
     def test_pr3_composer_starts_without_a_display_device(self):
         # Cuttlefish's composer otherwise looks for a virtio-gpu DRM card or a goldfish
         # display, finds neither under Hyper-V, and surfaceflinger aborts.
