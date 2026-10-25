@@ -70,15 +70,21 @@ impl<S: StreamSocket> FramedConnection<S> {
     }
 }
 
-impl<S: StreamSocket> Connection for FramedConnection<S> {
+/// One frame as it goes on the wire: its length, then its bytes.
+fn wire_frame(frame: &[u8]) -> Result<Vec<u8>, TransportError> {
+    check_frame_len(frame.len())?;
+    let mut wire = Vec::with_capacity(HEADER_LEN + frame.len());
+    wire.extend_from_slice(&(frame.len() as u32).to_le_bytes());
+    wire.extend_from_slice(frame);
+    Ok(wire)
+}
+
+impl<S: StreamSocket + 'static> Connection for FramedConnection<S> {
     fn send(&mut self, frame: &[u8]) -> Result<(), TransportError> {
-        check_frame_len(frame.len())?;
+        let wire = wire_frame(frame)?;
         if self.broken {
             return Err(TransportError::Closed);
         }
-        let mut wire = Vec::with_capacity(HEADER_LEN + frame.len());
-        wire.extend_from_slice(&(frame.len() as u32).to_le_bytes());
-        wire.extend_from_slice(frame);
         let result = self
             .socket
             .write_all(&wire)
@@ -157,11 +163,41 @@ impl<S: StreamSocket> Connection for FramedConnection<S> {
             self.broken = true;
         }
     }
+
+    /// A sender on a second handle to the socket. Frames from it and from the connection
+    /// itself must not be sent at the same time, or their bytes could interleave: once a
+    /// sender is cloned, send through one of them at a time.
+    fn try_clone_sender(&self) -> Option<Box<dyn FrameSender>> {
+        if self.broken {
+            return None;
+        }
+        let socket = self.socket.try_clone().ok()?;
+        Some(Box::new(FramedSender { socket }))
+    }
+}
+
+/// The sending half of a [`FramedConnection`], on a second handle to its socket. Dropping it
+/// leaves the connection open; the peer sees the connection end once both are gone.
+pub struct FramedSender<S: StreamSocket> {
+    socket: S,
+}
+
+impl<S: StreamSocket> FrameSender for FramedSender<S> {
+    fn send(&mut self, frame: &[u8]) -> Result<(), TransportError> {
+        let wire = wire_frame(frame)?;
+        self.socket
+            .write_all(&wire)
+            .and_then(|()| self.socket.flush())
+            .map_err(TransportError::from)
+    }
 }
 
 impl<S: StreamSocket> Drop for FramedConnection<S> {
     fn drop(&mut self) {
-        self.close();
+        if !self.broken {
+            self.socket.shutdown();
+            self.broken = true;
+        }
     }
 }
 

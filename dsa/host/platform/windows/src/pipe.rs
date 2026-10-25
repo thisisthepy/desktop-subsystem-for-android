@@ -15,9 +15,10 @@ use dsa_transport::local::{LocalListener, Peer};
 use dsa_transport::stream::{FramedConnection, StreamSocket};
 use dsa_transport::{Connection, Connector, TransportError};
 use windows_sys::Win32::Foundation::{
-    CloseHandle, LocalFree, ERROR_BROKEN_PIPE, ERROR_CANNOT_IMPERSONATE, ERROR_IO_PENDING,
-    ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED, GENERIC_READ,
-    GENERIC_WRITE, HANDLE, HLOCAL, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, DuplicateHandle, LocalFree, DUPLICATE_SAME_ACCESS, ERROR_BROKEN_PIPE,
+    ERROR_CANNOT_IMPERSONATE, ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_PIPE_BUSY,
+    ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED, GENERIC_READ, GENERIC_WRITE, HANDLE, HLOCAL,
+    INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -210,6 +211,32 @@ impl StreamSocket for PipeStream {
         // readable by the peer, which then reads end of stream. Nothing is pending here:
         // every operation is waited for before it returns.
         self.handle = None;
+    }
+
+    /// A second handle on the same pipe, with its own event, so one thread can write while
+    /// another waits in a read. The peer reads end of stream once every handle is closed.
+    fn try_clone(&self) -> io::Result<PipeStream> {
+        let handle = match &self.handle {
+            Some(handle) => handle.0,
+            None => return Err(io::Error::from(io::ErrorKind::NotConnected)),
+        };
+        let mut copy: HANDLE = std::ptr::null_mut();
+        // SAFETY: duplicates a handle of this process into this process.
+        let duplicated = unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                handle,
+                GetCurrentProcess(),
+                &mut copy,
+                0,
+                0,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+        if duplicated == 0 {
+            return Err(last_error());
+        }
+        PipeStream::new(OwnedHandle(copy))
     }
 }
 
