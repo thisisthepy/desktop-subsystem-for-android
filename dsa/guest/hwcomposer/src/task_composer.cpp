@@ -15,6 +15,8 @@ namespace {
 
 // How long a layer's acquire fence may take before its buffer is composed anyway.
 constexpr int kFenceTimeoutMs = 3000;
+// The display a compose request names so that the host composes without showing anything.
+constexpr uint32_t kNoDisplay = 0;
 // The blend mode SurfaceFlinger's client target is composed with.
 constexpr int32_t kBlendPremultiplied = 2;
 
@@ -278,8 +280,12 @@ void TaskComposer::present(Frame& frame) {
                 }
             }
 
+            // Composed for display 0, which names no task window: given the task's display,
+            // the host would make the target that display's frame before composing into
+            // it, and the window would show each frame one late. The frame goes to the
+            // task's display only once it is whole (post).
             const std::vector<uint8_t> request =
-                buildComposeRequest(output.display, target, task.bounds, inputs);
+                buildComposeRequest(kNoDisplay, target, task.bounds, inputs);
             if (mHost.compose(request)) {
                 mHost.post(output.display, target);
                 output.next ^= 1;

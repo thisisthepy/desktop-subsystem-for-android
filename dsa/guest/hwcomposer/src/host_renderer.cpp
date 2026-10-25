@@ -178,9 +178,9 @@ void HostRenderer::post(uint32_t displayId, uint32_t colorBuffer) {
         return;
     }
     ExtendedRCEncoderContext* rc = mConnection->encoder.get();
+    // The host copies the ColorBuffer into the display's window when it becomes the
+    // display's current one, so this is the frame's delivery.
     rc->rcSetDisplayColorBuffer(rc, displayId, colorBuffer);
-    rc->rcFBPost(rc, colorBuffer);
-    mConnection->stream->flush();
 }
 
 }  // namespace dsa::hwc

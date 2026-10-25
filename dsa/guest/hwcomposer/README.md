@@ -19,10 +19,12 @@ nothing else.
    `TaskRemoved`, when the display and its ColorBuffers are released.
 4. The task's layers are composed on the host GPU with `rcComposeWithoutPost`
    (`ComposeDevice_v2`) into a ColorBuffer the size of the task's bounds. Layer frames are
-   moved so the task's top left corner is the origin. The hwcomposer then makes that
-   ColorBuffer the display's current one (`rcSetDisplayColorBuffer`) and posts it
-   (`rcFBPost`). Two ColorBuffers per task alternate, so the host can show one while the
-   next is composed.
+   moved so the task's top left corner is the origin. The request names display 0, not
+   the task's: given a display, the host would make the target that display's frame
+   before composing into it, and the window would show each frame one late. Once the
+   compose has finished, the hwcomposer makes the ColorBuffer the task display's current
+   one (`rcSetDisplayColorBuffer`), which is when the host copies it into the window. Two
+   ColorBuffers per task alternate, so the host can show one while the next is composed.
 
 Composition finishes before `presentDisplay` returns, so the hwcomposer hands back no
 release fences and declares `PRESENT_FENCE_IS_NOT_RELIABLE`.
@@ -51,9 +53,9 @@ lowest client layer sits.
 - `TaskFrames {task_id, display_id}` tells the host that `display_id` carries the task's
   frames. Display IDs start at 1 (display 0 is the host renderer's own) and are reused
   after a task ends.
-- Each frame is a post (`rcFBPost`) of the ColorBuffer that is, at that moment, display
-  `display_id`'s current one. `getColorBufferDisplay` on the host maps the posted
-  ColorBuffer back to the display, and so to the task. Its size is the task's bounds.
+- Each frame is an `rcSetDisplayColorBuffer(display_id, colorBuffer)` with a ColorBuffer
+  that is already composed. Its size is the task's bounds. The hwcomposer never sets a
+  ColorBuffer on display 0.
 - The hwcomposer sends `TaskFrames` again for every pairing whenever it subscribes to
   the channel anew, and after reconnecting to a restarted host renderer.
 

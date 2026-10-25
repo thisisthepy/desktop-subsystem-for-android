@@ -67,7 +67,8 @@ class HostRenderer {
 
     // Composes a ComposeDevice_v2 request and waits until the host has finished.
     bool compose(const std::vector<uint8_t>& request);
-    // Makes `colorBuffer` display `displayId`'s current frame and posts it.
+    // Makes `colorBuffer`, already composed, display `displayId`'s current frame: the host
+    // shows it in the task's window then.
     void post(uint32_t displayId, uint32_t colorBuffer);
 
    private:

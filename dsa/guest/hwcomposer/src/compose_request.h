@@ -74,7 +74,7 @@ static_assert(sizeof(WireComposeLayer) == 56, "ComposeLayer must match the host'
 static_assert(sizeof(WireComposeDeviceV2) == 16, "ComposeDevice_v2 must match the host's layout");
 
 // A ComposeDevice_v2 that composes `layers` (bottom to top) into `target`, a ColorBuffer the
-// size of `bounds`, for host display `displayId`. Each layer's frame is moved so that the
+// size of `bounds`, naming host display `displayId` (0 to name none). Each layer's frame is moved so that the
 // task's top left corner is the target's origin; crops stay in buffer coordinates.
 std::vector<uint8_t> buildComposeRequest(uint32_t displayId, uint32_t target, const Rect& bounds,
                                          const std::vector<ComposeInput>& layers);
