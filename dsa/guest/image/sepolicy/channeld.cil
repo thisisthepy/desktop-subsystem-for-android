@@ -22,8 +22,10 @@
 (allow dsa_channeld dsa_channeld_exec (file (entrypoint read getattr map execute open)))
 (allow dsa_channeld init (fd (use)))
 
-; Its messages go to the kernel log through the descriptor init opens for it.
+; Its messages go to the kernel log through the descriptor init opens for it
+; (stdio_to_kmsg opens /dev/kmsg_debug).
 (allow dsa_channeld kmsg_device (chr_file (write append getattr)))
+(allow dsa_channeld kmsg_debug_device (chr_file (write append getattr)))
 
 ; The boot's secret.
 (allow dsa_channeld proc_bootconfig (file (read open getattr)))
