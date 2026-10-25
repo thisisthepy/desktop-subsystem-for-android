@@ -7,7 +7,9 @@
 //
 // A connection carries requests and their responses, until the client sends WatchTasks.
 // From the answer to that request on, the connection carries only TaskEvent frames from
-// the service; a client that sends anything more on it is disconnected.
+// the service; a client that sends anything more on it is disconnected. In the same way,
+// from the answer to StreamInput on, the connection carries only PointerEvent frames from
+// the client, and the service answers none of them.
 //
 // The caller's identity is the user the operating system reports for the connection.
 // Nothing in these messages names a user, so a client cannot claim to be someone else, and
@@ -117,6 +119,62 @@ message CloseTask {
 // window.
 message LaunchApp {
   string package_name = 1;
+}
+
+// Turns the connection into a stream of input for the caller's Android: after the answer
+// (Done), the client sends only PointerEvent frames, which the service passes on as they
+// come, without answering them. Input is never waited on, so a pointer that moves fast is
+// not held back by the answers.
+message StreamInput {}
+
+// What a pointer did.
+enum PointerAction {
+  POINTER_ACTION_UNSPECIFIED = 0;
+  // The pointer touched down, or a mouse's first button went down.
+  POINTER_ACTION_DOWN = 1;
+  // The pointer moved while down, or a mouse's buttons changed while one stays down.
+  POINTER_ACTION_MOVE = 2;
+  // The pointer lifted, or a mouse's last button went up.
+  POINTER_ACTION_UP = 3;
+  // The gesture ended without completing, as when the window lost the pointer.
+  POINTER_ACTION_CANCEL = 4;
+  // The wheel turned; `scroll_x` and `scroll_y` say how far.
+  POINTER_ACTION_SCROLL = 5;
+  // The pointer moved over the window without touching it.
+  POINTER_ACTION_HOVER_MOVE = 6;
+  // The pointer left the window, or a pen went out of range.
+  POINTER_ACTION_HOVER_EXIT = 7;
+}
+
+// What kind of pointer it is.
+enum PointerTool {
+  POINTER_TOOL_UNSPECIFIED = 0;
+  POINTER_TOOL_MOUSE = 1;
+  POINTER_TOOL_TOUCH = 2;
+  POINTER_TOOL_PEN = 3;
+  // A pen's eraser end.
+  POINTER_TOOL_ERASER = 4;
+}
+
+// Pointer input in a task's window, sent on a connection that streams input.
+message PointerEvent {
+  int32 task_id = 1;
+  PointerAction action = 2;
+  PointerTool tool = 3;
+  // Tells the fingers of one touch apart. Stays the same from DOWN to UP.
+  uint32 pointer_id = 4;
+  // The position relative to the task's top left corner, in Android display pixels.
+  float x = 5;
+  float y = 6;
+  // The buttons held down after this event, as a set of bits: 1 primary, 2 secondary,
+  // 4 tertiary (middle), 8 back, 16 forward, 32 a pen's first barrel button, 64 its second.
+  uint32 buttons = 7;
+  // From 0 to 1.
+  float pressure = 8;
+  // For SCROLL: how far the wheel turned, in notches. Positive `scroll_y` scrolls up,
+  // positive `scroll_x` scrolls right.
+  float scroll_x = 9;
+  float scroll_y = 10;
 }
 
 // A rectangle in Android display pixels: left and top inclusive, right and bottom
@@ -234,6 +292,7 @@ message Request {
     WatchTasks watch_tasks = 8;
     CloseTask close_task = 9;
     LaunchApp launch_app = 10;
+    StreamInput stream_input = 11;
   }
 }
 
@@ -258,5 +317,6 @@ message Envelope {
     Request request = 4;
     Response response = 5;
     TaskEvent task_event = 6;
+    PointerEvent pointer_event = 7;
   }
 }

@@ -9,6 +9,10 @@
 //! A client that asks to watch the tasks of its Android ([`HostApiClient::watch_tasks`])
 //! gets the tasks there are now, and then the connection carries every change to them, as
 //! the compositor needs to keep one window per task.
+//!
+//! A client that streams input ([`HostApiClient::stream_input`]) sends pointer events on its
+//! connection from then on, and the service passes each to the caller's Android as it
+//! arrives, without answering, so a pointer that moves fast is never held back.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,6 +30,7 @@ use dsa_protocol::host_api::{
 use dsa_transport::local::{LocalListener, Peer};
 use dsa_transport::{Connection, Connector, TransportError};
 
+use crate::input::PointerEvent;
 use crate::session::{Session, SessionError, SessionState};
 use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskWatch};
 
@@ -54,6 +59,13 @@ pub trait UserAndroid: Send + Sync {
         let _ = request;
         Err(TaskRequestError::Failed(
             "this Android does not take requests about its tasks".into(),
+        ))
+    }
+    /// Passes pointer input in a task's window to this Android.
+    fn pointer(&self, event: &PointerEvent) -> Result<(), TaskRequestError> {
+        let _ = event;
+        Err(TaskRequestError::Failed(
+            "this Android does not take pointer input".into(),
         ))
     }
 }
@@ -85,12 +97,19 @@ impl UserAndroid for Session {
         Some(Session::watch_tasks(self))
     }
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
-        Session::request(self, request).map_err(|error| match error {
-            SessionError::NotActive(state) => TaskRequestError::NotRunning(format!(
-                "Android is {state}, not running; start it first (dsa start)"
-            )),
-            other => TaskRequestError::Failed(other.to_string()),
-        })
+        Session::request(self, request).map_err(request_error)
+    }
+    fn pointer(&self, event: &PointerEvent) -> Result<(), TaskRequestError> {
+        Session::pointer(self, event).map_err(request_error)
+    }
+}
+
+fn request_error(error: SessionError) -> TaskRequestError {
+    match error {
+        SessionError::NotActive(state) => TaskRequestError::NotRunning(format!(
+            "Android is {state}, not running; start it first (dsa start)"
+        )),
+        other => TaskRequestError::Failed(other.to_string()),
     }
 }
 
@@ -410,6 +429,9 @@ impl HostApiService {
             if let Some(request::Body::WatchTasks(_)) = request.body {
                 return self.watch_tasks(connection, &peer, request.id);
             }
+            if let Some(request::Body::StreamInput(_)) = request.body {
+                return self.stream_input(connection, &peer, request.id);
+            }
             let response = self.answer(&peer, request);
             if send(&mut *connection, Body::Response(response)).is_err() {
                 return;
@@ -482,6 +504,79 @@ impl HostApiService {
         }
     }
 
+    /// Answers a StreamInput request, then passes every pointer event the client sends to
+    /// its Android until the client goes away. Input to an Android that is not running is
+    /// dropped: the window that sends it can do nothing better with it.
+    fn stream_input(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => {
+                let _ = send(
+                    &mut *connection,
+                    Body::Response(Response {
+                        id,
+                        body: Some(error(ErrorCode::Unavailable, why)),
+                    }),
+                );
+                return;
+            }
+        };
+        let answer = Response {
+            id,
+            body: Some(response::Body::Done(types::Done {})),
+        };
+        if send(&mut *connection, Body::Response(answer)).is_err() {
+            return;
+        }
+        // Said once per run of failures, not once per event.
+        let mut failing = false;
+        loop {
+            let frame = match connection.recv(None) {
+                Ok(frame) => frame,
+                Err(_) => return,
+            };
+            let event = match decode(&frame) {
+                Ok(Envelope {
+                    body: Some(Body::PointerEvent(event)),
+                }) => PointerEvent::from_wire(&event),
+                Ok(_) => {
+                    eprintln!(
+                        "local API: a client of {} sent something other than input on a \
+                         connection that streams input; closing its connection",
+                        peer.user
+                    );
+                    connection.close();
+                    return;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "local API: a client of {} sent an unreadable frame ({error}); \
+                         closing its connection",
+                        peer.user
+                    );
+                    connection.close();
+                    return;
+                }
+            };
+            let outcome = event
+                .map_err(|why| format!("dropped a pointer event: {why}"))
+                .and_then(|event| {
+                    android
+                        .pointer(&event)
+                        .map_err(|why| format!("pointer input did not reach Android: {why}"))
+                });
+            match outcome {
+                Ok(()) => failing = false,
+                Err(why) => {
+                    if !failing {
+                        eprintln!("local API: {}: {why}", peer.user);
+                    }
+                    failing = true;
+                }
+            }
+        }
+    }
+
     fn answer(&self, peer: &Peer, request: Request) -> Response {
         let body = match request.body {
             None => error(
@@ -530,7 +625,8 @@ impl HostApiService {
                         | request::Body::ListTasks(_)
                         | request::Body::WatchTasks(_)
                         | request::Body::CloseTask(_)
-                        | request::Body::LaunchApp(_) => unreachable!("answered above"),
+                        | request::Body::LaunchApp(_)
+                        | request::Body::StreamInput(_) => unreachable!("answered above"),
                     }
                     response::Body::Status(types::Status {
                         state: to_wire(android.state()) as i32,
@@ -746,6 +842,22 @@ impl HostApiClient {
         }
     }
 
+    /// Streams input to the caller's Android. The connection carries nothing else from here
+    /// on, so the client is used up.
+    pub fn stream_input(mut self) -> Result<InputStream, ClientError> {
+        match self.exchange(
+            request::Body::StreamInput(types::StreamInput {}),
+            self.timeout,
+        )? {
+            response::Body::Done(_) => Ok(InputStream {
+                connection: self.connection,
+            }),
+            _ => Err(ClientError::Malformed(
+                "expected the answer that input may be sent".into(),
+            )),
+        }
+    }
+
     fn done(&mut self, body: request::Body) -> Result<(), ClientError> {
         match self.exchange(body, self.timeout)? {
             response::Body::Done(_) => Ok(()),
@@ -849,5 +961,20 @@ impl TaskStream {
                 Err(error) => return Err(ClientError::Malformed(error.to_string())),
             }
         }
+    }
+}
+
+/// A connection that carries input to the caller's Android, from
+/// [`HostApiClient::stream_input`].
+pub struct InputStream {
+    connection: Box<dyn Connection>,
+}
+
+impl InputStream {
+    /// Sends one pointer event. It returns once the event is on its way; nothing is
+    /// awaited. An error means the connection has ended, and a new one is needed.
+    pub fn send(&mut self, event: &PointerEvent) -> Result<(), ClientError> {
+        send(&mut *self.connection, Body::PointerEvent(event.to_wire()))
+            .map_err(ClientError::Transport)
     }
 }

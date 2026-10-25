@@ -6,6 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use dsa_host_core::handshake::ControlHandshake;
+use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use dsa_host_core::session::{
     GuestLauncher, Session, SessionConfig, SessionError, SessionEvent, SessionState, StopReason,
 };
@@ -15,6 +16,7 @@ use dsa_protocol::control::{envelope::Body, Envelope, RejectReason, Role};
 use dsa_protocol::encode;
 use dsa_protocol::handshake::{guest_connect, local_hello, HandshakeError};
 use dsa_transport::memory::{self, MemoryConnector};
+use dsa_transport::stream::{accept_with_timeout, FramedConnection, StreamSocket};
 use dsa_transport::{Connection, Connector, TransportError};
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -855,4 +857,133 @@ fn nfr5_a_repeated_task_message_is_handed_on_once() {
         .events
         .recv_timeout(Duration::from_millis(100))
         .is_err());
+}
+
+fn pointer_down(task_id: i32) -> PointerEvent {
+    let mut event = PointerEvent::new(
+        task_id,
+        PointerAction::Down,
+        PointerTool::Mouse,
+        (12.5, 40.0),
+    );
+    event.buttons = buttons::SECONDARY;
+    event.pressure = 1.0;
+    event
+}
+
+#[test]
+fn fr5_pointer_input_reaches_the_guest_as_one_message_per_event() {
+    let (session, mut agent, _launcher) = active_session();
+    let down = pointer_down(7);
+    let mut up = down;
+    up.action = PointerAction::Up;
+    up.buttons = 0;
+    session.pointer(&down).expect("the down is sent");
+    session.pointer(&up).expect("the up is sent");
+    for expected in [down, up] {
+        let message = dsa_protocol::decode(&agent.recv(Some(WAIT)).unwrap()).unwrap();
+        assert_eq!(
+            message.body,
+            Some(Body::PointerEvent(expected.to_control()))
+        );
+    }
+}
+
+#[test]
+fn fr5_pointer_input_while_the_guest_is_not_running_says_so() {
+    let (session, _connector) = session_with(FakeLauncher::default(), WAIT);
+    assert_eq!(
+        session.pointer(&pointer_down(7)),
+        Err(SessionError::NotActive(SessionState::Stopped))
+    );
+}
+
+/// A control channel over a loopback socket, which can share its socket between a reader
+/// and a sender as hvsocket and vsock do; the in-memory one cannot.
+struct Tcp(std::net::TcpStream);
+
+impl std::io::Read for Tcp {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read(buf)
+    }
+}
+
+impl std::io::Write for Tcp {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
+impl StreamSocket for Tcp {
+    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+        self.0.set_read_timeout(timeout)
+    }
+    fn shutdown(&mut self) {
+        let _ = self.0.shutdown(std::net::Shutdown::Both);
+    }
+    fn try_clone(&self) -> std::io::Result<Self> {
+        self.0.try_clone().map(Tcp)
+    }
+}
+
+struct TcpListener(std::net::TcpListener);
+
+impl dsa_transport::Listener for TcpListener {
+    fn accept(&mut self, timeout: Duration) -> Result<Box<dyn Connection>, TransportError> {
+        let (stream, _) = accept_with_timeout(timeout, || self.0.accept())?;
+        stream.set_nonblocking(false)?;
+        Ok(Box::new(FramedConnection::new(Tcp(stream))))
+    }
+}
+
+#[test]
+fn fr5_pointer_input_does_not_wait_for_the_session_to_stop_reading_the_channel() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    listener.set_nonblocking(true).expect("nonblocking");
+    let address = listener.local_addr().unwrap();
+    let launcher = FakeLauncher::default();
+    let session = Session::new(
+        launcher.clone(),
+        Box::new(TcpListener(listener)),
+        ControlHandshake::new("dsa-host test", WAIT),
+        SessionConfig {
+            connect_timeout: WAIT,
+            stop_timeout: WAIT,
+        },
+    );
+    session.start();
+    let secret = launcher.secret();
+    let mut agent: Box<dyn Connection> = Box::new(FramedConnection::new(Tcp(
+        std::net::TcpStream::connect(address).expect("the agent connects"),
+    )));
+    guest_connect(
+        agent.as_mut(),
+        &local_hello(Role::Guest, "dsa-guestd test"),
+        &secret,
+        WAIT,
+    )
+    .expect("the host accepts the agent");
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    // The session waits on the channel for up to 20 ms at a time. An event that waited for
+    // that would take a second for these; a mouse sends this many in well under one.
+    let started = std::time::Instant::now();
+    for _ in 0..100 {
+        session.pointer(&pointer_down(7)).expect("sent");
+    }
+    let took = started.elapsed();
+    for _ in 0..100 {
+        let message = dsa_protocol::decode(&agent.recv(Some(WAIT)).unwrap()).unwrap();
+        assert_eq!(
+            message.body,
+            Some(Body::PointerEvent(pointer_down(7).to_control()))
+        );
+    }
+    assert!(
+        took < Duration::from_millis(400),
+        "100 events took {took:?}"
+    );
 }

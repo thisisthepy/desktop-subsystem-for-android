@@ -2,6 +2,8 @@ package io.github.thisisthepy.dsa.agent
 
 import io.github.thisisthepy.dsa.agent.channel.ChannelEndpoint
 import io.github.thisisthepy.dsa.agent.channel.ChannelLocator
+import io.github.thisisthepy.dsa.agent.input.InjectedMotion
+import io.github.thisisthepy.dsa.agent.input.InputInjector
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.tasks.TaskKind
@@ -179,4 +181,19 @@ class FakeWindowing(var acceptAfter: Int = 0) : WindowingControl {
     }
 
     override fun displaySize() = size ?: throw IllegalStateException("the display is not up")
+}
+
+/** The framework's input: records what was injected, on a clock the test moves. */
+class FakeInjector : InputInjector {
+    val injected = mutableListOf<InjectedMotion>()
+    var clock = 1000L
+    var refuse = false
+
+    override fun now() = clock
+
+    override fun inject(motion: InjectedMotion): Boolean {
+        if (refuse) return false
+        injected += motion
+        return true
+    }
 }
