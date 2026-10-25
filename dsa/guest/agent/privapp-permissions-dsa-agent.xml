@@ -13,6 +13,7 @@
         <permission name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
         <permission name="android.permission.WRITE_SECURE_SETTINGS" />
         <permission name="android.permission.INTERNAL_SYSTEM_WINDOW" />
+        <permission name="android.permission.INJECT_EVENTS" />
         <permission name="android.permission.QUERY_ALL_PACKAGES" />
     </privapp-permissions>
 </permissions>

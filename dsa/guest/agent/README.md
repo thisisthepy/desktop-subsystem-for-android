@@ -21,6 +21,9 @@ by the image in `/system_ext/priv-app/DsaAgent/`. It has no activity: the host i
 - **Host requests.** `LaunchApp` starts the package's launcher activity as a new task in a
   freeform window (or brings its task to the front). `CloseTask` ends the task, but only a
   task the host was told about.
+- **Pointer input.** The host sends the mouse, touch and pen input of each task's window
+  (`PointerEvent`, relative to the task). The agent injects it into the task at the
+  place it last reported for the task (see below).
 - **The channel.** It reaches the host through the control daemon's binder service,
   `io.github.thisisthepy.dsa.channel.IChannel/default` (`dsa/guest/aidl/`). It looks for
   the service every second until the daemon is up, subscribes, and sends every app task
@@ -78,6 +81,27 @@ of their own, because neither holds the other's surface, but a touch in the shar
 goes to the upper task. A bigger guest display holds more tasks
 (`androidboot.dsa.display_width` and `display_height`, in `dsa/guest/hwcomposer/`).
 
+## Pointer input
+
+The host sends one `PointerEvent` per pointer as it happens, with the position relative to
+the task. The agent adds the task's origin on the display, as it last reported it to the
+host, and injects a `MotionEvent` with `InputManager.injectInputEvent`, without waiting
+for the app (`input/PointerInput.kt`). Input for a task the host was not told about is
+dropped.
+
+- The mouse is `SOURCE_MOUSE`. A press is `ACTION_DOWN`, then `ACTION_BUTTON_PRESS` for
+  the button, so the right button is `BUTTON_SECONDARY`: a context click, not a long
+  press. A second button while one is down is only a button press. Hovering begins with
+  `ACTION_HOVER_ENTER` and ends before a press.
+- The wheel is `ACTION_SCROLL` with `AXIS_VSCROLL` and `AXIS_HSCROLL`, in notches.
+- Fingers are `SOURCE_TOUCHSCREEN` and a pen is `SOURCE_STYLUS` (its eraser end
+  `TOOL_TYPE_ERASER`). Every finger down goes in each event of a touch: the second finger
+  is `ACTION_POINTER_DOWN`, and lifting all but the last is `ACTION_POINTER_UP`.
+
+Injection rather than a uinput device: a uinput device needs `/dev/uinput` opened by a
+process the SELinux policy allows, which an app is not, and a mouse there reports movement,
+not places. Injection takes each event's place, source, tool and buttons as they are.
+
 ## Framework interfaces outside the SDK
 
 A platform app may use framework interfaces the SDK does not publish. The agent uses:
@@ -90,6 +114,7 @@ A platform app may use framework interfaces the SDK does not publish. The agent 
 | `ActivityOptions.setLaunchWindowingMode` | A freeform window for a launched app (reflection) |
 | `ServiceManager.checkService` | The control daemon's service (reflection) |
 | `Binder.markVintfStability` | Marking the listener the daemon calls as a stable interface (reflection) |
+| `InputManager.injectInputEvent`, `MotionEvent.setActionButton` | Injecting the host's pointer input (reflection) |
 
 `hidden-api/` declares the classes the agent links against. It is compile-only: at run time
 the classes are the guest's own.
@@ -124,8 +149,8 @@ The release APK, `build/outputs/apk/release/dsa-agent-release-unsigned.apk`, is 
 
 | Path | What it is |
 |---|---|
-| `src/main/kotlin/.../agent/` | The agent: task reports, requests, the channel client, the freeform setup, task placement |
-| `src/main/kotlin/.../agent/platform/` | The framework side: the application, task source, actions, windowing, binder channel |
+| `src/main/kotlin/.../agent/` | The agent: task reports, requests, pointer input, the channel client, the freeform setup, task placement |
+| `src/main/kotlin/.../agent/platform/` | The framework side: the application, task source, actions, windowing, input injection, binder channel |
 | `src/test/` | The unit tests |
 | `hidden-api/` | Compile-only declarations of framework classes outside the SDK |
 | `privapp-permissions-dsa-agent.xml` | The agent's privileged permissions |
