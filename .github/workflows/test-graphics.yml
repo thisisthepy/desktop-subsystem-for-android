@@ -36,6 +36,9 @@ jobs:
       - name: Fetch gfxstream and guest build dependencies
         run: bash dsa/graphics/fetch.sh .scratch/gfxstream
 
+      - name: Test the guest transport on the build machine
+        run: bash dsa/graphics/tests/test.sh .scratch
+
       - name: Build the guest transport
         run: bash dsa/graphics/build.sh .scratch .scratch/build
 
