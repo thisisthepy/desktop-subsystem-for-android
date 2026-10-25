@@ -265,6 +265,10 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::close_and_launch_reach_the_caller(&mut || $make);
         }
         #[test]
+        fn fr4_resizing_and_rescaling_a_task_reach_the_callers_android() {
+            $crate::host_api_conformance::resize_and_density_reach_the_caller(&mut || $make);
+        }
+        #[test]
         fn fr3_a_request_to_an_android_that_is_not_running_says_so() {
             $crate::host_api_conformance::request_to_stopped_android_says_so(&mut || $make);
         }
@@ -435,6 +439,9 @@ pub fn sample_task(task_id: i32, label: &str) -> Task {
         package_name: "com.example.app".into(),
         label: label.into(),
         focused: false,
+        density_dpi: 320,
+        max_width: 3840,
+        max_height: 2160,
     }
 }
 
@@ -522,6 +529,30 @@ pub fn close_and_launch_reach_the_caller(make: MakeLocal<'_>) {
                 package_name: "com.example.clock".into()
             },
             TaskRequest::Close { task_id: 9 },
+        ]
+    );
+}
+
+pub fn resize_and_density_reach_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut client = connect(&mut *connector);
+    client.start().unwrap();
+    client.set_task_density(9, 320).expect("the density");
+    client.resize_task(9, 1280, 720).expect("the resize");
+    assert_eq!(
+        *androids.of(&user).unwrap().requests.lock().unwrap(),
+        vec![
+            TaskRequest::SetDensity {
+                task_id: 9,
+                density_dpi: 320
+            },
+            TaskRequest::Resize {
+                task_id: 9,
+                width: 1280,
+                height: 720
+            },
         ]
     );
 }

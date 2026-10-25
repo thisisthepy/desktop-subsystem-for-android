@@ -79,7 +79,8 @@ TEST(fr3_task_removed_ends_the_task) {
 }
 
 TEST(fr3_other_messages_mean_nothing_to_the_hwcomposer) {
-    for (const char* name : {"close_task", "launch_app", "task_frames", "hello_guest"}) {
+    for (const char* name : {"close_task", "launch_app", "task_frames", "hello_guest", "resize_task",
+                             "set_task_density"}) {
         const std::vector<uint8_t> bytes = vector(name);
         EXPECT_TRUE(std::holds_alternative<std::monostate>(decodeChannelFrame(bytes.data(), bytes.size())));
     }

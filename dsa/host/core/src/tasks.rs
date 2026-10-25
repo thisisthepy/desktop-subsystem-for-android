@@ -44,6 +44,19 @@ pub struct Task {
     pub label: String,
     /// Whether the task has input focus in the guest.
     pub focused: bool,
+    /// The density the task's app draws at, in dots per inch (160 at a scale of 100%); 0
+    /// when the agent could not read it.
+    pub density_dpi: u32,
+    /// The largest size the guest can give the task, in its display pixels; 0 when unknown.
+    pub max_width: u32,
+    pub max_height: u32,
+}
+
+impl Task {
+    /// The largest size the guest can give the task, when the agent said.
+    pub fn max_size(&self) -> Option<(u32, u32)> {
+        (self.max_width > 0 && self.max_height > 0).then_some((self.max_width, self.max_height))
+    }
 }
 
 /// A change to the guest's tasks.
@@ -82,6 +95,65 @@ pub enum TaskRequest {
     Close { task_id: i32 },
     /// Start the app's launcher activity as a new task in its own window.
     Launch { package_name: String },
+    /// The user resized the task's window: the task takes its client size, in guest
+    /// display pixels.
+    Resize {
+        task_id: i32,
+        width: u32,
+        height: u32,
+    },
+    /// The task's window is on a monitor of another scale: the task draws at this density.
+    SetDensity { task_id: i32, density_dpi: u32 },
+}
+
+impl TaskRequest {
+    /// What the request asks for, in words for a log line.
+    pub fn describe(&self) -> String {
+        match self {
+            TaskRequest::Close { task_id } => format!("end task {task_id}"),
+            TaskRequest::Launch { package_name } => format!("launch {package_name}"),
+            TaskRequest::Resize {
+                task_id,
+                width,
+                height,
+            } => format!("resize task {task_id} to {width}x{height}"),
+            TaskRequest::SetDensity {
+                task_id,
+                density_dpi,
+            } => format!("draw task {task_id} at {density_dpi} dpi"),
+        }
+    }
+}
+
+/// Folds a run of requests waiting to be sent into the ones still worth sending.
+///
+/// Only a task's latest size and latest density count: while the user drags a window's
+/// edge, the sizes it passed through are dropped rather than queued, so the guest never
+/// works through a backlog. The latest of each keeps its place, so a density followed by
+/// the size that goes with it still arrives in that order. Closes and launches are kept, in
+/// order.
+pub fn coalesce(requests: Vec<TaskRequest>) -> Vec<TaskRequest> {
+    let superseded = |index: usize, request: &TaskRequest| {
+        requests[index + 1..]
+            .iter()
+            .any(|later| match (request, later) {
+                (
+                    TaskRequest::Resize { task_id: a, .. },
+                    TaskRequest::Resize { task_id: b, .. },
+                ) => a == b,
+                (
+                    TaskRequest::SetDensity { task_id: a, .. },
+                    TaskRequest::SetDensity { task_id: b, .. },
+                ) => a == b,
+                _ => false,
+            })
+    };
+    requests
+        .iter()
+        .enumerate()
+        .filter(|(index, request)| !superseded(*index, request))
+        .map(|(_, request)| request.clone())
+        .collect()
 }
 
 /// Why a [`TaskRequest`] was not carried out.
@@ -234,8 +306,68 @@ mod tests {
             },
             package_name: "com.example".into(),
             label: label.into(),
-            focused: false,
+            ..Task::default()
         }
+    }
+
+    fn resize(task_id: i32, width: u32) -> TaskRequest {
+        TaskRequest::Resize {
+            task_id,
+            width,
+            height: 600,
+        }
+    }
+
+    #[test]
+    fn fr4_only_the_latest_size_of_each_task_is_sent() {
+        let requests = vec![
+            resize(1, 500),
+            resize(2, 300),
+            resize(1, 520),
+            resize(1, 540),
+        ];
+        assert_eq!(coalesce(requests), vec![resize(2, 300), resize(1, 540)]);
+    }
+
+    #[test]
+    fn fr4_a_density_and_its_size_keep_their_order() {
+        let density = TaskRequest::SetDensity {
+            task_id: 1,
+            density_dpi: 320,
+        };
+        let requests = vec![
+            resize(1, 500),
+            TaskRequest::SetDensity {
+                task_id: 1,
+                density_dpi: 240,
+            },
+            density.clone(),
+            resize(1, 1000),
+        ];
+        assert_eq!(coalesce(requests), vec![density, resize(1, 1000)]);
+    }
+
+    #[test]
+    fn fr4_closes_and_launches_are_never_dropped() {
+        let launch = TaskRequest::Launch {
+            package_name: "com.example".into(),
+        };
+        let close = TaskRequest::Close { task_id: 1 };
+        let requests = vec![close.clone(), launch.clone(), close.clone(), resize(1, 500)];
+        assert_eq!(
+            coalesce(requests),
+            vec![close.clone(), launch, close, resize(1, 500)]
+        );
+    }
+
+    #[test]
+    fn fr4_a_task_reports_its_size_limit_only_when_it_knows_it() {
+        let mut known = task(1, "a");
+        assert_eq!(known.max_size(), None);
+        known.max_width = 1920;
+        assert_eq!(known.max_size(), None);
+        known.max_height = 1080;
+        assert_eq!(known.max_size(), Some((1920, 1080)));
     }
 
     #[test]

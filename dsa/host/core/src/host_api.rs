@@ -225,6 +225,9 @@ fn task_to_wire(task: Task) -> types::Task {
         package_name: task.package_name,
         label: task.label,
         focused: task.focused,
+        density_dpi: task.density_dpi,
+        max_width: task.max_width,
+        max_height: task.max_height,
     }
 }
 
@@ -241,6 +244,9 @@ fn task_from_wire(task: types::Task) -> Task {
         package_name: task.package_name,
         label: task.label,
         focused: task.focused,
+        density_dpi: task.density_dpi,
+        max_width: task.max_width,
+        max_height: task.max_height,
     }
 }
 
@@ -518,6 +524,21 @@ impl HostApiService {
                     package_name: launch.package_name,
                 },
             ),
+            Some(request::Body::ResizeTask(resize)) => self.request(
+                peer,
+                TaskRequest::Resize {
+                    task_id: resize.task_id,
+                    width: resize.width,
+                    height: resize.height,
+                },
+            ),
+            Some(request::Body::SetTaskDensity(density)) => self.request(
+                peer,
+                TaskRequest::SetDensity {
+                    task_id: density.task_id,
+                    density_dpi: density.density_dpi,
+                },
+            ),
             Some(body) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => {
@@ -530,7 +551,9 @@ impl HostApiService {
                         | request::Body::ListTasks(_)
                         | request::Body::WatchTasks(_)
                         | request::Body::CloseTask(_)
-                        | request::Body::LaunchApp(_) => unreachable!("answered above"),
+                        | request::Body::LaunchApp(_)
+                        | request::Body::ResizeTask(_)
+                        | request::Body::SetTaskDensity(_) => unreachable!("answered above"),
                     }
                     response::Body::Status(types::Status {
                         state: to_wire(android.state()) as i32,
@@ -729,6 +752,47 @@ impl HostApiClient {
         self.done(request::Body::LaunchApp(types::LaunchApp {
             package_name: package_name.into(),
         }))
+    }
+
+    /// Asks the caller's Android to give a task the client size of its window, in Android
+    /// display pixels, as when the user resizes the window.
+    pub fn resize_task(
+        &mut self,
+        task_id: i32,
+        width: u32,
+        height: u32,
+    ) -> Result<(), ClientError> {
+        self.done(request::Body::ResizeTask(types::ResizeTask {
+            task_id,
+            width,
+            height,
+        }))
+    }
+
+    /// Asks the caller's Android to draw a task at `density_dpi`, as when its window moves
+    /// to a monitor of another scale.
+    pub fn set_task_density(&mut self, task_id: i32, density_dpi: u32) -> Result<(), ClientError> {
+        self.done(request::Body::SetTaskDensity(types::SetTaskDensity {
+            task_id,
+            density_dpi,
+        }))
+    }
+
+    /// Carries out `request` against the caller's Android.
+    pub fn request(&mut self, request: &TaskRequest) -> Result<(), ClientError> {
+        match request {
+            TaskRequest::Close { task_id } => self.close_task(*task_id),
+            TaskRequest::Launch { package_name } => self.launch_app(package_name),
+            TaskRequest::Resize {
+                task_id,
+                width,
+                height,
+            } => self.resize_task(*task_id, *width, *height),
+            TaskRequest::SetDensity {
+                task_id,
+                density_dpi,
+            } => self.set_task_density(*task_id, *density_dpi),
+        }
     }
 
     /// Watches the app tasks of the caller's Android. The connection carries nothing else

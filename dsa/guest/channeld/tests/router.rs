@@ -53,6 +53,7 @@ fn task_updated(task_id: i32) -> Vec<u8> {
         package_name: "org.example.notes".into(),
         label: "Notes".into(),
         focused: true,
+        ..TaskUpdated::default()
     }))
 }
 

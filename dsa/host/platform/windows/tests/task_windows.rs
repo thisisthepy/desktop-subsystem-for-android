@@ -127,7 +127,7 @@ fn task(task_id: i32, label: &str, width: i32, height: i32) -> Task {
         },
         package_name: format!("com.example.app{task_id}"),
         label: label.into(),
-        focused: false,
+        ..Task::default()
     }
 }
 

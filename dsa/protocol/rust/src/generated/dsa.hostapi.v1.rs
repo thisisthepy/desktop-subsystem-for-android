@@ -70,6 +70,26 @@ pub struct LaunchApp {
     #[prost(string, tag = "1")]
     pub package_name: ::prost::alloc::string::String,
 }
+/// The user resized a task's window: asks the caller's Android to give the task the
+/// window's client size, in Android display pixels.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResizeTask {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub width: u32,
+    #[prost(uint32, tag = "3")]
+    pub height: u32,
+}
+/// A task's window moved to a monitor of another scale: asks the caller's Android to draw
+/// the task at `density_dpi` (160 at a scale of 100%).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetTaskDensity {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub density_dpi: u32,
+}
 /// A rectangle in Android display pixels: left and top inclusive, right and bottom
 /// exclusive.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -102,6 +122,15 @@ pub struct Task {
     /// Whether the task has input focus in Android.
     #[prost(bool, tag = "5")]
     pub focused: bool,
+    /// The density the task's app draws at, in dots per inch (160 at a scale of 100%). 0 when
+    /// unknown.
+    #[prost(uint32, tag = "6")]
+    pub density_dpi: u32,
+    /// The largest size Android can give the task, in its display pixels. 0 when unknown.
+    #[prost(uint32, tag = "7")]
+    pub max_width: u32,
+    #[prost(uint32, tag = "8")]
+    pub max_height: u32,
 }
 /// The task ended.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -194,7 +223,7 @@ pub struct Error {
 pub struct Request {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "request::Body", tags = "2, 3, 4, 5, 6, 7, 8, 9, 10")]
+    #[prost(oneof = "request::Body", tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12")]
     pub body: ::core::option::Option<request::Body>,
 }
 /// Nested message and enum types in `Request`.
@@ -219,6 +248,10 @@ pub mod request {
         CloseTask(super::CloseTask),
         #[prost(message, tag = "10")]
         LaunchApp(super::LaunchApp),
+        #[prost(message, tag = "11")]
+        ResizeTask(super::ResizeTask),
+        #[prost(message, tag = "12")]
+        SetTaskDensity(super::SetTaskDensity),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]

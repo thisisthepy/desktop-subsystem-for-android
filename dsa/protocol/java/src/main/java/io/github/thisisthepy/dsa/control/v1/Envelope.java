@@ -30,6 +30,8 @@ public  final class Envelope extends
     TASK_FRAMES(8),
     CLOSE_TASK(9),
     LAUNCH_APP(10),
+    RESIZE_TASK(11),
+    SET_TASK_DENSITY(12),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -55,6 +57,8 @@ public  final class Envelope extends
         case 8: return TASK_FRAMES;
         case 9: return CLOSE_TASK;
         case 10: return LAUNCH_APP;
+        case 11: return RESIZE_TASK;
+        case 12: return SET_TASK_DENSITY;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -571,6 +575,106 @@ public  final class Envelope extends
    */
   private void clearLaunchApp() {
     if (bodyCase_ == 10) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int RESIZE_TASK_FIELD_NUMBER = 11;
+  /**
+   * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+   */
+  @java.lang.Override
+  public boolean hasResizeTask() {
+    return bodyCase_ == 11;
+  }
+  /**
+   * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ResizeTask getResizeTask() {
+    if (bodyCase_ == 11) {
+       return (io.github.thisisthepy.dsa.control.v1.ResizeTask) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ResizeTask.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+   */
+  private void setResizeTask(io.github.thisisthepy.dsa.control.v1.ResizeTask value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 11;
+  }
+  /**
+   * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+   */
+  private void mergeResizeTask(io.github.thisisthepy.dsa.control.v1.ResizeTask value) {
+    value.getClass();
+  if (bodyCase_ == 11 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ResizeTask.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ResizeTask.newBuilder((io.github.thisisthepy.dsa.control.v1.ResizeTask) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 11;
+  }
+  /**
+   * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+   */
+  private void clearResizeTask() {
+    if (bodyCase_ == 11) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int SET_TASK_DENSITY_FIELD_NUMBER = 12;
+  /**
+   * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+   */
+  @java.lang.Override
+  public boolean hasSetTaskDensity() {
+    return bodyCase_ == 12;
+  }
+  /**
+   * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.SetTaskDensity getSetTaskDensity() {
+    if (bodyCase_ == 12) {
+       return (io.github.thisisthepy.dsa.control.v1.SetTaskDensity) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.SetTaskDensity.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+   */
+  private void setSetTaskDensity(io.github.thisisthepy.dsa.control.v1.SetTaskDensity value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 12;
+  }
+  /**
+   * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+   */
+  private void mergeSetTaskDensity(io.github.thisisthepy.dsa.control.v1.SetTaskDensity value) {
+    value.getClass();
+  if (bodyCase_ == 12 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.SetTaskDensity.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.SetTaskDensity.newBuilder((io.github.thisisthepy.dsa.control.v1.SetTaskDensity) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 12;
+  }
+  /**
+   * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+   */
+  private void clearSetTaskDensity() {
+    if (bodyCase_ == 12) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -1167,6 +1271,102 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+     */
+    @java.lang.Override
+    public boolean hasResizeTask() {
+      return instance.hasResizeTask();
+    }
+    /**
+     * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ResizeTask getResizeTask() {
+      return instance.getResizeTask();
+    }
+    /**
+     * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+     */
+    public Builder setResizeTask(io.github.thisisthepy.dsa.control.v1.ResizeTask value) {
+      copyOnWrite();
+      instance.setResizeTask(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+     */
+    public Builder setResizeTask(
+        io.github.thisisthepy.dsa.control.v1.ResizeTask.Builder builderForValue) {
+      copyOnWrite();
+      instance.setResizeTask(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+     */
+    public Builder mergeResizeTask(io.github.thisisthepy.dsa.control.v1.ResizeTask value) {
+      copyOnWrite();
+      instance.mergeResizeTask(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+     */
+    public Builder clearResizeTask() {
+      copyOnWrite();
+      instance.clearResizeTask();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+     */
+    @java.lang.Override
+    public boolean hasSetTaskDensity() {
+      return instance.hasSetTaskDensity();
+    }
+    /**
+     * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.SetTaskDensity getSetTaskDensity() {
+      return instance.getSetTaskDensity();
+    }
+    /**
+     * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+     */
+    public Builder setSetTaskDensity(io.github.thisisthepy.dsa.control.v1.SetTaskDensity value) {
+      copyOnWrite();
+      instance.setSetTaskDensity(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+     */
+    public Builder setSetTaskDensity(
+        io.github.thisisthepy.dsa.control.v1.SetTaskDensity.Builder builderForValue) {
+      copyOnWrite();
+      instance.setSetTaskDensity(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+     */
+    public Builder mergeSetTaskDensity(io.github.thisisthepy.dsa.control.v1.SetTaskDensity value) {
+      copyOnWrite();
+      instance.mergeSetTaskDensity(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+     */
+    public Builder clearSetTaskDensity() {
+      copyOnWrite();
+      instance.clearSetTaskDensity();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -1195,11 +1395,13 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.TaskFrames.class,
             io.github.thisisthepy.dsa.control.v1.CloseTask.class,
             io.github.thisisthepy.dsa.control.v1.LaunchApp.class,
+            io.github.thisisthepy.dsa.control.v1.ResizeTask.class,
+            io.github.thisisthepy.dsa.control.v1.SetTaskDensity.class,
           };
           java.lang.String info =
-              "\u0000\n\u0001\u0000\u0001\n\n\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003" +
+              "\u0000\f\u0001\u0000\u0001\f\f\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003" +
               "<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<" +
-              "\u0000";
+              "\u0000\u000b<\u0000\f<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

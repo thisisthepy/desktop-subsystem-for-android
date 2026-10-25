@@ -294,7 +294,7 @@ mod tests {
             },
             package_name: format!("com.example.app{task_id}"),
             label: label.into(),
-            focused: false,
+            ..Task::default()
         }
     }
 

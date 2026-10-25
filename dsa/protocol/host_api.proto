@@ -119,6 +119,21 @@ message LaunchApp {
   string package_name = 1;
 }
 
+// The user resized a task's window: asks the caller's Android to give the task the
+// window's client size, in Android display pixels.
+message ResizeTask {
+  int32 task_id = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+}
+
+// A task's window moved to a monitor of another scale: asks the caller's Android to draw
+// the task at `density_dpi` (160 at a scale of 100%).
+message SetTaskDensity {
+  int32 task_id = 1;
+  uint32 density_dpi = 2;
+}
+
 // A rectangle in Android display pixels: left and top inclusive, right and bottom
 // exclusive.
 message Rect {
@@ -141,6 +156,12 @@ message Task {
   string label = 4;
   // Whether the task has input focus in Android.
   bool focused = 5;
+  // The density the task's app draws at, in dots per inch (160 at a scale of 100%). 0 when
+  // unknown.
+  uint32 density_dpi = 6;
+  // The largest size Android can give the task, in its display pixels. 0 when unknown.
+  uint32 max_width = 7;
+  uint32 max_height = 8;
 }
 
 // The task ended.
@@ -234,6 +255,8 @@ message Request {
     WatchTasks watch_tasks = 8;
     CloseTask close_task = 9;
     LaunchApp launch_app = 10;
+    ResizeTask resize_task = 11;
+    SetTaskDensity set_task_density = 12;
   }
 }
 

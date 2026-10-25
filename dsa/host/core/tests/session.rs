@@ -676,6 +676,9 @@ fn task_updated(task_id: i32, label: &str) -> Body {
         package_name: "com.example.clock".into(),
         label: label.into(),
         focused: true,
+        density_dpi: 240,
+        max_width: 1920,
+        max_height: 1080,
     })
 }
 
@@ -691,6 +694,9 @@ fn clock(task_id: i32, label: &str) -> Task {
         package_name: "com.example.clock".into(),
         label: label.into(),
         focused: true,
+        density_dpi: 240,
+        max_width: 1920,
+        max_height: 1080,
     }
 }
 
@@ -794,6 +800,44 @@ fn fr3_closing_a_task_and_launching_an_app_reach_the_guest() {
         second.body,
         Some(Body::LaunchApp(dsa_protocol::control::LaunchApp {
             package_name: "com.example.clock".into()
+        }))
+    );
+}
+
+#[test]
+fn fr4_resizing_and_rescaling_a_task_reach_the_guest() {
+    let (session, mut agent, _launcher) = active_session();
+    session
+        .request(TaskRequest::SetDensity {
+            task_id: 7,
+            density_dpi: 320,
+        })
+        .expect("the density is sent");
+    session
+        .request(TaskRequest::Resize {
+            task_id: 7,
+            width: 1096,
+            height: 1948,
+        })
+        .expect("the resize is sent");
+
+    let first = dsa_protocol::decode(&agent.recv(Some(WAIT)).unwrap()).unwrap();
+    assert_eq!(
+        first.body,
+        Some(Body::SetTaskDensity(
+            dsa_protocol::control::SetTaskDensity {
+                task_id: 7,
+                density_dpi: 320
+            }
+        ))
+    );
+    let second = dsa_protocol::decode(&agent.recv(Some(WAIT)).unwrap()).unwrap();
+    assert_eq!(
+        second.body,
+        Some(Body::ResizeTask(dsa_protocol::control::ResizeTask {
+            task_id: 7,
+            width: 1096,
+            height: 1948
         }))
     );
 }

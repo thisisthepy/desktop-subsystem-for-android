@@ -10,7 +10,8 @@ use std::path::PathBuf;
 
 use dsa_protocol::control::{
     envelope::Body, AuthChallenge, AuthProof, CloseTask, Envelope, Hello, HelloAccepted,
-    HelloRejected, LaunchApp, Rect, RejectReason, Role, TaskFrames, TaskRemoved, TaskUpdated,
+    HelloRejected, LaunchApp, Rect, RejectReason, ResizeTask, Role, SetTaskDensity, TaskFrames,
+    TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
 
@@ -90,6 +91,39 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                 package_name: "com.example.notes".into(),
                 label: "메모 (Notes)".into(),
                 focused: true,
+                ..TaskUpdated::default()
+            })),
+        ),
+        (
+            "task_updated_density",
+            wrap(Body::TaskUpdated(TaskUpdated {
+                task_id: 42,
+                bounds: Some(Rect {
+                    left: 0,
+                    top: 0,
+                    right: 1096,
+                    bottom: 1948,
+                }),
+                package_name: "com.example.notes".into(),
+                density_dpi: 320,
+                max_width: 3840,
+                max_height: 2160,
+                ..TaskUpdated::default()
+            })),
+        ),
+        (
+            "resize_task",
+            wrap(Body::ResizeTask(ResizeTask {
+                task_id: 42,
+                width: 1280,
+                height: 720,
+            })),
+        ),
+        (
+            "set_task_density",
+            wrap(Body::SetTaskDensity(SetTaskDensity {
+                task_id: 42,
+                density_dpi: 240,
             })),
         ),
         (

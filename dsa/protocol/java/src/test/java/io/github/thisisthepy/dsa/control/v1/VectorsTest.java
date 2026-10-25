@@ -79,6 +79,21 @@ public final class VectorsTest {
                         .setLabel("메모 (Notes)")
                         .setFocused(true))
                 .build());
+        cases.put("task_updated_density", Envelope.newBuilder()
+                .setTaskUpdated(TaskUpdated.newBuilder()
+                        .setTaskId(42)
+                        .setBounds(Rect.newBuilder().setLeft(0).setTop(0).setRight(1096).setBottom(1948))
+                        .setPackageName("com.example.notes")
+                        .setDensityDpi(320)
+                        .setMaxWidth(3840)
+                        .setMaxHeight(2160))
+                .build());
+        cases.put("resize_task", Envelope.newBuilder()
+                .setResizeTask(ResizeTask.newBuilder().setTaskId(42).setWidth(1280).setHeight(720))
+                .build());
+        cases.put("set_task_density", Envelope.newBuilder()
+                .setSetTaskDensity(SetTaskDensity.newBuilder().setTaskId(42).setDensityDpi(240))
+                .build());
         cases.put("task_updated_negative_origin", Envelope.newBuilder()
                 .setTaskUpdated(TaskUpdated.newBuilder()
                         .setTaskId(7)
