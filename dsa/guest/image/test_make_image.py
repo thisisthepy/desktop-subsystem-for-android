@@ -351,12 +351,25 @@ class ImageLayoutTests(unittest.TestCase):
         props = make_image.edit_props("ro.debuggable=1\n")
         self.assertIn("sys.use_memfd=true\n", props)
 
+    def test_pr3_composer_starts_without_a_display_device(self):
+        # Cuttlefish's composer otherwise looks for a virtio-gpu DRM card or a goldfish
+        # display, finds neither under Hyper-V, and surfaceflinger aborts.
+        cmdline = make_image.kernel_cmdline("blkdevparts=sda:1@0(misc)")
+        self.assertIn("androidboot.hardware.hwcomposer.mode=noop", cmdline)
+        self.assertIn("androidboot.hardware.hwcomposer.display_finder_mode=noop", cmdline)
+
     def test_pr3_edit_props_sets_graphics_properties(self):
         props = make_image.edit_props("ro.debuggable=1\n")
         self.assertIn("ro.hardware.egl=angle\n", props)
         self.assertIn("ro.hardware.vulkan=ranchu\n", props)
         self.assertIn("ro.hardware.gralloc=minigbm\n", props)
         self.assertIn("ro.cpuvulkan.version=0\n", props)
+
+    def test_pr3_vulkan_loader_uses_the_vendor_driver_not_the_cuttlefish_apex(self):
+        # With ro.vulkan.apex set, the loader takes Cuttlefish's driver from its APEX,
+        # which reaches the host only through virtio-gpu or the goldfish pipe.
+        props = make_image.edit_props("ro.vulkan.apex=com.google.cf.vulkan\nro.debuggable=1\n")
+        self.assertNotIn("ro.vulkan.apex", props)
 
     def test_pr3_modify_installs_vulkan_and_opengl_libraries_and_filesystem_config(self):
         with tempfile.TemporaryDirectory() as tmp:

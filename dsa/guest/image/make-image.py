@@ -105,6 +105,11 @@ GRAPHICS_PROPS = {
     "ro.cpuvulkan.version": "0",
 }
 
+# Properties the image drops. ro.vulkan.apex makes the Vulkan loader take Cuttlefish's
+# driver from its APEX, which reaches the host only through virtio-gpu or the goldfish
+# pipe; without it the loader takes the vendor driver, which uses the Hyper-V socket.
+REMOVED_PROPS = {"ro.vulkan.apex"}
+
 # Cuttlefish ships selectable vendor APEX implementations. Its launcher passes
 # the selections in bootconfig. DSA does not run that launcher, so choose the
 # implementations that can start without Cuttlefish remote services before
@@ -212,7 +217,7 @@ def edit_props(text):
     out = []
     for line in text.splitlines():
         key = line.split("=", 1)[0]
-        if key in props_to_apply:
+        if key in props_to_apply or key in REMOVED_PROPS:
             continue
         if key.endswith("build.type"):
             line = f"{key}=user"
@@ -722,6 +727,11 @@ def kernel_cmdline(partition_cmdline):
         "androidboot.hardware.egl=angle",
         "androidboot.hardware.vulkan=ranchu",
         "androidboot.hardware.gralloc=minigbm",
+        # Cuttlefish's composer needs a virtio-gpu card or a goldfish display, and Hyper-V
+        # has neither. Until DSA's own composer hands layers to the host, it runs with
+        # no display device and composes nothing.
+        "androidboot.hardware.hwcomposer.mode=noop",
+        "androidboot.hardware.hwcomposer.display_finder_mode=noop",
         "androidboot.cpuvulkan.version=0",
         *(f"androidboot.vendor.apex.{module}={apex}"
           for module, apex in VENDOR_APEX_BOOTCONFIG.items()),

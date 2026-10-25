@@ -97,6 +97,11 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         if f"{prop}={val}" not in props and f"{prop}={val}" not in vendor_props:
             problems.append(f"neither SYSTEM nor VENDOR build.prop sets {prop}={val}")
 
+    # The loader would take Cuttlefish's APEX driver instead of the vendor one.
+    for name in sorted(n for n in names if n.endswith("build.prop") or n.endswith("prop.default")):
+        if any(line.startswith("ro.vulkan.apex=") for line in z.read(name).decode(errors="replace").splitlines()):
+            problems.append(f"{name} sets ro.vulkan.apex, so the Vulkan loader skips the vendor driver")
+
 disks_to_check = [d for d in ["system.vhdx", "data.vhdx"] if (image / d).exists()]
 if not disks_to_check and (image / "disk.vhdx").exists():
     disks_to_check = ["disk.vhdx"]
