@@ -11,7 +11,7 @@
 //!   client.
 //! - [`tasks`]: the guest's app tasks, which the session keeps and hands on.
 //! - [`compositor`]: platform-neutral graphics stream bookkeeping, renderer interfaces, and
-//!   task registry.
+//!   which window each task and each frame goes to.
 
 pub mod bootconfig;
 pub mod compositor;
