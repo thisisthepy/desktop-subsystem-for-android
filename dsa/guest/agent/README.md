@@ -20,7 +20,11 @@ by the image in `/system_ext/priv-app/DsaAgent/`. It has no activity: the host i
   tasks are reported: not its own, not home or recents, and not a task with no package.
 - **Host requests.** `LaunchApp` starts the package's launcher activity as a new task in a
   freeform window (or brings its task to the front). `CloseTask` ends the task, but only a
-  task the host was told about.
+  task the host was told about. `ResizeTask` gives a task its host window's client size,
+  and `SetTaskDensity` the density of the window's monitor (see below); both are refused
+  for a task the host was not told about.
+- **Density and size limits in reports.** Each `TaskUpdated` also carries the density the
+  task's app draws at and the display's size, which is the largest a task can be.
 - **The channel.** It reaches the host through the control daemon's binder service,
   `io.github.thisisthepy.dsa.channel.IChannel/default` (`dsa/guest/aidl/`). It looks for
   the service every second until the daemon is up, subscribes, and sends every app task
@@ -70,6 +74,31 @@ agent reads the tasks again every 100 ms until the move lands. After 2 seconds i
 up, logs it, reports the task where it is, and leaves the task there until its bounds
 change.
 
+## Size and density from the host
+
+The host shows each task 1:1 in its window, so a window's client size in host pixels is the
+task's size in guest pixels, and the task's density keeps the app the size it should be on
+the window's monitor (160 dpi at 100%, 320 at 200%).
+
+`ResizeTask` asks for a size. The task keeps its top left corner and takes the size, cut
+down to the display and moved back inside it if it would cross an edge. If the task then
+overlaps another, the placement above moves the newer of the two. Only the latest size of
+each task counts. While one resize is under way, the next waits until it lands: the agent
+reads the tasks every 16 ms while a resize is pending, so the next size goes out within a
+frame of the last one landing, and the window manager never works through sizes the user
+has already dragged past. A resized task is reported at its new bounds at once, as a moved
+one is. A resize that has not landed after 2 seconds is given up, logged, and the task
+reported where it is.
+
+`SetTaskDensity` asks for a density. A density and a size that arrive together are applied
+in one window container transaction (`WindowContainerTransaction.setBounds` and
+`setDensityDpi`, through `IActivityTaskManager.getWindowOrganizerController().
+applyTransaction`), so the app relays out once. This is how the framework's own desktop
+windowing gives a task a density of its own. The density is part of the task's
+configuration, so tasks on the one display each draw at their own density. On a framework
+without these calls the task still gets its size through `resizeTask`, draws at the
+display's density, and the agent logs it once.
+
 **Capacity.** A phone app's default freeform size on the default 1920x1080 display is
 548x974, so three such tasks fit side by side. A fourth goes where it shares the fewest
 pixels with the others (beside three such tasks, the bottom right corner, over a strip of
@@ -85,7 +114,8 @@ A platform app may use framework interfaces the SDK does not publish. The agent 
 | Interface | For |
 |---|---|
 | `TaskStackListener`, `ActivityTaskManager.getService()` | Task change callbacks, ending a task (`removeTask`), moving a task (`resizeTask`) |
-| `TaskInfo.configuration.windowConfiguration`, `TaskInfo.isFocused` | A task's bounds, activity type and focus (reflection) |
+| `TaskInfo.configuration`, its `windowConfiguration`, `TaskInfo.isFocused` | A task's density, bounds, activity type and focus (reflection) |
+| `WindowContainerTransaction`, `TaskInfo.token`, `IActivityTaskManager.getWindowOrganizerController` | A task's bounds and density in one change (reflection) |
 | `IWindowManager.get/setWindowingMode` | The display's windowing mode (reflection) |
 | `ActivityOptions.setLaunchWindowingMode` | A freeform window for a launched app (reflection) |
 | `ServiceManager.checkService` | The control daemon's service (reflection) |

@@ -1,11 +1,14 @@
 package io.github.thisisthepy.dsa.agent.tasks
 
+import io.github.thisisthepy.dsa.agent.windowing.Size
+
 /**
  * Keeps the host's picture of the guest's app tasks in step with the guest.
  *
  * Each [update] compares the running tasks with what the host was last told and sends only
- * the difference: TaskUpdated for a task that is new or whose bounds, package, label or focus
- * changed, TaskRemoved for a task that is gone. A frame that could not be sent is not
+ * the difference: TaskUpdated for a task that is new or whose bounds, package, label, focus
+ * or density changed, TaskRemoved for a task that is gone. Every TaskUpdated also carries the
+ * display's size, the largest a task can be; when it changes, every task is sent again. A frame that could not be sent is not
  * recorded as told, so the next update tries again.
  *
  * Only app tasks are reported. The agent's own tasks, tasks of no package, and home, recents
@@ -20,6 +23,7 @@ class TaskReporter(
 ) {
     private val told = LinkedHashMap<Int, TaskSnapshot>()
     private var stale = false
+    private var display: Size? = null
 
     /** The tasks the host was told about and not yet told have ended. */
     val reported: Set<Int> get() = told.keys.toSet()
@@ -30,7 +34,11 @@ class TaskReporter(
     fun reportable(task: TaskSnapshot): Boolean =
         task.kind == TaskKind.APP && !task.packageName.isNullOrEmpty() && task.packageName != ownPackage
 
-    fun update(tasks: List<TaskSnapshot>) {
+    fun update(tasks: List<TaskSnapshot>, display: Size? = this.display) {
+        if (display != this.display) {
+            this.display = display
+            stale = true
+        }
         val current = LinkedHashMap<Int, TaskSnapshot>()
         for (task in tasks) {
             if (reportable(task) && task.taskId !in current) current[task.taskId] = task
@@ -41,7 +49,7 @@ class TaskReporter(
         var allSent = true
         for ((taskId, task) in current) {
             if (stale || told[taskId] != task) {
-                if (send(Messages.taskUpdated(task))) told[taskId] = task else allSent = false
+                if (send(Messages.taskUpdated(task, display))) told[taskId] = task else allSent = false
             }
         }
         if (allSent && told.keys.all { it in current }) stale = false

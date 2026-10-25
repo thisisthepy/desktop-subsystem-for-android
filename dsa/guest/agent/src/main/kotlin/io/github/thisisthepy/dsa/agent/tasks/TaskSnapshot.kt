@@ -28,6 +28,8 @@ data class TaskSnapshot(
     val label: String,
     val bounds: TaskBounds,
     val focused: Boolean,
+    /** The density the task's app draws at, in dots per inch; 0 when the framework names none. */
+    val densityDpi: Int = 0,
 )
 
 /** Reads the guest's running tasks and says when they may have changed. */

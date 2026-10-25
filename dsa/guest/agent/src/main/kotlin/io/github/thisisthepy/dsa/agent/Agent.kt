@@ -13,7 +13,8 @@ import io.github.thisisthepy.dsa.agent.windowing.WindowingControl
 
 /**
  * The agent: makes the display freeform, keeps app tasks from overlapping on it, reports
- * them to the host over the control daemon, and acts on the host's requests.
+ * them to the host over the control daemon, and acts on the host's requests: launching an
+ * app, ending a task, and giving a task the size and density of its host window.
  *
  * Everything runs on the scheduler's one thread. Task changes are coalesced: however many
  * arrive before the agent gets to them, it reads the tasks once.
@@ -76,6 +77,12 @@ class Agent(
             is RequestResult.LaunchFailed -> log.warn("could not launch ${result.packageName}: ${result.reason}")
             is RequestResult.Closed -> log.info("ended task ${result.taskId}")
             is RequestResult.CloseRefused -> log.warn("did not end task ${result.taskId}: ${result.reason}")
+            is RequestResult.Resize -> arranger.resize(result.taskId, result.size)
+            is RequestResult.Density -> {
+                log.info("task ${result.taskId} draws at ${result.densityDpi} dpi")
+                arranger.setDensity(result.taskId, result.densityDpi)
+            }
+            is RequestResult.SizeRefused -> log.warn("did not resize task ${result.taskId}: ${result.reason}")
             is RequestResult.Malformed -> log.warn("dropped a frame: ${result.reason}")
             is RequestResult.NotForTheAgent -> Unit
         }
@@ -92,9 +99,10 @@ class Agent(
     }
 
     /**
-     * Reads the tasks, moves app tasks that overlap apart, and reports them. A task that is
-     * being moved is reported at the place it is going to, so the host never hears of two
-     * app tasks that overlap.
+     * Reads the tasks, gives them the sizes the host asked for, moves app tasks that overlap
+     * apart, and reports them. A task that is being moved or resized is reported at the
+     * bounds it is going to, so the host never hears of two app tasks that overlap, and a
+     * window hears at once that its task is taking its size.
      */
     private fun refresh() {
         val running = try {
@@ -111,22 +119,26 @@ class Agent(
                 val placed = bounds[task.taskId]
                 if (placed == null || placed == task.bounds) task else task.copy(bounds = placed)
             },
+            arranger.display,
         )
     }
 
-    /** Reads the tasks again shortly: a move does not always call the task stack listener. */
+    /**
+     * Reads the tasks again shortly: a move or a resize does not always call the task stack
+     * listener.
+     */
     private fun checkMoves() {
         if (checkPending) return
         checkPending = true
-        scheduler.postDelayed(MOVE_CHECK_MILLIS) {
+        val interval = arranger.checkIntervalMillis
+        scheduler.postDelayed(interval) {
             checkPending = false
-            arranger.tick()
+            arranger.tick(interval)
             requestRefresh()
         }
     }
 
     private companion object {
         const val RETRY_MILLIS = 1000L
-        const val MOVE_CHECK_MILLIS = 100L
     }
 }

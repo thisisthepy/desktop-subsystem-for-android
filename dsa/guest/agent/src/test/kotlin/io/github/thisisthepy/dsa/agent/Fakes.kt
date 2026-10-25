@@ -2,6 +2,7 @@ package io.github.thisisthepy.dsa.agent
 
 import io.github.thisisthepy.dsa.agent.channel.ChannelEndpoint
 import io.github.thisisthepy.dsa.agent.channel.ChannelLocator
+import io.github.thisisthepy.dsa.agent.requests.ResizeOutcome
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.tasks.TaskKind
@@ -20,7 +21,8 @@ fun appTask(
     bounds: TaskBounds = TaskBounds(10 * taskId, 20, 10 * taskId + 400, 620),
     focused: Boolean = false,
     kind: TaskKind = TaskKind.APP,
-) = TaskSnapshot(taskId, kind, packageName, label, bounds, focused)
+    densityDpi: Int = 160,
+) = TaskSnapshot(taskId, kind, packageName, label, bounds, focused, densityDpi)
 
 fun decode(frame: ByteArray): Envelope = Envelope.parseFrom(frame)
 
@@ -139,11 +141,17 @@ class FakeActions : TaskActions {
     val launched = mutableListOf<String>()
     val closed = mutableListOf<Int>()
     val moved = mutableListOf<Pair<Int, TaskBounds>>()
+
+    /** Each resize asked for: the task, its bounds, and the density if one was asked for. */
+    val resized = mutableListOf<Triple<Int, TaskBounds, Int?>>()
     var launchable = setOf<String>()
     var closable = setOf<Int>()
 
     /** What the window manager does with a move; by default it accepts it and does nothing yet. */
     var onMove: (Int, TaskBounds) -> Boolean = { _, _ -> true }
+
+    /** What the window manager takes of a resize; by default all of it, applied later. */
+    var onResize: (Int, TaskBounds, Int?) -> ResizeOutcome = { _, _, _ -> ResizeOutcome.APPLIED }
 
     override fun launchApp(packageName: String): Boolean {
         launched += packageName
@@ -158,6 +166,11 @@ class FakeActions : TaskActions {
     override fun moveTask(taskId: Int, bounds: TaskBounds): Boolean {
         moved += taskId to bounds
         return onMove(taskId, bounds)
+    }
+
+    override fun resizeTask(taskId: Int, bounds: TaskBounds, densityDpi: Int?): ResizeOutcome {
+        resized += Triple(taskId, bounds, densityDpi)
+        return onResize(taskId, bounds, densityDpi)
     }
 }
 

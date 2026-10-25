@@ -63,6 +63,7 @@ class AndroidTaskSource(
             label = label(info, root),
             bounds = fields.bounds(info)?.let { TaskBounds(it.left, it.top, it.right, it.bottom) } ?: TaskBounds.EMPTY,
             focused = fields.focused(info),
+            densityDpi = fields.densityDpi(info) ?: 0,
         )
     }
 
@@ -91,8 +92,8 @@ class AndroidTaskSource(
 }
 
 /**
- * The task fields the SDK does not publish: TaskInfo.configuration.windowConfiguration (bounds
- * and activity type) and TaskInfo.isFocused. A field that cannot be read is logged once and
+ * The task fields the SDK does not publish: TaskInfo.configuration (its density, and its
+ * windowConfiguration's bounds and activity type) and TaskInfo.isFocused. A field that cannot be read is logged once and
  * read as unknown: no bounds, not focused, and not an app task, so nothing is reported that
  * the agent cannot describe.
  */
@@ -110,6 +111,10 @@ private class TaskFields(private val log: Log) {
 
     fun activityType(info: ActivityManager.RunningTaskInfo): Int? =
         read("activity type") { getActivityType!!.invoke(windowConfiguration(info)) as Int }
+
+    /** The density the task's configuration gives its app, as a host window asked for it. */
+    fun densityDpi(info: ActivityManager.RunningTaskInfo): Int? =
+        read("density") { (configuration!!.get(info) as android.content.res.Configuration).densityDpi }
 
     fun focused(info: ActivityManager.RunningTaskInfo): Boolean =
         read("focus") { isFocused!!.getBoolean(info) } ?: false

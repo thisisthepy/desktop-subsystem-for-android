@@ -2,6 +2,7 @@ package io.github.thisisthepy.dsa.agent.requests
 
 import com.google.protobuf.InvalidProtocolBufferException
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
+import io.github.thisisthepy.dsa.agent.windowing.Size
 import io.github.thisisthepy.dsa.control.v1.Envelope
 
 /** What the agent does to the guest's tasks on the host's behalf. */
@@ -21,6 +22,25 @@ interface TaskActions {
      * them later. False when the framework refused.
      */
     fun moveTask(taskId: Int, bounds: TaskBounds): Boolean
+
+    /**
+     * Asks the window manager to give the task [bounds] and, when [densityDpi] is not null,
+     * to have the task's app draw at that density, both in one change so the app relays out
+     * once. It may apply them later. Returns what the framework took.
+     */
+    fun resizeTask(taskId: Int, bounds: TaskBounds, densityDpi: Int?): ResizeOutcome
+}
+
+/** What the framework took of a resize. */
+enum class ResizeOutcome {
+    /** The bounds, and the density if one was asked for. */
+    APPLIED,
+
+    /** The bounds, but not the density: the framework has no way to set a task's density. */
+    BOUNDS_ONLY,
+
+    /** Nothing. */
+    REFUSED,
 }
 
 /** What became of one frame from the channel. */
@@ -29,6 +49,15 @@ sealed interface RequestResult {
     data class LaunchFailed(val packageName: String, val reason: String) : RequestResult
     data class Closed(val taskId: Int) : RequestResult
     data class CloseRefused(val taskId: Int, val reason: String) : RequestResult
+
+    /** The host resized the task's window; the task takes [size]. */
+    data class Resize(val taskId: Int, val size: Size) : RequestResult
+
+    /** The host's window for the task is on a monitor of another scale; it draws at [densityDpi]. */
+    data class Density(val taskId: Int, val densityDpi: Int) : RequestResult
+
+    /** A resize or density for a task the host was never told about. */
+    data class SizeRefused(val taskId: Int, val reason: String) : RequestResult
 
     /** A well-formed frame that is not a request to the agent (another client's task message). */
     data class NotForTheAgent(val body: Envelope.BodyCase) : RequestResult
@@ -41,9 +70,10 @@ sealed interface RequestResult {
  * Turns the frames the channel delivers into actions on the guest's tasks.
  *
  * LaunchApp starts an app; CloseTask ends a task, but only one the host was told about, so
- * the host cannot end the agent's own task or anything else that has no window. Every other
- * message is ignored, and a frame that does not decode is dropped: a bad frame never stops
- * the agent.
+ * the host cannot end the agent's own task or anything else that has no window. ResizeTask
+ * and SetTaskDensity are checked the same way and handed back for the agent to apply with
+ * the rest of the task layout. Every other message is ignored, and a frame that does not
+ * decode is dropped: a bad frame never stops the agent.
  */
 class HostRequests(
     private val ownPackage: String,
@@ -60,6 +90,10 @@ class HostRequests(
         return when (envelope.bodyCase) {
             Envelope.BodyCase.LAUNCH_APP -> launch(envelope.launchApp.packageName)
             Envelope.BodyCase.CLOSE_TASK -> close(envelope.closeTask.taskId)
+            Envelope.BodyCase.RESIZE_TASK ->
+                resize(envelope.resizeTask.taskId, envelope.resizeTask.width, envelope.resizeTask.height)
+            Envelope.BodyCase.SET_TASK_DENSITY ->
+                density(envelope.setTaskDensity.taskId, envelope.setTaskDensity.densityDpi)
             Envelope.BodyCase.BODY_NOT_SET, null -> RequestResult.Malformed("the frame carries no message")
             else -> RequestResult.NotForTheAgent(envelope.bodyCase)
         }
@@ -76,5 +110,29 @@ class HostRequests(
         !reported(taskId) -> RequestResult.CloseRefused(taskId, "the host was never told about this task")
         actions.closeTask(taskId) -> RequestResult.Closed(taskId)
         else -> RequestResult.CloseRefused(taskId, "the framework has no such task or refused to end it")
+    }
+
+    // The sizes are unsigned on the wire; a value past Int.MAX_VALUE reads as negative here.
+    private fun resize(taskId: Int, width: Int, height: Int): RequestResult = when {
+        width <= 0 || height <= 0 || width > MAX_LENGTH || height > MAX_LENGTH ->
+            RequestResult.Malformed("ResizeTask asks for a size of ${Integer.toUnsignedString(width)}x${Integer.toUnsignedString(height)}")
+        !reported(taskId) -> RequestResult.SizeRefused(taskId, "the host was never told about this task")
+        else -> RequestResult.Resize(taskId, Size(width, height))
+    }
+
+    private fun density(taskId: Int, densityDpi: Int): RequestResult = when {
+        densityDpi < MIN_DENSITY || densityDpi > MAX_DENSITY ->
+            RequestResult.Malformed("SetTaskDensity asks for ${Integer.toUnsignedString(densityDpi)} dpi")
+        !reported(taskId) -> RequestResult.SizeRefused(taskId, "the host was never told about this task")
+        else -> RequestResult.Density(taskId, densityDpi)
+    }
+
+    private companion object {
+        // Past any display the framework draws.
+        const val MAX_LENGTH = 16384
+
+        // The densities the hwcomposer accepts for the display.
+        const val MIN_DENSITY = 72
+        const val MAX_DENSITY = 960
     }
 }
