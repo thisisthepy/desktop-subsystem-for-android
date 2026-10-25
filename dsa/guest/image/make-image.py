@@ -25,6 +25,7 @@ The results go to dsa/target/image/<version>/:
 """
 
 import argparse
+import base64
 import gzip
 import hashlib
 import json
@@ -137,13 +138,17 @@ VENDOR_APEX_BOOTCONFIG = {
 }
 
 
-def aosp_test_certificates(otatools, root):
+def aosp_test_certificates(otatools, root, target_files=None):
     """Lays AOSP's test certificates out at the paths META/apkcerts.txt names them by.
 
     sign_target_files_apks replaces those certificates with ours in every
     mac_permissions.xml, opening them relative to where it runs, and skips any it cannot
     open without a word. Running it in the returned folder lets it find them; otatools
     ships them under build/target, while apkcerts.txt names build/make/target.
+
+    A certificate otatools does not ship (Bluetooth's, from packages/modules/Bluetooth) is
+    taken from target_files' mac_permissions.xml, from the signer whose seinfo is the last
+    part of the certificate's name (com.android.bluetooth: bluetooth).
     """
     otatools = Path(otatools)
     found = sorted(otatools.rglob("product/security/platform.x509.pem"))
@@ -156,6 +161,31 @@ def aosp_test_certificates(otatools, root):
         for cert in found[0].parent.iterdir():
             if cert.is_file():
                 shutil.copy2(cert, dest / cert.name)
+    if target_files is None:
+        return root
+
+    with zipfile.ZipFile(target_files) as z:
+        names = z.namelist()
+        certificates = set(re.findall(r'certificate="([^"]+\.x509\.pem)"', z.read("META/apkcerts.txt").decode()))
+        signers = {}
+        for name in names:
+            if name.endswith("mac_permissions.xml"):
+                text = z.read(name).decode()
+                for signature, body in re.findall(r'<signer signature="([0-9a-fA-F]+)"\s*>(.*?)</signer>', text, re.S):
+                    for seinfo in re.findall(r'<seinfo value="([^"]+)"', body):
+                        signers.setdefault(seinfo, signature)
+    for certificate in sorted(certificates):
+        path = root / certificate
+        if path.exists():
+            continue
+        seinfo = Path(certificate).name[: -len(".x509.pem")].split(".")[-1]
+        if seinfo not in signers:
+            continue
+        der = bytes.fromhex(signers[seinfo])
+        body = base64.b64encode(der).decode()
+        lines = [body[i : i + 64] for i in range(0, len(body), 64)]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("-----BEGIN CERTIFICATE-----\n" + "\n".join(lines) + "\n-----END CERTIFICATE-----\n")
     return root
 
 
@@ -852,7 +882,7 @@ def main():
     signed = work / "signed.zip"
     # It runs where AOSP's certificates sit at the paths apkcerts.txt names, so every path
     # passed to it is absolute.
-    aosp_root = aosp_test_certificates(otatools, work / "aosp-certificates")
+    aosp_root = aosp_test_certificates(otatools, work / "aosp-certificates", modified)
     run(otatools.resolve() / "bin/sign_target_files_apks", "-p", otatools.resolve(),
         *key_arguments(modified, str(Path(keys).resolve())), modified.resolve(), signed.resolve(),
         env=env, cwd=aosp_root)

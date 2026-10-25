@@ -507,6 +507,36 @@ class ImageLayoutTests(unittest.TestCase):
             for prefix in ["build/make/target/product/security", "build/target/product/security"]:
                 self.assertEqual((cwd / prefix / "platform.x509.pem").read_text(), "platform")
 
+    def test_fr1_signing_finds_certificates_otatools_does_not_ship(self):
+        # Bluetooth is signed with its own certificate, kept in packages/modules/Bluetooth
+        # and not in otatools. mac_permissions.xml holds it for the bluetooth seinfo, so
+        # it is written where apkcerts.txt names it.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            security = root / "otatools/build/target/product/security"
+            security.mkdir(parents=True)
+            (security / "platform.x509.pem").write_text("platform")
+            bluetooth = b"aosp bluetooth certificate"
+            target_files = root / "target-files.zip"
+            with zipfile.ZipFile(target_files, "w") as archive:
+                archive.writestr(
+                    "META/apkcerts.txt",
+                    'name="Bluetooth.apk" certificate="packages/modules/Bluetooth/android/app/certs/'
+                    'com.android.bluetooth.x509.pem" private_key="packages/modules/Bluetooth/android/'
+                    'app/certs/com.android.bluetooth.pk8"\n',
+                )
+                archive.writestr(
+                    "SYSTEM/etc/selinux/plat_mac_permissions.xml",
+                    f'<policy><signer signature="{bluetooth.hex()}"><seinfo value="bluetooth"/></signer></policy>',
+                )
+
+            cwd = make_image.aosp_test_certificates(root / "otatools", root / "aosp", target_files)
+
+            pem = (cwd / "packages/modules/Bluetooth/android/app/certs/com.android.bluetooth.x509.pem").read_text()
+            body = "".join(line for line in pem.splitlines() if "-----" not in line)
+            self.assertEqual(base64.b64decode(body), bluetooth)
+            self.assertIn("-----BEGIN CERTIFICATE-----", pem)
+
     def test_fr1_signing_fails_when_otatools_has_no_test_certificates(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
