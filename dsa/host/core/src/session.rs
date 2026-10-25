@@ -6,6 +6,10 @@
 //! once; callers watch the state with [`Session::state`], [`Session::wait_for`] or
 //! [`Session::events`].
 //!
+//! While the guest is up, the session keeps the latest state of the guest's app tasks from
+//! the task messages the guest sends, and hands every change to [`Session::watch_tasks`]
+//! subscribers. When the guest goes away, every task it had is removed.
+//!
 //! The states are those of the lifecycle: `Stopped`, `Starting`, `Active`, `Dozing`,
 //! `Frozen` and `Stopping`. This module moves between `Stopped`, `Starting`, `Active` and
 //! `Stopping`. Entering `Dozing` and `Frozen` belongs to the lifecycle policy, which is not
@@ -18,7 +22,10 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use dsa_protocol::auth::BootSecret;
+use dsa_protocol::control::{self, envelope::Body};
 use dsa_transport::{Connection, Listener, TransportError};
+
+use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskTable};
 
 /// Where the session is in its life.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -240,6 +247,23 @@ struct Shared {
     vm_id: Mutex<Option<String>>,
     changed: Condvar,
     subscribers: Mutex<Vec<Sender<SessionEvent>>>,
+    tasks: Mutex<TaskHub>,
+}
+
+/// The guest's tasks and who is watching them, under one lock, so a new watcher's starting
+/// point and the changes it receives afterwards never overlap or leave a gap.
+#[derive(Default)]
+struct TaskHub {
+    table: TaskTable,
+    watchers: Vec<Sender<TaskEvent>>,
+}
+
+/// The guest's tasks as they are now, and every change to them from then on.
+pub struct TaskWatch {
+    /// The events that bring an empty list of tasks to the current one.
+    pub current: Vec<TaskEvent>,
+    /// The changes after `current`, in order.
+    pub events: Receiver<TaskEvent>,
 }
 
 impl Shared {
@@ -265,6 +289,27 @@ impl Shared {
     fn set_vm_id(&self, vm_id: Option<String>) {
         *self.vm_id.lock().unwrap_or_else(|e| e.into_inner()) = vm_id;
     }
+
+    /// Records a task message and hands it to the watchers, unless it changes nothing.
+    fn publish_task(&self, event: TaskEvent) {
+        let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        if !hub.table.apply(&event) {
+            return;
+        }
+        hub.watchers
+            .retain(|watcher| watcher.send(event.clone()).is_ok());
+    }
+
+    /// Removes every task, as when the guest has gone away.
+    fn clear_tasks(&self) {
+        let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        let removed = hub.table.clear();
+        hub.watchers.retain(|watcher| {
+            removed
+                .iter()
+                .all(|event| watcher.send(event.clone()).is_ok())
+        });
+    }
 }
 
 /// A guest session. Dropping it stops the guest if it is running.
@@ -288,6 +333,7 @@ impl Session {
             vm_id: Mutex::new(None),
             changed: Condvar::new(),
             subscribers: Mutex::new(Vec::new()),
+            tasks: Mutex::new(TaskHub::default()),
         });
         let (commands, command_rx) = mpsc::channel();
         let incoming = Arc::new(Mutex::new(None));
@@ -394,6 +440,40 @@ impl Session {
             .send(Command::Send(frame, reply_tx))
             .map_err(|_| SessionError::Gone)?;
         reply_rx.recv().map_err(|_| SessionError::Gone)?
+    }
+
+    /// The guest's tasks now, and every change to them from now on. The watch lasts across
+    /// restarts of the guest: when it stops, its tasks are removed, and the next boot's
+    /// tasks arrive as they appear.
+    pub fn watch_tasks(&self) -> TaskWatch {
+        let (tx, events) = mpsc::channel();
+        let mut hub = self.shared.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        let current = hub.table.snapshot();
+        hub.watchers.push(tx);
+        TaskWatch { current, events }
+    }
+
+    /// The guest's tasks as the agent last described them, in task ID order.
+    pub fn tasks(&self) -> Vec<Task> {
+        self.shared
+            .tasks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .table
+            .tasks()
+    }
+
+    /// Asks the guest to close a task or launch an app. Needs an active session.
+    pub fn request(&self, request: TaskRequest) -> Result<(), SessionError> {
+        let body = match request {
+            TaskRequest::Close { task_id } => Body::CloseTask(control::CloseTask { task_id }),
+            TaskRequest::Launch { package_name } => {
+                Body::LaunchApp(control::LaunchApp { package_name })
+            }
+        };
+        self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(body),
+        }))
     }
 }
 
@@ -630,30 +710,7 @@ impl Worker {
             };
             match connection.recv(Some(POLL)) {
                 Ok(frame) => match dsa_protocol::decode(&frame) {
-                    Ok(envelope) => match envelope.body {
-                        Some(dsa_protocol::control::envelope::Body::Hello(_))
-                        | Some(dsa_protocol::control::envelope::Body::HelloAccepted(_))
-                        | Some(dsa_protocol::control::envelope::Body::HelloRejected(_))
-                        | Some(dsa_protocol::control::envelope::Body::AuthChallenge(_))
-                        | Some(dsa_protocol::control::envelope::Body::AuthProof(_)) => {
-                            eprintln!(
-                                "control channel: dropping unexpected handshake message on active session"
-                            );
-                        }
-                        // The compositor takes these once the session hands them on.
-                        Some(dsa_protocol::control::envelope::Body::TaskUpdated(_))
-                        | Some(dsa_protocol::control::envelope::Body::TaskRemoved(_))
-                        | Some(dsa_protocol::control::envelope::Body::TaskFrames(_)) => {
-                            eprintln!("control channel: no window takes task messages yet");
-                        }
-                        Some(dsa_protocol::control::envelope::Body::CloseTask(_))
-                        | Some(dsa_protocol::control::envelope::Body::LaunchApp(_)) => {
-                            eprintln!("control channel: dropping a request only the host sends");
-                        }
-                        None => {
-                            eprintln!("control channel: dropping message with unknown body");
-                        }
-                    },
+                    Ok(envelope) => self.received(envelope.body),
                     Err(error) => {
                         eprintln!("control channel: dropping malformed frame: {error}");
                     }
@@ -663,6 +720,54 @@ impl Worker {
                     self.stop(StopReason::ChannelLost(error.to_string()));
                     return;
                 }
+            }
+        }
+    }
+
+    /// Acts on one message from the guest. A message the host does not expect is dropped
+    /// and logged; it never ends the session.
+    fn received(&mut self, body: Option<Body>) {
+        match body {
+            Some(Body::Hello(_))
+            | Some(Body::HelloAccepted(_))
+            | Some(Body::HelloRejected(_))
+            | Some(Body::AuthChallenge(_))
+            | Some(Body::AuthProof(_)) => {
+                eprintln!(
+                    "control channel: dropping unexpected handshake message on active session"
+                );
+            }
+            Some(Body::TaskUpdated(update)) => {
+                let bounds = update.bounds.unwrap_or_default();
+                self.shared.publish_task(TaskEvent::Updated(Task {
+                    task_id: update.task_id,
+                    bounds: Bounds {
+                        left: bounds.left,
+                        top: bounds.top,
+                        right: bounds.right,
+                        bottom: bounds.bottom,
+                    },
+                    package_name: update.package_name,
+                    label: update.label,
+                    focused: update.focused,
+                }));
+            }
+            Some(Body::TaskRemoved(removed)) => {
+                self.shared.publish_task(TaskEvent::Removed {
+                    task_id: removed.task_id,
+                });
+            }
+            Some(Body::TaskFrames(frames)) => {
+                self.shared.publish_task(TaskEvent::Frames {
+                    task_id: frames.task_id,
+                    display_id: frames.display_id,
+                });
+            }
+            Some(Body::CloseTask(_)) | Some(Body::LaunchApp(_)) => {
+                eprintln!("control channel: dropping a request only the host sends");
+            }
+            None => {
+                eprintln!("control channel: dropping message with unknown body");
             }
         }
     }
@@ -684,6 +789,8 @@ impl Worker {
         if let Some(mut connection) = self.connection.take() {
             connection.close();
         }
+        // The guest's tasks end with it, so their windows close even when it died.
+        self.shared.clear_tasks();
         match self.launcher.stop(self.config.stop_timeout) {
             Ok(()) => {
                 let reason = reason(self.launcher.as_mut());

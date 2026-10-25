@@ -9,6 +9,7 @@
 //! - [`handshake`]: the control channel's handshake as a session uses it.
 //! - [`host_api`]: the local API service, which acts on each caller's own Android, and its
 //!   client.
+//! - [`tasks`]: the guest's app tasks, which the session keeps and hands on.
 //! - [`compositor`]: platform-neutral graphics stream bookkeeping, renderer interfaces, and
 //!   task registry.
 
@@ -19,4 +20,5 @@ pub mod host_api;
 #[cfg(feature = "conformance")]
 pub mod host_api_conformance;
 pub mod session;
+pub mod tasks;
 pub mod update;
