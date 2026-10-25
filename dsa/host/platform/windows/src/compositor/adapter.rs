@@ -4,6 +4,10 @@
 //! OpenGL ES calls onto the host Vulkan driver. This adapter implements [`GraphicsRenderer`]
 //! and serves as the integration point between accepted Hyper-V socket streams and the native
 //! graphics backend.
+//!
+//! It also hands each display's frames to a [`DisplaySink`]: the renderer asks the sink for
+//! a Direct3D 11 texture to copy a display's newest frame into, copies it on the GPU, and
+//! tells the sink when it is there.
 
 use std::ffi::{c_int, c_void, CStr};
 use std::path::{Path, PathBuf};
@@ -46,6 +50,74 @@ pub type PostCallbackFn = unsafe extern "C" fn(
 /// Function pointer type for color buffer post notifications.
 pub type ColorBufferPostFn = unsafe extern "C" fn(context: *mut c_void, color_buffer_id: u32);
 
+/// Asks where to copy a display's new frame: returns a Direct3D 11 texture's shared NT
+/// handle, or null to drop the frame.
+pub type DisplayTargetFn = unsafe extern "C" fn(
+    context: *mut c_void,
+    display_id: u32,
+    width: u32,
+    height: u32,
+) -> *mut c_void;
+
+/// Says that a display's frame is in the texture [`DisplayTargetFn`] named.
+pub type DisplayFrameFn = unsafe extern "C" fn(context: *mut c_void, display_id: u32);
+
+/// Where each display's frames go.
+///
+/// Both calls come from the renderer's presentation thread, one display at a time: first
+/// [`DisplaySink::target`] for a frame, then, once the frame has been copied,
+/// [`DisplaySink::frame`].
+pub trait DisplaySink: Send + Sync {
+    /// The shared NT handle of a Direct3D 11 texture of exactly `width` x `height` pixels in
+    /// `DXGI_FORMAT_R8G8B8A8_UNORM` to copy the display's new frame into, or `None` to drop
+    /// the frame. The handle must stay open until a later call for the same display returns
+    /// something else.
+    fn target(&self, display_id: u32, width: u32, height: u32) -> Option<isize>;
+
+    /// The frame is in the texture, and the GPU has finished copying it. The texture is not
+    /// written again for this display until this returns.
+    fn frame(&self, display_id: u32);
+}
+
+/// What can hand display frames to a [`DisplaySink`].
+pub trait DisplayPresenter: Send + Sync {
+    /// Starts handing every display's frames to `sink`, or stops with `None`.
+    fn present_displays(&self, sink: Option<Arc<dyn DisplaySink>>) -> Result<(), String>;
+
+    /// The LUID of the GPU the frames are on, so the sink's textures are made on the same one.
+    fn adapter_luid(&self) -> Option<[u8; 8]>;
+}
+
+/// The sink registered with the native backend, kept alive while it is registered.
+type SinkBox = Box<Arc<dyn DisplaySink>>;
+
+unsafe extern "C" fn display_target_trampoline(
+    context: *mut c_void,
+    display_id: u32,
+    width: u32,
+    height: u32,
+) -> *mut c_void {
+    if context.is_null() {
+        return std::ptr::null_mut();
+    }
+    let sink = &*(context as *const Arc<dyn DisplaySink>);
+    // A panic must not cross into the renderer; the frame is dropped instead.
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sink.target(display_id, width, height)
+    }))
+    .ok()
+    .flatten()
+    .map_or(std::ptr::null_mut(), |handle| handle as *mut c_void)
+}
+
+unsafe extern "C" fn display_frame_trampoline(context: *mut c_void, display_id: u32) {
+    if context.is_null() {
+        return;
+    }
+    let sink = &*(context as *const Arc<dyn DisplaySink>);
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sink.frame(display_id)));
+}
+
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
@@ -79,6 +151,24 @@ pub trait GfxBackend: Send + Sync {
 
     /// Cleans up graphics objects for the given process identifier.
     fn on_process_destroy(&self, puid: u64);
+
+    /// Registers the per-display presentation callbacks, or stops presenting with `None`.
+    ///
+    /// # Safety
+    /// `context` must stay valid until the callbacks are replaced or removed.
+    unsafe fn set_display_callbacks(
+        &self,
+        callbacks: Option<(DisplayTargetFn, DisplayFrameFn)>,
+        context: *mut c_void,
+    ) -> Result<(), String> {
+        let _ = (callbacks, context);
+        Err("this graphics backend does not present displays".into())
+    }
+
+    /// The LUID of the GPU the renderer runs on.
+    fn adapter_luid(&self) -> Option<[u8; 8]> {
+        None
+    }
 }
 
 /// Native backend loaded from `gfxstream_backend.dll`.
@@ -91,6 +181,9 @@ pub struct NativeBackend {
     fn_process_pipe: unsafe extern "C" fn(StreamReadFn, StreamWriteFn, *mut c_void) -> c_int,
     fn_on_process_create: unsafe extern "C" fn() -> u64,
     fn_on_process_destroy: unsafe extern "C" fn(u64),
+    fn_set_display_callbacks:
+        unsafe extern "C" fn(Option<DisplayTargetFn>, Option<DisplayFrameFn>, *mut c_void) -> c_int,
+    fn_get_adapter_luid: unsafe extern "C" fn(*mut u8) -> c_int,
 }
 
 // SAFETY: HMODULE is owned and accessed across threads safely through the loaded function pointers.
@@ -119,6 +212,9 @@ impl NativeBackend {
             let fn_process_pipe = Self::get_symbol(handle, b"dsa_gfx_process_pipe\0")?;
             let fn_on_process_create = Self::get_symbol(handle, b"dsa_gfx_on_process_create\0")?;
             let fn_on_process_destroy = Self::get_symbol(handle, b"dsa_gfx_on_process_destroy\0")?;
+            let fn_set_display_callbacks =
+                Self::get_symbol(handle, b"dsa_gfx_set_display_callbacks\0")?;
+            let fn_get_adapter_luid = Self::get_symbol(handle, b"dsa_gfx_get_adapter_luid\0")?;
 
             let ret = (fn_init)(1280, 720);
             if ret != 0 {
@@ -134,6 +230,8 @@ impl NativeBackend {
                 fn_process_pipe,
                 fn_on_process_create,
                 fn_on_process_destroy,
+                fn_set_display_callbacks,
+                fn_get_adapter_luid,
             })
         }
     }
@@ -192,6 +290,30 @@ impl GfxBackend for NativeBackend {
 
     fn on_process_destroy(&self, puid: u64) {
         unsafe { (self.fn_on_process_destroy)(puid) }
+    }
+
+    unsafe fn set_display_callbacks(
+        &self,
+        callbacks: Option<(DisplayTargetFn, DisplayFrameFn)>,
+        context: *mut c_void,
+    ) -> Result<(), String> {
+        let (target, frame) = match callbacks {
+            Some((target, frame)) => (Some(target), Some(frame)),
+            None => (None, None),
+        };
+        match (self.fn_set_display_callbacks)(target, frame, context) {
+            0 => Ok(()),
+            code => Err(format!(
+                "the graphics backend cannot present displays (dsa_gfx_set_display_callbacks \
+                 returned {code}); task windows stay empty"
+            )),
+        }
+    }
+
+    fn adapter_luid(&self) -> Option<[u8; 8]> {
+        let mut luid = [0u8; 8];
+        // SAFETY: the backend writes at most 8 bytes into `luid`.
+        (unsafe { (self.fn_get_adapter_luid)(luid.as_mut_ptr()) } == 0).then_some(luid)
     }
 }
 
@@ -291,6 +413,8 @@ unsafe extern "C" fn stream_write_trampoline(
 pub struct GfxstreamAdapter {
     dll_path: Option<PathBuf>,
     backend: Option<Arc<dyn GfxBackend>>,
+    /// The sink the backend presents to, boxed so its address stays put while registered.
+    sink: Mutex<Option<SinkBox>>,
 }
 
 impl GfxstreamAdapter {
@@ -310,7 +434,11 @@ impl GfxstreamAdapter {
             None
         };
 
-        GfxstreamAdapter { dll_path, backend }
+        GfxstreamAdapter {
+            dll_path,
+            backend,
+            sink: Mutex::new(None),
+        }
     }
 
     /// Creates an adapter configured with a custom or fake backend for testing.
@@ -318,6 +446,7 @@ impl GfxstreamAdapter {
         GfxstreamAdapter {
             dll_path: None,
             backend: Some(backend),
+            sink: Mutex::new(None),
         }
     }
 
@@ -345,6 +474,49 @@ impl GfxstreamAdapter {
             Some(local_candidate)
         } else {
             None
+        }
+    }
+}
+
+impl DisplayPresenter for GfxstreamAdapter {
+    fn present_displays(&self, sink: Option<Arc<dyn DisplaySink>>) -> Result<(), String> {
+        let Some(backend) = &self.backend else {
+            return Err("the graphics backend is not loaded; task windows stay empty".into());
+        };
+        let mut registered = self.sink.lock().unwrap_or_else(|e| e.into_inner());
+        // The old sink stays alive until the backend has stopped calling it.
+        // SAFETY: a null context with no callbacks is always valid.
+        let stopped = unsafe { backend.set_display_callbacks(None, std::ptr::null_mut()) };
+        *registered = None;
+        let Some(sink) = sink else {
+            return stopped;
+        };
+        let boxed: SinkBox = Box::new(sink);
+        let context = &*boxed as *const Arc<dyn DisplaySink> as *mut c_void;
+        // SAFETY: `context` points into `boxed`, which `self.sink` keeps until the callbacks
+        // are replaced or removed.
+        unsafe {
+            backend.set_display_callbacks(
+                Some((display_target_trampoline, display_frame_trampoline)),
+                context,
+            )?;
+        }
+        *registered = Some(boxed);
+        Ok(())
+    }
+
+    fn adapter_luid(&self) -> Option<[u8; 8]> {
+        self.backend
+            .as_ref()
+            .and_then(|backend| backend.adapter_luid())
+    }
+}
+
+impl Drop for GfxstreamAdapter {
+    fn drop(&mut self) {
+        if let Some(backend) = &self.backend {
+            // SAFETY: removing the callbacks is always valid.
+            let _ = unsafe { backend.set_display_callbacks(None, std::ptr::null_mut()) };
         }
     }
 }
@@ -487,6 +659,131 @@ mod tests {
         fn on_process_destroy(&self, _puid: u64) {
             self.process_destroyed.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// A backend that presents one frame for each display it is told to, as the native
+    /// backend does when the guest sets a display's color buffer.
+    #[derive(Default)]
+    struct PresentingBackend {
+        callbacks: Mutex<Option<(DisplayTargetFn, DisplayFrameFn, usize)>>,
+    }
+
+    impl PresentingBackend {
+        fn post(&self, display_id: u32, width: u32, height: u32) -> Option<isize> {
+            let (target, frame, context) = (*self.callbacks.lock().unwrap())?;
+            let context = context as *mut c_void;
+            let handle = unsafe { target(context, display_id, width, height) };
+            if handle.is_null() {
+                return None;
+            }
+            unsafe { frame(context, display_id) };
+            Some(handle as isize)
+        }
+    }
+
+    impl GfxBackend for PresentingBackend {
+        unsafe fn serve_stream(
+            &self,
+            _: StreamReadFn,
+            _: StreamWriteFn,
+            _: *mut c_void,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+        unsafe fn process_pipe(
+            &self,
+            _: StreamReadFn,
+            _: StreamWriteFn,
+            _: *mut c_void,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+        fn on_process_create(&self) -> u64 {
+            1
+        }
+        fn on_process_destroy(&self, _: u64) {}
+        unsafe fn set_display_callbacks(
+            &self,
+            callbacks: Option<(DisplayTargetFn, DisplayFrameFn)>,
+            context: *mut c_void,
+        ) -> Result<(), String> {
+            *self.callbacks.lock().unwrap() =
+                callbacks.map(|(target, frame)| (target, frame, context as usize));
+            Ok(())
+        }
+        fn adapter_luid(&self) -> Option<[u8; 8]> {
+            Some([1, 2, 3, 4, 5, 6, 7, 8])
+        }
+    }
+
+    /// A sink that shows display 3 only, and records what it was shown.
+    #[derive(Default)]
+    struct RecordingSink {
+        shown: Mutex<Vec<(u32, u32, u32)>>,
+        framed: Mutex<Vec<u32>>,
+        panic_on: Option<u32>,
+    }
+
+    impl DisplaySink for RecordingSink {
+        fn target(&self, display_id: u32, width: u32, height: u32) -> Option<isize> {
+            if Some(display_id) == self.panic_on {
+                panic!("a broken sink");
+            }
+            self.shown.lock().unwrap().push((display_id, width, height));
+            (display_id == 3).then_some(0x1234)
+        }
+        fn frame(&self, display_id: u32) {
+            self.framed.lock().unwrap().push(display_id);
+        }
+    }
+
+    #[test]
+    fn fr3_display_frames_reach_the_sink_and_unrouted_ones_are_dropped() {
+        let backend = Arc::new(PresentingBackend::default());
+        let adapter = GfxstreamAdapter::with_backend(backend.clone());
+        let sink = Arc::new(RecordingSink::default());
+        adapter
+            .present_displays(Some(sink.clone() as Arc<dyn DisplaySink>))
+            .unwrap();
+        assert_eq!(
+            DisplayPresenter::adapter_luid(&adapter),
+            Some([1, 2, 3, 4, 5, 6, 7, 8])
+        );
+
+        assert_eq!(backend.post(3, 720, 1280), Some(0x1234));
+        assert_eq!(backend.post(0, 1920, 1080), None);
+        assert_eq!(
+            *sink.shown.lock().unwrap(),
+            vec![(3, 720, 1280), (0, 1920, 1080)]
+        );
+        assert_eq!(*sink.framed.lock().unwrap(), vec![3]);
+
+        adapter.present_displays(None).unwrap();
+        assert_eq!(backend.post(3, 720, 1280), None);
+    }
+
+    #[test]
+    fn nfr5_a_panicking_sink_drops_the_frame_instead_of_crossing_into_the_renderer() {
+        let backend = Arc::new(PresentingBackend::default());
+        let adapter = GfxstreamAdapter::with_backend(backend.clone());
+        let sink = Arc::new(RecordingSink {
+            panic_on: Some(3),
+            ..RecordingSink::default()
+        });
+        adapter
+            .present_displays(Some(sink.clone() as Arc<dyn DisplaySink>))
+            .unwrap();
+        assert_eq!(backend.post(3, 10, 10), None);
+        assert!(sink.framed.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn fr3_without_a_backend_there_is_nothing_to_present() {
+        let adapter = GfxstreamAdapter::new(Some(PathBuf::from("nonexistent_path_to_dll.dll")));
+        let sink = Arc::new(RecordingSink::default());
+        assert!(adapter
+            .present_displays(Some(sink as Arc<dyn DisplaySink>))
+            .is_err());
     }
 
     #[test]

@@ -49,6 +49,11 @@ impl FakeAndroid {
         }
     }
 
+    /// Ends every watch of its tasks, as a service that goes away does.
+    pub fn end_watches(&self) {
+        self.tasks.lock().unwrap().1.clear();
+    }
+
     /// Changes its tasks as a guest's task message would, and tells the watchers.
     pub fn publish(&self, event: TaskEvent) {
         let mut tasks = self.tasks.lock().unwrap();
