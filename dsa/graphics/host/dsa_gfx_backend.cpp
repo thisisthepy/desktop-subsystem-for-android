@@ -16,6 +16,7 @@
 
 #include "aemu/base/system/System.h"
 #include "gfxstream/virtio-gpu-gfxstream-renderer.h"
+#include "gfxstream/virtio-gpu-gfxstream-renderer-unstable.h"
 #include "host-common/opengles.h"
 #include "render-utils/RenderChannel.h"
 #include "render-utils/Renderer.h"
@@ -66,10 +67,17 @@ extern "C" DSA_GFX_EXPORT int dsa_gfx_init(uint32_t width, uint32_t height) {
     static uint64_t s_cookie = 0x534144; /* "DSA" */
     const uint64_t flags = STREAM_RENDERER_FLAGS_USE_VK_BIT | STREAM_RENDERER_FLAGS_USE_SURFACELESS_BIT;
 
+    // The guest reaches us over a Hyper-V socket, with no memory the two share, so the
+    // guest keeps a copy of host-visible memory and the stream carries its contents. The
+    // decoder copies them only when neither GlDirectMem nor VirtioGpuNext is on, and the
+    // guest decides from the same features.
+    static const char kFeatures[] = "VirtioGpuNext:disabled";
+
     struct stream_renderer_param params[] = {
         {STREAM_RENDERER_PARAM_USER_DATA, reinterpret_cast<uint64_t>(&s_cookie)},
         {STREAM_RENDERER_PARAM_FENCE_CALLBACK, reinterpret_cast<uint64_t>(dummy_fence_cb)},
         {STREAM_RENDERER_PARAM_RENDERER_FLAGS, flags},
+        {STREAM_RENDERER_PARAM_RENDERER_FEATURES, reinterpret_cast<uint64_t>(kFeatures)},
         {STREAM_RENDERER_PARAM_WIN0_WIDTH, width},
         {STREAM_RENDERER_PARAM_WIN0_HEIGHT, height},
     };

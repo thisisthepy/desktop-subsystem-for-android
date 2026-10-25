@@ -51,7 +51,7 @@ git -C "$mesa_dir" checkout --detach "$mesa_revision"
 git -C "$mesa_dir" reset --hard "$mesa_revision"
 git -C "$mesa_dir" clean -fdx
 
-mesa_patches=("$patch_dir"/0002-*.patch)
+mesa_patches=("$patch_dir"/0002-*.patch "$patch_dir"/0003-*.patch)
 if ((${#mesa_patches[@]})); then
     git -C "$mesa_dir" apply --recount --check "${mesa_patches[@]}"
     git -C "$mesa_dir" apply --recount "${mesa_patches[@]}"
