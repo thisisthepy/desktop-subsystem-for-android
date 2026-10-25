@@ -358,6 +358,14 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertIn("androidboot.hardware.hwcomposer.mode=noop", cmdline)
         self.assertIn("androidboot.hardware.hwcomposer.display_finder_mode=noop", cmdline)
 
+    def test_fr1_lights_hal_listens_on_an_unprivileged_vsock_port(self):
+        # Without a port the Cuttlefish lights HAL binds vsock port 0, which needs
+        # CAP_NET_BIND_SERVICE, and aborts; system_server waits for it and never boots.
+        cmdline = make_image.kernel_cmdline("blkdevparts=sda:1@0(misc)")
+        port = int(cmdline.split("androidboot.vsock_lights_port=", 1)[1].split()[0])
+        self.assertGreaterEqual(port, 1024)
+        self.assertNotIn(port, {5000, 5566, 5567})
+
     def test_pr3_edit_props_sets_graphics_properties(self):
         props = make_image.edit_props("ro.debuggable=1\n")
         self.assertIn("ro.hardware.egl=angle\n", props)
