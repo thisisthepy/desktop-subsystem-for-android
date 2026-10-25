@@ -82,11 +82,11 @@ class GuestDriverCheckTests(unittest.TestCase):
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as z:
             z.writestr("SYSTEM/lib64/libc.so", "/apex/com.android.runtime/lib64/bionic/libc.so")
-            z.writestr("SYSTEM/lib64/bootstrap/libc.so", b"ELF-bionic")
-            z.writestr("VENDOR/lib64/libdrm.so", b"ELF-drm")
+            z.writestr("SYSTEM/lib64/bootstrap/libc.so", b"\x7fELF-bionic")
+            z.writestr("VENDOR/lib64/libdrm.so", b"\x7fELF-drm")
         with zipfile.ZipFile(buffer) as z:
-            self.assertEqual(check.find_library(z, "libc.so"), b"ELF-bionic")
-            self.assertEqual(check.find_library(z, "libdrm.so"), b"ELF-drm")
+            self.assertEqual(check.find_library(z, "libc.so"), b"\x7fELF-bionic")
+            self.assertEqual(check.find_library(z, "libdrm.so"), b"\x7fELF-drm")
             self.assertIsNone(check.find_library(z, "libmissing.so"))
 
 

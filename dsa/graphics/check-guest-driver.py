@@ -98,7 +98,7 @@ def find_library(z, name):
         path = directory + name
         if path in members:
             data = z.read(path)
-            if data.startswith(b"ELF"):
+            if data.startswith(b"\x7fELF"):
                 return data
     return None
 
