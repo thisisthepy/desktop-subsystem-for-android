@@ -18,6 +18,17 @@ fn main() {
     std::process::exit(2);
 }
 
+/// Writes one message line to standard error in a single write. The kernel log makes a
+/// record of every write, so a line written in pieces arrives cut into pieces.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+macro_rules! say {
+    ($($arg:tt)*) => {{
+        use std::io::Write;
+        let line = format!("dsa-channeld: {}\n", format_args!($($arg)*));
+        let _ = std::io::stderr().lock().write_all(line.as_bytes());
+    }};
+}
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod daemon {
     use std::sync::atomic::AtomicBool;
@@ -75,7 +86,7 @@ mod daemon {
         let options = match options() {
             Ok(options) => options,
             Err(why) => {
-                eprintln!("dsa-channeld: {why}");
+                say!("{why}");
                 return 2;
             }
         };
@@ -83,8 +94,8 @@ mod daemon {
             Ok(text) => match secret_from_bootconfig(&text) {
                 Some(secret) => secret,
                 None => {
-                    eprintln!(
-                        "dsa-channeld: {} has no {BOOTCONFIG_KEY}; the host did not start this \
+                    say!(
+                        "{} has no {BOOTCONFIG_KEY}; the host did not start this \
                          boot, so there is nothing to connect to",
                         options.bootconfig
                     );
@@ -92,10 +103,7 @@ mod daemon {
                 }
             },
             Err(error) => {
-                eprintln!(
-                    "dsa-channeld: could not read {}: {error}",
-                    options.bootconfig
-                );
+                say!("could not read {}: {error}", options.bootconfig);
                 return 1;
             }
         };
@@ -119,7 +127,7 @@ mod daemon {
             for _ in from_host {
                 dropped += 1;
                 if dropped.is_power_of_two() {
-                    eprintln!("dsa-channeld: {dropped} frames from the host had no taker");
+                    say!("{dropped} frames from the host had no taker");
                 }
             }
         });
@@ -130,19 +138,16 @@ mod daemon {
             for event in event_rx {
                 match event {
                     ChannelEvent::Connected { host_build } => {
-                        eprintln!("dsa-channeld: connected to the host ({host_build})")
+                        say!("connected to the host ({host_build})")
                     }
                     ChannelEvent::Lost(why) => {
-                        eprintln!("dsa-channeld: lost the host ({why}); connecting again")
+                        say!("lost the host ({why}); connecting again")
                     }
                 }
             }
         });
 
-        eprintln!(
-            "dsa-channeld: connecting to the host on vsock port {}",
-            options.port
-        );
+        say!("connecting to the host on vsock port {}", options.port);
         let stop = AtomicBool::new(false);
         let ended = dsa_guest_channeld::run(
             &mut connector,
@@ -153,7 +158,7 @@ mod daemon {
             &events,
             &stop,
         );
-        eprintln!("dsa-channeld: {ended}");
+        say!("{ended}");
         1
     }
 }

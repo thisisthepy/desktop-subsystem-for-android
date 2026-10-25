@@ -79,3 +79,31 @@ fn pr6_the_daemon_reads_the_secret_and_is_accepted_over_vsock() {
     let _ = child.wait();
     assert!(guest.expect("accepted").build.starts_with("dsa-channeld "));
 }
+
+#[test]
+fn pr6_each_message_reaches_the_kernel_log_as_one_record() {
+    // The kernel log makes a record of every write. A datagram socket does the same, so
+    // a line written in pieces shows up here as pieces.
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixDatagram;
+    use std::time::Duration;
+
+    let path = bootconfig("records", "androidboot.hardware = \"cutf_cvm\"\n");
+    let (reader, writer) = UnixDatagram::pair().unwrap();
+    let status = Command::new(env!("CARGO_BIN_EXE_dsa-channeld"))
+        .arg("--bootconfig")
+        .arg(&path)
+        .stderr(OwnedFd::from(writer))
+        .status()
+        .unwrap();
+    assert_eq!(status.code(), Some(1));
+    reader
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut buffer = [0u8; 4096];
+    let size = reader.recv(&mut buffer).expect("a message");
+    let record = String::from_utf8_lossy(&buffer[..size]);
+    assert!(record.starts_with("dsa-channeld: "), "{record:?}");
+    assert!(record.ends_with('\n'), "{record:?}");
+    assert!(record.contains("dsa.control.secret"), "{record:?}");
+}
