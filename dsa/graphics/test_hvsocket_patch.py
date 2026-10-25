@@ -9,6 +9,8 @@ PATCH_0002 = Path(__file__).resolve().parent / "patches" / "0002-add-hyper-v-vul
 PATCH_0003 = Path(__file__).resolve().parent / "patches" / "0003-copy-host-visible-memory-without-shared-memory.patch"
 PATCH_0005 = Path(__file__).resolve().parent / "patches" / "0005-give-each-task-window-a-display-and-share-color-buffers.patch"
 PATCH_0006 = Path(__file__).resolve().parent / "patches" / "0006-reject-vulkan-handles-the-host-does-not-know.patch"
+PATCH_0007 = Path(__file__).resolve().parent / "patches" / "0007-work-without-a-virtio-gpu-device.patch"
+HWC_HOST_RENDERER = Path(__file__).resolve().parents[1] / "guest" / "hwcomposer" / "src" / "host_renderer.cpp"
 HOST_FETCH = Path(__file__).resolve().parent / "host" / "fetch.ps1"
 SHARED_HANDLE = Path(__file__).resolve().parent / "include" / "dsa_shared_color_buffer.h"
 VULKAN_CMAKE = Path(__file__).resolve().parent / "cmake" / "vulkan.cmake"
@@ -68,10 +70,40 @@ class HvSocketPatchTests(unittest.TestCase):
         self.assertIn('#include "dsa_shared_color_buffer.h"', patch)
         self.assertIn("dsa_shared_color_buffer_handle(bufferId)", patch)
         self.assertIn("rcOpenColorBuffer2(rcEnc, hostHandle) != 0", patch)
-        self.assertIn("rcCreateColorBufferWithHandle(rcEnc, width, height, kGlFormatRGBA, hostHandle)", patch)
+        self.assertIn("rcCreateColorBufferWithHandle(rcEnc, width, height, glFormat, hostHandle)", patch)
         header = SHARED_HANDLE.read_text()
         self.assertIn("DSA_SHARED_COLOR_BUFFER_BIT 0x80000000u", header)
         self.assertIn("${CMAKE_CURRENT_SOURCE_DIR}/../include", VULKAN_CMAKE.read_text())
+
+    def test_fr3_imported_buffer_color_buffer_has_the_buffers_format(self):
+        # The guest binds the buffer's VkImage, made in the buffer's format, to the
+        # ColorBuffer's memory, so every process creates it in that format.
+        # Behaviour: fr3_shared_color_buffer_has_the_format_of_its_gralloc_buffer.
+        patch = PATCH_0002.read_text()
+        self.assertIn("dsa_shared_color_buffer_gl_format(cros_handle->format)", patch)
+        self.assertIn("dsa_shared_color_buffer_gl_format(buffer.format)", HWC_HOST_RENDERER.read_text())
+
+    def test_pr3_hardware_buffer_import_uses_no_virtio_gpu_ioctl_without_the_device(self):
+        # On a Hyper-V VM the first render node is vgem or vkms. Importing a buffer used to
+        # send it virtio-gpu ioctls (RESOURCE_INFO, GET_CAPS, CONTEXT_INIT) and report an
+        # allocation size of 0; the driver now leaves such a node alone and takes the size
+        # from the allocator.
+        patch_0002 = PATCH_0002.read_text()
+        self.assertIn("if (mDevice && mDevice->getDeviceHandle() < 0)", patch_0002)
+        self.assertIn("return static_cast<size_t>(cros_handle->total_size);", patch_0002)
+        patch_0007 = PATCH_0007.read_text()
+        self.assertIn('strcmp(version->name, "virtio_gpu") == 0', patch_0007)
+        self.assertIn("mDeviceHandle = -1;", patch_0007)
+        self.assertIn('"$patch_dir"/0007-*.patch', FETCH.read_text())
+
+    def test_fr3_frames_are_released_without_virtio_gpu_fences(self):
+        # Without virtio-gpu a native-sync fence goes out as an execbuffer the render node
+        # rejects, and vkQueueSignalReleaseImageANDROID failed on every frame ("halting
+        # rendering"). The release now waits on the host instead.
+        patch = PATCH_0007.read_text()
+        self.assertIn("mFeatureInfo.hasVirtioGpuNativeSync = false;", patch)
+        self.assertIn("mFeatureInfo.hasVulkanAsyncQsri = false;", patch)
+        self.assertIn("mFeatureInfo.hasVirtioGpuNext = false;", patch)
 
     def test_fr3_the_host_accepts_a_color_buffer_two_processes_create(self):
         # Two processes can race to create the shared ColorBuffer; the host must not abort.

@@ -1,0 +1,73 @@
+diff --git a/src/gfxstream/guest/platform/linux/LinuxVirtGpuDevice.cpp b/src/gfxstream/guest/platform/linux/LinuxVirtGpuDevice.cpp
+index 533a14f..0243938 100644
+--- a/src/gfxstream/guest/platform/linux/LinuxVirtGpuDevice.cpp
++++ b/src/gfxstream/guest/platform/linux/LinuxVirtGpuDevice.cpp
+@@ -65,6 +65,25 @@ LinuxVirtGpuDevice::LinuxVirtGpuDevice(enum VirtGpuCapset capset, int32_t descri
+         }
+     }
+ 
++    // The first render node is not always virtio-gpu: a Hyper-V VM has none, and its node
++    // belongs to vgem or vkms, which reject every virtio-gpu ioctl. Such a device has no
++    // handle, so nothing sends it virtio-gpu commands; gfxstream then reaches the host over
++    // its stream alone.
++    drmVersionPtr version = drmGetVersion(static_cast<int>(mDeviceHandle));
++    const bool isVirtioGpu = version && version->name && strcmp(version->name, "virtio_gpu") == 0;
++    if (!isVirtioGpu) {
++        mesa_logi("The render node is %s, not virtio-gpu; not using it",
++                  version && version->name ? version->name : "unknown");
++    }
++    if (version) {
++        drmFreeVersion(version);
++    }
++    if (!isVirtioGpu) {
++        close(static_cast<int>(mDeviceHandle));
++        mDeviceHandle = -1;
++        return;
++    }
++
+     for (uint32_t i = 0; i < kParamMax; i++) {
+         struct drm_virtgpu_getparam get_param = {0};
+         get_param.param = params[i].param;
+@@ -137,7 +156,11 @@ LinuxVirtGpuDevice::LinuxVirtGpuDevice(enum VirtGpuCapset capset, int32_t descri
+     }
+ }
+ 
+-LinuxVirtGpuDevice::~LinuxVirtGpuDevice() { close(mDeviceHandle); }
++LinuxVirtGpuDevice::~LinuxVirtGpuDevice() {
++    if (mDeviceHandle >= 0) {
++        close(mDeviceHandle);
++    }
++}
+ 
+ struct VirtGpuCaps LinuxVirtGpuDevice::getCaps(void) { return mCaps; }
+ 
+diff --git a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+index 530b8c9..e9de7ec 100644
+--- a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
++++ b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+@@ -1449,6 +1449,25 @@ void ResourceTracker::setupFeatures(const struct GfxStreamVkFeatureInfo* feature
+     }
+ 
+     mFeatureInfo = *features;
++
++    // The host offers what its virtio-gpu frontend can do, whatever the transport. Without
++    // a virtio-gpu device (a Hyper-V VM) the guest has no blobs and no fences from the host:
++    // a fence would go out as a virtio-gpu execbuffer the render node rejects, and
++    // vkQueueSignalReleaseImageANDROID would fail on every frame. The release then waits on
++    // the host, which returns no fence because the image is ready when it answers.
++    VirtGpuDevice* virtGpu = VirtGpuDevice::getInstance();
++    if (!virtGpu || virtGpu->getDeviceHandle() < 0) {
++        mFeatureInfo.hasVirtioGpuNext = false;
++        mFeatureInfo.hasVirtioGpuNativeSync = false;
++        bool hasGoldfishSync = false;
++#if GFXSTREAM_ENABLE_GUEST_GOLDFISH
++        ensureSyncDeviceFd();
++        hasGoldfishSync = mSyncDeviceFd >= 0;
++#endif
++        if (!hasGoldfishSync) {
++            mFeatureInfo.hasVulkanAsyncQsri = false;
++        }
++    }
+ #if DETECT_OS_ANDROID
+     if (mFeatureInfo.hasDirectMem) {
+         mGoldfishAddressSpaceBlockProvider.reset(

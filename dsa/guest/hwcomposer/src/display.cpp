@@ -69,7 +69,7 @@ BufferRef bufferRefFromHandle(const aidl::android::hardware::common::NativeHandl
     if (cros->magic != kCrosGrallocMagic) {
         return {};
     }
-    return BufferRef{cros->id, cros->width, cros->height};
+    return BufferRef{cros->id, cros->width, cros->height, cros->format};
 }
 
 BufferRef BufferSlots::apply(const composer3::Buffer& buffer) {
