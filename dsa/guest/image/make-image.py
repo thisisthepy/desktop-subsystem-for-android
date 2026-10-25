@@ -322,11 +322,17 @@ GFXSTREAM_LIBRARY = "VENDOR/lib64/libOpenglSystemCommon.so"
 VULKAN_RANCHU_LIBRARY = "VENDOR/lib64/hw/vulkan.ranchu.so"
 
 CONSOLE_LOGCAT_RC = "VENDOR/etc/init/dsa-console-logcat.rc"
+
+# The guest's control channel daemon, its init script, and the policy that gives it a domain
+# of its own: the one that may read the boot's secret from /proc/bootconfig.
+CHANNELD_BINARY = "VENDOR/bin/dsa-channeld"
+CHANNELD_RC = "VENDOR/etc/init/dsa-channeld.rc"
+CHANNELD_CONTEXT = "/vendor/bin/dsa-channeld u:object_r:dsa_channeld_exec:s0"
 # The console logcat runs as logd, and ueventd makes the serial port root's alone.
 CONSOLE_UEVENTD_LINE = "/dev/ttyS0 0660 system logd"
 
 
-def update_vendor_file_contexts(fc_text):
+def update_vendor_file_contexts(fc_text, channeld=False):
     """Adds same_process_hal_file contexts for guest graphics libraries if not present, and
     opens the DRM cards to every graphics client.
 
@@ -345,20 +351,27 @@ def update_vendor_file_contexts(fc_text):
         (r"/vendor/lib64/hw/vulkan\.ranchu\.so", "/vendor/lib64/hw/vulkan\\.ranchu\\.so u:object_r:same_process_hal_file:s0"),
         (r"/vendor/lib64/libOpenglSystemCommon\.so", "/vendor/lib64/libOpenglSystemCommon\\.so u:object_r:same_process_hal_file:s0"),
     ]
+    if channeld:
+        entries.append((r"/vendor/bin/dsa-channeld", CHANNELD_CONTEXT))
     for pattern, rule in entries:
         if not any(pattern in line for line in lines):
             lines.append(rule)
     return "\n".join(lines) + ("\n" if lines else "")
 
 
-def update_vendor_filesystem_config(fs_config_text):
-    """Adds filesystem configuration entries for guest graphics libraries if not present."""
+def update_vendor_filesystem_config(fs_config_text, channeld=False):
+    """Adds filesystem configuration entries for the files DSA adds to vendor if not present."""
     lines = fs_config_text.splitlines()
     entries = [
         ("vendor/lib64/hw/vulkan.ranchu.so", "vendor/lib64/hw/vulkan.ranchu.so 0 0 644 capabilities=0x0"),
         ("vendor/lib64/libOpenglSystemCommon.so", "vendor/lib64/libOpenglSystemCommon.so 0 0 644 capabilities=0x0"),
         ("vendor/etc/init/dsa-console-logcat.rc", "vendor/etc/init/dsa-console-logcat.rc 0 0 644 capabilities=0x0"),
     ]
+    if channeld:
+        entries += [
+            ("vendor/bin/dsa-channeld", "vendor/bin/dsa-channeld 0 2000 755 capabilities=0x0"),
+            ("vendor/etc/init/dsa-channeld.rc", "vendor/etc/init/dsa-channeld.rc 0 0 644 capabilities=0x0"),
+        ]
     for path, rule in entries:
         if not any(line.startswith(path + " ") for line in lines):
             lines.append(rule)
@@ -370,6 +383,7 @@ GFXSTREAM_ALLOWED_PERMS = {
     "create", "connect", "read", "write", "getattr", "setopt", "getopt", "shutdown"
 }
 SEPOLICY_FRAGMENT = HERE / "sepolicy/graphics-vsock.cil"
+CHANNELD_POLICY = HERE / "sepolicy/channeld.cil"
 
 
 def narrow_vsock_neverallows(text):
@@ -499,13 +513,15 @@ def recompile_precompiled_sepolicy(otatools, cil_map, vendor_version, genfs_vers
         return None
 
 
-def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=None):
+def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=None, channeld=None):
     """Copies target_files, removing the shell apps and the published kernel modules,
-    switching to a user build and adding the Hyper-V mount table."""
+    switching to a user build and adding the Hyper-V mount table, and the control channel
+    daemon when `channeld` names one."""
     fstab = (HERE / "fstab.dsa").read_bytes()
     console_logcat = (HERE / "console-logcat.rc").read_bytes()
     graphics_payload = Path(graphics_library).read_bytes() if graphics_library else None
     vulkan_payload = Path(vulkan_driver).read_bytes() if vulkan_driver else None
+    channeld_payload = Path(channeld).read_bytes() if channeld else None
     replaced_graphics_payload = False
     replaced_vulkan_payload = False
     kept_modules = re.compile(r"^(VENDOR_BOOT/RAMDISK|VENDOR_DLKM|SYSTEM_DLKM)/lib/modules/.*\.ko$")
@@ -525,6 +541,9 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         if "SYSTEM/etc/selinux/plat_sepolicy.cil" in cil_map:
             plat_orig = cil_map["SYSTEM/etc/selinux/plat_sepolicy.cil"].decode()
             plat_patched = patch_plat_sepolicy(plat_orig, fragment_text)
+            if channeld_payload is not None:
+                # Its rules name the domain they declare, so they go in whole.
+                plat_patched += "\n" + CHANNELD_POLICY.read_text()
             new_plat_bytes = plat_patched.encode()
             cil_map["SYSTEM/etc/selinux/plat_sepolicy.cil"] = new_plat_bytes
 
@@ -601,24 +620,27 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                                 prefix = directory.lower()
                             text += f"{prefix}fstab.dsa 0 0 644 capabilities=0x0\n"
                     if name == "META/vendor_filesystem_config.txt":
-                        text = update_vendor_filesystem_config(text)
+                        text = update_vendor_filesystem_config(text, channeld_payload is not None)
                     data = text.encode()
                 elif name == "VENDOR/etc/ueventd.rc":
                     data = data.rstrip(b"\n") + b"\n" + CONSOLE_UEVENTD_LINE.encode() + b"\n"
                 elif name in ("VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"):
-                    data = update_vendor_file_contexts(data.decode()).encode()
+                    data = update_vendor_file_contexts(data.decode(), channeld_payload is not None).encode()
             info.compress_type = zipfile.ZIP_STORED
             zout.writestr(info, data)
         for directory in FSTAB_DIRS:
             zout.writestr(directory + "fstab.dsa", fstab)
         zout.writestr(CONSOLE_LOGCAT_RC, console_logcat)
+        if channeld_payload is not None:
+            zout.writestr(CHANNELD_BINARY, channeld_payload)
+            zout.writestr(CHANNELD_RC, (HERE / "dsa-channeld.rc").read_bytes())
         if vulkan_payload is not None and not replaced_vulkan_payload:
             zout.writestr(VULKAN_RANCHU_LIBRARY, vulkan_payload)
             replaced_vulkan_payload = True
         if "VENDOR/etc/selinux/vendor_file_contexts" not in names:
             zout.writestr(
                 "VENDOR/etc/selinux/vendor_file_contexts",
-                update_vendor_file_contexts("").encode(),
+                update_vendor_file_contexts("", channeld_payload is not None).encode(),
             )
     if graphics_payload is not None and not replaced_graphics_payload:
         dest.unlink(missing_ok=True)
@@ -846,6 +868,8 @@ def main():
                         help="a libOpenglSystemCommon.so built for the selected guest")
     parser.add_argument("--vulkan-driver", type=Path,
                         help="a vulkan.ranchu.so built for the selected guest")
+    parser.add_argument("--channeld", type=Path,
+                        help="the guest's control channel daemon (dsa-channeld) built for the guest")
     parser.add_argument("--graphics-dir", type=Path,
                         help="a directory containing guest graphics libraries (vulkan.ranchu.so, libOpenglSystemCommon.so)")
     args = parser.parse_args()
@@ -883,7 +907,8 @@ def main():
             vulkan_driver = sibling
 
     modified = work / "modified.zip"
-    modify(target_files, modified, graphics_library=graphics_library, vulkan_driver=vulkan_driver, otatools=otatools)
+    modify(target_files, modified, graphics_library=graphics_library, vulkan_driver=vulkan_driver,
+           otatools=otatools, channeld=args.channeld)
 
     signed = work / "signed.zip"
     # It runs where AOSP's certificates sit at the paths apkcerts.txt names, so every path

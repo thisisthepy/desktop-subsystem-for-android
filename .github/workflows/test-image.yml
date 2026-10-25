@@ -11,6 +11,9 @@ on:
       - "dsa/guest/image/**"
       - "dsa/graphics/**"
       - "dsa/kernel/**"
+      - "dsa/guest/channeld/**"
+      - "dsa/guest/transport/**"
+      - "dsa/protocol/**"
       - ".github/workflows/test-image.yml"
       - "scripts/tests/image-graphics-workflow.test.sh"
   workflow_dispatch:
@@ -86,9 +89,33 @@ jobs:
             .scratch/build/vulkan.ranchu.so
           if-no-files-found: error
 
+  channeld:
+    name: Build the guest control daemon
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
+
+      - name: Build dsa-channeld for the guest
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: bash dsa/guest/channeld/build-android.sh .scratch/channeld
+
+      - name: Keep the daemon
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-channeld
+          path: .scratch/channeld/dsa-channeld
+          if-no-files-found: error
+
   image:
     name: Make and check the guest image (ubuntu-latest, Android ${{ matrix.android }})
-    needs: guest-graphics
+    needs: [guest-graphics, channeld]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -162,10 +189,17 @@ jobs:
         run: |
           uv run dsa/graphics/check-guest-driver.py .scratch/guest-graphics/vulkan.ranchu.so .scratch/aosp-inputs/*/*target_files*.zip
 
+      - name: Download the guest control daemon
+        uses: actions/download-artifact@v4
+        with:
+          name: guest-channeld
+          path: .scratch/channeld
+
       - name: Make the image
         run: |
           args=(--major "${{ matrix.android }}" --keys .scratch/image-keys)
           args+=(--graphics-dir .scratch/guest-graphics --graphics-library .scratch/guest-graphics/libOpenglSystemCommon.so)
+          args+=(--channeld .scratch/channeld/dsa-channeld)
           uv run dsa/guest/image/make-image.py "${args[@]}"
 
       - name: Check the image
