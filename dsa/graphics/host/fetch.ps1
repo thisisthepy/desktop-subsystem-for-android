@@ -32,15 +32,18 @@ git -C $GfxstreamDir checkout --detach $GfxstreamRevision
 git -C $GfxstreamDir reset --hard $GfxstreamRevision
 git -C $GfxstreamDir clean -fdx
 
-# Apply the checked-in gfxstream patches. 0002 and 0003 patch Mesa for the guest and do not
+# Apply the checked-in gfxstream patches. 0002, 0003 and 0008 patch Mesa for the guest and do not
 # belong to this tree. The host renderer cannot build without 0004, and without 0005 it
 # aborts when two guest processes create one shared ColorBuffer and refuses more than
-# eleven task windows. Without 0007 the renderer cannot be asked for the GPU that drives the
-# display, so a patch that does not apply stops the fetch.
+# eleven task windows. Without 0006 a Vulkan call naming an image, buffer or memory the
+# host does not have reaches the GPU driver or aborts, and takes the renderer down with
+# every app on it. Without 0007 the renderer cannot be asked for the GPU that drives the
+# display. A patch that does not apply stops the fetch.
 $PatchDir = Join-Path $RepoRoot "dsa/graphics/patches"
 $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0004-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0005-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0006-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0007-*.patch")
 foreach ($Patch in $Patches) {
     Write-Host "Applying patch: $($Patch.Name)"

@@ -70,7 +70,9 @@ in the hwcomposer. Without virtio-gpu, a gralloc buffer carries no host resource
 process derives the ColorBuffer handle from the buffer ID minigbm writes into the handle
 (`dsa/graphics/include/dsa_shared_color_buffer.h`). The first process to use the buffer
 creates the ColorBuffer with that handle; the others open it. The guest Vulkan driver does
-the same (`dsa/graphics/patches/0002-*.patch`). The hwcomposer closes its reference when
+the same (`dsa/graphics/patches/0002-*.patch`). Whoever creates it gives it the buffer's
+own format, from the DRM format minigbm writes into the handle, through the same header:
+the driver binds the buffer's VkImage, made in that format, to the ColorBuffer's memory. The hwcomposer closes its reference when
 SurfaceFlinger can no longer show the buffer, and the host frees whatever a process still
 holds when the process dies.
 
