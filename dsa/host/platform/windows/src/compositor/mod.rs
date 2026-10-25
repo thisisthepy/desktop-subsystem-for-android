@@ -49,7 +49,7 @@ pub struct CompositorConfig {
 impl Default for CompositorConfig {
     fn default() -> Self {
         CompositorConfig {
-            pipe_name: "dsa".into(),
+            pipe_name: crate::host_config::DEFAULT_PIPE_NAME.into(),
             command_port: GRAPHICS_COMMAND_PORT,
             process_pipe_port: GRAPHICS_PROCESS_PIPE_PORT,
             mutex_name: DEFAULT_MUTEX_NAME.into(),

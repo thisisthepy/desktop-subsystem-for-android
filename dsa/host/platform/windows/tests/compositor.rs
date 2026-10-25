@@ -368,6 +368,17 @@ fn pr1_compositor_accepts_stream_over_hvsocket_loopback() {
     assert_eq!(renderer.command_stream_count(), 1);
 }
 
+/// The compositor learns the VM's ID from the service's local API; on a different pipe it
+/// never learns it and never binds its listeners.
+#[test]
+fn fr3_compositor_asks_the_service_on_its_local_api_pipe() {
+    let service = dsa_host_windows::host_config::HostConfig::parse(
+        r#"{"kernel": "k", "system_image": "s", "data_disk": "d"}"#,
+    )
+    .unwrap();
+    assert_eq!(CompositorConfig::default().pipe_name, service.pipe_name);
+}
+
 #[test]
 fn fr3_compositor_logs_to_user_local_appdata_folder() {
     let temp_dir = std::env::temp_dir().join(format!(
