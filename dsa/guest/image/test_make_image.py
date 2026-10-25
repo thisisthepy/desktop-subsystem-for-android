@@ -345,6 +345,13 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertIn("androidboot.hardware.gralloc=minigbm", cmdline)
         self.assertIn("androidboot.cpuvulkan.version=0", cmdline)
 
+    def test_pr3_composer_starts_without_a_display_device(self):
+        # Cuttlefish's composer otherwise looks for a virtio-gpu DRM card or a goldfish
+        # display, finds neither under Hyper-V, and surfaceflinger aborts.
+        cmdline = make_image.kernel_cmdline("blkdevparts=sda:1@0(misc)")
+        self.assertIn("androidboot.hardware.hwcomposer.mode=noop", cmdline)
+        self.assertIn("androidboot.hardware.hwcomposer.display_finder_mode=noop", cmdline)
+
     def test_pr3_edit_props_sets_graphics_properties(self):
         props = make_image.edit_props("ro.debuggable=1\n")
         self.assertIn("ro.hardware.egl=angle\n", props)
