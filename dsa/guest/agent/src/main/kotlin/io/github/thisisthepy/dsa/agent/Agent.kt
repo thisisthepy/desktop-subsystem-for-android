@@ -8,11 +8,12 @@ import io.github.thisisthepy.dsa.agent.requests.TaskActions
 import io.github.thisisthepy.dsa.agent.tasks.TaskReporter
 import io.github.thisisthepy.dsa.agent.tasks.TaskSource
 import io.github.thisisthepy.dsa.agent.windowing.FreeformSetup
+import io.github.thisisthepy.dsa.agent.windowing.TaskArranger
 import io.github.thisisthepy.dsa.agent.windowing.WindowingControl
 
 /**
- * The agent: makes the display freeform, reports app tasks to the host over the control
- * daemon, and acts on the host's requests.
+ * The agent: makes the display freeform, keeps app tasks from overlapping on it, reports
+ * them to the host over the control daemon, and acts on the host's requests.
  *
  * Everything runs on the scheduler's one thread. Task changes are coalesced: however many
  * arrive before the agent gets to them, it reads the tasks once.
@@ -36,7 +37,9 @@ class Agent(
     private val reporter = TaskReporter(ownPackage) { frame -> channel.send(frame) }
     private val requests = HostRequests(ownPackage, actions, reporter::isReported)
     private val freeform = FreeformSetup(windowing, scheduler, log)
+    private val arranger = TaskArranger(actions, windowing::displaySize, log)
     private var refreshPending = false
+    private var checkPending = false
 
     fun start() {
         scheduler.post {
@@ -88,18 +91,42 @@ class Agent(
         }
     }
 
+    /**
+     * Reads the tasks, moves app tasks that overlap apart, and reports them. A task that is
+     * being moved is reported at the place it is going to, so the host never hears of two
+     * app tasks that overlap.
+     */
     private fun refresh() {
-        if (!channel.connected) return
         val running = try {
             tasks.snapshot()
         } catch (e: Exception) {
             log.warn("reading the running tasks failed", e)
             return
         }
-        reporter.update(running)
+        val bounds = arranger.arrange(running.filter(reporter::reportable))
+        if (arranger.waiting) checkMoves()
+        if (!channel.connected) return
+        reporter.update(
+            running.map { task ->
+                val placed = bounds[task.taskId]
+                if (placed == null || placed == task.bounds) task else task.copy(bounds = placed)
+            },
+        )
+    }
+
+    /** Reads the tasks again shortly: a move does not always call the task stack listener. */
+    private fun checkMoves() {
+        if (checkPending) return
+        checkPending = true
+        scheduler.postDelayed(MOVE_CHECK_MILLIS) {
+            checkPending = false
+            arranger.tick()
+            requestRefresh()
+        }
     }
 
     private companion object {
         const val RETRY_MILLIS = 1000L
+        const val MOVE_CHECK_MILLIS = 100L
     }
 }

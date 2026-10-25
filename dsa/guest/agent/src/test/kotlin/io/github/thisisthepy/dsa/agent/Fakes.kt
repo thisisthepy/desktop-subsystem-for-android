@@ -7,6 +7,7 @@ import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.tasks.TaskKind
 import io.github.thisisthepy.dsa.agent.tasks.TaskSnapshot
 import io.github.thisisthepy.dsa.agent.tasks.TaskSource
+import io.github.thisisthepy.dsa.agent.windowing.Size
 import io.github.thisisthepy.dsa.agent.windowing.WindowingControl
 import io.github.thisisthepy.dsa.control.v1.Envelope
 
@@ -137,8 +138,12 @@ class FakeTasks : TaskSource {
 class FakeActions : TaskActions {
     val launched = mutableListOf<String>()
     val closed = mutableListOf<Int>()
+    val moved = mutableListOf<Pair<Int, TaskBounds>>()
     var launchable = setOf<String>()
     var closable = setOf<Int>()
+
+    /** What the window manager does with a move; by default it accepts it and does nothing yet. */
+    var onMove: (Int, TaskBounds) -> Boolean = { _, _ -> true }
 
     override fun launchApp(packageName: String): Boolean {
         launched += packageName
@@ -149,12 +154,18 @@ class FakeActions : TaskActions {
         closed += taskId
         return taskId in closable
     }
+
+    override fun moveTask(taskId: Int, bounds: TaskBounds): Boolean {
+        moved += taskId to bounds
+        return onMove(taskId, bounds)
+    }
 }
 
 class FakeWindowing(var acceptAfter: Int = 0) : WindowingControl {
     var freeformEnabled = false
     var mode = 1
     var sets = 0
+    var size: Size? = Size(1920, 1080)
 
     override fun enableFreeform() {
         freeformEnabled = true
@@ -166,4 +177,6 @@ class FakeWindowing(var acceptAfter: Int = 0) : WindowingControl {
         sets++
         if (freeformEnabled && sets > acceptAfter) this.mode = mode
     }
+
+    override fun displaySize() = size ?: throw IllegalStateException("the display is not up")
 }

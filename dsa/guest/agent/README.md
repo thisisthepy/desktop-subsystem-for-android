@@ -12,6 +12,9 @@ by the image in `/system_ext/priv-app/DsaAgent/`. It has no activity: the host i
   default display's windowing mode to freeform through the window manager. Every task
   then has bounds of its own on the one display. The window manager takes the setting
   through an observer, so the agent sets the mode and checks again until it holds.
+- **Task placement.** No two app tasks overlap on the display. Android's freeform launch
+  puts every new task at the same default place, and on one shared display a covered task
+  shows in no window, so the agent moves a task that overlaps another (see below).
 - **Task reports.** It sends `TaskUpdated` (task ID, bounds, package, label, focus) when an
   app task appears or any of those change, and `TaskRemoved` when the task ends. Only app
   tasks are reported: not its own, not home or recents, and not a task with no package.
@@ -36,8 +39,44 @@ sends only what changed. A burst of changes is read once.
 A task organizer would report bounds directly, but registering one hands the organizer
 every task's surface and its transitions, which the guest's composer must keep, and only
 one organizer is active at a time. With no SystemUI and no window decorations in the guest,
-nothing in the guest moves or resizes a task: its bounds are set when it starts, which the
-listener reports, and later only at the host's request, which goes through the agent.
+only the agent moves or resizes a task: its bounds are set when it starts, which the
+listener reports, and later only by the agent, which reads the tasks again until the
+change lands (below).
+
+## Where tasks sit on the display
+
+The hwcomposer gives each task the layers inside its bounds, and SurfaceFlinger does not
+draw a window that another one covers. Two tasks at the same place would show one app in
+both host windows, or nothing in one of them. Where a task sits on the guest display is
+never seen, because the host places each window itself, so any packing works.
+
+Each time the agent reads the tasks, it goes through the app tasks by task ID, oldest
+first. A task that lies inside the display and overlaps no older task stays where it is.
+Any other task moves to the highest free place, then the leftmost, among the older ones
+(`windowing/TaskPlacement.kt`). A task only ever moves: its size is the one Android gave
+it. So when an older task grows into a newer one, the newer one moves.
+
+The move goes through `IActivityTaskManager.resizeTask`, the call behind
+`cmd activity task resize`. It works for any task in a freeform window, whichever way the
+task appeared: launched by the host, started by another app, or restored. The agent does
+not give launch bounds to `LaunchApp` instead. The window manager picks a new task's size
+from the app's layout and the display, so the agent cannot know it before the launch, and
+launch bounds would replace that size. Launch bounds also do nothing for a task that is
+already running, or for one an app starts itself.
+
+The window manager may apply a move later, and a move does not always call the task stack
+listener. So a task that is being moved is reported at the place it is going to, and the
+agent reads the tasks again every 100 ms until the move lands. After 2 seconds it gives
+up, logs it, reports the task where it is, and leaves the task there until its bounds
+change.
+
+**Capacity.** A phone app's default freeform size on the default 1920x1080 display is
+548x974, so three such tasks fit side by side. A fourth goes where it shares the fewest
+pixels with the others (beside three such tasks, the bottom right corner, over a strip of
+the third) and the agent logs a warning. Tasks that only partly overlap still get frames
+of their own, because neither holds the other's surface, but a touch in the shared part
+goes to the upper task. A bigger guest display holds more tasks
+(`androidboot.dsa.display_width` and `display_height`, in `dsa/guest/hwcomposer/`).
 
 ## Framework interfaces outside the SDK
 
@@ -45,7 +84,7 @@ A platform app may use framework interfaces the SDK does not publish. The agent 
 
 | Interface | For |
 |---|---|
-| `TaskStackListener`, `ActivityTaskManager.getService()` | Task change callbacks, ending a task (`removeTask`) |
+| `TaskStackListener`, `ActivityTaskManager.getService()` | Task change callbacks, ending a task (`removeTask`), moving a task (`resizeTask`) |
 | `TaskInfo.configuration.windowConfiguration`, `TaskInfo.isFocused` | A task's bounds, activity type and focus (reflection) |
 | `IWindowManager.get/setWindowingMode` | The display's windowing mode (reflection) |
 | `ActivityOptions.setLaunchWindowingMode` | A freeform window for a launched app (reflection) |
@@ -85,7 +124,7 @@ The release APK, `build/outputs/apk/release/dsa-agent-release-unsigned.apk`, is 
 
 | Path | What it is |
 |---|---|
-| `src/main/kotlin/.../agent/` | The agent: task reports, requests, the channel client, the freeform setup |
+| `src/main/kotlin/.../agent/` | The agent: task reports, requests, the channel client, the freeform setup, task placement |
 | `src/main/kotlin/.../agent/platform/` | The framework side: the application, task source, actions, windowing, binder channel |
 | `src/test/` | The unit tests |
 | `hidden-api/` | Compile-only declarations of framework classes outside the SDK |
