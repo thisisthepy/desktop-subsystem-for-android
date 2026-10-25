@@ -142,8 +142,13 @@ fn default_stop_timeout_secs() -> u64 {
 fn default_data_disk_size_gb() -> u32 {
     64
 }
+
+/// The local API's named pipe when the configuration names none. The compositor and the
+/// CLI connect to it too.
+pub const DEFAULT_PIPE_NAME: &str = "dsa-host";
+
 fn default_pipe_name() -> String {
-    "dsa-host".into()
+    DEFAULT_PIPE_NAME.into()
 }
 
 /// The host's settings, as written in the configuration file.
