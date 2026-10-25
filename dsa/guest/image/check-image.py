@@ -3,9 +3,9 @@
     uv run dsa/guest/image/check-image.py dsa/target/image/17.0.0-16373615 .scratch/image-keys
 
 It fails when the shell apps are still there, when the build is still debuggable, when an
-app is not signed with one of the keys in the key folder, when the files do not match
-image.json, or when the ramdisk lacks the directories and links Android's first stage
-init needs.
+app is not signed with one of the keys in the key folder, when the agent is missing or not
+signed with the platform key, when the files do not match image.json, or when the ramdisk
+lacks the directories and links Android's first stage init needs.
 
 The signatures are read from the apps themselves. sign_target_files_apks copies
 META/apkcerts.txt over unchanged, so that file still names AOSP's keys after signing.
@@ -129,6 +129,24 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         for client in ["system_app", "platform_app", "hal_graphics_composer_server"]:
             if f"(allow {client} dsa_channel_service (service_manager (find)))" not in plat_sepolicy:
                 problems.append(f"plat_sepolicy.cil does not let {client} find the daemon's binder service")
+    # The agent, which tells the host about each app task, so each gets its own window. It
+    # uses framework interfaces only a platform app may, so it must carry our platform
+    # certificate, and the framework refuses to boot without its privileged permission list.
+    agent = "SYSTEM_EXT/priv-app/DsaAgent/DsaAgent.apk"
+    if agent not in names:
+        problems.append(f"{agent} is missing from the image, so the host never learns of a task")
+    else:
+        platform_pem = keys / "platform.x509.pem"
+        if platform_pem.exists():
+            platform_cert = base64.b64decode(
+                "".join(l for l in platform_pem.read_text().splitlines() if "-----" not in l)
+            )
+            if platform_cert not in z.read(agent):
+                problems.append("DsaAgent.apk is not signed with our platform key, so the framework "
+                                "refuses the agent the interfaces it needs")
+    if "SYSTEM_EXT/etc/permissions/privapp-permissions-dsa-agent.xml" not in names:
+        problems.append("SYSTEM_EXT/etc/permissions/privapp-permissions-dsa-agent.xml is missing, so the "
+                        "framework refuses to boot with the agent")
 
     # DSA's composer, which sends the host each task's frames: with Cuttlefish's in its place,
     # no task window ever gets one.

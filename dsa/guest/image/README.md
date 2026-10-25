@@ -24,8 +24,10 @@ dsa/guest/image/fetch.sh 17
 dsa/guest/image/make-keys.sh .scratch/image-keys
 ANDROID_NDK_HOME=/path/to/ndk dsa/guest/channeld/build-android.sh .scratch/channeld
 dsa/guest/hwcomposer/build.sh .scratch .scratch/build-hwcomposer
+(cd dsa/guest/agent && ./gradlew assembleRelease)
 uv run dsa/guest/image/make-image.py --major 17 --keys .scratch/image-keys --channeld .scratch/channeld/dsa-channeld \
-    --hwcomposer .scratch/build-hwcomposer/dsa-hwcomposer
+    --hwcomposer .scratch/build-hwcomposer/dsa-hwcomposer \
+    --agent dsa/guest/agent/build/outputs/apk/release/dsa-agent-release-unsigned.apk
 uv run dsa/guest/image/check-image.py dsa/target/image/17.0.0-16373615 .scratch/image-keys
 ```
 
@@ -54,6 +56,9 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
   each task's frames rather than one picture of the whole display. The kernel command line
   sets its display (`androidboot.dsa.display_width`, `_height`, `_dpi`) and drops the
   settings only Cuttlefish's composer read.
+- The agent (`dsa/guest/agent/`) is added as a privileged app in
+  `/system_ext/priv-app/DsaAgent/`, with its privileged permission list, and is signed with
+  the platform key. It tells the host about each app task, so each gets its own window.
 - The published kernel modules are dropped. They belong to Google's kernel; DSA boots its
   own kernel with the drivers built in.
 - `fstab.dsa` replaces the mount table. All partitions are on the user's one Android

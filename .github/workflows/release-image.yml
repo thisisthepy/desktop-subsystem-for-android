@@ -138,9 +138,64 @@ jobs:
           path: .scratch/channeld/dsa-channeld
           if-no-files-found: error
 
+  hwcomposer:
+    name: Build the guest hwcomposer
+    if: inputs.rebuild_images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
+
+      # aidl comes from the runner's Android SDK build-tools.
+      - name: Build dsa-hwcomposer for the guest
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: bash dsa/guest/hwcomposer/build.sh .scratch .scratch/build-hwcomposer
+
+      - name: Keep the hwcomposer
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-hwcomposer
+          path: .scratch/build-hwcomposer/dsa-hwcomposer
+          if-no-files-found: error
+
+  agent:
+    name: Build the guest agent
+    if: inputs.rebuild_images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up a JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build the agent
+        working-directory: dsa/guest/agent
+        run: ./gradlew --no-daemon assembleRelease
+
+      # Unsigned: make-image.py signs it with the platform key.
+      - name: Keep the agent
+        run: |
+          mkdir -p .scratch/agent
+          cp dsa/guest/agent/build/outputs/apk/release/dsa-agent-release-unsigned.apk .scratch/agent/DsaAgent.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-agent
+          path: .scratch/agent/DsaAgent.apk
+          if-no-files-found: error
+
   image:
     name: Make and publish the guest image (ubuntu-latest, Android ${{ matrix.android }})
-    needs: [kernel, guest-graphics, channeld]
+    needs: [kernel, guest-graphics, channeld, hwcomposer, agent]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
@@ -188,6 +243,18 @@ jobs:
           name: guest-channeld
           path: .scratch/channeld
 
+      - name: Download the guest hwcomposer
+        uses: actions/download-artifact@v4
+        with:
+          name: guest-hwcomposer
+          path: .scratch/hwcomposer
+
+      - name: Download the guest agent
+        uses: actions/download-artifact@v4
+        with:
+          name: guest-agent
+          path: .scratch/agent
+
       - name: Fetch the pinned inputs
         run: dsa/guest/image/fetch.sh ${{ matrix.android }}
 
@@ -213,12 +280,18 @@ jobs:
         run: |
           uv run dsa/graphics/check-guest-driver.py .scratch/guest-graphics/vulkan.ranchu.so .scratch/aosp-inputs/*/*target_files*.zip
 
+      - name: Check the hwcomposer starts on the image
+        run: |
+          uv run dsa/graphics/check-guest-driver.py --executable .scratch/hwcomposer/dsa-hwcomposer .scratch/aosp-inputs/*/*target_files*.zip
+
       - name: Make the image
         run: >
           uv run dsa/guest/image/make-image.py --major ${{ matrix.android }}
           --keys .scratch/image-keys --kernel .scratch/kernel-out/bzImage
           --graphics-dir .scratch/guest-graphics
           --channeld .scratch/channeld/dsa-channeld
+          --hwcomposer .scratch/hwcomposer/dsa-hwcomposer
+          --agent .scratch/agent/DsaAgent.apk
 
       - name: Check the image
         run: uv run dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys

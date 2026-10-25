@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The guest agent. coreApp makes it start in the core-only boot stages too; persistent makes
+  the activity manager start it at boot and restart it if it dies. It has no activities:
+  the host is the shell, and the agent only reports tasks and acts on the host's requests.
+  Every permission here is also in privapp-permissions-dsa-agent.xml.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    coreApp="true">
+
+    <!-- Listening to task changes. -->
+    <uses-permission android:name="android.permission.MANAGE_ACTIVITY_TASKS" />
+    <!-- Seeing every app's tasks, not only its own. -->
+    <uses-permission android:name="android.permission.REAL_GET_TASKS" />
+    <!-- Ending a task the host closed. -->
+    <uses-permission android:name="android.permission.REMOVE_TASKS" />
+    <!-- Starting the app the host launched while the agent has no window of its own. -->
+    <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
+    <!-- Turning freeform windows on. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <!-- Making the display a freeform display. -->
+    <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" />
+    <!-- Reading the label and launcher activity of any app. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <application
+        android:name=".platform.AgentApplication"
+        android:allowBackup="false"
+        android:defaultToDeviceProtectedStorage="true"
+        android:directBootAware="true"
+        android:label="@string/app_name"
+        android:persistent="true" />
+</manifest>

@@ -98,6 +98,26 @@ jobs:
       - name: Run the tests
         run: cargo test --no-fail-fast -p dsa-transport -p dsa-host-unix -p dsa-cli
 
+  agent:
+    name: Test the guest agent (ubuntu-latest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dsa/guest/agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up a JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # The unit tests, and the release build, which compiles the agent against the
+      # generated protocol and channel code.
+      - name: Run the tests and build the agent
+        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+
   protocol:
     name: Check the generated protocol code (ubuntu-latest)
     runs-on: ubuntu-latest
