@@ -296,12 +296,8 @@ void present(Presenter& presenter, uint32_t display_id, uint32_t color_buffer) {
     if (!keep_alive) {
         return;
     }
-    std::unique_ptr<BorrowedImageInfoVk> source = emu->borrowColorBufferForDisplay(color_buffer);
-    if (!source) {
-        return;
-    }
-    const uint32_t width = source->imageCreateInfo.extent.width;
-    const uint32_t height = source->imageCreateInfo.extent.height;
+    const uint32_t width = keep_alive->getWidth();
+    const uint32_t height = keep_alive->getHeight();
     if (width == 0 || height == 0) {
         return;
     }
@@ -323,6 +319,14 @@ void present(Presenter& presenter, uint32_t display_id, uint32_t color_buffer) {
         log_once("could not set up the Vulkan commands that copy frames into task windows");
         return;
     }
+    /* Borrowed last: borrowing records the layout the copy leaves the buffer in, so from
+     * here on the copy must be submitted. */
+    std::unique_ptr<BorrowedImageInfoVk> source = emu->borrowColorBufferForDisplay(color_buffer);
+    if (!source) {
+        return;
+    }
+    const int32_t source_width = static_cast<int32_t>(source->imageCreateInfo.extent.width);
+    const int32_t source_height = static_cast<int32_t>(source->imageCreateInfo.extent.height);
 
     VulkanDispatch* vk = emu->getDeviceDispatch();
     VkDevice device = emu->getDevice();
@@ -358,7 +362,7 @@ void present(Presenter& presenter, uint32_t display_id, uint32_t color_buffer) {
 
     VkImageBlit region = {};
     region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    region.srcOffsets[1] = {static_cast<int32_t>(width), static_cast<int32_t>(height), 1};
+    region.srcOffsets[1] = {source_width, source_height, 1};
     region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.dstOffsets[1] = {static_cast<int32_t>(width), static_cast<int32_t>(height), 1};
     vk->vkCmdBlitImage(presenter.commands, source->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,

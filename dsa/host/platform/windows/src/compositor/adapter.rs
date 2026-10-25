@@ -181,9 +181,12 @@ pub struct NativeBackend {
     fn_process_pipe: unsafe extern "C" fn(StreamReadFn, StreamWriteFn, *mut c_void) -> c_int,
     fn_on_process_create: unsafe extern "C" fn() -> u64,
     fn_on_process_destroy: unsafe extern "C" fn(u64),
-    fn_set_display_callbacks:
+    /// Absent from a backend built before task windows: it still serves streams, and the
+    /// windows stay empty.
+    fn_set_display_callbacks: Option<
         unsafe extern "C" fn(Option<DisplayTargetFn>, Option<DisplayFrameFn>, *mut c_void) -> c_int,
-    fn_get_adapter_luid: unsafe extern "C" fn(*mut u8) -> c_int,
+    >,
+    fn_get_adapter_luid: Option<unsafe extern "C" fn(*mut u8) -> c_int>,
 }
 
 // SAFETY: HMODULE is owned and accessed across threads safely through the loaded function pointers.
@@ -213,8 +216,8 @@ impl NativeBackend {
             let fn_on_process_create = Self::get_symbol(handle, b"dsa_gfx_on_process_create\0")?;
             let fn_on_process_destroy = Self::get_symbol(handle, b"dsa_gfx_on_process_destroy\0")?;
             let fn_set_display_callbacks =
-                Self::get_symbol(handle, b"dsa_gfx_set_display_callbacks\0")?;
-            let fn_get_adapter_luid = Self::get_symbol(handle, b"dsa_gfx_get_adapter_luid\0")?;
+                Self::get_symbol(handle, b"dsa_gfx_set_display_callbacks\0").ok();
+            let fn_get_adapter_luid = Self::get_symbol(handle, b"dsa_gfx_get_adapter_luid\0").ok();
 
             let ret = (fn_init)(1280, 720);
             if ret != 0 {
@@ -301,7 +304,14 @@ impl GfxBackend for NativeBackend {
             Some((target, frame)) => (Some(target), Some(frame)),
             None => (None, None),
         };
-        match (self.fn_set_display_callbacks)(target, frame, context) {
+        let Some(set_display_callbacks) = self.fn_set_display_callbacks else {
+            return Err(
+                "this graphics backend predates task windows (no dsa_gfx_set_display_callbacks); \
+                 task windows stay empty"
+                    .into(),
+            );
+        };
+        match set_display_callbacks(target, frame, context) {
             0 => Ok(()),
             code => Err(format!(
                 "the graphics backend cannot present displays (dsa_gfx_set_display_callbacks \
@@ -311,9 +321,10 @@ impl GfxBackend for NativeBackend {
     }
 
     fn adapter_luid(&self) -> Option<[u8; 8]> {
+        let get_adapter_luid = self.fn_get_adapter_luid?;
         let mut luid = [0u8; 8];
         // SAFETY: the backend writes at most 8 bytes into `luid`.
-        (unsafe { (self.fn_get_adapter_luid)(luid.as_mut_ptr()) } == 0).then_some(luid)
+        (unsafe { get_adapter_luid(luid.as_mut_ptr()) } == 0).then_some(luid)
     }
 }
 
