@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Desktop Subsystem for Android (DSA)
+     Features the Cuttlefish build declares that a Hyper-V VM does not have. Without a
+     Bluetooth controller, the Bluetooth stack aborts each time system_server starts it,
+     because no HCI HAL is declared. Bluetooth comes back as a host HAL. -->
+<permissions>
+    <unavailable-feature name="android.hardware.bluetooth" />
+    <unavailable-feature name="android.hardware.bluetooth_le" />
+</permissions>

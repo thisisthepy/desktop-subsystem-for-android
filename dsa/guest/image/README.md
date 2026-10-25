@@ -14,6 +14,7 @@ them with the project's keys.
 | `check-image.py` | Checks a made image |
 | `fstab.dsa` | The guest's mount table on Hyper-V |
 | `console-logcat.rc` | The service that writes Android's log to the serial console |
+| `unavailable-features.xml` | Hardware features the VM lacks, withdrawn from the system |
 | `dsa-channeld.rc` | The service that runs the control channel daemon |
 | `sepolicy/` | Policy added to the image: vsock for graphics, and the control daemon's domain |
 
@@ -34,6 +35,8 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
 - The oemlock, UWB, Bluetooth and Thread HAL APEXes are removed. Their devices
   (Cuttlefish's virtio consoles, radios) do not exist on Hyper-V, they abort in a loop, and
   system_server waits for the oemlock HAL forever. Bluetooth comes back as a host HAL.
+- `unavailable-features.xml` withdraws the Bluetooth features, so system_server does not
+  start a Bluetooth stack that has no controller to talk to.
 - The build becomes a user build: not debuggable, adb only when authorised.
 - The control channel daemon (`/vendor/bin/dsa-channeld`) is added and runs in its own
   SELinux domain, the only one that may read `/proc/bootconfig`, where the host puts the

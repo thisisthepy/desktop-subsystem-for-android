@@ -397,6 +397,23 @@ class ImageLayoutTests(unittest.TestCase):
             self.assertIn("VENDOR/apex/com.android.hardware.boot.apex", names)
             self.assertIn('name="com.android.hardware.boot.apex"', keys)
 
+    def test_fr1_bluetooth_is_not_advertised_without_a_controller(self):
+        # With the feature declared, system_server starts the Bluetooth stack, which aborts
+        # in a loop because no HCI HAL exists.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/etc/permissions 0 2000 755 capabilities=0x0\n")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+            with zipfile.ZipFile(modified) as archive:
+                xml = archive.read("VENDOR/etc/permissions/dsa-unavailable-features.xml").decode()
+                fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
+            for feature in ["android.hardware.bluetooth", "android.hardware.bluetooth_le"]:
+                self.assertIn(f'<unavailable-feature name="{feature}" />', xml)
+            self.assertIn("vendor/etc/permissions/dsa-unavailable-features.xml 0 0 644 capabilities=0x0", fs_config)
+
     def test_fr1_system_server_does_not_wait_for_a_factory_reset_protection_partition(self):
         # With ro.frp.pst set, system_server starts PersistentDataBlockService, which needs
         # an frp partition the DSA disks do not have, and dies at boot phase 500. Empty,
