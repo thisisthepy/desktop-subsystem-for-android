@@ -68,7 +68,7 @@ const WM_APP_USER_CLOSED: u32 = WM_APP + 2;
 const WM_APP_QUIT: u32 = WM_APP + 3;
 
 const TASK_CLASS: &str = "DsaTaskWindow";
-const MESSAGE_CLASS: &str = "DsaCompositorMessages";
+const MESSAGE_CLASS: &str = "DsaWmMessages";
 const TASK_STYLE: WINDOW_STYLE = WS_OVERLAPPEDWINDOW;
 // Without a redirection surface, everything in the client area comes from the visual.
 const TASK_EX_STYLE: WINDOW_EX_STYLE = WS_EX_NOREDIRECTIONBITMAP | WS_EX_APPWINDOW;
@@ -153,7 +153,7 @@ pub fn start(setup: UiSetup) -> Result<UiHandle, String> {
     let (ready_tx, ready_rx) = mpsc::channel();
     let (events_tx, events_rx) = mpsc::channel();
     let thread = thread::Builder::new()
-        .name("dsa-compositor-ui".into())
+        .name("dsa-wm-ui".into())
         .spawn(move || run(setup, events_rx, ready_tx))
         .map_err(|e| format!("could not start the window thread: {e}"))?;
     match ready_rx.recv() {

@@ -180,7 +180,7 @@ impl Compositor {
     /// Runs the compositor until `stop` is set.
     pub fn run(mut self, stop: Arc<AtomicBool>) {
         if let Some(logger) = &self.logger {
-            logger.log("dsa-compositor starting");
+            logger.log("dsa-wm starting");
         }
 
         let bind_cmd = self.bind_command.take().expect("bind_command present");
@@ -203,7 +203,7 @@ impl Compositor {
         let monitor_logger = self.logger.clone();
 
         let monitor_thread = thread::Builder::new()
-            .name("dsa-compositor-monitor".into())
+            .name("dsa-wm-monitor".into())
             .spawn(move || {
                 let mut connector = monitor_connector_factory;
                 let mut client_opt: Option<HostApiClient> = None;
@@ -214,7 +214,7 @@ impl Compositor {
                         None => {
                             match HostApiClient::connect(
                                 &mut *connector,
-                                "dsa-compositor",
+                                "dsa-wm",
                                 Duration::from_secs(1),
                             ) {
                                 Ok(c) => {
@@ -280,7 +280,7 @@ impl Compositor {
         let cmd_logger = self.logger.clone();
 
         let cmd_thread = thread::Builder::new()
-            .name("dsa-compositor-cmd".into())
+            .name("dsa-wm-cmd".into())
             .spawn(move || {
                 while !cmd_stop.load(Ordering::Relaxed) {
                     match cmd_listener.accept(Duration::from_millis(100)) {
@@ -322,7 +322,7 @@ impl Compositor {
         let proc_logger = self.logger.clone();
 
         let proc_thread = thread::Builder::new()
-            .name("dsa-compositor-pipe".into())
+            .name("dsa-wm-pipe".into())
             .spawn(move || {
                 while !proc_stop.load(Ordering::Relaxed) {
                     match proc_listener.accept(Duration::from_millis(100)) {
@@ -368,7 +368,7 @@ impl Compositor {
         let _ = proc_thread.join();
 
         if let Some(logger) = &self.logger {
-            logger.log("dsa-compositor stopped cleanly");
+            logger.log("dsa-wm stopped cleanly");
         }
     }
 
@@ -424,7 +424,7 @@ impl Compositor {
         let watch_stop = Arc::clone(stop);
         let watch_logger = self.logger.clone();
         let watcher = thread::Builder::new()
-            .name("dsa-compositor-tasks".into())
+            .name("dsa-wm-tasks".into())
             .spawn(move || {
                 tasks::watch(
                     watch_connector,
@@ -440,7 +440,7 @@ impl Compositor {
         let request_connector = (self.local_api_connector)();
         let request_logger = self.logger.clone();
         let requester = thread::Builder::new()
-            .name("dsa-compositor-requests".into())
+            .name("dsa-wm-requests".into())
             .spawn(move || {
                 tasks::serve_requests(
                     request_connector,

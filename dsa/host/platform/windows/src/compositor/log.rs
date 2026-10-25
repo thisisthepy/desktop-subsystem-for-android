@@ -21,9 +21,9 @@ pub fn default_log_dir() -> PathBuf {
     }
 }
 
-/// Returns the default log file path: `%LOCALAPPDATA%\DSA\logs\dsa-compositor.log`.
+/// Returns the default log file path: `%LOCALAPPDATA%\DSA\logs\dsa-wm.log`.
 pub fn default_log_file() -> PathBuf {
-    default_log_dir().join("dsa-compositor.log")
+    default_log_dir().join("dsa-wm.log")
 }
 
 /// A thread-safe file logger.
@@ -91,6 +91,6 @@ fn humantime_now() -> String {
 pub fn note(logger: Option<&CompositorLogger>, message: &str) {
     match logger {
         Some(logger) => logger.log(message),
-        None => eprintln!("dsa-compositor: {message}"),
+        None => eprintln!("dsa-wm: {message}"),
     }
 }

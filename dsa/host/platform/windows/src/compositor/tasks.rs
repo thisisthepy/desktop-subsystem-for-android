@@ -17,7 +17,7 @@ use super::log::{note, CompositorLogger};
 use super::window::UiEvent;
 
 /// The build the compositor names itself by on the local API.
-const BUILD: &str = "dsa-compositor";
+const BUILD: &str = "dsa-wm";
 
 /// How long the compositor waits for the service to answer.
 const ANSWER: Duration = Duration::from_secs(2);

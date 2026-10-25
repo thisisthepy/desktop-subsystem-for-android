@@ -13,8 +13,8 @@
 //!
 //! `render_gpu` is `display` (the default), `integrated`, `discrete`, or part of a GPU's name
 //! (`"RTX"`, `"Arc"`), matched ignoring case. The renderer chooses when it starts, so a new
-//! value takes effect when `dsa-compositor` starts again. When no GPU matches, the renderer
-//! ranks the GPUs itself (a discrete GPU first) and the compositor's log says so.
+//! value takes effect when `dsa-wm` starts again. When no GPU matches, the renderer
+//! ranks the GPUs itself (a discrete GPU first) and the window manager's log says so.
 //!
 //! Everything here is plain data, so it is tested on every platform; the Windows calls that
 //! find the displays and name the adapters are in `compositor::display_gpu`.
@@ -76,7 +76,7 @@ impl<'de> Deserialize<'de> for RenderGpu {
     }
 }
 
-/// The compositor's per-user settings file, `%LOCALAPPDATA%\DSA\compositor.json`. Unknown
+/// The window manager's per-user settings file, `%LOCALAPPDATA%\DSA\compositor.json`. Unknown
 /// keys are an error, so a misspelt setting is reported rather than silently ignored.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -117,7 +117,7 @@ impl CompositorSettings {
     }
 }
 
-/// Where the compositor's settings are: `compositor.json` in `%LOCALAPPDATA%\DSA`, beside
+/// Where the window manager's settings are: `compositor.json` in `%LOCALAPPDATA%\DSA`, beside
 /// the `logs` folder.
 pub fn default_settings_file(local_app_data: Option<&Path>) -> PathBuf {
     match local_app_data {

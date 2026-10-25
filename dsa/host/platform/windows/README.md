@@ -1,8 +1,8 @@
 # host/platform/windows
 
 The Windows host: the Android VM, its control channel over Hyper-V sockets,
-`dsa-hostd`, which runs both, and `dsa-compositor`, which shows each Android task in a
-window of its own.
+`dsa-hostd`, which runs both, and `dsa-wm`, the DSA Window Manager, which shows each
+Android task in a window of its own.
 
 ## dsa-hostd
 
@@ -109,11 +109,12 @@ up to date, from a second signed list that the same `trusted_keys` sign:
   A path instead of a URL reads the lists from a folder, such as a mirror on a network
   drive.
 
-## dsa-compositor
+## dsa-wm
 
-`dsa-compositor.exe` runs in each signed-in user's session; the installer starts it at
-sign-in. One copy runs per session, and it ends at sign-out. It writes its messages to
-`%LOCALAPPDATA%\DSA\logs\dsa-compositor.log`.
+`dsa-wm.exe`, the DSA Window Manager, runs in each signed-in user's session; the
+installer starts it at sign-in. One copy runs per session, and it ends at sign-out. It
+writes its messages to `%LOCALAPPDATA%\DSA\logs\dsa-wm.log`. Earlier releases called it
+`dsa-compositor`.
 
 - It shows one window per Android app task, and nothing else. It watches the user's
   tasks through the service's local API, opens a window for each task, titled by the
@@ -138,7 +139,7 @@ sign-in. One copy runs per session, and it ends at sign-out. It writes its messa
 
 ### Choosing the render GPU
 
-`%LOCALAPPDATA%\DSA\compositor.json` holds the compositor's settings for each user. It
+`%LOCALAPPDATA%\DSA\compositor.json` holds the window manager's settings for each user. It
 is optional; without it every setting has its default.
 
 ```json
@@ -154,7 +155,7 @@ is optional; without it every setting has its default.
   or `"Arc"`.
 
 The renderer chooses its GPU when it starts, so a change takes effect the next time
-`dsa-compositor` starts (sign out and back in). A setting that cannot be read is logged
+`dsa-wm` starts (sign out and back in). A setting that cannot be read is logged
 and the default is used. Unknown keys are an error, so a misspelt setting is reported.
 
 The log says what was asked for and what the renderer chose:
