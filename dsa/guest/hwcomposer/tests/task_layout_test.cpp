@@ -185,6 +185,60 @@ TEST(fr3_no_display_is_paired_when_all_are_taken) {
     EXPECT_TRUE(!displays.acquire(3));
 }
 
+TEST(fr3_two_tasks_at_one_place_cannot_be_told_apart) {
+    // Android's freeform launch gives every new task the same default place. With identical
+    // bounds both surfaces match both tasks exactly, so every layer goes to one task and the
+    // other gets none: the agent has to move tasks apart.
+    const Rect place{686, 53, 1234, 1027};
+    const std::vector<Task> tasks{{4, place}, {5, place}};
+    const std::vector<LayerPlacement> layers{{40, 1, place}, {50, 2, place}};
+    const Layout layout = assignLayersToTasks(layers, tasks, kDisplay);
+    EXPECT_EQ(layersOf(layout, 4), (std::vector<int64_t>{40, 50}));
+    EXPECT_TRUE(!hasTask(layout, 5));
+}
+
+TEST(fr3_a_task_moved_apart_gets_its_own_layers_and_keeps_its_display) {
+    const Rect place{686, 53, 1234, 1027};
+    const Rect moved{0, 0, 548, 974};
+    TaskRegistry registry;
+    TaskDisplays displays(1, 10);
+    registry.update(4, place);
+    registry.update(5, place);
+    const auto before = displays.acquire(5);
+
+    // The agent moves task 5 and reports its new bounds; its surface follows.
+    EXPECT_TRUE(registry.update(5, moved));
+    const std::vector<LayerPlacement> layers{
+        {40, 1, place},
+        {50, 2, moved},
+        {51, 3, {100, 200, 300, 260}},
+    };
+    const Layout layout = assignLayersToTasks(layers, registry.tasks(), kDisplay);
+    EXPECT_EQ(layersOf(layout, 4), (std::vector<int64_t>{40}));
+    EXPECT_EQ(layersOf(layout, 5), (std::vector<int64_t>{50, 51}));
+    EXPECT_TRUE(layout.unassigned.empty());
+
+    const auto after = displays.acquire(5);
+    EXPECT_TRUE(before && after);
+    EXPECT_EQ(after->displayId, before->displayId);
+    EXPECT_TRUE(!after->created);
+}
+
+TEST(fr3_a_surface_not_yet_at_its_task_new_place_goes_to_no_other_task) {
+    // Between the agent's report and the window manager's move, the surface is still at the
+    // old place, which no task's bounds hold any more: it is left out, not given to a
+    // neighbour.
+    const std::vector<Task> tasks{{4, {0, 0, 548, 974}}, {5, {548, 0, 1096, 974}}};
+    const std::vector<LayerPlacement> layers{
+        {40, 1, {0, 0, 548, 974}},
+        {50, 2, {686, 53, 1234, 1027}},
+    };
+    const Layout layout = assignLayersToTasks(layers, tasks, kDisplay);
+    EXPECT_EQ(layersOf(layout, 4), (std::vector<int64_t>{40}));
+    EXPECT_TRUE(!hasTask(layout, 5));
+    EXPECT_EQ(layout.unassigned, (std::vector<int64_t>{50}));
+}
+
 TEST(fr3_task_frames_are_composed_relative_to_the_task_origin) {
     ComposeInput surface;
     surface.colorBuffer = 0x80000007u;

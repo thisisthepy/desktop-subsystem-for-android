@@ -1,8 +1,11 @@
 package io.github.thisisthepy.dsa.agent.platform
 
 import android.content.Context
+import android.graphics.Point
+import android.hardware.display.DisplayManager
 import android.provider.Settings
 import android.view.Display
+import io.github.thisisthepy.dsa.agent.windowing.Size
 import io.github.thisisthepy.dsa.agent.windowing.WindowingControl
 
 /**
@@ -28,6 +31,19 @@ class AndroidWindowing(private val context: Context) : WindowingControl {
         windowManagerInterface()
             .getMethod("setWindowingMode", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
             .invoke(windowManager(), Display.DEFAULT_DISPLAY, mode)
+    }
+
+    /**
+     * The display's logical size, which task bounds are measured in. getRealSize includes the
+     * whole display; the guest has no system bars to take away.
+     */
+    override fun displaySize(): Size {
+        val display = context.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
+            ?: error("the default display is not up")
+        val size = Point()
+        @Suppress("DEPRECATION")
+        display.getRealSize(size)
+        return Size(size.x, size.y)
     }
 
     // The methods are looked up on the interface: the proxy class that implements it is private.

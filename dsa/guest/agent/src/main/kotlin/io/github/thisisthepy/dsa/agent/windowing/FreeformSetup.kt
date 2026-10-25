@@ -15,6 +15,9 @@ interface WindowingControl {
     fun displayWindowingMode(): Int
 
     fun setDisplayWindowingMode(mode: Int)
+
+    /** The default display's size in pixels, as task bounds measure it. */
+    fun displaySize(): Size
 }
 
 /**
