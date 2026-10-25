@@ -15,7 +15,7 @@ vsock-loopback-tests = []
 [dependencies]
 dsa-transport.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]

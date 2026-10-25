@@ -543,6 +543,8 @@ class ImageLayoutTests(unittest.TestCase):
                 policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
                 self.assertIn("(typetransition init dsa_channeld_exec process dsa_channeld)", policy)
                 self.assertIn("(allow dsa_channeld proc_bootconfig (file (read open getattr)))", policy)
+                # stdio_to_kmsg hands it /dev/kmsg_debug; denied, its messages are lost.
+                self.assertIn("(allow dsa_channeld kmsg_debug_device (chr_file (write append getattr)))", policy)
                 self.assertIn("(allow dsa_channeld self (vsock_socket (create connect", policy)
                 self.assertNotRegex(policy, r"\(allow (appdomain|untrusted_app)\S* proc_bootconfig")
 

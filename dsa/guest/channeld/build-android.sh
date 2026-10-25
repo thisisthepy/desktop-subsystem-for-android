@@ -36,4 +36,10 @@ for lib in $needed; do
         *) echo "dsa-channeld needs $lib, which a vendor process cannot load" >&2; exit 1 ;;
     esac
 done
+# Android is its own target_os; code gated on Linux alone leaves only the stub that refuses
+# to run, which is what init started on the first boot.
+if ! grep -aq 'connecting to the host' "$out/dsa-channeld"; then
+    echo "dsa-channeld was built without the daemon; is it gated on target_os = linux only?" >&2
+    exit 1
+fi
 echo "built $out/dsa-channeld ($(wc -c < "$out/dsa-channeld") bytes, needs: $needed)"

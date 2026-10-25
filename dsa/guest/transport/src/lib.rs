@@ -4,5 +4,5 @@
 //! this through its native layer; the transport traits and the framing are the shared ones
 //! from `dsa-transport`, so both ends agree on what a frame is.
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub mod vsock;
