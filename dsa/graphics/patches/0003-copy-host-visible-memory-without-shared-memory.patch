@@ -1,0 +1,190 @@
+diff --git a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+index 4e0dc43c892..530b8c9b23c 100644
+--- a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
++++ b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+@@ -1520,7 +1520,52 @@ void ResourceTracker::setThreadingCallbacks(const ResourceTracker::ThreadingCall
+     ResourceTracker::threadingCallbacks = callbacks;
+ }
+ 
+-bool ResourceTracker::usingDirectMapping() const { return true; }
++bool ResourceTracker::usingDirectMapping() const {
++    // Host-visible memory is shared through the goldfish address space or virtio-gpu blobs.
++    // Without either (a Hyper-V VM), the guest keeps a copy and the stream carries it.
++    return mFeatureInfo.hasDirectMem || mFeatureInfo.hasVirtioGpuNext ||
++           mCaps.vulkanCapset.deferredMapping || mCaps.params[kParamCreateGuestHandle];
++}
++
++void ResourceTracker::flushShadowedMemory(VkEncoder* enc, VkDevice device) {
++    std::vector<VkMappedMemoryRange> ranges;
++    {
++        std::lock_guard<std::recursive_mutex> lock(mLock);
++        for (const auto& [memory, info] : info_VkDeviceMemory) {
++            if (!info.shadowed || info.device != device) continue;
++            ranges.push_back({VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, nullptr, memory, 0,
++                              VK_WHOLE_SIZE});
++        }
++    }
++    if (!ranges.empty()) {
++        enc->vkFlushMappedMemoryRanges(device, ranges.size(), ranges.data(), true /* do lock */);
++    }
++}
++
++void ResourceTracker::invalidateShadowedMemory(VkEncoder* enc, VkDevice device) {
++    // Only memory the host caches for reading comes back: reading back memory the guest
++    // only writes would overwrite what it wrote since its last submit.
++    std::vector<VkMappedMemoryRange> ranges;
++    {
++        std::lock_guard<std::recursive_mutex> lock(mLock);
++        auto deviceIt = info_VkDevice.find(device);
++        if (deviceIt == info_VkDevice.end()) return;
++        const auto& memProps = deviceIt->second.memProps;
++        for (const auto& [memory, info] : info_VkDeviceMemory) {
++            if (!info.shadowed || info.device != device) continue;
++            if (!(memProps.memoryTypes[info.memoryTypeIndex].propertyFlags &
++                  VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) {
++                continue;
++            }
++            ranges.push_back({VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, nullptr, memory, 0,
++                              VK_WHOLE_SIZE});
++        }
++    }
++    if (!ranges.empty()) {
++        enc->vkInvalidateMappedMemoryRanges(device, ranges.size(), ranges.data(),
++                                            true /* do lock */);
++    }
++}
+ 
+ uint32_t ResourceTracker::getStreamFeatures() const { return ResourceTracker::streamFeatureBits; }
+ 
+@@ -3024,7 +3069,8 @@ VkResult ResourceTracker::allocateCoherentMemory(VkDevice device,
+ 
+     bool dedicated = deviceAddressMemoryAllocation;
+ 
+-    if (mCaps.vulkanCapset.deferredMapping || mCaps.params[kParamCreateGuestHandle])
++    if (mCaps.vulkanCapset.deferredMapping || mCaps.params[kParamCreateGuestHandle] ||
++        !usingDirectMapping())
+         dedicated = true;
+ 
+     VkMemoryAllocateInfo hostAllocationInfo = vk_make_orphan_copy(*pAllocateInfo);
+@@ -3144,6 +3190,25 @@ VkResult ResourceTracker::allocateCoherentMemory(VkDevice device,
+         return host_res;
+     }
+ 
++    if (!usingDirectMapping()) {
++        uint8_t* shadow = static_cast<uint8_t*>(
++            aligned_alloc(kLargestPageSize, hostAllocationInfo.allocationSize));
++        if (!shadow) {
++            enc->vkFreeMemory(device, mem, nullptr, true);
++            std::lock_guard<std::recursive_mutex> lock(mLock);
++            info_VkDeviceMemory.erase(mem);
++            return VK_ERROR_OUT_OF_HOST_MEMORY;
++        }
++        memset(shadow, 0, hostAllocationInfo.allocationSize);
++        std::lock_guard<std::recursive_mutex> lock(mLock);
++        auto& stored = info_VkDeviceMemory[mem];
++        stored.allocationSize = pAllocateInfo->allocationSize;
++        stored.ptr = shadow;
++        stored.shadowed = true;
++        *pMemory = mem;
++        return host_res;
++    }
++
+     auto coherentMemory = createCoherentMemory(device, mem, hostAllocationInfo, enc, host_res);
+     if (coherentMemory) {
+         std::lock_guard<std::recursive_mutex> lock(mLock);
+@@ -4060,6 +4125,10 @@ void ResourceTracker::on_vkFreeMemory(void* context, VkDevice device, VkDeviceMe
+ #endif
+ 
+     if (!info.coherentMemory) {
++        if (info.shadowed) {
++            free(info.ptr);
++            info_VkDeviceMemory.erase(it);
++        }
+         lock.unlock();
+         VkEncoder* enc = (VkEncoder*)context;
+         enc->vkFreeMemory(device, memory, pAllocateInfo, true /* do lock */);
+@@ -4972,11 +5041,20 @@ VkResult ResourceTracker::on_vkWaitForFences(void* context, VkResult, VkDevice d
+         auto hostConn = ResourceTracker::threadingCallbacks.hostConnectionGetFunc();
+         auto vkEncoder = ResourceTracker::threadingCallbacks.vkEncoderGetFunc(hostConn);
+         mesa_logd("vkWaitForFences to host");
+-        return vkEncoder->vkWaitForFences(device, fencesNonExternal.size(),
+-                                          fencesNonExternal.data(), waitAll, timeout,
+-                                          true /* do lock */);
++        VkResult result = vkEncoder->vkWaitForFences(device, fencesNonExternal.size(),
++                                                     fencesNonExternal.data(), waitAll, timeout,
++                                                     true /* do lock */);
++        if (result == VK_SUCCESS && !usingDirectMapping()) {
++            invalidateShadowedMemory(vkEncoder, device);
++        }
++        return result;
+     }
+ 
++    if (!usingDirectMapping()) {
++        auto hostConn = ResourceTracker::threadingCallbacks.hostConnectionGetFunc();
++        invalidateShadowedMemory(ResourceTracker::threadingCallbacks.vkEncoderGetFunc(hostConn),
++                                 device);
++    }
+     return VK_SUCCESS;
+ 
+ #else
+@@ -6096,6 +6174,18 @@ VkResult ResourceTracker::on_vkQueueSubmitTemplate(void* context, VkResult input
+                                                    VkFence fence) {
+     flushStagingStreams(context, queue, submitCount, pSubmits);
+ 
++    if (!usingDirectMapping()) {
++        VkDevice device = VK_NULL_HANDLE;
++        {
++            std::lock_guard<std::recursive_mutex> lock(mLock);
++            auto queueIt = info_VkQueue.find(queue);
++            if (queueIt != info_VkQueue.end()) device = queueIt->second.device;
++        }
++        if (device != VK_NULL_HANDLE) {
++            flushShadowedMemory(static_cast<VkEncoder*>(context), device);
++        }
++    }
++
+     std::vector<VkSemaphore> pre_signal_semaphores;
+     std::vector<zx_handle_t> pre_signal_events;
+     std::vector<int> pre_signal_sync_fds;
+@@ -6245,7 +6335,17 @@ VkResult ResourceTracker::on_vkQueueWaitIdle(void* context, VkResult, VkQueue qu
+     VkEncoder* enc = (VkEncoder*)context;
+ 
+     // now done waiting, get the host's opinion
+-    return enc->vkQueueWaitIdle(queue, true /* do lock */);
++    VkResult result = enc->vkQueueWaitIdle(queue, true /* do lock */);
++    if (result == VK_SUCCESS && !usingDirectMapping()) {
++        VkDevice device = VK_NULL_HANDLE;
++        {
++            std::lock_guard<std::recursive_mutex> lock(mLock);
++            auto queueIt = info_VkQueue.find(queue);
++            if (queueIt != info_VkQueue.end()) device = queueIt->second.device;
++        }
++        if (device != VK_NULL_HANDLE) invalidateShadowedMemory(enc, device);
++    }
++    return result;
+ }
+ 
+ #ifdef VK_USE_PLATFORM_ANDROID_KHR
+diff --git a/src/gfxstream/guest/vulkan_enc/ResourceTracker.h b/src/gfxstream/guest/vulkan_enc/ResourceTracker.h
+index 1462a7bf02f..2222d637ea2 100644
+--- a/src/gfxstream/guest/vulkan_enc/ResourceTracker.h
++++ b/src/gfxstream/guest/vulkan_enc/ResourceTracker.h
+@@ -546,6 +546,8 @@ class ResourceTracker {
+     void setThreadingCallbacks(const ThreadingCallbacks& callbacks);
+     bool hostSupportsVulkan() const;
+     bool usingDirectMapping() const;
++    void flushShadowedMemory(VkEncoder* enc, VkDevice device);
++    void invalidateShadowedMemory(VkEncoder* enc, VkDevice device);
+     uint32_t getStreamFeatures() const;
+     uint32_t getApiVersionFromInstance(VkInstance instance);
+     uint32_t getApiVersionFromDevice(VkDevice device);
+@@ -752,6 +754,9 @@ class ResourceTracker {
+         VkDevice device;
+ 
+         uint8_t* ptr = nullptr;
++        // ptr is the guest's own copy of the memory, which the stream keeps in step with
++        // the host's, since there is no memory the guest and the host share.
++        bool shadowed = false;
+ 
+         uint64_t blobId = 0;
+         uint64_t allocationSize = 0;
