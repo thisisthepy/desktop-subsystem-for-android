@@ -6,6 +6,9 @@ from pathlib import Path
 
 PATCH_0001 = Path(__file__).resolve().parent / "patches" / "0001-add-hyper-v-socket-transport.patch"
 PATCH_0002 = Path(__file__).resolve().parent / "patches" / "0002-add-hyper-v-vulkan-and-gralloc.patch"
+PATCH_0003 = Path(__file__).resolve().parent / "patches" / "0003-copy-host-visible-memory-without-shared-memory.patch"
+HOST_BACKEND = Path(__file__).resolve().parent / "host" / "dsa_gfx_backend.cpp"
+FETCH = Path(__file__).resolve().parent / "fetch.sh"
 
 
 class HvSocketPatchTests(unittest.TestCase):
@@ -51,6 +54,25 @@ class HvSocketPatchTests(unittest.TestCase):
         self.assertIn("cb->hostHandle", patch)
         self.assertIn("Hyper-V", patch)
 
+
+    def test_pr3_host_visible_memory_works_without_shared_memory(self):
+        # A Hyper-V VM has no goldfish address space and no virtio-gpu blobs, so the guest
+        # keeps a copy of host-visible memory and the stream carries it: flushed before a
+        # submit, read back after a wait.
+        patch = PATCH_0003.read_text()
+        self.assertIn("return mFeatureInfo.hasDirectMem || mFeatureInfo.hasVirtioGpuNext", patch)
+        self.assertIn("aligned_alloc(kLargestPageSize", patch)
+        self.assertIn("flushShadowedMemory(static_cast<VkEncoder*>(context), device);", patch)
+        self.assertIn("invalidateShadowedMemory(vkEncoder, device);", patch)
+        self.assertIn("VK_MEMORY_PROPERTY_HOST_CACHED_BIT", patch)
+        self.assertIn('"$patch_dir"/0003-*.patch', FETCH.read_text())
+
+    def test_pr3_host_renderer_does_not_expect_shared_memory(self):
+        # The host decoder copies memory from the stream only when neither GlDirectMem nor
+        # VirtioGpuNext is on, and the guest decides from the same features.
+        backend = HOST_BACKEND.read_text()
+        self.assertIn("STREAM_RENDERER_PARAM_RENDERER_FEATURES", backend)
+        self.assertIn("VirtioGpuNext:disabled", backend)
 
 if __name__ == "__main__":
     unittest.main()
