@@ -104,6 +104,9 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     if "SYSTEM/etc/selinux/plat_sepolicy.cil" in names and "dsa_channeld" not in z.read(
             "SYSTEM/etc/selinux/plat_sepolicy.cil").decode():
         problems.append("plat_sepolicy.cil has no dsa_channeld domain, so init cannot start the daemon")
+    if "META/file_contexts.bin" in names and b"dsa_channeld_exec" not in z.read("META/file_contexts.bin"):
+        problems.append("META/file_contexts.bin does not label dsa-channeld, so the vendor image leaves it "
+                        "vendor_file and init refuses to start it")
 
     if "VENDOR/etc/selinux/vendor_file_contexts" in names:
         vendor_fc = z.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
