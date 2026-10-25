@@ -361,6 +361,32 @@ def update_vendor_file_contexts(fc_text, channeld=False):
     return "\n".join(lines) + ("\n" if lines else "")
 
 
+# The partitions' file contexts, in the order the Android build joins them into
+# META/file_contexts.bin. The partition images are labelled from that file, not from these.
+PARTITION_FILE_CONTEXTS = [
+    "SYSTEM/etc/selinux/plat_file_contexts",
+    "SYSTEM_EXT/etc/selinux/system_ext_file_contexts",
+    "PRODUCT/etc/selinux/product_file_contexts",
+    "VENDOR/etc/selinux/vendor_file_contexts",
+    "ODM/etc/selinux/odm_file_contexts",
+]
+
+
+def compile_file_contexts(otatools, text):
+    """META/file_contexts.bin made from `text`: compiled with otatools' sefcontext_compile
+    when it has one, otherwise the text itself, which libselinux reads as text because it
+    lacks the compiled form's magic number."""
+    compiler = Path(otatools) / "bin/sefcontext_compile" if otatools else None
+    if compiler is None or not compiler.exists():
+        return text.encode()
+    compiler.chmod(0o755)
+    with tempfile.TemporaryDirectory() as tmp:
+        source, out = Path(tmp) / "file_contexts", Path(tmp) / "file_contexts.bin"
+        source.write_text(text)
+        run(compiler, "-o", out, source)
+        return out.read_bytes()
+
+
 def update_vendor_filesystem_config(fs_config_text, channeld=False):
     """Adds filesystem configuration entries for the files DSA adds to vendor if not present."""
     lines = fs_config_text.splitlines()
@@ -572,6 +598,16 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             if vers:
                 recompiled_policy = recompile_precompiled_sepolicy(otatools, cil_map, vers, genfs_version)
 
+        # The partition images are labelled from META/file_contexts.bin, so the labels added
+        # to vendor_file_contexts reach the image only once that is rebuilt from them.
+        file_contexts = []
+        for name in PARTITION_FILE_CONTEXTS:
+            text = zin.read(name).decode() if name in names else ""
+            if name == "VENDOR/etc/selinux/vendor_file_contexts":
+                text = update_vendor_file_contexts(text, channeld_payload is not None)
+            file_contexts.append(text if text.endswith("\n") or not text else text + "\n")
+        compiled_file_contexts = compile_file_contexts(otatools, "".join(file_contexts))
+
         for info in zin.infolist():
             name = info.filename
             if removed(name) or kept_modules.match(name):
@@ -592,6 +628,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 "ODM/etc/selinux/precompiled_sepolicy.plat_sepolicy_and_mapping.sha256",
             }:
                 data = new_sha256.encode()
+            elif name == "META/file_contexts.bin":
+                data = compiled_file_contexts
             elif name == GFXSTREAM_LIBRARY and graphics_payload is not None:
                 data = graphics_payload
                 replaced_graphics_payload = True
