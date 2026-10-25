@@ -7,6 +7,8 @@
 //! from the tasks that exist now rather than from nothing.
 
 use std::collections::BTreeMap;
+use std::fmt;
+use std::sync::mpsc::Receiver;
 
 /// A rectangle in guest display pixels: left and top inclusive, right and bottom exclusive.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -65,6 +67,14 @@ impl TaskEvent {
     }
 }
 
+/// The guest's tasks as they are now, and every change to them from then on.
+pub struct TaskWatch {
+    /// The events that bring an empty list of tasks to the current one.
+    pub current: Vec<TaskEvent>,
+    /// The changes after `current`, in order.
+    pub events: Receiver<TaskEvent>,
+}
+
 /// What the host asks of the guest about its tasks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskRequest {
@@ -73,6 +83,26 @@ pub enum TaskRequest {
     /// Start the app's launcher activity as a new task in its own window.
     Launch { package_name: String },
 }
+
+/// Why a [`TaskRequest`] was not carried out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskRequestError {
+    /// The Android is not running, so there is nothing to act on; the detail says so in
+    /// words a person can act on.
+    NotRunning(String),
+    /// The request could not be delivered; the detail says why.
+    Failed(String),
+}
+
+impl fmt::Display for TaskRequestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TaskRequestError::NotRunning(why) | TaskRequestError::Failed(why) => f.write_str(why),
+        }
+    }
+}
+
+impl std::error::Error for TaskRequestError {}
 
 /// The most tasks the table keeps. A guest that reports more is broken or hostile; the
 /// tasks past this are dropped rather than allowed to grow the host's memory without end.

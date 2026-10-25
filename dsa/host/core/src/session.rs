@@ -25,7 +25,7 @@ use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{self, envelope::Body};
 use dsa_transport::{Connection, Listener, TransportError};
 
-use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskTable};
+use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskTable, TaskWatch};
 
 /// Where the session is in its life.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -256,14 +256,6 @@ struct Shared {
 struct TaskHub {
     table: TaskTable,
     watchers: Vec<Sender<TaskEvent>>,
-}
-
-/// The guest's tasks as they are now, and every change to them from then on.
-pub struct TaskWatch {
-    /// The events that bring an empty list of tasks to the current one.
-    pub current: Vec<TaskEvent>,
-    /// The changes after `current`, in order.
-    pub events: Receiver<TaskEvent>,
 }
 
 impl Shared {

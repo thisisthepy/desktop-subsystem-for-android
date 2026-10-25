@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -21,6 +22,7 @@ use crate::host_api::{
     UpdateProgram, UserAndroid, UserAndroids,
 };
 use crate::session::SessionState;
+use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskTable, TaskWatch};
 
 /// A fresh listener, a connector that reaches it, and the user it reports for this process.
 pub type LocalPair = (Box<dyn LocalListener>, Box<dyn Connector>, String);
@@ -33,12 +35,27 @@ const WAIT: Duration = Duration::from_secs(10);
 /// An Android that only remembers what it was asked.
 pub struct FakeAndroid {
     state: Mutex<SessionState>,
+    tasks: Mutex<(TaskTable, Vec<Sender<TaskEvent>>)>,
+    /// The requests about tasks it was asked to carry out, in order.
+    pub requests: Mutex<Vec<TaskRequest>>,
 }
 
 impl FakeAndroid {
     pub fn new() -> FakeAndroid {
         FakeAndroid {
             state: Mutex::new(SessionState::Stopped),
+            tasks: Mutex::new((TaskTable::new(), Vec::new())),
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Changes its tasks as a guest's task message would, and tells the watchers.
+    pub fn publish(&self, event: TaskEvent) {
+        let mut tasks = self.tasks.lock().unwrap();
+        if tasks.0.apply(&event) {
+            tasks
+                .1
+                .retain(|watcher| watcher.send(event.clone()).is_ok());
         }
     }
 }
@@ -64,6 +81,25 @@ impl UserAndroid for FakeAndroid {
     }
     fn vm_id(&self) -> Option<String> {
         (self.state() == SessionState::Active).then(|| "fake-vm-id-1234".into())
+    }
+    fn watch_tasks(&self) -> Option<TaskWatch> {
+        let (tx, events) = mpsc::channel();
+        let mut tasks = self.tasks.lock().unwrap();
+        tasks.1.push(tx);
+        Some(TaskWatch {
+            current: tasks.0.snapshot(),
+            events,
+        })
+    }
+    fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
+        if self.state() != SessionState::Active {
+            return Err(TaskRequestError::NotRunning(format!(
+                "Android is {}, not running",
+                self.state()
+            )));
+        }
+        self.requests.lock().unwrap().push(request);
+        Ok(())
     }
 }
 
@@ -210,6 +246,26 @@ macro_rules! host_api_conformance {
         #[test]
         fn pr5_a_user_without_an_android_is_told_why() {
             $crate::host_api_conformance::user_without_an_android_is_told_why(&mut || $make);
+        }
+        #[test]
+        fn fr3_a_watching_client_receives_every_change_to_its_tasks() {
+            $crate::host_api_conformance::watcher_receives_task_changes(&mut || $make);
+        }
+        #[test]
+        fn fr3_a_client_that_watches_late_starts_from_the_current_tasks() {
+            $crate::host_api_conformance::late_watcher_starts_from_current_tasks(&mut || $make);
+        }
+        #[test]
+        fn fr3_closing_a_task_and_launching_an_app_reach_the_callers_android() {
+            $crate::host_api_conformance::close_and_launch_reach_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr3_a_request_to_an_android_that_is_not_running_says_so() {
+            $crate::host_api_conformance::request_to_stopped_android_says_so(&mut || $make);
+        }
+        #[test]
+        fn nfr5_a_watching_client_that_sends_a_request_is_disconnected() {
+            $crate::host_api_conformance::watcher_that_sends_is_disconnected(&mut || $make);
         }
         #[test]
         fn fr15_an_update_request_reaches_the_program_updater() {
@@ -359,4 +415,158 @@ pub fn update_failure_is_reported(make: MakeLocal<'_>) {
         }
         other => panic!("expected the service to refuse, got {other:?}"),
     }
+}
+
+/// A task as a guest's agent would describe it.
+pub fn sample_task(task_id: i32, label: &str) -> Task {
+    Task {
+        task_id,
+        bounds: Bounds {
+            left: 0,
+            top: 0,
+            right: 1080,
+            bottom: 1920,
+        },
+        package_name: "com.example.app".into(),
+        label: label.into(),
+        focused: false,
+    }
+}
+
+fn next_event(stream: &mut crate::host_api::TaskStream) -> TaskEvent {
+    stream
+        .next(WAIT)
+        .expect("the watch goes on")
+        .expect("a task event in time")
+}
+
+pub fn watcher_receives_task_changes(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut stream = connect(&mut *connector).watch_tasks().expect("watching");
+    assert!(stream.current().tasks.is_empty());
+    let android = androids
+        .of(&user)
+        .expect("the watch asked for the caller's Android");
+
+    android.publish(TaskEvent::Updated(sample_task(4, "Clock")));
+    android.publish(TaskEvent::Frames {
+        task_id: 4,
+        display_id: 2,
+    });
+    android.publish(TaskEvent::Removed { task_id: 4 });
+
+    assert_eq!(
+        next_event(&mut stream),
+        TaskEvent::Updated(sample_task(4, "Clock"))
+    );
+    assert_eq!(
+        next_event(&mut stream),
+        TaskEvent::Frames {
+            task_id: 4,
+            display_id: 2
+        }
+    );
+    assert_eq!(next_event(&mut stream), TaskEvent::Removed { task_id: 4 });
+    assert_eq!(
+        stream
+            .next(Duration::from_millis(50))
+            .expect("still watching"),
+        None
+    );
+}
+
+pub fn late_watcher_starts_from_current_tasks(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut client = connect(&mut *connector);
+    client.status().unwrap();
+    let android = androids.of(&user).unwrap();
+    android.publish(TaskEvent::Updated(sample_task(1, "Clock")));
+    android.publish(TaskEvent::Updated(sample_task(2, "Maps")));
+    android.publish(TaskEvent::Frames {
+        task_id: 2,
+        display_id: 7,
+    });
+
+    let list = client.tasks().expect("the list of tasks");
+    assert_eq!(
+        list.tasks,
+        vec![sample_task(1, "Clock"), sample_task(2, "Maps")]
+    );
+    assert_eq!(list.frames, vec![(2, 7)]);
+
+    let stream = client.watch_tasks().expect("watching");
+    assert_eq!(stream.current(), &list);
+}
+
+pub fn close_and_launch_reach_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut client = connect(&mut *connector);
+    client.start().unwrap();
+    client.launch_app("com.example.clock").expect("the launch");
+    client.close_task(9).expect("the close");
+    assert_eq!(
+        *androids.of(&user).unwrap().requests.lock().unwrap(),
+        vec![
+            TaskRequest::Launch {
+                package_name: "com.example.clock".into()
+            },
+            TaskRequest::Close { task_id: 9 },
+        ]
+    );
+}
+
+pub fn request_to_stopped_android_says_so(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let mut client = connect(&mut *connector);
+    match client.launch_app("com.example.clock") {
+        Err(ClientError::Service { code, detail }) => {
+            assert_eq!(code, ErrorCode::NotRunning);
+            assert!(detail.contains("not running"), "{detail}");
+        }
+        other => panic!("expected the service to refuse, got {other:?}"),
+    }
+    // The connection goes on serving.
+    assert_eq!(client.status().unwrap().state, SessionState::Stopped);
+}
+
+pub fn watcher_that_sends_is_disconnected(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let mut connection = connector.connect(WAIT).unwrap();
+    client_connect(&mut *connection, &local_hello(Role::Client, "client"), WAIT).unwrap();
+    let watch = dsa_protocol::host_api::types::Request {
+        id: 1,
+        body: Some(dsa_protocol::host_api::types::request::Body::WatchTasks(
+            dsa_protocol::host_api::types::WatchTasks {},
+        )),
+    };
+    dsa_protocol::host_api::send(
+        &mut *connection,
+        dsa_protocol::host_api::types::envelope::Body::Request(watch.clone()),
+    )
+    .unwrap();
+    connection
+        .recv(Some(WAIT))
+        .expect("the answer to the watch");
+    dsa_protocol::host_api::send(
+        &mut *connection,
+        dsa_protocol::host_api::types::envelope::Body::Request(watch),
+    )
+    .unwrap();
+    assert!(
+        connection.recv(Some(WAIT)).is_err(),
+        "the service closes a watching client that sends a request"
+    );
+    // Other clients are served.
+    assert_eq!(
+        connect(&mut *connector).status().unwrap().state,
+        SessionState::Stopped
+    );
 }
