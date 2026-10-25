@@ -7,18 +7,18 @@
 //! when it cannot work at all: no secret, or a host that refuses this guest for good.
 //! Messages go to standard error, which init sends to the kernel log.
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn main() {
     std::process::exit(daemon::run());
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn main() {
     eprintln!("dsa-channeld runs only in the Linux guest");
     std::process::exit(2);
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod daemon {
     use std::sync::atomic::AtomicBool;
     use std::sync::mpsc;
