@@ -8,6 +8,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+dsa-exe-resources = { path = "resources" }
 dsa-transport.workspace = true
 dsa-host-core.workspace = true
 dsa-protocol.workspace = true
@@ -49,6 +50,9 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_Dxgi_Common",
     "Win32_Security",
 ] }
+
+[build-dependencies]
+dsa-exe-resources = { path = "resources" }
 
 [dev-dependencies]
 dsa-transport = { workspace = true, features = ["conformance"] }

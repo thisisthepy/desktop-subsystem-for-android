@@ -162,6 +162,25 @@ jobs:
           $currentHash = (Get-FileHash -Path $wslconfig -Algorithm SHA256).Hash
           if ($currentHash -ne $env:INITIAL_WSLCONFIG_HASH) { throw ".wslconfig was modified by installation or service startup" }
 
+      # Task Manager and the taskbar name a program by its version information.
+      - name: fr3_every_program_carries_its_name_and_version
+        run: |
+          $expected = [ordered]@{
+            'dsa-hostd.exe' = 'Desktop Subsystem for Android Service'
+            'dsa-wm.exe' = 'DSA Window Manager'
+            'dsa.exe' = 'Desktop Subsystem for Android command line'
+          }
+          foreach ($name in $expected.Keys) {
+            $info = (Get-Item "$env:PROGRAM_DIR\$name").VersionInfo
+            Write-Host "$name : $($info.FileDescription) | $($info.ProductName) | $($info.CompanyName) | $($info.ProductVersion)"
+            if ($info.FileDescription -cne $expected[$name]) { throw "$name calls itself '$($info.FileDescription)', not '$($expected[$name])'" }
+            if ($info.ProductName -cne 'Desktop Subsystem for Android') { throw "$name names its product '$($info.ProductName)'" }
+            if ($info.CompanyName -cne 'Thisisthepy') { throw "$name names its company '$($info.CompanyName)'" }
+            if ($info.ProductVersion -cne '0.0.9') { throw "$name says it is version '$($info.ProductVersion)', not 0.0.9" }
+          }
+          $display = (Get-Service DsaHost).DisplayName
+          if ($display -cne 'Desktop Subsystem for Android Service') { throw "the service is called '$display'" }
+
       - name: fr3_window_manager_installed_and_registered
         run: |
           if (-not (Test-Path "$env:PROGRAM_DIR\dsa-wm.exe")) {

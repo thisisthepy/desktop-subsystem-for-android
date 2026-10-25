@@ -98,7 +98,7 @@
                 <File Id="HostdExe" Source="$(SourceDir)\dsa-hostd.exe" KeyPath="yes" />
                 <ServiceInstall Id="DsaHost"
                                 Name="DsaHost"
-                                DisplayName="Desktop Subsystem for Android"
+                                DisplayName="Desktop Subsystem for Android Service"
                                 Description="Runs each user's Android in its own virtual machine and answers the dsa command and the desktop apps."
                                 Type="ownProcess"
                                 Start="auto"
