@@ -2,7 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["pyelftools"]
 # ///
-"""Checks that the guest Vulkan driver can load on the image it ships in.
+"""Checks that the guest Vulkan driver, or another guest binary, can load on the image it ships in.
 
 The Android Vulkan loader opens the driver with immediate binding, so every symbol the
 driver imports must be defined by a library it loads, or the driver fails to load and
@@ -12,6 +12,10 @@ is mangled differently from the platform's. This check resolves the driver's imp
 against the libraries in the image's own target_files.
 
     uv run dsa/graphics/check-guest-driver.py vulkan.ranchu.so target_files.zip
+    uv run dsa/graphics/check-guest-driver.py --executable dsa-hwcomposer target_files.zip
+
+An executable (the hwcomposer) is held to the same rule: the dynamic linker binds its
+imports when it starts, and one that does not resolve stops it there.
 """
 
 import io
@@ -35,10 +39,11 @@ class Library:
     weak: set = field(default_factory=set)
 
 
-def problems(driver, image):
-    """What stops the driver loading, given the image's libraries by file name."""
+def problems(driver, image, module=HAL_MODULE):
+    """What stops the driver loading, given the image's libraries by file name. `module` is
+    the symbol the binary must export, or None for an executable."""
     found = []
-    if HAL_MODULE not in driver.defined:
+    if module is not None and module not in driver.defined:
         found.append(f"the driver does not export {HAL_MODULE}, the module the Android Vulkan loader looks up")
 
     # The dynamic linker searches the driver's dependencies and theirs, breadth first.
@@ -121,15 +126,18 @@ def image_libraries(target_files, names):
 
 
 def main(argv):
+    executable = len(argv) > 1 and argv[1] == "--executable"
+    if executable:
+        argv = argv[:1] + argv[2:]
     if len(argv) != 3:
-        print(__doc__.strip().splitlines()[-1].strip(), file=sys.stderr)
+        print(__doc__.strip().splitlines()[2].strip(), file=sys.stderr)
         return 2
     driver = read_library(Path(argv[1]).read_bytes())
-    found = problems(driver, image_libraries(argv[2], driver.needed))
+    found = problems(driver, image_libraries(argv[2], driver.needed), None if executable else HAL_MODULE)
     for problem in found:
         print(f"problem: {problem}")
     if found:
-        print(f"{len(found)} problems: the driver would not load on this image")
+        print(f"{len(found)} problems: {Path(argv[1]).name} would not load on this image")
         return 1
     print(f"{Path(argv[1]).name} loads on this image: {len(driver.undefined)} imports resolve")
     return 0

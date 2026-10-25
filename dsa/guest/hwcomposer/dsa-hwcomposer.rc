@@ -1,0 +1,9 @@
+# The guest's composer HAL. SurfaceFlinger cannot run without it, and holds state the
+# composer shares, so a composer restart restarts SurfaceFlinger too.
+service vendor.dsa-hwcomposer /vendor/bin/hw/dsa-hwcomposer
+    class hal animation
+    user system
+    group graphics
+    capabilities SYS_NICE
+    onrestart restart surfaceflinger
+    task_profiles ServiceCapacityLow

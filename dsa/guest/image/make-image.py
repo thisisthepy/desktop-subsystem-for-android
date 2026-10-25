@@ -282,10 +282,17 @@ def command_line_partitions(partitions, uuids=None):
     return "blkdevparts=sda:" + ",".join(entries)
 
 
-def removed(name):
+def removed_apexes(hwcomposer=False):
+    """The vendor APEXes the guest must not have; Cuttlefish's composers too when DSA's
+    composer replaces them."""
+    return REMOVED_APEXES + (CUTTLEFISH_COMPOSER_APEXES if hwcomposer else [])
+
+
+def removed(name, hwcomposer=False):
     """Whether a target_files member belongs to an app or a HAL the guest must not have."""
     return any(f"/{app}/" in name for app in REMOVED_APPS) or any(
-        name in (f"VENDOR/apex/{apex}.apex", f"VENDOR/apex/{apex}.capex") for apex in REMOVED_APEXES
+        name in (f"VENDOR/apex/{apex}.apex", f"VENDOR/apex/{apex}.capex")
+        for apex in removed_apexes(hwcomposer)
     )
 
 
@@ -323,6 +330,27 @@ FSTAB_DIRS = {
 GFXSTREAM_LIBRARY = "VENDOR/lib64/libOpenglSystemCommon.so"
 VULKAN_RANCHU_LIBRARY = "VENDOR/lib64/hw/vulkan.ranchu.so"
 
+# DSA's composer HAL (dsa/guest/hwcomposer), which sends the host each task's frames, and
+# Cuttlefish's composers, which compose the whole display and go when DSA's is installed.
+HWCOMPOSER_DIR = REPO / "dsa/guest/hwcomposer"
+HWCOMPOSER_BINARY = "VENDOR/bin/hw/dsa-hwcomposer"
+HWCOMPOSER_RC = "VENDOR/etc/init/dsa-hwcomposer.rc"
+HWCOMPOSER_MANIFEST = "VENDOR/etc/vintf/manifest/dsa-hwcomposer.xml"
+# The vendor policy's composer domain: init starts the binary in it, and it may serve the
+# composer HAL, reach the host renderer over vsock and call dsa-channeld.
+HWCOMPOSER_CONTEXT = "/vendor/bin/hw/dsa-hwcomposer u:object_r:hal_graphics_composer_default_exec:s0"
+CUTTLEFISH_COMPOSER_APEXES = [
+    "com.android.hardware.graphics.composer.ranchu",
+    "com.android.hardware.graphics.composer.drm_hwcomposer",
+]
+# The freeform display every task window lives on, as the hwcomposer reads it from
+# ro.boot.dsa.*. The host shows windows, not this display, so its size bounds a window's.
+DISPLAY_BOOTCONFIG = {
+    "display_width": 1920,
+    "display_height": 1080,
+    "display_dpi": 160,
+}
+
 CONSOLE_LOGCAT_RC = "VENDOR/etc/init/dsa-console-logcat.rc"
 # Features the VM lacks; SystemConfig drops them wherever else they are declared.
 UNAVAILABLE_FEATURES = "VENDOR/etc/permissions/dsa-unavailable-features.xml"
@@ -359,7 +387,7 @@ AGENT_FS_CONFIG = [
 CONSOLE_UEVENTD_LINE = "/dev/ttyS0 0660 system logd"
 
 
-def update_vendor_file_contexts(fc_text, channeld=False):
+def update_vendor_file_contexts(fc_text, channeld=False, hwcomposer=False):
     """Adds same_process_hal_file contexts for guest graphics libraries if not present, and
     opens the DRM cards to every graphics client.
 
@@ -380,6 +408,8 @@ def update_vendor_file_contexts(fc_text, channeld=False):
     ]
     if channeld:
         entries.append((r"/vendor/bin/dsa-channeld", CHANNELD_CONTEXT))
+    if hwcomposer:
+        entries.append((r"/vendor/bin/hw/dsa-hwcomposer", HWCOMPOSER_CONTEXT))
     for pattern, rule in entries:
         if not any(pattern in line for line in lines):
             lines.append(rule)
@@ -430,7 +460,7 @@ def add_filesystem_config(fs_config_text, rules):
     return "\n".join(lines) + ("\n" if lines else "")
 
 
-def update_vendor_filesystem_config(fs_config_text, channeld=False):
+def update_vendor_filesystem_config(fs_config_text, channeld=False, hwcomposer=False):
     """Adds filesystem configuration entries for the files DSA adds to vendor if not present."""
     lines = fs_config_text.splitlines()
     entries = [
@@ -448,6 +478,13 @@ def update_vendor_filesystem_config(fs_config_text, channeld=False):
              "vendor/etc/vintf/manifest/dsa-channel.xml 0 0 644 capabilities=0x0"),
             ("vendor/etc/selinux/vendor_service_contexts",
              "vendor/etc/selinux/vendor_service_contexts 0 0 644 capabilities=0x0"),
+        ]
+    if hwcomposer:
+        entries += [
+            ("vendor/bin/hw/dsa-hwcomposer", "vendor/bin/hw/dsa-hwcomposer 0 2000 755 capabilities=0x0"),
+            ("vendor/etc/init/dsa-hwcomposer.rc", "vendor/etc/init/dsa-hwcomposer.rc 0 0 644 capabilities=0x0"),
+            ("vendor/etc/vintf/manifest/dsa-hwcomposer.xml",
+             "vendor/etc/vintf/manifest/dsa-hwcomposer.xml 0 0 644 capabilities=0x0"),
         ]
     for path, rule in entries:
         if not any(line.startswith(path + " ") for line in lines):
@@ -590,16 +627,20 @@ def recompile_precompiled_sepolicy(otatools, cil_map, vendor_version, genfs_vers
         return None
 
 
-def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=None, channeld=None, agent=None):
+def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=None, channeld=None,
+           agent=None, hwcomposer=None):
     """Copies target_files, removing the shell apps and the published kernel modules,
     switching to a user build and adding the Hyper-V mount table, the control channel
-    daemon when `channeld` names one, and the agent when `agent` names its APK."""
+    daemon when `channeld` names one, the agent when `agent` names its APK, and DSA's
+    composer in place of Cuttlefish's when `hwcomposer` names one."""
     fstab = (HERE / "fstab.dsa").read_bytes()
     console_logcat = (HERE / "console-logcat.rc").read_bytes()
     graphics_payload = Path(graphics_library).read_bytes() if graphics_library else None
     vulkan_payload = Path(vulkan_driver).read_bytes() if vulkan_driver else None
     channeld_payload = Path(channeld).read_bytes() if channeld else None
     agent_payload = Path(agent).read_bytes() if agent else None
+    hwcomposer_payload = Path(hwcomposer).read_bytes() if hwcomposer else None
+    has_hwcomposer = hwcomposer_payload is not None
     replaced_graphics_payload = False
     replaced_vulkan_payload = False
     kept_modules = re.compile(r"^(VENDOR_BOOT/RAMDISK|VENDOR_DLKM|SYSTEM_DLKM)/lib/modules/.*\.ko$")
@@ -658,13 +699,13 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         for name in PARTITION_FILE_CONTEXTS:
             text = zin.read(name).decode() if name in names else ""
             if name == "VENDOR/etc/selinux/vendor_file_contexts":
-                text = update_vendor_file_contexts(text, channeld_payload is not None)
+                text = update_vendor_file_contexts(text, channeld_payload is not None, has_hwcomposer)
             file_contexts.append(text if text.endswith("\n") or not text else text + "\n")
         compiled_file_contexts = compile_file_contexts(otatools, "".join(file_contexts))
 
         for info in zin.infolist():
             name = info.filename
-            if removed(name) or kept_modules.match(name):
+            if removed(name, has_hwcomposer) or kept_modules.match(name):
                 continue
             if name.startswith("IMAGES/"):
                 # Rebuilt after signing from the modified contents.
@@ -699,7 +740,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 elif name == "META/apexkeys.txt":
                     data = b"".join(
                         line + b"\n" for line in data.splitlines()
-                        if not any(f'name="{a}.apex"' in line.decode() for a in REMOVED_APEXES)
+                        if not any(f'name="{a}.apex"' in line.decode() for a in removed_apexes(has_hwcomposer))
                     )
                 elif name == "META/apkcerts.txt":
                     data = b"".join(
@@ -721,12 +762,13 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                                 prefix = directory.lower()
                             text += f"{prefix}fstab.dsa 0 0 644 capabilities=0x0\n"
                     if name == "META/vendor_filesystem_config.txt":
-                        text = update_vendor_filesystem_config(text, channeld_payload is not None)
+                        text = update_vendor_filesystem_config(text, channeld_payload is not None, has_hwcomposer)
                     data = text.encode()
                 elif name == "VENDOR/etc/ueventd.rc":
                     data = data.rstrip(b"\n") + b"\n" + CONSOLE_UEVENTD_LINE.encode() + b"\n"
                 elif name in ("VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"):
-                    data = update_vendor_file_contexts(data.decode(), channeld_payload is not None).encode()
+                    data = update_vendor_file_contexts(data.decode(), channeld_payload is not None,
+                                                       has_hwcomposer).encode()
                 elif name == VENDOR_SERVICE_CONTEXTS and channeld_payload is not None:
                     data = update_vendor_service_contexts(data.decode()).encode()
             info.compress_type = zipfile.ZIP_STORED
@@ -735,6 +777,10 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             zout.writestr(directory + "fstab.dsa", fstab)
         zout.writestr(CONSOLE_LOGCAT_RC, console_logcat)
         zout.writestr(UNAVAILABLE_FEATURES, (HERE / "unavailable-features.xml").read_bytes())
+        if has_hwcomposer:
+            zout.writestr(HWCOMPOSER_BINARY, hwcomposer_payload)
+            zout.writestr(HWCOMPOSER_RC, (HWCOMPOSER_DIR / "dsa-hwcomposer.rc").read_bytes())
+            zout.writestr(HWCOMPOSER_MANIFEST, (HWCOMPOSER_DIR / "dsa-hwcomposer.xml").read_bytes())
         if channeld_payload is not None:
             zout.writestr(CHANNELD_BINARY, channeld_payload)
             zout.writestr(CHANNELD_RC, (HERE / "dsa-channeld.rc").read_bytes())
@@ -750,7 +796,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         if "VENDOR/etc/selinux/vendor_file_contexts" not in names:
             zout.writestr(
                 "VENDOR/etc/selinux/vendor_file_contexts",
-                update_vendor_file_contexts("", channeld_payload is not None).encode(),
+                update_vendor_file_contexts("", channeld_payload is not None, has_hwcomposer).encode(),
             )
     if graphics_payload is not None and not replaced_graphics_payload:
         dest.unlink(missing_ok=True)
@@ -938,8 +984,22 @@ def data_disk(otatools, work, out):
     raw.unlink()
 
 
-def kernel_cmdline(partition_cmdline):
-    """Returns the kernel command line shared by every DSA guest image."""
+def kernel_cmdline(partition_cmdline, hwcomposer=False):
+    """Returns the kernel command line shared by every DSA guest image. With `hwcomposer`,
+    the image has DSA's composer in place of Cuttlefish's."""
+    if hwcomposer:
+        composer = [f"androidboot.dsa.{key}={value}" for key, value in DISPLAY_BOOTCONFIG.items()]
+        apexes = {module: apex for module, apex in VENDOR_APEX_BOOTCONFIG.items()
+                  if module != "com.android.hardware.graphics.composer"}
+    else:
+        composer = [
+            # Cuttlefish's composer needs a virtio-gpu card or a goldfish display, and
+            # Hyper-V has neither. Without DSA's composer it runs with no display device
+            # and composes nothing.
+            "androidboot.hardware.hwcomposer.mode=noop",
+            "androidboot.hardware.hwcomposer.display_finder_mode=noop",
+        ]
+        apexes = VENDOR_APEX_BOOTCONFIG
     return " ".join([
         "console=ttyS0", "printk.devkmsg=on", "audit=1", "panic=-1", "8250.nr_uarts=1",
         "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init", partition_cmdline,
@@ -951,18 +1011,14 @@ def kernel_cmdline(partition_cmdline):
         "androidboot.hardware.egl=angle",
         "androidboot.hardware.vulkan=ranchu",
         "androidboot.hardware.gralloc=minigbm",
-        # Cuttlefish's composer needs a virtio-gpu card or a goldfish display, and Hyper-V
-        # has neither. Until DSA's own composer hands layers to the host, it runs with
-        # no display device and composes nothing.
-        "androidboot.hardware.hwcomposer.mode=noop",
-        "androidboot.hardware.hwcomposer.display_finder_mode=noop",
+        *composer,
         "androidboot.cpuvulkan.version=0",
         # The Cuttlefish lights HAL listens on this vsock port for a host client; without
         # one it binds port 0, which only privileged processes may, and aborts. No host
         # client connects; DSA's own ports are 5000 and 5566-5567.
         "androidboot.vsock_lights_port=6900",
         *(f"androidboot.vendor.apex.{module}={apex}"
-          for module, apex in VENDOR_APEX_BOOTCONFIG.items()),
+          for module, apex in apexes.items()),
     ])
 
 
@@ -980,6 +1036,9 @@ def main():
                         help="a vulkan.ranchu.so built for the selected guest")
     parser.add_argument("--channeld", type=Path,
                         help="the guest's control channel daemon (dsa-channeld) built for the guest")
+    parser.add_argument("--hwcomposer", type=Path,
+                        help="DSA's composer HAL (dsa-hwcomposer) built for the guest; it replaces "
+                             "Cuttlefish's, and sends the host each task's frames")
     parser.add_argument("--agent", type=Path,
                         help="the guest agent's APK (DsaAgent), unsigned or signed with any key; "
                         "the image signs it with the platform key")
@@ -1021,7 +1080,7 @@ def main():
 
     modified = work / "modified.zip"
     modify(target_files, modified, graphics_library=graphics_library, vulkan_driver=vulkan_driver,
-           otatools=otatools, channeld=args.channeld, agent=args.agent)
+           otatools=otatools, channeld=args.channeld, agent=args.agent, hwcomposer=args.hwcomposer)
 
     signed = work / "signed.zip"
     # It runs where AOSP's certificates sit at the paths apkcerts.txt names, so every path
@@ -1066,7 +1125,7 @@ def main():
         shutil.copy(args.kernel, out / "bzImage")
         files.append("bzImage")
 
-    cmdline = kernel_cmdline(partition_cmdline)
+    cmdline = kernel_cmdline(partition_cmdline, hwcomposer=args.hwcomposer is not None)
     manifest = {
         "version": spec["version"],
         "android_major": spec["android_major"],

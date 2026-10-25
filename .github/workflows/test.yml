@@ -149,3 +149,19 @@ jobs:
 
       - name: Check the C++ codec against the vectors
         run: dsa/protocol/cpp/test.sh
+
+  hwcomposer:
+    name: Test the guest hwcomposer's task rules (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The channel messages go through the generated protobuf-lite codec, built against the
+      # 3.21 runtime Ubuntu 24.04 ships.
+      - name: Install the protobuf runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libprotobuf-dev g++
+
+      - name: Run the tests
+        run: dsa/guest/hwcomposer/test.sh
