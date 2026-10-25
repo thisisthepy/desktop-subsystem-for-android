@@ -118,6 +118,13 @@ LOADER_PROPS = {
     "ro.vulkan.apex": "",
 }
 
+# Factory reset protection is a phone's theft deterrent and needs an frp partition, which
+# the DSA disks do not have. With ro.frp.pst empty, system_server starts neither
+# PersistentDataBlockService nor, without an oemlock HAL, OemLockService.
+FRP_PROPS = {
+    "ro.frp.pst": "",
+}
+
 # Cuttlefish ships selectable vendor APEX implementations. Its launcher passes
 # the selections in bootconfig. DSA does not run that launcher, so choose the
 # implementations that can start without Cuttlefish remote services before
@@ -223,7 +230,7 @@ def removed(name):
 
 
 def edit_props(text):
-    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS}
+    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS, **FRP_PROPS}
     out = []
     for line in text.splitlines():
         key = line.split("=", 1)[0]

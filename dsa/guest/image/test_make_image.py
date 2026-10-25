@@ -393,6 +393,14 @@ class ImageLayoutTests(unittest.TestCase):
             self.assertIn("VENDOR/apex/com.android.hardware.boot.apex", names)
             self.assertIn('name="com.android.hardware.boot.apex"', keys)
 
+    def test_fr1_system_server_does_not_wait_for_a_factory_reset_protection_partition(self):
+        # With ro.frp.pst set, system_server starts PersistentDataBlockService, which needs
+        # an frp partition the DSA disks do not have, and dies at boot phase 500. Empty,
+        # neither it nor OemLockService (without an oemlock HAL) starts.
+        props = make_image.edit_props("ro.frp.pst=/dev/block/by-name/frp\n")
+        self.assertIn("ro.frp.pst=\n", props)
+        self.assertNotIn("by-name/frp", props)
+
     def test_pr3_edit_props_sets_graphics_properties(self):
         props = make_image.edit_props("ro.debuggable=1\n")
         self.assertIn("ro.hardware.egl=angle\n", props)
