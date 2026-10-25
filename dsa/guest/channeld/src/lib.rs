@@ -7,8 +7,15 @@
 //! host refuses it, it stops, because a guest built from a different protocol definition
 //! cannot become acceptable by retrying.
 //!
-//! This crate is the connection half, independent of how the guest's users reach it, so
-//! it runs and is tested on any Linux, over the in-memory transport and over vsock.
+//! The connection half and the routing ([`router`]) are independent of how the guest's
+//! users reach the daemon, so they run and are tested on any Linux, over the in-memory
+//! transport and over vsock. The binder service (`binder`, Android only) is the thin layer
+//! that lets those users in; [`aidl`] holds the values it shares with their generated code.
+
+pub mod aidl;
+#[cfg(target_os = "android")]
+pub mod binder;
+pub mod router;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};

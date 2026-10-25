@@ -5,6 +5,10 @@
 // this API. This file is the only definition of its messages; the codecs are generated
 // from it (see README.md).
 //
+// A connection carries requests and their responses, until the client sends WatchTasks.
+// From the answer to that request on, the connection carries only TaskEvent frames from
+// the service; a client that sends anything more on it is disconnected.
+//
 // The caller's identity is the user the operating system reports for the connection.
 // Nothing in these messages names a user, so a client cannot claim to be someone else, and
 // every request acts on the caller's own Android only.
@@ -95,6 +99,82 @@ message UpdateProgram {}
 // Asks for the runtime ID of the caller's Android VM.
 message GetVmId {}
 
+// Asks for the app tasks of the caller's Android, each of which the compositor shows as one
+// window.
+message ListTasks {}
+
+// Asks for the app tasks of the caller's Android, and for every change to them from then
+// on. The service answers with Tasks, then sends a TaskEvent for each change. The watch
+// lasts across restarts of the Android: when it stops, its tasks are removed.
+message WatchTasks {}
+
+// The user closed a task's window: asks the caller's Android to end the task.
+message CloseTask {
+  int32 task_id = 1;
+}
+
+// Asks the caller's Android to start an app's launcher activity as a new task in its own
+// window.
+message LaunchApp {
+  string package_name = 1;
+}
+
+// A rectangle in Android display pixels: left and top inclusive, right and bottom
+// exclusive.
+message Rect {
+  int32 left = 1;
+  int32 top = 2;
+  int32 right = 3;
+  int32 bottom = 4;
+}
+
+// One app task of the caller's Android. Every field is sent each time, so the latest one
+// replaces what came before.
+message Task {
+  // Android's task ID, unique while the task lives.
+  int32 task_id = 1;
+  // Where the task is on Android's display.
+  Rect bounds = 2;
+  // The package of the task's root activity.
+  string package_name = 3;
+  // The title the task's window shows.
+  string label = 4;
+  // Whether the task has input focus in Android.
+  bool focused = 5;
+}
+
+// The task ended.
+message TaskRemoved {
+  int32 task_id = 1;
+}
+
+// The frames of the task now arrive on the graphics stream as posts to `display_id`.
+message TaskFrames {
+  int32 task_id = 1;
+  uint32 display_id = 2;
+}
+
+// A change to the tasks of the caller's Android, sent after the answer to WatchTasks.
+message TaskEvent {
+  oneof body {
+    Task updated = 1;
+    TaskRemoved removed = 2;
+    TaskFrames frames = 3;
+  }
+}
+
+// The answer to ListTasks and WatchTasks: the tasks there are now.
+message Tasks {
+  // In task ID order.
+  repeated Task tasks = 1;
+  // The display of each task whose frames have been placed, in task ID order. A task may
+  // appear here before it appears in `tasks`.
+  repeated TaskFrames frames = 2;
+}
+
+// The answer to a request that has nothing to report but that it was carried out.
+message Done {}
+
 // The caller's Android as the service sees it.
 message Status {
   SessionState state = 1;
@@ -131,6 +211,8 @@ enum ErrorCode {
   // DSA could not be updated: updates are off, the program list or the setup file did not
   // check out, or setup could not start. The detail says which.
   ERROR_CODE_UPDATE_FAILED = 3;
+  // The request needs the caller's Android to be running, and it is not.
+  ERROR_CODE_NOT_RUNNING = 4;
 }
 
 message Error {
@@ -148,6 +230,10 @@ message Request {
     StopSession stop_session = 4;
     UpdateProgram update_program = 5;
     GetVmId get_vm_id = 6;
+    ListTasks list_tasks = 7;
+    WatchTasks watch_tasks = 8;
+    CloseTask close_task = 9;
+    LaunchApp launch_app = 10;
   }
 }
 
@@ -158,6 +244,8 @@ message Response {
     Error error = 3;
     ProgramUpdate program_update = 4;
     VmId vm_id = 5;
+    Tasks tasks = 6;
+    Done done = 7;
   }
 }
 
@@ -169,5 +257,6 @@ message Envelope {
     HelloRejected hello_rejected = 3;
     Request request = 4;
     Response response = 5;
+    TaskEvent task_event = 6;
   }
 }

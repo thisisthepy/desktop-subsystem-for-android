@@ -2,15 +2,25 @@
 //!
 //! Runs in the user session, listens on Hyper-V sockets for guest graphics streams
 //! (ports 5566 and 5567), and delegates accepted streams to a [`GraphicsRenderer`].
+//!
+//! It shows one native window per guest app task. It watches the guest's tasks through the
+//! service's local API ([`tasks`]), opens and closes a window for each ([`window`]), and
+//! has the renderer copy each task's frames into its window on the GPU ([`frames`],
+//! [`present`]). When the user closes a window, the guest is asked to end its task.
 
 pub mod adapter;
+pub mod frames;
 pub mod log;
+pub mod present;
 pub mod shutdown;
 pub mod single_instance;
+pub mod tasks;
+pub mod window;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -22,8 +32,12 @@ use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::session::SessionState;
 use dsa_transport::{Connector, Listener, TransportError};
 
-use self::log::CompositorLogger;
+use self::adapter::{DisplayPresenter, DisplaySink};
+use self::frames::FrameRouter;
+use self::log::{note, CompositorLogger};
+use self::present::Gpu;
 use self::single_instance::DEFAULT_MUTEX_NAME;
+use self::window::{OpenWindow, UiSetup};
 use crate::guid::Guid;
 use crate::hvsocket::RawHvSocketListener;
 use crate::pipe::NamedPipeConnector;
@@ -69,6 +83,9 @@ pub struct Compositor {
     bind_command: Option<BindFn>,
     bind_process_pipe: Option<BindFn>,
     logger: Option<Arc<CompositorLogger>>,
+    /// What copies each display's frames into the task windows, when there is one.
+    presenter: Option<Arc<dyn DisplayPresenter>>,
+    open_windows: Arc<Mutex<Vec<OpenWindow>>>,
 }
 
 impl Compositor {
@@ -103,6 +120,8 @@ impl Compositor {
             bind_command: Some(bind_command),
             bind_process_pipe: Some(bind_process_pipe),
             logger: None,
+            presenter: None,
+            open_windows: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -123,7 +142,22 @@ impl Compositor {
             bind_command: Some(bind_command),
             bind_process_pipe: Some(bind_process_pipe),
             logger: None,
+            presenter: None,
+            open_windows: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Shows each task's frames in its window through `presenter`. Without one, the task
+    /// windows open and close with their tasks but stay empty.
+    pub fn with_display_presenter(mut self, presenter: Arc<dyn DisplayPresenter>) -> Compositor {
+        self.presenter = Some(presenter);
+        self
+    }
+
+    /// The task windows that are open, in task ID order, kept up to date while the
+    /// compositor runs.
+    pub fn open_windows(&self) -> Arc<Mutex<Vec<OpenWindow>>> {
+        Arc::clone(&self.open_windows)
     }
 
     /// Sets an optional file logger.
@@ -156,6 +190,9 @@ impl Compositor {
 
         let mut cmd_listener = VmBoundListener::new(Arc::clone(&self.vm_id_slot), bind_cmd);
         let mut proc_listener = VmBoundListener::new(Arc::clone(&self.vm_id_slot), bind_proc);
+
+        // 0. The task windows, the watch of the guest's tasks, and the requests to end them.
+        let task_windows = self.start_task_windows(&stop);
 
         // 1. Monitor thread that tracks the VM ID and state via the local API.
         let monitor_stop = Arc::clone(&stop);
@@ -324,12 +361,124 @@ impl Compositor {
             thread::sleep(Duration::from_millis(100));
         }
 
+        task_windows.stop(self.presenter.as_deref());
         let _ = monitor_thread.join();
         let _ = cmd_thread.join();
         let _ = proc_thread.join();
 
         if let Some(logger) = &self.logger {
             logger.log("dsa-compositor stopped cleanly");
+        }
+    }
+
+    /// Starts the task windows. A part that cannot start is logged; the rest of the
+    /// compositor goes on.
+    fn start_task_windows(&self, stop: &Arc<AtomicBool>) -> TaskWindowThreads {
+        let logger = self.logger.clone();
+        let log = |message: &str| note(logger.as_deref(), message);
+        let router = Arc::new(FrameRouter::new());
+        let gpu = match &self.presenter {
+            None => None,
+            Some(presenter) => {
+                let luid = presenter.adapter_luid();
+                match Gpu::new(luid) {
+                    Ok(gpu) => {
+                        if luid.is_some() && !gpu.on_renderer_gpu {
+                            log("the renderer's GPU was not found; task windows may stay empty");
+                        }
+                        match presenter
+                            .present_displays(Some(Arc::clone(&router) as Arc<dyn DisplaySink>))
+                        {
+                            Ok(()) => Some(gpu),
+                            Err(why) => {
+                                log(&why);
+                                None
+                            }
+                        }
+                    }
+                    Err(why) => {
+                        log(&format!("task windows cannot show frames: {why}"));
+                        None
+                    }
+                }
+            }
+        };
+        let (requests_tx, requests_rx) = mpsc::channel();
+        let ui = match window::start(UiSetup {
+            requests: requests_tx,
+            router,
+            gpu,
+            logger: self.logger.clone(),
+            listing: Arc::clone(&self.open_windows),
+        }) {
+            Ok(ui) => ui,
+            Err(why) => {
+                log(&format!("task windows cannot open: {why}"));
+                return TaskWindowThreads::default();
+            }
+        };
+
+        let watch_sender = ui.sender();
+        let watch_connector = (self.local_api_connector)();
+        let watch_stop = Arc::clone(stop);
+        let watch_logger = self.logger.clone();
+        let watcher = thread::Builder::new()
+            .name("dsa-compositor-tasks".into())
+            .spawn(move || {
+                tasks::watch(
+                    watch_connector,
+                    |event| watch_sender.send(event),
+                    watch_stop,
+                    watch_logger,
+                )
+            })
+            .map_err(|e| log(&format!("could not start the watch of tasks: {e}")))
+            .ok();
+
+        let request_sender = ui.sender();
+        let request_connector = (self.local_api_connector)();
+        let request_logger = self.logger.clone();
+        let requester = thread::Builder::new()
+            .name("dsa-compositor-requests".into())
+            .spawn(move || {
+                tasks::serve_requests(
+                    request_connector,
+                    requests_rx,
+                    |event| request_sender.send(event),
+                    request_logger,
+                )
+            })
+            .map_err(|e| log(&format!("could not start the task requests: {e}")))
+            .ok();
+
+        TaskWindowThreads {
+            ui: Some(ui),
+            watcher,
+            requester,
+        }
+    }
+}
+
+/// The threads behind the task windows.
+#[derive(Default)]
+struct TaskWindowThreads {
+    ui: Option<window::UiHandle>,
+    watcher: Option<thread::JoinHandle<()>>,
+    requester: Option<thread::JoinHandle<()>>,
+}
+
+impl TaskWindowThreads {
+    /// Stops the frames first, then closes the windows and ends the threads. The watch ends
+    /// on the compositor's stop flag; the request thread ends with the windows.
+    fn stop(self, presenter: Option<&dyn DisplayPresenter>) {
+        if let Some(presenter) = presenter {
+            let _ = presenter.present_displays(None);
+        }
+        if let Some(ui) = self.ui {
+            ui.stop();
+        }
+        for thread in [self.watcher, self.requester].into_iter().flatten() {
+            let _ = thread.join();
         }
     }
 }

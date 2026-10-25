@@ -4,7 +4,8 @@
 #   ANDROID_NDK_HOME=/path/to/ndk dsa/guest/channeld/build-android.sh <out dir>
 #
 # The binary links only against the C library and the dynamic loader, which every vendor
-# process may use, and is stripped.
+# process may use, and is stripped. It opens the NDK binder (libbinder_ndk.so, which a
+# vendor process may use too) at run time.
 set -euo pipefail
 
 out="${1:?usage: build-android.sh <out dir>}"
@@ -40,6 +41,11 @@ done
 # to run, which is what init started on the first boot.
 if ! grep -aq 'connecting to the host' "$out/dsa-channeld"; then
     echo "dsa-channeld was built without the daemon; is it gated on target_os = linux only?" >&2
+    exit 1
+fi
+# The binder service the agent and the hwcomposer reach the daemon through is Android only.
+if ! grep -aq 'libbinder_ndk.so' "$out/dsa-channeld"; then
+    echo "dsa-channeld was built without the binder service; is it gated on target_os = android?" >&2
     exit 1
 fi
 echo "built $out/dsa-channeld ($(wc -c < "$out/dsa-channeld") bytes, needs: $needed)"

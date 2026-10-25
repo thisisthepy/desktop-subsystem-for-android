@@ -13,7 +13,8 @@ if (-not $ScratchPath) {
     $ScratchPath = $ScratchPath.Path
 }
 
-$RepoRoot = (Resolve-Path "$PSScriptRoot/../../../..").Path
+# The repository root: this script is in dsa/graphics/host.
+$RepoRoot = (Resolve-Path "$PSScriptRoot/../../..").Path
 $GfxstreamDir = Join-Path $ScratchPath "gfxstream"
 $AemuDir = Join-Path $ScratchPath "aemu"
 $AngleDir = Join-Path $ScratchPath "angle"
@@ -31,12 +32,20 @@ git -C $GfxstreamDir checkout --detach $GfxstreamRevision
 git -C $GfxstreamDir reset --hard $GfxstreamRevision
 git -C $GfxstreamDir clean -fdx
 
-# Apply checked-in patches if present
+# Apply the checked-in gfxstream patches. 0002 and 0003 patch Mesa for the guest and do not
+# belong to this tree. The host renderer cannot build without 0004, and without 0005 it
+# aborts when two guest processes create one shared ColorBuffer and refuses more than
+# eleven task windows, so a patch that does not apply stops the fetch.
 $PatchDir = Join-Path $RepoRoot "dsa/graphics/patches"
-$Patches = Get-ChildItem -Path $PatchDir -Filter "*.patch" -ErrorAction SilentlyContinue
+$Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0004-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0005-*.patch")
 foreach ($Patch in $Patches) {
     Write-Host "Applying patch: $($Patch.Name)"
     git -C $GfxstreamDir apply --recount $Patch.FullName
+    if ($LASTEXITCODE -ne 0) {
+        throw "patch $($Patch.Name) does not apply to gfxstream $GfxstreamRevision"
+    }
 }
 
 # 2. Fetch aemu

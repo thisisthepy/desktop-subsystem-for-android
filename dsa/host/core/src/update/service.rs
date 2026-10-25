@@ -16,6 +16,7 @@ use super::trial::{self, Boot, Outcome};
 use super::UpdateError;
 use crate::host_api::UserAndroid;
 use crate::session::{Session, SessionState};
+use crate::tasks::{TaskRequest, TaskRequestError, TaskWatch};
 
 /// The latest news about the image, shared by every user's Android.
 #[derive(Default)]
@@ -223,6 +224,12 @@ impl UserAndroid for UpdatingAndroid {
     }
     fn vm_id(&self) -> Option<String> {
         UserAndroid::vm_id(&*self.session)
+    }
+    fn watch_tasks(&self) -> Option<TaskWatch> {
+        UserAndroid::watch_tasks(&*self.session)
+    }
+    fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
+        UserAndroid::request(&*self.session, request)
     }
 
     fn start(&self) {

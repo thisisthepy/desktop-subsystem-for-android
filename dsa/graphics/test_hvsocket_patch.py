@@ -7,7 +7,8 @@ from pathlib import Path
 PATCH_0001 = Path(__file__).resolve().parent / "patches" / "0001-add-hyper-v-socket-transport.patch"
 PATCH_0002 = Path(__file__).resolve().parent / "patches" / "0002-add-hyper-v-vulkan-and-gralloc.patch"
 PATCH_0003 = Path(__file__).resolve().parent / "patches" / "0003-copy-host-visible-memory-without-shared-memory.patch"
-PATCH_0004 = Path(__file__).resolve().parent / "patches" / "0004-give-each-task-window-a-display-and-share-color-buffers.patch"
+PATCH_0005 = Path(__file__).resolve().parent / "patches" / "0005-give-each-task-window-a-display-and-share-color-buffers.patch"
+HOST_FETCH = Path(__file__).resolve().parent / "host" / "fetch.ps1"
 SHARED_HANDLE = Path(__file__).resolve().parent / "include" / "dsa_shared_color_buffer.h"
 VULKAN_CMAKE = Path(__file__).resolve().parent / "cmake" / "vulkan.cmake"
 HOST_BACKEND = Path(__file__).resolve().parent / "host" / "dsa_gfx_backend.cpp"
@@ -73,14 +74,14 @@ class HvSocketPatchTests(unittest.TestCase):
 
     def test_fr3_the_host_accepts_a_color_buffer_two_processes_create(self):
         # Two processes can race to create the shared ColorBuffer; the host must not abort.
-        patch = PATCH_0004.read_text()
+        patch = PATCH_0005.read_text()
         self.assertIn("-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER));", patch)
         self.assertIn("+            return;", patch)
 
     def test_fr3_the_host_gives_every_task_window_a_display(self):
-        patch = PATCH_0004.read_text()
+        patch = PATCH_0005.read_text()
         self.assertIn("kDsaMaxDisplays = 64", patch)
-        self.assertIn('"$patch_dir"/0004-*.patch', FETCH.read_text())
+        self.assertIn('-Filter "0005-*.patch"', HOST_FETCH.read_text())
 
     def test_pr3_host_visible_memory_works_without_shared_memory(self):
         # A Hyper-V VM has no goldfish address space and no virtio-gpu blobs, so the guest

@@ -1,0 +1,21 @@
+diff --git a/host/vulkan/VkCommonOperations.h b/host/vulkan/VkCommonOperations.h
+index 9e14b4d..2deb2d5 100644
+--- a/host/vulkan/VkCommonOperations.h
++++ b/host/vulkan/VkCommonOperations.h
+@@ -401,6 +401,16 @@ class VkEmulation {
+                                                                          bool colorBufferIsTarget);
+     std::unique_ptr<BorrowedImageInfoVk> borrowColorBufferForDisplay(uint32_t colorBufferHandle);
+ 
++    // The device and queue color buffers live on, for an embedder that copies posted color
++    // buffers into windows of its own. Work submitted on the queue must hold the queue lock.
++    VulkanDispatch* getDeviceDispatch() const { return mDvk; }
++    VulkanDispatch* getInstanceDispatch() const { return mIvk; }
++    VkPhysicalDevice getPhysicalDevice() const { return mPhysicalDevice; }
++    VkDevice getDevice() const { return mDevice; }
++    VkQueue getQueue() const { return mQueue; }
++    std::shared_ptr<android::base::Lock> getQueueLock() const { return mQueueLock; }
++    uint32_t getQueueFamilyIndex() const { return mQueueFamilyIndex; }
++
+    private:
+     VkEmulation() = default;
+ 

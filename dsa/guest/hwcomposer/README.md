@@ -60,7 +60,7 @@ lowest client layer sits.
   the channel anew, and after reconnecting to a restarted host renderer.
 
 The emulator's host renderer allows eleven displays in all.
-`dsa/graphics/patches/0004-*.patch` raises that to 64 for displays created by ID, which
+`dsa/graphics/patches/0005-*.patch` raises that to 64 for displays created by ID, which
 gives 63 task windows; past that a task gets no frames and the hwcomposer logs it.
 
 ## Buffers shared between processes
