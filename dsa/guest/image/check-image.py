@@ -69,14 +69,18 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         problems.append(f"{len(unsigned)} apps are not signed with our keys, e.g. {unsigned[:3]}")
     # The platform apps get their SELinux domain from the platform signer here. Left with
     # AOSP's certificate, they get seinfo "default", and zygote aborts starting them.
-    platform_pem = keys / "platform.x509.pem"
-    if platform_pem.exists() and "SYSTEM/etc/selinux/plat_mac_permissions.xml" in names:
-        platform = base64.b64decode(
-            "".join(l for l in platform_pem.read_text().splitlines() if "-----" not in l)
-        ).hex()
+    # Bluetooth's comes the same way, from its own signer.
+    if "SYSTEM/etc/selinux/plat_mac_permissions.xml" in names:
         mac_permissions = z.read("SYSTEM/etc/selinux/plat_mac_permissions.xml").decode().lower()
-        if f'signature="{platform}"' not in mac_permissions:
-            problems.append("plat_mac_permissions.xml does not name our platform certificate")
+        for role in ["platform", "bluetooth"]:
+            pem = keys / f"{role}.x509.pem"
+            if not pem.exists() or f'<seinfo value="{role}"' not in mac_permissions:
+                continue
+            cert = base64.b64decode(
+                "".join(l for l in pem.read_text().splitlines() if "-----" not in l)
+            ).hex()
+            if f'signature="{cert}"' not in mac_permissions:
+                problems.append(f"plat_mac_permissions.xml does not name our {role} certificate")
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
     if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:
