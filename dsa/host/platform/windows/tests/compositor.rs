@@ -535,3 +535,378 @@ fn pr3_compositor_serves_a_gfxstream_client() {
         .present_displays(None)
         .expect("the backend stops presenting displays");
 }
+
+/// A guest command stream speaking gfxstream's wire format directly, so a test can send the
+/// host exactly the message it wants, including ones a correct guest driver never sends.
+struct GfxstreamWire {
+    connection: Box<dyn Connection>,
+    received: Vec<u8>,
+    vulkan_seqno: u32,
+}
+
+impl GfxstreamWire {
+    const RC_GET_RENDERER_VERSION: u32 = 10000;
+    const RC_SET_PUID: u32 = 10033;
+
+    const VK_CREATE_INSTANCE: u32 = 20000;
+    const VK_ENUMERATE_PHYSICAL_DEVICES: u32 = 20002;
+    const VK_CREATE_DEVICE: u32 = 20011;
+    const VK_BIND_BUFFER_MEMORY: u32 = 20028;
+    const VK_BIND_IMAGE_MEMORY: u32 = 20029;
+    const VK_GET_BUFFER_MEMORY_REQUIREMENTS: u32 = 20030;
+    const VK_GET_IMAGE_MEMORY_REQUIREMENTS: u32 = 20031;
+    const VK_CREATE_IMAGE_VIEW: u32 = 20057;
+    const VK_GET_IMAGE_MEMORY_REQUIREMENTS_2: u32 = 20144;
+
+    fn new(mut connection: Box<dyn Connection>) -> GfxstreamWire {
+        // Every stream starts with the guest's client flags.
+        connection
+            .send(&0u32.to_le_bytes())
+            .expect("send client flags");
+        GfxstreamWire {
+            connection,
+            received: Vec::new(),
+            vulkan_seqno: 0,
+        }
+    }
+
+    fn render_control(&mut self, opcode: u32, args: &[u8]) {
+        let mut packet = Vec::with_capacity(8 + args.len());
+        packet.extend_from_slice(&opcode.to_le_bytes());
+        packet.extend_from_slice(&((8 + args.len()) as u32).to_le_bytes());
+        packet.extend_from_slice(args);
+        self.connection.send(&packet).expect("send renderControl");
+    }
+
+    /// Sends one Vulkan command. The host runs with queue-submit-with-commands, so every
+    /// Vulkan packet carries the guest process's next sequence number.
+    fn vulkan(&mut self, opcode: u32, body: &[u8]) {
+        self.vulkan_seqno += 1;
+        let mut packet = Vec::with_capacity(12 + body.len());
+        packet.extend_from_slice(&opcode.to_le_bytes());
+        packet.extend_from_slice(&((12 + body.len()) as u32).to_le_bytes());
+        packet.extend_from_slice(&self.vulkan_seqno.to_le_bytes());
+        packet.extend_from_slice(body);
+        self.connection.send(&packet).expect("send Vulkan command");
+    }
+
+    fn read(&mut self, len: usize) -> Vec<u8> {
+        while self.received.len() < len {
+            let frame = self
+                .connection
+                .recv(Some(WAIT))
+                .expect("the host renderer answers");
+            assert!(!frame.is_empty(), "the host renderer closed the stream");
+            self.received.extend_from_slice(&frame);
+        }
+        self.received.drain(..len).collect()
+    }
+
+    fn read_u32(&mut self) -> u32 {
+        u32::from_le_bytes(self.read(4).try_into().unwrap())
+    }
+
+    fn read_u64(&mut self) -> u64 {
+        u64::from_le_bytes(self.read(8).try_into().unwrap())
+    }
+
+    fn read_be_u64(&mut self) -> u64 {
+        u64::from_be_bytes(self.read(8).try_into().unwrap())
+    }
+
+    fn renderer_version(&mut self) -> i32 {
+        self.render_control(Self::RC_GET_RENDERER_VERSION, &[]);
+        self.read_u32() as i32
+    }
+}
+
+/// Builds a Vulkan command body in gfxstream's marshalling: plain fields little endian,
+/// pointer presence and `pNext` sizes big endian.
+#[derive(Default)]
+struct VkBody(Vec<u8>);
+
+impl VkBody {
+    fn u32(mut self, value: u32) -> Self {
+        self.0.extend_from_slice(&value.to_le_bytes());
+        self
+    }
+    fn u64(mut self, value: u64) -> Self {
+        self.0.extend_from_slice(&value.to_le_bytes());
+        self
+    }
+    fn f32(mut self, value: f32) -> Self {
+        self.0.extend_from_slice(&value.to_le_bytes());
+        self
+    }
+    /// Whether a pointer is present: zero for NULL.
+    fn ptr(mut self, present: bool) -> Self {
+        self.0.extend_from_slice(&u64::from(present).to_be_bytes());
+        self
+    }
+    /// The start of a structure with no `pNext` chain.
+    fn s_type(mut self, s_type: u32) -> Self {
+        self.0.extend_from_slice(&s_type.to_le_bytes());
+        self.0.extend_from_slice(&0u32.to_be_bytes());
+        self
+    }
+    /// An empty list of layer or extension names: the count, then the array's length.
+    fn no_strings(mut self) -> Self {
+        self.0.extend_from_slice(&0u32.to_le_bytes());
+        self.0.extend_from_slice(&0u32.to_be_bytes());
+        self
+    }
+    fn done(self) -> Vec<u8> {
+        self.0
+    }
+}
+
+const VK_SUCCESS: u32 = 0;
+const VK_INCOMPLETE: u32 = 5;
+const VK_STRUCTURE_TYPE_APPLICATION_INFO: u32 = 0;
+const VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO: u32 = 1;
+const VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO: u32 = 2;
+const VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO: u32 = 3;
+const VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO: u32 = 15;
+const VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2: u32 = 1000146001;
+const VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2: u32 = 1000146003;
+
+/// Creates a Vulkan instance and device on the host, as the guest driver does, and returns
+/// the device's handle.
+fn create_vulkan_device(wire: &mut GfxstreamWire) -> u64 {
+    let create_instance = VkBody::default()
+        .s_type(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO)
+        .u32(0) // flags
+        .ptr(true) // pApplicationInfo
+        .s_type(VK_STRUCTURE_TYPE_APPLICATION_INFO)
+        .ptr(false) // pApplicationName
+        .u32(0)
+        .ptr(false) // pEngineName
+        .u32(0)
+        .u32((1 << 22) | (1 << 12)) // Vulkan 1.1
+        .no_strings() // layers
+        .no_strings() // extensions
+        .ptr(false) // pAllocator
+        .u64(0) // pInstance
+        .done();
+    wire.vulkan(GfxstreamWire::VK_CREATE_INSTANCE, &create_instance);
+    let instance = wire.read_u64();
+    assert_eq!(wire.read_u32(), VK_SUCCESS, "vkCreateInstance");
+
+    let enumerate = VkBody::default()
+        .u64(instance)
+        .ptr(true)
+        .u32(4)
+        .ptr(true)
+        .u64(0)
+        .u64(0)
+        .u64(0)
+        .u64(0)
+        .done();
+    wire.vulkan(GfxstreamWire::VK_ENUMERATE_PHYSICAL_DEVICES, &enumerate);
+    wire.read_be_u64();
+    let count = wire.read_u32();
+    assert!(count >= 1, "the host offers a physical device");
+    wire.read_be_u64();
+    let physical_device = wire.read_u64();
+    for _ in 1..count {
+        wire.read_u64();
+    }
+    let result = wire.read_u32();
+    assert!(
+        result == VK_SUCCESS || result == VK_INCOMPLETE,
+        "vkEnumeratePhysicalDevices: {result}"
+    );
+
+    let create_device = VkBody::default()
+        .u64(physical_device)
+        .s_type(VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO)
+        .u32(0) // flags
+        .u32(1) // queueCreateInfoCount
+        .s_type(VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO)
+        .u32(0) // flags
+        .u32(0) // queueFamilyIndex
+        .u32(1) // queueCount
+        .f32(1.0)
+        .no_strings() // layers
+        .no_strings() // extensions
+        .ptr(false) // pEnabledFeatures
+        .ptr(false) // pAllocator
+        .u64(0) // pDevice
+        .done();
+    wire.vulkan(GfxstreamWire::VK_CREATE_DEVICE, &create_device);
+    let device = wire.read_u64();
+    assert_eq!(wire.read_u32(), VK_SUCCESS, "vkCreateDevice");
+    assert_ne!(device, 0, "vkCreateDevice returns a device");
+    device
+}
+
+/// Reads a VkMemoryRequirements: size, alignment and memoryTypeBits.
+fn read_memory_requirements(wire: &mut GfxstreamWire) -> (u64, u64, u32) {
+    (wire.read_u64(), wire.read_u64(), wire.read_u32())
+}
+
+#[test]
+fn nfr5_unknown_vulkan_image_is_rejected_without_reaching_the_driver() {
+    let dll_path = match std::env::var("GFXSTREAM_BACKEND_PATH") {
+        Ok(path) if !path.is_empty() => std::path::PathBuf::from(path),
+        _ => {
+            eprintln!("skipping: GFXSTREAM_BACKEND_PATH not set");
+            return;
+        }
+    };
+    if !dll_path.exists() {
+        eprintln!("skipping: library not found at {}", dll_path.display());
+        return;
+    }
+    let adapter = Arc::new(GfxstreamAdapter::new(Some(dll_path)));
+    assert!(adapter.is_available(), "the host renderer loads");
+
+    // The guest process the commands belong to, as its process pipe announces it. The pipe
+    // stays open for the whole test: closing it ends the process on the host.
+    let (mut pipe_server, mut pipe_client) = memory::pair();
+    let pipe_adapter = Arc::clone(&adapter);
+    let pipe_thread = thread::spawn(move || {
+        let conn = pipe_server.accept(WAIT).expect("accept process pipe");
+        pipe_adapter
+            .serve_stream(GraphicsStreamKind::ProcessPipe, conn)
+            .expect("serve process pipe");
+    });
+    let mut pipe = pipe_client.connect(WAIT).expect("connect process pipe");
+    pipe.send(&100i32.to_le_bytes()).expect("send confirm code");
+    let puid = u64::from_le_bytes(
+        pipe.recv(Some(WAIT))
+            .expect("receive puid")
+            .try_into()
+            .expect("an 8-byte puid"),
+    );
+
+    let (mut cmd_server, mut cmd_client) = memory::pair();
+    let cmd_adapter = Arc::clone(&adapter);
+    let cmd_thread = thread::spawn(move || {
+        let conn = cmd_server.accept(WAIT).expect("accept command stream");
+        cmd_adapter
+            .serve_stream(GraphicsStreamKind::Command, conn)
+            .expect("serve command stream");
+    });
+    let mut wire = GfxstreamWire::new(cmd_client.connect(WAIT).expect("connect command stream"));
+    wire.render_control(GfxstreamWire::RC_SET_PUID, &puid.to_le_bytes());
+    assert!(wire.renderer_version() > 0, "renderControl answers");
+
+    let device = create_vulkan_device(&mut wire);
+
+    // A guest that lost track of its handles names an image the host never made: NULL, as
+    // on the machine where this crashed the renderer inside the GPU driver, and a stale one.
+    for image in [0u64, 0x0006_0000_dead_beef] {
+        let info = VkBody::default()
+            .u64(device)
+            .s_type(VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2)
+            .u64(image)
+            .s_type(VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2)
+            .u64(0)
+            .u64(0)
+            .u32(0)
+            .done();
+        wire.vulkan(GfxstreamWire::VK_GET_IMAGE_MEMORY_REQUIREMENTS_2, &info);
+        assert_eq!(wire.read_u32(), VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2);
+        wire.read(4); // no pNext
+        let (size, _, memory_type_bits) = read_memory_requirements(&mut wire);
+        assert_eq!(
+            (size, memory_type_bits),
+            (0, 0),
+            "an unknown image {image:#x} has no memory requirements"
+        );
+
+        let v1 = VkBody::default()
+            .u64(device)
+            .u64(image)
+            .u64(0)
+            .u64(0)
+            .u32(0)
+            .done();
+        wire.vulkan(GfxstreamWire::VK_GET_IMAGE_MEMORY_REQUIREMENTS, &v1);
+        let (size, _, memory_type_bits) = read_memory_requirements(&mut wire);
+        assert_eq!(
+            (size, memory_type_bits),
+            (0, 0),
+            "vkGetImageMemoryRequirements of image {image:#x}"
+        );
+
+        let bind = VkBody::default()
+            .u64(device)
+            .u64(image)
+            .u64(0) // memory
+            .u64(0) // memoryOffset
+            .done();
+        wire.vulkan(GfxstreamWire::VK_BIND_IMAGE_MEMORY, &bind);
+        assert_ne!(
+            wire.read_u32(),
+            VK_SUCCESS,
+            "binding memory to image {image:#x}"
+        );
+
+        let view = VkBody::default()
+            .u64(device)
+            .s_type(VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO)
+            .u32(0) // flags
+            .u64(image)
+            .u32(1) // VK_IMAGE_VIEW_TYPE_2D
+            .u32(37) // VK_FORMAT_R8G8B8A8_UNORM
+            .u32(0)
+            .u32(0)
+            .u32(0)
+            .u32(0)
+            .u32(1) // VK_IMAGE_ASPECT_COLOR_BIT
+            .u32(0)
+            .u32(1)
+            .u32(0)
+            .u32(1)
+            .ptr(false) // pAllocator
+            .u64(0) // pView
+            .done();
+        wire.vulkan(GfxstreamWire::VK_CREATE_IMAGE_VIEW, &view);
+        wire.read_u64();
+        assert_ne!(wire.read_u32(), VK_SUCCESS, "a view of image {image:#x}");
+    }
+
+    // The same for a buffer.
+    for buffer in [0u64, 0x0006_0000_dead_beef] {
+        let reqs = VkBody::default()
+            .u64(device)
+            .u64(buffer)
+            .u64(0)
+            .u64(0)
+            .u32(0)
+            .done();
+        wire.vulkan(GfxstreamWire::VK_GET_BUFFER_MEMORY_REQUIREMENTS, &reqs);
+        let (size, _, memory_type_bits) = read_memory_requirements(&mut wire);
+        assert_eq!(
+            (size, memory_type_bits),
+            (0, 0),
+            "an unknown buffer {buffer:#x} has no memory requirements"
+        );
+
+        let bind = VkBody::default()
+            .u64(device)
+            .u64(buffer)
+            .u64(0) // memory
+            .u64(0) // memoryOffset
+            .done();
+        wire.vulkan(GfxstreamWire::VK_BIND_BUFFER_MEMORY, &bind);
+        assert_ne!(
+            wire.read_u32(),
+            VK_SUCCESS,
+            "binding memory to buffer {buffer:#x}"
+        );
+    }
+
+    // The renderer is still there and still serving this guest.
+    assert!(
+        wire.renderer_version() > 0,
+        "the renderer keeps serving the guest"
+    );
+
+    drop(wire);
+    cmd_thread.join().expect("command stream ends");
+    pipe.close();
+    pipe_thread.join().expect("process pipe ends");
+}

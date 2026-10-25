@@ -8,6 +8,7 @@ PATCH_0001 = Path(__file__).resolve().parent / "patches" / "0001-add-hyper-v-soc
 PATCH_0002 = Path(__file__).resolve().parent / "patches" / "0002-add-hyper-v-vulkan-and-gralloc.patch"
 PATCH_0003 = Path(__file__).resolve().parent / "patches" / "0003-copy-host-visible-memory-without-shared-memory.patch"
 PATCH_0005 = Path(__file__).resolve().parent / "patches" / "0005-give-each-task-window-a-display-and-share-color-buffers.patch"
+PATCH_0006 = Path(__file__).resolve().parent / "patches" / "0006-reject-vulkan-handles-the-host-does-not-know.patch"
 HOST_FETCH = Path(__file__).resolve().parent / "host" / "fetch.ps1"
 SHARED_HANDLE = Path(__file__).resolve().parent / "include" / "dsa_shared_color_buffer.h"
 VULKAN_CMAKE = Path(__file__).resolve().parent / "cmake" / "vulkan.cmake"
@@ -94,6 +95,19 @@ class HvSocketPatchTests(unittest.TestCase):
         self.assertIn("invalidateShadowedMemory(vkEncoder, device);", patch)
         self.assertIn("VK_MEMORY_PROPERTY_HOST_CACHED_BIT", patch)
         self.assertIn('"$patch_dir"/0003-*.patch', FETCH.read_text())
+
+    def test_nfr5_host_rejects_vulkan_handles_it_does_not_have(self):
+        # A guest call naming an image, buffer or memory the host does not have fails for
+        # that guest; it never reaches the GPU driver and never aborts the renderer.
+        # Behaviour: nfr5_unknown_vulkan_image_is_rejected_without_reaching_the_driver.
+        patch = PATCH_0006.read_text()
+        self.assertIn('ERR("Failed to unbox %s %p, not found"', patch)
+        self.assertIn("bool validateRequiredHandle(", patch)
+        self.assertIn('isKnownHandleLocked(mImageInfo, pInfo->image, __func__, "pInfo->image")', patch)
+        self.assertIn('isKnownHandleLocked(mBufferInfo, buffer, __func__, "buffer")', patch)
+        self.assertIn("was not made from a gralloc buffer", patch)
+        self.assertIn("-                            GFXSTREAM_ABORT(::emugl::FatalError(::emugl::ABORT_REASON_OTHER));", patch)
+        self.assertIn('-Filter "0006-*.patch"', HOST_FETCH.read_text())
 
     def test_pr3_host_renderer_does_not_expect_shared_memory(self):
         # The host decoder copies memory from the stream only when neither GlDirectMem nor

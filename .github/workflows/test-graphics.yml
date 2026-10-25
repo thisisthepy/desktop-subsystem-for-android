@@ -124,6 +124,16 @@ jobs:
         run: |
           cargo test -p dsa-host-windows --test compositor -- pr3_compositor_serves_a_gfxstream_client --nocapture
 
+      - name: Check the host renderer survives unknown Vulkan handles on software Vulkan
+        shell: pwsh
+        working-directory: dsa
+        env:
+          VK_ICD_FILENAMES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
+          VK_DRIVER_FILES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
+          GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
+        run: |
+          cargo test -p dsa-host-windows --test compositor -- nfr5_unknown_vulkan_image_is_rejected_without_reaching_the_driver --nocapture
+
       - name: Keep the host renderer library and headers
         uses: actions/upload-artifact@v4
         with:
