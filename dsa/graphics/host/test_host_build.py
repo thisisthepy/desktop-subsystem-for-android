@@ -18,6 +18,13 @@ class HostGraphicsBuildTests(unittest.TestCase):
         self.assertIn("gfxstream_backend", script)
         self.assertIn("dist_host_gfxstream", script)
 
+    def test_pr3_host_build_keeps_the_renderers_symbols_apart_from_the_dll(self):
+        # A crash in the renderer or in the GPU driver it calls is only readable with them.
+        script = BUILD_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase", script)
+        self.assertIn("/DEBUG", script)
+        self.assertIn("symbols/gfxstream_backend.pdb", script)
+
     def test_pr3_host_cmake_glue_enforces_vulkan_and_standalone_aemu(self):
         cmake = CMAKE_FILE.read_text(encoding="utf-8")
         self.assertIn("VK_USE_PLATFORM_WIN32_KHR", cmake)
