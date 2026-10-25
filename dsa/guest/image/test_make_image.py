@@ -352,6 +352,12 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertIn("ro.hardware.gralloc=minigbm\n", props)
         self.assertIn("ro.cpuvulkan.version=0\n", props)
 
+    def test_pr3_vulkan_loader_uses_the_vendor_driver_not_the_cuttlefish_apex(self):
+        # With ro.vulkan.apex set, the loader takes Cuttlefish's driver from its APEX,
+        # which reaches the host only through virtio-gpu or the goldfish pipe.
+        props = make_image.edit_props("ro.vulkan.apex=com.google.cf.vulkan\nro.debuggable=1\n")
+        self.assertNotIn("ro.vulkan.apex", props)
+
     def test_pr3_modify_installs_vulkan_and_opengl_libraries_and_filesystem_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
