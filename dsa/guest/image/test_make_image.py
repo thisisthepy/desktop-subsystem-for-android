@@ -402,6 +402,21 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertIn("ro.frp.pst=\n", props)
         self.assertNotIn("by-name/frp", props)
 
+    def test_pr3_graphics_clients_can_open_the_drm_card_minigbm_uses(self):
+        # Every process that maps a graphics buffer runs minigbm's mapper, which opens the
+        # vkms card. Labelled graphics_device, as Cuttlefish labels its composer's cards,
+        # apps and the boot animation are refused and cannot dequeue a single buffer.
+        fc = make_image.update_vendor_file_contexts(
+            "/dev/dri u:object_r:gpu_device:s0\n"
+            "/dev/dri/card0  u:object_r:graphics_device:s0\n"
+            "/dev/dri/card1  u:object_r:graphics_device:s0\n"
+            "/dev/dri/renderD128  u:object_r:gpu_device:s0\n"
+        )
+        self.assertIn("/dev/dri/card0  u:object_r:gpu_device:s0", fc)
+        self.assertIn("/dev/dri/card1  u:object_r:gpu_device:s0", fc)
+        self.assertNotIn("graphics_device", fc)
+        self.assertEqual(fc.count("/dev/dri/card1 "), 1)
+
     def test_pr3_edit_props_sets_graphics_properties(self):
         props = make_image.edit_props("ro.debuggable=1\n")
         self.assertIn("ro.hardware.egl=angle\n", props)
