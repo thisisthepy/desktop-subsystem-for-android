@@ -1,0 +1,342 @@
+// Copyright 2026 The DSA Authors
+// SPDX-License-Identifier: Apache-2.0
+
+#include "task_composer.h"
+
+#include <algorithm>
+#include <chrono>
+#include <unordered_map>
+
+#include "log.h"
+
+namespace dsa::hwc {
+
+namespace {
+
+// How long a layer's acquire fence may take before its buffer is composed anyway.
+constexpr int kFenceTimeoutMs = 3000;
+// The blend mode SurfaceFlinger's client target is composed with.
+constexpr int32_t kBlendPremultiplied = 2;
+
+}  // namespace
+
+TaskComposer::TaskComposer() : mReconnector([this] { reconnectLoop(); }) {}
+
+TaskComposer::~TaskComposer() {
+    {
+        std::lock_guard<std::mutex> lock(mReconnectMutex);
+        mStopping = true;
+    }
+    mReconnectWake.notify_all();
+    mReconnector.join();
+}
+
+void TaskComposer::setSender(Sender send) {
+    std::lock_guard<std::mutex> lock(mCallbackMutex);
+    mSend = std::move(send);
+}
+
+void TaskComposer::setRefreshRequest(RefreshRequest refresh) {
+    std::lock_guard<std::mutex> lock(mCallbackMutex);
+    mRefresh = std::move(refresh);
+}
+
+void TaskComposer::send(const std::vector<std::vector<uint8_t>>& outbox) {
+    if (outbox.empty()) {
+        return;
+    }
+    Sender send;
+    {
+        std::lock_guard<std::mutex> lock(mCallbackMutex);
+        send = mSend;
+    }
+    if (!send) {
+        // channelConnected() announces every pairing once the channel is there.
+        return;
+    }
+    for (const auto& frame : outbox) {
+        send(frame);
+    }
+}
+
+void TaskComposer::taskUpdated(const TaskUpdate& update) {
+    bool changed;
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        changed = mTasks.update(update.id, update.bounds);
+    }
+    if (changed) {
+        // The window's frame has to follow its new place now, not at the next app redraw.
+        RefreshRequest refresh;
+        {
+            std::lock_guard<std::mutex> lock(mCallbackMutex);
+            refresh = mRefresh;
+        }
+        if (refresh) {
+            refresh();
+        }
+    }
+}
+
+void TaskComposer::taskEnded(int32_t task) {
+    std::lock_guard<std::mutex> lock(mMutex);
+    mTasks.remove(task);
+    mDisplays.release(task);
+    auto it = mOutputs.find(task);
+    if (it != mOutputs.end()) {
+        releaseOutputLocked(it->second);
+        mOutputs.erase(it);
+    }
+}
+
+void TaskComposer::channelConnected() {
+    std::vector<std::vector<uint8_t>> outbox;
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        for (auto& [task, output] : mOutputs) {
+            if (output.onHost) {
+                outbox.push_back(encodeTaskFrames(task, output.display));
+                output.announced = true;
+            }
+        }
+    }
+    send(outbox);
+}
+
+void TaskComposer::releaseOutputLocked(Output& output) {
+    if (!output.onHost || !mHost.connected()) {
+        return;
+    }
+    for (uint32_t& target : output.targets) {
+        mHost.closeColorBuffer(target);
+        target = 0;
+    }
+    mHost.destroyDisplay(output.display);
+    output.onHost = false;
+}
+
+void TaskComposer::syncGenerationLocked() {
+    if (mHost.generation() == mGeneration) {
+        return;
+    }
+    // A new connection: whatever the hwcomposer made on the host before went with the old
+    // one, so every display is made, and announced, again.
+    mGeneration = mHost.generation();
+    mShared.clear();
+    for (auto& [_, output] : mOutputs) {
+        output.onHost = false;
+        output.announced = false;
+        output.targets[0] = output.targets[1] = 0;
+        output.next = 0;
+    }
+}
+
+uint32_t TaskComposer::sharedHandleLocked(const BufferRef& buffer) {
+    if (!buffer.valid()) {
+        return 0;
+    }
+    auto it = mShared.find(buffer.id);
+    if (it != mShared.end()) {
+        return it->second;
+    }
+    const uint32_t handle = mHost.openSharedColorBuffer(buffer);
+    if (handle != 0) {
+        mShared.emplace(buffer.id, handle);
+    }
+    return handle;
+}
+
+void TaskComposer::present(Frame& frame) {
+    std::vector<std::vector<uint8_t>> outbox;
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        if (!mHost.connected()) {
+            // The reconnecting thread asks for a frame once the host is back; connecting
+            // here would hold up SurfaceFlinger for as long as the host takes to answer.
+            mDisconnected = true;
+            mReconnectWake.notify_all();
+            return;
+        }
+        syncGenerationLocked();
+
+        std::vector<LayerPlacement> placements;
+        std::unordered_map<int64_t, FrameLayer*> byId;
+        placements.reserve(frame.layers.size());
+        for (FrameLayer& layer : frame.layers) {
+            placements.push_back(LayerPlacement{layer.id, layer.z, layer.frame});
+            byId[layer.id] = &layer;
+        }
+        const Layout layout = assignLayersToTasks(placements, mTasks.tasks(), frame.display);
+
+        bool clientTargetReady = false;
+        for (const TaskLayers& task : layout.tasks) {
+            const auto pairing = mDisplays.acquire(task.task);
+            if (!pairing) {
+                if (!mWarnedNoDisplay) {
+                    HWC_LOGE("every host display is taken; task %d gets no window frames", task.task);
+                    mWarnedNoDisplay = true;
+                }
+                continue;
+            }
+            Output& output = mOutputs[task.task];
+            output.display = pairing->displayId;
+            const int64_t width = std::max<int64_t>(task.bounds.width(), 1);
+            const int64_t height = std::max<int64_t>(task.bounds.height(), 1);
+
+            if (!output.onHost) {
+                if (!mHost.createDisplay(output.display, static_cast<uint32_t>(width),
+                                         static_cast<uint32_t>(height))) {
+                    continue;
+                }
+                output.onHost = true;
+                output.width = width;
+                output.height = height;
+            } else if (output.width != width || output.height != height) {
+                // The window was resized: its frames are composed at the new size.
+                for (uint32_t& target : output.targets) {
+                    mHost.closeColorBuffer(target);
+                    target = 0;
+                }
+                mHost.resizeDisplay(output.display, static_cast<uint32_t>(width),
+                                    static_cast<uint32_t>(height));
+                output.width = width;
+                output.height = height;
+            }
+            if (!output.announced) {
+                // Before the first post, so the host knows whose frames these are.
+                outbox.push_back(encodeTaskFrames(task.task, output.display));
+                output.announced = true;
+            }
+
+            uint32_t& target = output.targets[output.next];
+            if (target == 0) {
+                target = mHost.createColorBuffer(static_cast<uint32_t>(width),
+                                                 static_cast<uint32_t>(height));
+            }
+            if (target == 0) {
+                continue;
+            }
+
+            std::vector<ComposeInput> inputs;
+            Rect clientArea;
+            int clientSlot = -1;
+            for (int64_t id : task.layers) {
+                FrameLayer& layer = *byId[id];
+                if (layer.client) {
+                    // SurfaceFlinger drew it into the client target. The task's part of the
+                    // client target goes where its lowest client layer is.
+                    clientArea = clientArea.empty()
+                                     ? layer.frame.intersect(task.bounds)
+                                     : Rect{std::min(clientArea.left, layer.frame.left),
+                                            std::min(clientArea.top, layer.frame.top),
+                                            std::max(clientArea.right, layer.frame.right),
+                                            std::max(clientArea.bottom, layer.frame.bottom)}
+                                           .intersect(task.bounds);
+                    if (clientSlot < 0) {
+                        clientSlot = static_cast<int>(inputs.size());
+                        inputs.emplace_back();
+                    }
+                    continue;
+                }
+                ComposeInput in;
+                in.mode = layer.mode;
+                if (layer.mode == ComposeMode::Device) {
+                    if (!waitForFence(layer.acquireFence, kFenceTimeoutMs)) {
+                        HWC_LOGW("layer %lld's buffer was not ready in %d ms",
+                                 static_cast<long long>(layer.id), kFenceTimeoutMs);
+                    }
+                    in.colorBuffer = sharedHandleLocked(layer.buffer);
+                    if (in.colorBuffer == 0) {
+                        continue;
+                    }
+                }
+                in.frame = layer.frame;
+                in.crop = layer.crop;
+                in.blendMode = layer.blendMode;
+                in.alpha = layer.alpha;
+                std::copy(std::begin(layer.color), std::end(layer.color), std::begin(in.color));
+                in.transform = layer.transform;
+                inputs.push_back(in);
+            }
+            if (clientSlot >= 0) {
+                if (!clientTargetReady) {
+                    waitForFence(frame.clientTargetFence, kFenceTimeoutMs);
+                    clientTargetReady = true;
+                }
+                ComposeInput& slice = inputs[static_cast<size_t>(clientSlot)];
+                slice.colorBuffer = sharedHandleLocked(frame.clientTarget);
+                // The client target covers the display, so its buffer coordinates are
+                // display coordinates.
+                slice.frame = clientArea;
+                slice.crop = FRect{static_cast<float>(clientArea.left),
+                                   static_cast<float>(clientArea.top),
+                                   static_cast<float>(clientArea.right),
+                                   static_cast<float>(clientArea.bottom)};
+                slice.blendMode = kBlendPremultiplied;
+                if (slice.colorBuffer == 0 || clientArea.empty()) {
+                    inputs.erase(inputs.begin() + clientSlot);
+                }
+            }
+
+            const std::vector<uint8_t> request =
+                buildComposeRequest(output.display, target, task.bounds, inputs);
+            if (mHost.compose(request)) {
+                mHost.post(output.display, target);
+                output.next ^= 1;
+            }
+        }
+
+        // Drop this process's hold on buffers SurfaceFlinger can no longer show.
+        for (auto it = mShared.begin(); it != mShared.end();) {
+            if (frame.liveBuffers.count(it->first) || it->first == frame.clientTarget.id) {
+                ++it;
+            } else {
+                mHost.closeColorBuffer(it->second);
+                it = mShared.erase(it);
+            }
+        }
+
+        if (!mHost.connected()) {
+            mDisconnected = true;
+            mReconnectWake.notify_all();
+        }
+    }
+    send(outbox);
+}
+
+void TaskComposer::reconnectLoop() {
+    std::unique_lock<std::mutex> wait(mReconnectMutex);
+    while (!mStopping) {
+        if (!mDisconnected) {
+            mReconnectWake.wait_for(wait, std::chrono::seconds(1));
+            continue;
+        }
+        wait.unlock();
+        // Connecting can take a while; frames go on being dropped meanwhile.
+        auto connection = HostRenderer::open();
+        bool reconnected = false;
+        if (connection) {
+            std::lock_guard<std::mutex> lock(mMutex);
+            mHost.adopt(std::move(connection));
+            syncGenerationLocked();
+            reconnected = true;
+        }
+        if (reconnected) {
+            mDisconnected = false;
+            RefreshRequest refresh;
+            {
+                std::lock_guard<std::mutex> lock(mCallbackMutex);
+                refresh = mRefresh;
+            }
+            if (refresh) {
+                refresh();
+            }
+        }
+        wait.lock();
+        if (!reconnected && !mStopping) {
+            mReconnectWake.wait_for(wait, std::chrono::seconds(1));
+        }
+    }
+}
+
+}  // namespace dsa::hwc

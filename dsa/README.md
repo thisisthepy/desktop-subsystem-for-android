@@ -19,5 +19,6 @@ cargo test --workspace
 | `graphics/` | C++ | Vulkan remoting on the host, starting from gfxstream | planned |
 | `guest/` | Kotlin, C++, Rust | The agent (a system app), the hwcomposer, HAL clients, the image configuration | planned |
 | `guest/transport/` | Rust | The guest side of the control channel, over vsock, for the guest's channel daemon | in progress |
+| `guest/hwcomposer/` | C++ | The guest's composer HAL: groups the freeform display's layers by task, composes each task on the host GPU into its own host display, and tells the host which display carries which task | in progress: built and installed in the image; not yet run against the host compositor |
 | `guest/channeld/` | Rust | The guest's control channel daemon: reads the boot's secret, connects to the host, passes the handshake, carries frames, reconnects | in progress: runs in the image and holds the connection; serving the agent and hwcomposer over binder is not done yet |
 | `kernel/` | config, shell | The guest kernel configuration, with binder built in, and its build | planned |

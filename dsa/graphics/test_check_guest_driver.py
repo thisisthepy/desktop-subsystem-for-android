@@ -64,6 +64,23 @@ class GuestDriverCheckTests(unittest.TestCase):
             ["the driver does not export HMI, the module the Android Vulkan loader looks up"],
         )
 
+    def test_fr3_an_executable_needs_no_hal_module(self):
+        hwcomposer = library(
+            needed=["libbinder_ndk.so"],
+            defined={"main"},
+            undefined={"AServiceManager_addService"},
+        )
+        image = {"libbinder_ndk.so": library(defined={"AServiceManager_addService"})}
+        self.assertEqual(check.problems(hwcomposer, image, module=None), [])
+
+    def test_fr3_an_executable_with_a_call_the_platform_lacks_is_rejected(self):
+        hwcomposer = library(needed=["libbinder_ndk.so"], undefined={"AServiceManager_addServiceSomeday"})
+        image = {"libbinder_ndk.so": library(defined={"AServiceManager_addService"})}
+        self.assertEqual(
+            check.problems(hwcomposer, image, module=None),
+            ["AServiceManager_addServiceSomeday is not defined by any library the driver loads"],
+        )
+
     def test_pr3_weak_imports_may_stay_unresolved(self):
         driver = library(defined={"HMI"}, undefined={"__cxa_thread_atexit_impl"}, weak={"__cxa_thread_atexit_impl"})
         self.assertEqual(check.problems(driver, {}), [])
