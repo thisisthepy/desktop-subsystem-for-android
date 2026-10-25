@@ -14,6 +14,17 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertNotIn("CONFIG_ASHMEM", config)
         self.assertIn("CONFIG_MEMFD_CREATE=y", config)
 
+    def test_fr1_memfds_answer_the_ashmem_ioctls_android_checks_for(self):
+        # libcutils uses memfd only when a memfd answers ASHMEM_GET_SIZE; otherwise it
+        # opens /dev/ashmem, which this kernel does not have, and system_server dies.
+        config = CONFIG.read_text()
+        self.assertIn("CONFIG_MEMFD_ASHMEM_SHIM=y", config)
+        patch = (PATCHES / "memfd-ashmem-shim.patch").read_text()
+        self.assertIn("mm/memfd-ashmem-shim.c", patch)
+        self.assertIn("case ASHMEM_GET_SIZE:", patch)
+        self.assertIn(".unlocked_ioctl\t= shmem_file_ioctl,", patch)
+        self.assertIn("config MEMFD_ASHMEM_SHIM", patch)
+
     def test_fr1_binder_device_nodes_are_created_for_android_init(self):
         config = CONFIG.read_text()
         self.assertIn('CONFIG_ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder"', config)

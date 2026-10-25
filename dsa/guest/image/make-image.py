@@ -92,6 +92,12 @@ USER_PROPS = {
     "ro.force.debuggable": "0",
 }
 
+# Shared memory goes through memfd: libcutils falls back to /dev/ashmem unless this is
+# set, and DSA's kernel has no ashmem driver (its memfds answer the ashmem ioctls).
+MEMORY_PROPS = {
+    "sys.use_memfd": "true",
+}
+
 GRAPHICS_PROPS = {
     "ro.hardware.egl": "angle",
     "ro.hardware.vulkan": "ranchu",
@@ -207,7 +213,7 @@ def removed(name):
 
 
 def edit_props(text):
-    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS}
+    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS}
     out = []
     for line in text.splitlines():
         key = line.split("=", 1)[0]
