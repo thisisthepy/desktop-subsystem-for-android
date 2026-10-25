@@ -477,6 +477,9 @@ impl Worker {
             );
             return;
         }
+        // The guest renders while it boots, before the agent connects, and the compositor
+        // binds its sockets to this ID, so it is known from the moment the guest runs.
+        self.shared.set_vm_id(self.launcher.vm_id());
         let started = Instant::now();
         let deadline = started + self.config.connect_timeout;
         loop {
