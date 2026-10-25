@@ -34,6 +34,27 @@ class HostGraphicsBuildTests(unittest.TestCase):
         self.assertIn("3ff20aed307f55bc4ae865373d07bf76c9efa43c", script)
         self.assertIn("https://android.googlesource.com/platform/external/angle", script)
 
+    def test_fr3_host_fetch_applies_the_patch_that_lends_out_the_vulkan_queue(self):
+        script = FETCH_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('"0004-*.patch"', script)
+        self.assertIn("throw", script)
+        patch = (HERE.parent / "patches" / "0004-expose-the-vulkan-queue-to-the-host-backend.patch")
+        text = patch.read_text(encoding="utf-8")
+        self.assertIn("host/vulkan/VkCommonOperations.h", text)
+        self.assertIn("getQueueLock", text)
+
+    def test_fr3_each_display_is_copied_into_its_window_on_the_gpu(self):
+        header = (HERE / "dsa_gfx_backend.h").read_text(encoding="utf-8")
+        self.assertIn("dsa_gfx_set_display_callbacks", header)
+        self.assertIn("dsa_gfx_get_adapter_luid", header)
+        source = (HERE / "dsa_gfx_display.cpp").read_text(encoding="utf-8")
+        # The frame goes into the window's Direct3D texture without a trip through the CPU.
+        self.assertIn("VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT", source)
+        self.assertIn("vkCmdBlitImage", source)
+        self.assertNotIn("readColorBuffer", source)
+        self.assertIn("setDisplayColorBuffer", source)
+        self.assertIn("dsa_gfx_display.cpp", CMAKE_FILE.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()
