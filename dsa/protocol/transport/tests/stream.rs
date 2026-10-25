@@ -9,7 +9,9 @@ use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::time::Duration;
 
-use dsa_transport::stream::{accept_with_timeout, FramedConnection, StreamSocket};
+use dsa_transport::stream::{
+    accept_with_timeout, FramedConnection, RawStreamConnection, StreamSocket,
+};
 use dsa_transport::{Connection, Connector, Listener, TransportError, MAX_FRAME_LEN};
 
 struct Tcp(TcpStream);
@@ -35,6 +37,9 @@ impl StreamSocket for Tcp {
     }
     fn shutdown(&mut self) {
         let _ = self.0.shutdown(Shutdown::Both);
+    }
+    fn try_clone(&self) -> io::Result<Self> {
+        self.0.try_clone().map(Tcp)
     }
 }
 
@@ -170,4 +175,29 @@ fn pr1_a_socket_that_refuses_timeouts_after_the_peer_left_still_reports_closed()
         connection.recv(Some(Duration::from_secs(1))),
         Err(TransportError::Closed)
     );
+}
+
+/// The host renderer replies to the guest while it waits for the guest's next bytes. With
+/// one handle for both, every reply waited for the read to time out, and a Vulkan start
+/// that makes thousands of round trips took minutes.
+#[test]
+fn pr3_a_raw_stream_sends_while_another_thread_waits_to_receive() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let mut guest = TcpStream::connect(listener.local_addr().unwrap()).expect("connect");
+    let (accepted, _) = listener.accept().expect("accept");
+    let mut host = RawStreamConnection::new(Tcp(accepted));
+    let mut sender = host.try_clone_sender().expect("a raw stream can share its socket");
+
+    let reader = std::thread::spawn(move || host.recv(Some(Duration::from_secs(5))));
+    std::thread::sleep(Duration::from_millis(100));
+
+    let started = std::time::Instant::now();
+    sender.send(b"reply").expect("send while the reader waits");
+    let mut reply = [0u8; 5];
+    guest.read_exact(&mut reply).expect("the guest gets the reply");
+    assert_eq!(&reply, b"reply");
+    assert!(started.elapsed() < Duration::from_secs(1), "{:?}", started.elapsed());
+
+    guest.write_all(b"next").expect("guest writes");
+    assert_eq!(reader.join().unwrap().expect("the reader gets it"), b"next");
 }
