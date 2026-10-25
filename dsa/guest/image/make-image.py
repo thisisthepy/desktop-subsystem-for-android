@@ -105,10 +105,13 @@ GRAPHICS_PROPS = {
     "ro.cpuvulkan.version": "0",
 }
 
-# Properties the image drops. ro.vulkan.apex makes the Vulkan loader take Cuttlefish's
-# driver from its APEX, which reaches the host only through virtio-gpu or the goldfish
-# pipe; without it the loader takes the vendor driver, which uses the Hyper-V socket.
-REMOVED_PROPS = {"ro.vulkan.apex"}
+# ro.vulkan.apex makes the Vulkan loader take Cuttlefish's driver from its APEX, which
+# reaches the host only through virtio-gpu or the goldfish pipe; empty, the loader takes
+# the vendor driver, which uses the Hyper-V socket. The APEX's init script sets it "on
+# init", so build.prop, which init reads first, claims the read-only property empty.
+LOADER_PROPS = {
+    "ro.vulkan.apex": "",
+}
 
 # Cuttlefish ships selectable vendor APEX implementations. Its launcher passes
 # the selections in bootconfig. DSA does not run that launcher, so choose the
@@ -213,11 +216,11 @@ def removed(name):
 
 
 def edit_props(text):
-    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS}
+    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS}
     out = []
     for line in text.splitlines():
         key = line.split("=", 1)[0]
-        if key in props_to_apply or key in REMOVED_PROPS:
+        if key in props_to_apply:
             continue
         if key.endswith("build.type"):
             line = f"{key}=user"
