@@ -80,6 +80,10 @@ impl GuestLauncher for FakeLauncher {
         guest.diagnostics_asked.push(stopped);
         guest.diagnostics.clone()
     }
+
+    fn vm_id(&self) -> Option<String> {
+        (self.0.lock().unwrap().processes > 0).then(|| "fake-vm".into())
+    }
 }
 
 /// A session that checks the agent with the real control protocol handshake.
@@ -123,6 +127,21 @@ fn fr2_a_new_session_is_stopped() {
     let (session, _connector) = session_with(FakeLauncher::default(), WAIT);
     assert_eq!(session.state(), SessionState::Stopped);
     assert_eq!(session.last_reason(), None);
+}
+
+/// The compositor binds its Hyper-V sockets to the VM's ID, and the guest renders before
+/// the agent connects, so the ID is known as soon as the guest is running.
+#[test]
+fn fr3_the_vm_id_is_known_while_the_guest_boots() {
+    let (session, _connector) = session_with(FakeLauncher::default(), WAIT);
+    session.start();
+    assert!(session.wait_for(SessionState::Starting, WAIT));
+    let deadline = std::time::Instant::now() + WAIT;
+    while session.vm_id().is_none() && std::time::Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(session.vm_id().as_deref(), Some("fake-vm"));
+    assert_eq!(session.state(), SessionState::Starting);
 }
 
 #[test]
