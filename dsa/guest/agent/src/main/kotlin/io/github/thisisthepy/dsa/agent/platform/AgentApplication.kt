@@ -21,6 +21,7 @@ class AgentApplication : Application() {
             windowing = AndroidWindowing(this),
             scheduler = HandlerScheduler(thread.looper),
             log = log,
+            apps = AndroidAppInfoSource(this, log),
         ).start()
     }
 }

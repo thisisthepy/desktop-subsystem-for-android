@@ -8,7 +8,8 @@ package io.github.thisisthepy.dsa.control.v1;
  * Guest to host, from the agent: the name and launcher icon of an app the host shows a task
  * of. The host's window for the app carries them, in the taskbar and the task list. The
  * agent sends it before the first TaskUpdated of the app's package on each connection, and
- * again when the app's name or icon changes.
+ * again before the next one once the app has had no task, which is how an updated app's new
+ * name and icon arrive.
  * </pre>
  *
  * Protobuf type {@code dsa.control.v1.AppInfo}
@@ -265,7 +266,8 @@ public  final class AppInfo extends
    * Guest to host, from the agent: the name and launcher icon of an app the host shows a task
    * of. The host's window for the app carries them, in the taskbar and the task list. The
    * agent sends it before the first TaskUpdated of the app's package on each connection, and
-   * again when the app's name or icon changes.
+   * again before the next one once the app has had no task, which is how an updated app's new
+   * name and icon arrive.
    * </pre>
    *
    * Protobuf type {@code dsa.control.v1.AppInfo}

@@ -155,7 +155,7 @@ message TaskFrames {
 }
 
 // The name and launcher icon of an app the caller's Android has a task of. Sent before the
-// app's first task, and again when either changes.
+// app's first task, and again before the next one once the app has had no task.
 message AppInfo {
   string package_name = 1;
   // The app's own name, as a launcher shows it.

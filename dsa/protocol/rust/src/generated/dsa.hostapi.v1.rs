@@ -118,7 +118,7 @@ pub struct TaskFrames {
     pub display_id: u32,
 }
 /// The name and launcher icon of an app the caller's Android has a task of. Sent before the
-/// app's first task, and again when either changes.
+/// app's first task, and again before the next one once the app has had no task.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct AppInfo {
     #[prost(string, tag = "1")]
