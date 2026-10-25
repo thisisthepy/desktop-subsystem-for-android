@@ -404,8 +404,7 @@ class ImageLayoutTests(unittest.TestCase):
             root = Path(tmp)
             source = root / "target-files.zip"
             with zipfile.ZipFile(source, "w") as archive:
-                archive.writestr("META/vendor_filesystem_config.txt", "vendor/etc/permissions 0 2000 755 capabilities=0x0
-")
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/etc/permissions 0 2000 755 capabilities=0x0\n")
             modified = root / "modified.zip"
             make_image.modify(source, modified)
             with zipfile.ZipFile(modified) as archive:
