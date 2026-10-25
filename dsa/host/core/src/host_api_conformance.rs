@@ -21,6 +21,7 @@ use crate::host_api::{
     running_of, stop_every, ClientError, HostApiClient, HostApiService, ProgramUpdate,
     UpdateProgram, UserAndroid, UserAndroids,
 };
+use crate::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use crate::session::SessionState;
 use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskTable, TaskWatch};
 
@@ -38,6 +39,8 @@ pub struct FakeAndroid {
     tasks: Mutex<(TaskTable, Vec<Sender<TaskEvent>>)>,
     /// The requests about tasks it was asked to carry out, in order.
     pub requests: Mutex<Vec<TaskRequest>>,
+    /// The pointer events it was given, in order.
+    pub pointers: Mutex<Vec<PointerEvent>>,
 }
 
 impl FakeAndroid {
@@ -46,6 +49,7 @@ impl FakeAndroid {
             state: Mutex::new(SessionState::Stopped),
             tasks: Mutex::new((TaskTable::new(), Vec::new())),
             requests: Mutex::new(Vec::new()),
+            pointers: Mutex::new(Vec::new()),
         }
     }
 
@@ -104,6 +108,16 @@ impl UserAndroid for FakeAndroid {
             )));
         }
         self.requests.lock().unwrap().push(request);
+        Ok(())
+    }
+    fn pointer(&self, event: &PointerEvent) -> Result<(), TaskRequestError> {
+        if self.state() != SessionState::Active {
+            return Err(TaskRequestError::NotRunning(format!(
+                "Android is {}, not running",
+                self.state()
+            )));
+        }
+        self.pointers.lock().unwrap().push(*event);
         Ok(())
     }
 }
@@ -271,6 +285,22 @@ macro_rules! host_api_conformance {
         #[test]
         fn nfr5_a_watching_client_that_sends_a_request_is_disconnected() {
             $crate::host_api_conformance::watcher_that_sends_is_disconnected(&mut || $make);
+        }
+        #[test]
+        fn fr5_pointer_input_reaches_the_callers_android_in_order() {
+            $crate::host_api_conformance::pointer_input_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr5_pointer_input_to_an_android_that_is_not_running_is_dropped() {
+            $crate::host_api_conformance::pointer_input_to_stopped_android_is_dropped(&mut || {
+                $make
+            });
+        }
+        #[test]
+        fn nfr5_a_client_that_streams_input_and_sends_a_request_is_disconnected() {
+            $crate::host_api_conformance::input_stream_that_sends_a_request_is_disconnected(
+                &mut || $make,
+            );
         }
         #[test]
         fn fr15_an_update_request_reaches_the_program_updater() {
@@ -570,6 +600,95 @@ pub fn watcher_that_sends_is_disconnected(make: MakeLocal<'_>) {
         "the service closes a watching client that sends a request"
     );
     // Other clients are served.
+    assert_eq!(
+        connect(&mut *connector).status().unwrap().state,
+        SessionState::Stopped
+    );
+}
+
+fn pointer(task_id: i32, action: PointerAction, x: f32) -> PointerEvent {
+    let mut event = PointerEvent::new(task_id, action, PointerTool::Mouse, (x, 20.0));
+    if action == PointerAction::Down || action == PointerAction::Move {
+        event.buttons = buttons::PRIMARY;
+        event.pressure = 1.0;
+    }
+    event
+}
+
+/// Waits until `android` has been given `count` pointer events, and returns them.
+fn pointers_given(android: &FakeAndroid, count: usize) -> Vec<PointerEvent> {
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let given = android.pointers.lock().unwrap().clone();
+        if given.len() >= count || std::time::Instant::now() >= deadline {
+            return given;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+pub fn pointer_input_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let mut input = connect(&mut *connector)
+        .stream_input()
+        .expect("streaming input");
+    let sent: Vec<PointerEvent> = (0..50)
+        .map(|step| {
+            let action = match step {
+                0 => PointerAction::Down,
+                49 => PointerAction::Up,
+                _ => PointerAction::Move,
+            };
+            pointer(4, action, step as f32)
+        })
+        .collect();
+    for event in &sent {
+        input.send(event).expect("the event is sent");
+    }
+    let android = androids.of(&user).unwrap();
+    assert_eq!(pointers_given(&android, sent.len()), sent);
+}
+
+pub fn pointer_input_to_stopped_android_is_dropped(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut input = connect(&mut *connector)
+        .stream_input()
+        .expect("streaming input");
+    input
+        .send(&pointer(4, PointerAction::Down, 1.0))
+        .expect("the event is sent");
+    // Once Android runs, the same stream carries input to it.
+    connect(&mut *connector).start().unwrap();
+    let up = pointer(4, PointerAction::Up, 2.0);
+    input.send(&up).expect("the event is sent");
+    let android = androids.of(&user).unwrap();
+    assert_eq!(pointers_given(&android, 1), vec![up]);
+}
+
+pub fn input_stream_that_sends_a_request_is_disconnected(make: MakeLocal<'_>) {
+    use dsa_protocol::host_api::types::{envelope::Body, request, Request, StreamInput};
+    let (listener, mut connector, _) = make();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let mut connection = connector.connect(WAIT).unwrap();
+    client_connect(&mut *connection, &local_hello(Role::Client, "client"), WAIT).unwrap();
+    let stream = Request {
+        id: 1,
+        body: Some(request::Body::StreamInput(StreamInput {})),
+    };
+    dsa_protocol::host_api::send(&mut *connection, Body::Request(stream.clone())).unwrap();
+    connection
+        .recv(Some(WAIT))
+        .expect("the answer to the request to stream input");
+    dsa_protocol::host_api::send(&mut *connection, Body::Request(stream)).unwrap();
+    assert!(
+        connection.recv(Some(WAIT)).is_err(),
+        "the service closes a client that sends a request on a stream of input"
+    );
     assert_eq!(
         connect(&mut *connector).status().unwrap().state,
         SessionState::Stopped

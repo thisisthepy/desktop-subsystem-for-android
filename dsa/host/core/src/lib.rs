@@ -10,6 +10,7 @@
 //! - [`host_api`]: the local API service, which acts on each caller's own Android, and its
 //!   client.
 //! - [`tasks`]: the guest's app tasks, which the session keeps and hands on.
+//! - [`input`]: pointer input in a task's window, as the guest task receives it.
 //! - [`compositor`]: platform-neutral graphics stream bookkeeping, renderer interfaces, and
 //!   which window each task and each frame goes to.
 
@@ -19,6 +20,7 @@ pub mod handshake;
 pub mod host_api;
 #[cfg(feature = "conformance")]
 pub mod host_api_conformance;
+pub mod input;
 pub mod session;
 pub mod tasks;
 pub mod update;
