@@ -99,11 +99,19 @@ fn fr3_compositor_refuses_second_instance() {
 
 #[test]
 fn fr3_compositor_accepts_graphics_stream_and_hands_to_renderer() {
+    accepts_graphics_streams_while(SessionState::Active);
+}
+
+/// The guest renders its first frames (surfaceflinger, the boot animation) while it boots,
+/// before the agent connects and the session becomes active.
+#[test]
+fn fr3_compositor_accepts_guest_graphics_while_the_vm_starts() {
+    accepts_graphics_streams_while(SessionState::Starting);
+}
+
+fn accepts_graphics_streams_while(state: SessionState) {
     let vm_guid = Guid::new(0x12345678, 0xabcd, 0xef01, [1, 2, 3, 4, 5, 6, 7, 8]);
-    let android = Arc::new(MockAndroid::new(
-        SessionState::Active,
-        Some(vm_guid.to_string()),
-    ));
+    let android = Arc::new(MockAndroid::new(state, Some(vm_guid.to_string())));
 
     // Local API service on in-memory transport.
     let (api_listener, api_connector) = local::pair();
