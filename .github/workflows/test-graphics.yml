@@ -133,6 +133,13 @@ jobs:
             .scratch/build-host/dist/include/
           if-no-files-found: error
 
+      - name: Keep the host renderer's symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-gfxstream-windows-symbols
+          path: .scratch/build-host/dist/symbols/gfxstream_backend.pdb
+          if-no-files-found: warn
+
   installer-package:
     name: Package the installer with the host graphics renderer (windows)
     needs: host-renderer
