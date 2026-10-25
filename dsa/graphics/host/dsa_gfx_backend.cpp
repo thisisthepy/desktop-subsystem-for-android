@@ -22,6 +22,8 @@
 #include "render-utils/RenderChannel.h"
 #include "render-utils/Renderer.h"
 #include "FrameBuffer.h"
+#include "vulkan/VkCommonOperations.h"
+#include "vulkan/VulkanDispatch.h"
 
 namespace {
 
@@ -88,6 +90,80 @@ extern "C" DSA_GFX_EXPORT int dsa_gfx_init(uint32_t width, uint32_t height) {
         s_initialized.store(true, std::memory_order_release);
     }
     return ret;
+}
+
+extern "C" DSA_GFX_EXPORT int dsa_gfx_select_gpu(uint32_t rule, const uint8_t* luid, const char* name) {
+    if (s_initialized.load(std::memory_order_acquire)) {
+        return -1;
+    }
+    using Rule = gfxstream::vk::GpuPreference::Rule;
+    gfxstream::vk::GpuPreference preference;
+    switch (rule) {
+        case DSA_GFX_GPU_RANKING:
+            preference.rule = Rule::None;
+            break;
+        case DSA_GFX_GPU_LUID:
+            if (!luid) {
+                return -1;
+            }
+            preference.rule = Rule::Luid;
+            std::memcpy(preference.luid, luid, sizeof(preference.luid));
+            break;
+        case DSA_GFX_GPU_INTEGRATED:
+            preference.rule = Rule::Integrated;
+            break;
+        case DSA_GFX_GPU_DISCRETE:
+            preference.rule = Rule::Discrete;
+            break;
+        case DSA_GFX_GPU_NAME:
+            if (!name || !*name) {
+                return -1;
+            }
+            preference.rule = Rule::Name;
+            preference.name = name;
+            break;
+        default:
+            return -1;
+    }
+    gfxstream::vk::setGpuPreference(preference);
+    return 0;
+}
+
+extern "C" DSA_GFX_EXPORT int dsa_gfx_get_gpu_info(dsa_gfx_gpu_info* info) {
+    if (!info || !s_initialized.load(std::memory_order_acquire)) {
+        return -1;
+    }
+    gfxstream::FrameBuffer* fb = gfxstream::FrameBuffer::getFB();
+    if (!fb || !fb->hasEmulationVk()) {
+        return -1;
+    }
+    gfxstream::vk::VkEmulation& emu = fb->getEmulationVk();
+    gfxstream::vk::VulkanDispatch* ivk = emu.getInstanceDispatch();
+    VkPhysicalDevice device = emu.getPhysicalDevice();
+
+    std::memset(info, 0, sizeof(*info));
+    VkPhysicalDeviceProperties properties = {};
+    ivk->vkGetPhysicalDeviceProperties(device, &properties);
+    std::strncpy(info->name, properties.deviceName, sizeof(info->name) - 1);
+    info->device_type = static_cast<uint32_t>(properties.deviceType);
+
+    auto get_properties2 = ivk->vkGetPhysicalDeviceProperties2
+                               ? ivk->vkGetPhysicalDeviceProperties2
+                               : ivk->vkGetPhysicalDeviceProperties2KHR;
+    if (get_properties2) {
+        VkPhysicalDeviceIDProperties id_properties = {};
+        id_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+        VkPhysicalDeviceProperties2 properties2 = {};
+        properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        properties2.pNext = &id_properties;
+        get_properties2(device, &properties2);
+        if (id_properties.deviceLUIDValid) {
+            std::memcpy(info->luid, id_properties.deviceLUID, sizeof(info->luid));
+            info->luid_valid = 1;
+        }
+    }
+    info->preference_matched = gfxstream::vk::gpuPreferenceMatched();
+    return 0;
 }
 
 extern "C" DSA_GFX_EXPORT void dsa_gfx_teardown(void) {

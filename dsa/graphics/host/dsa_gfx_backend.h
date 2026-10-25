@@ -33,6 +33,34 @@ typedef void (*dsa_post_callback_fn)(void* context,
 
 typedef void (*dsa_color_buffer_post_fn)(void* context, uint32_t color_buffer_id);
 
+/* Which GPU the renderer runs on.
+ *
+ * The embedder may ask for a GPU before dsa_gfx_init. Only a GPU with a graphics queue can
+ * match. When none matches, or nothing is asked, gfxstream ranks the GPUs itself: a discrete
+ * GPU first, then an integrated one, then the highest Vulkan version. */
+#define DSA_GFX_GPU_RANKING 0    /* gfxstream's own ranking */
+#define DSA_GFX_GPU_LUID 1       /* the GPU whose VkPhysicalDeviceIDProperties::deviceLUID is `luid` */
+#define DSA_GFX_GPU_INTEGRATED 2 /* the first integrated GPU */
+#define DSA_GFX_GPU_DISCRETE 3   /* the first discrete GPU */
+#define DSA_GFX_GPU_NAME 4       /* the first GPU whose name contains `name`, ignoring case */
+
+/* Asks for the GPU `rule` describes. `luid` (8 bytes, as a Windows LUID) is read only for
+ * DSA_GFX_GPU_LUID and `name` (UTF-8) only for DSA_GFX_GPU_NAME. Returns 0 on success, -1
+ * when the rule is unknown, its argument is missing, or the renderer is already running. */
+DSA_GFX_EXPORT int dsa_gfx_select_gpu(uint32_t rule, const uint8_t* luid, const char* name);
+
+/* The GPU the renderer runs on, and whether it is the one asked for. */
+typedef struct dsa_gfx_gpu_info {
+    char name[256];          /* VkPhysicalDeviceProperties::deviceName, UTF-8 */
+    uint32_t device_type;    /* VkPhysicalDeviceType */
+    uint8_t luid[8];         /* valid when luid_valid is 1 */
+    int32_t luid_valid;
+    int32_t preference_matched; /* 1: the GPU asked for; 0: none matched, so ranked; -1: none asked */
+} dsa_gfx_gpu_info;
+
+/* Fills `info`. Returns 0 on success, -1 when the renderer is not initialised. */
+DSA_GFX_EXPORT int dsa_gfx_get_gpu_info(dsa_gfx_gpu_info* info);
+
 /* Initializes the host gfxstream renderer (Vulkan only, surfaceless). */
 DSA_GFX_EXPORT int dsa_gfx_init(uint32_t width, uint32_t height);
 

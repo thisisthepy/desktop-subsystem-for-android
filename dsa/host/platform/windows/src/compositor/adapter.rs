@@ -8,14 +8,19 @@
 //! It also hands each display's frames to a [`DisplaySink`]: the renderer asks the sink for
 //! a Direct3D 11 texture to copy a display's newest frame into, copies it on the GPU, and
 //! tells the sink when it is there.
+//!
+//! Before the renderer starts, the adapter asks it for the GPU to run on (see
+//! [`crate::render_gpu`]), and afterwards reports which GPU it runs on.
 
-use std::ffi::{c_int, c_void, CStr};
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dsa_host_core::compositor::{GraphicsRenderer, GraphicsStreamKind};
 use dsa_transport::{Connection, FrameSender};
+
+use crate::render_gpu::{GpuRequest, Luid, RendererGpu};
 use windows_sys::Win32::Foundation::HMODULE;
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 
@@ -34,6 +39,25 @@ pub type StreamReadFn =
 /// Function pointer type for writing to a stream callback.
 pub type StreamWriteFn =
     unsafe extern "C" fn(user_data: *mut c_void, buf: *const c_void, count: usize) -> c_int;
+
+/// What the renderer reports about its GPU, as `dsa_gfx_gpu_info` lays it out.
+#[repr(C)]
+struct GpuInfo {
+    name: [u8; 256],
+    device_type: u32,
+    luid: [u8; 8],
+    luid_valid: i32,
+    preference_matched: i32,
+}
+
+/// The backend's rules for choosing a GPU (`DSA_GFX_GPU_*`).
+const GPU_LUID: u32 = 1;
+const GPU_INTEGRATED: u32 = 2;
+const GPU_DISCRETE: u32 = 3;
+const GPU_NAME: u32 = 4;
+
+type SelectGpuFn = unsafe extern "C" fn(u32, *const u8, *const c_char) -> c_int;
+type GetGpuInfoFn = unsafe extern "C" fn(*mut GpuInfo) -> c_int;
 
 /// Function pointer type for framebuffer post notifications.
 pub type PostCallbackFn = unsafe extern "C" fn(
@@ -169,6 +193,11 @@ pub trait GfxBackend: Send + Sync {
     fn adapter_luid(&self) -> Option<[u8; 8]> {
         None
     }
+
+    /// The GPU the renderer runs on, and whether it is the one asked for.
+    fn gpu(&self) -> Option<RendererGpu> {
+        None
+    }
 }
 
 /// Native backend loaded from `gfxstream_backend.dll`.
@@ -187,6 +216,8 @@ pub struct NativeBackend {
         unsafe extern "C" fn(Option<DisplayTargetFn>, Option<DisplayFrameFn>, *mut c_void) -> c_int,
     >,
     fn_get_adapter_luid: Option<unsafe extern "C" fn(*mut u8) -> c_int>,
+    /// Absent from a backend built before the render GPU could be chosen.
+    fn_get_gpu_info: Option<GetGpuInfoFn>,
 }
 
 // SAFETY: HMODULE is owned and accessed across threads safely through the loaded function pointers.
@@ -194,8 +225,18 @@ unsafe impl Send for NativeBackend {}
 unsafe impl Sync for NativeBackend {}
 
 impl NativeBackend {
-    /// Attempts to load the native backend from the specified DLL path.
+    /// Attempts to load the native backend from the specified DLL path, letting the
+    /// renderer rank the GPUs itself.
     pub fn load(path: &Path) -> Result<NativeBackend, String> {
+        Self::load_on(path, &GpuRequest::Ranking).map(|(backend, _)| backend)
+    }
+
+    /// Loads the native backend from `path` and starts the renderer on the GPU `request`
+    /// asks for. Also returns why the request could not be passed on, when it could not.
+    pub fn load_on(
+        path: &Path,
+        request: &GpuRequest,
+    ) -> Result<(NativeBackend, Option<String>), String> {
         let wide_path = wide(&path.to_string_lossy());
         // SAFETY: LoadLibraryW with null-terminated UTF-16 path.
         let handle = unsafe { LoadLibraryW(wide_path.as_ptr()) };
@@ -218,6 +259,12 @@ impl NativeBackend {
             let fn_set_display_callbacks =
                 Self::get_symbol(handle, b"dsa_gfx_set_display_callbacks\0").ok();
             let fn_get_adapter_luid = Self::get_symbol(handle, b"dsa_gfx_get_adapter_luid\0").ok();
+            let fn_select_gpu: Option<SelectGpuFn> =
+                Self::get_symbol(handle, b"dsa_gfx_select_gpu\0").ok();
+            let fn_get_gpu_info: Option<GetGpuInfoFn> =
+                Self::get_symbol(handle, b"dsa_gfx_get_gpu_info\0").ok();
+
+            let note = select_gpu(fn_select_gpu, request);
 
             let ret = (fn_init)(1280, 720);
             if ret != 0 {
@@ -225,17 +272,21 @@ impl NativeBackend {
                 return Err(format!("dsa_gfx_init failed with code {ret}"));
             }
 
-            Ok(NativeBackend {
-                handle,
-                fn_init,
-                fn_teardown,
-                fn_serve_stream,
-                fn_process_pipe,
-                fn_on_process_create,
-                fn_on_process_destroy,
-                fn_set_display_callbacks,
-                fn_get_adapter_luid,
-            })
+            Ok((
+                NativeBackend {
+                    handle,
+                    fn_init,
+                    fn_teardown,
+                    fn_serve_stream,
+                    fn_process_pipe,
+                    fn_on_process_create,
+                    fn_on_process_destroy,
+                    fn_set_display_callbacks,
+                    fn_get_adapter_luid,
+                    fn_get_gpu_info,
+                },
+                note,
+            ))
         }
     }
 
@@ -246,6 +297,43 @@ impl NativeBackend {
             return Err(format!("missing exported symbol {name}"));
         }
         Ok(std::mem::transmute_copy(&proc))
+    }
+}
+
+/// Passes `request` to the backend before it starts. Returns why it could not, if it could
+/// not; the renderer then ranks the GPUs itself.
+///
+/// # Safety
+/// `select` must be the backend's `dsa_gfx_select_gpu`, called before `dsa_gfx_init`.
+unsafe fn select_gpu(select: Option<SelectGpuFn>, request: &GpuRequest) -> Option<String> {
+    let (no_luid, no_name) = (std::ptr::null(), std::ptr::null());
+    let name;
+    let (rule, luid, name_ptr) = match request {
+        GpuRequest::Ranking => return None,
+        GpuRequest::Luid(Luid(bytes)) => (GPU_LUID, bytes.as_ptr(), no_name),
+        GpuRequest::Integrated => (GPU_INTEGRATED, no_luid, no_name),
+        GpuRequest::Discrete => (GPU_DISCRETE, no_luid, no_name),
+        GpuRequest::Named(text) => match CString::new(text.as_str()) {
+            Ok(text) => {
+                name = text;
+                (GPU_NAME, no_luid, name.as_ptr())
+            }
+            Err(_) => return Some(format!("the GPU name {text:?} holds a NUL character")),
+        },
+    };
+    let Some(select) = select else {
+        return Some(
+            "this graphics backend cannot be asked for a GPU (no dsa_gfx_select_gpu); the \
+             renderer ranks the GPUs itself"
+                .into(),
+        );
+    };
+    match select(rule, luid, name_ptr) {
+        0 => None,
+        code => Some(format!(
+            "the graphics backend refused the GPU request (dsa_gfx_select_gpu returned \
+             {code}); the renderer ranks the GPUs itself"
+        )),
     }
 }
 
@@ -325,6 +413,39 @@ impl GfxBackend for NativeBackend {
         let mut luid = [0u8; 8];
         // SAFETY: the backend writes at most 8 bytes into `luid`.
         (unsafe { get_adapter_luid(luid.as_mut_ptr()) } == 0).then_some(luid)
+    }
+
+    fn gpu(&self) -> Option<RendererGpu> {
+        let get_gpu_info = self.fn_get_gpu_info?;
+        let mut info = GpuInfo {
+            name: [0; 256],
+            device_type: 0,
+            luid: [0; 8],
+            luid_valid: 0,
+            preference_matched: -1,
+        };
+        // SAFETY: `info` has the layout the backend fills.
+        if unsafe { get_gpu_info(&mut info) } != 0 {
+            return None;
+        }
+        Some(renderer_gpu(&info))
+    }
+}
+
+fn renderer_gpu(info: &GpuInfo) -> RendererGpu {
+    let len = info
+        .name
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(info.name.len());
+    RendererGpu {
+        name: String::from_utf8_lossy(&info.name[..len]).into_owned(),
+        luid: (info.luid_valid == 1).then_some(Luid(info.luid)),
+        matched: match info.preference_matched {
+            1 => Some(true),
+            0 => Some(false),
+            _ => None,
+        },
     }
 }
 
@@ -426,22 +547,35 @@ pub struct GfxstreamAdapter {
     backend: Option<Arc<dyn GfxBackend>>,
     /// The sink the backend presents to, boxed so its address stays put while registered.
     sink: Mutex<Option<SinkBox>>,
+    /// Why the backend could not be loaded, or the GPU request not passed on.
+    notes: Vec<String>,
 }
 
 impl GfxstreamAdapter {
     /// Creates a new adapter, searching for `gfxstream_backend.dll` at `custom_path`, beside
     /// the current executable, or in the current directory.
+    /// The renderer ranks the GPUs itself.
     pub fn new(custom_path: Option<PathBuf>) -> GfxstreamAdapter {
+        Self::on_gpu(custom_path, &GpuRequest::Ranking)
+    }
+
+    /// Like [`new`](Self::new), starting the renderer on the GPU `request` asks for.
+    pub fn on_gpu(custom_path: Option<PathBuf>, request: &GpuRequest) -> GfxstreamAdapter {
         let dll_path = custom_path.or_else(Self::find_backend_dll);
+        let mut notes = Vec::new();
         let backend = if let Some(path) = &dll_path {
-            match NativeBackend::load(path) {
-                Ok(b) => Some(Arc::new(b) as Arc<dyn GfxBackend>),
+            match NativeBackend::load_on(path, request) {
+                Ok((b, note)) => {
+                    notes.extend(note);
+                    Some(Arc::new(b) as Arc<dyn GfxBackend>)
+                }
                 Err(err) => {
-                    eprintln!("failed to load gfxstream backend library: {err}");
+                    notes.push(format!("failed to load gfxstream backend library: {err}"));
                     None
                 }
             }
         } else {
+            notes.push(format!("{GFXSTREAM_BACKEND_DLL} was not found"));
             None
         };
 
@@ -449,6 +583,7 @@ impl GfxstreamAdapter {
             dll_path,
             backend,
             sink: Mutex::new(None),
+            notes,
         }
     }
 
@@ -458,7 +593,18 @@ impl GfxstreamAdapter {
             dll_path: None,
             backend: Some(backend),
             sink: Mutex::new(None),
+            notes: Vec::new(),
         }
+    }
+
+    /// Why the backend could not be loaded, or the GPU request not passed on, for the log.
+    pub fn notes(&self) -> &[String] {
+        &self.notes
+    }
+
+    /// The GPU the renderer runs on, and whether it is the one asked for.
+    pub fn renderer_gpu(&self) -> Option<RendererGpu> {
+        self.backend.as_ref().and_then(|backend| backend.gpu())
     }
 
     /// Returns the resolved path to `gfxstream_backend.dll` if found.
@@ -860,5 +1006,77 @@ mod tests {
 
         client_thread.join().expect("client thread join");
         assert_eq!(fake.serve_stream_calls.load(Ordering::Relaxed), 1);
+    }
+
+    /// What the fake `dsa_gfx_select_gpu` was last called with.
+    type Selected = (u32, Option<[u8; 8]>, Option<String>);
+    static SELECTED: Mutex<Option<Selected>> = Mutex::new(None);
+
+    unsafe extern "C" fn fake_select_gpu(rule: u32, luid: *const u8, name: *const c_char) -> c_int {
+        let luid = (!luid.is_null()).then(|| {
+            let mut bytes = [0u8; 8];
+            std::ptr::copy_nonoverlapping(luid, bytes.as_mut_ptr(), 8);
+            bytes
+        });
+        let name = (!name.is_null()).then(|| CStr::from_ptr(name).to_string_lossy().into_owned());
+        *SELECTED.lock().unwrap() = Some((rule, luid, name));
+        0
+    }
+
+    #[test]
+    fn pr3_the_render_gpu_request_reaches_the_backend() {
+        let luid = Luid([1, 2, 3, 4, 5, 6, 7, 8]);
+        let cases = [
+            (GpuRequest::Luid(luid), (GPU_LUID, Some(luid.0), None)),
+            (GpuRequest::Integrated, (GPU_INTEGRATED, None, None)),
+            (GpuRequest::Discrete, (GPU_DISCRETE, None, None)),
+            (
+                GpuRequest::Named("RTX".into()),
+                (GPU_NAME, None, Some("RTX".to_string())),
+            ),
+        ];
+        for (request, expected) in cases {
+            *SELECTED.lock().unwrap() = None;
+            assert_eq!(unsafe { select_gpu(Some(fake_select_gpu), &request) }, None);
+            assert_eq!(SELECTED.lock().unwrap().clone(), Some(expected));
+        }
+
+        // Nothing asked: the backend is not called.
+        *SELECTED.lock().unwrap() = None;
+        assert_eq!(
+            unsafe { select_gpu(Some(fake_select_gpu), &GpuRequest::Ranking) },
+            None
+        );
+        assert_eq!(*SELECTED.lock().unwrap(), None);
+
+        // A backend that cannot be asked says so, for the log.
+        let note = unsafe { select_gpu(None, &GpuRequest::Discrete) }.unwrap();
+        assert!(note.contains("ranks the GPUs itself"));
+    }
+
+    #[test]
+    fn pr3_the_renderer_reports_its_gpu_and_whether_it_was_asked_for() {
+        let mut info = GpuInfo {
+            name: [0; 256],
+            device_type: 1,
+            luid: [0x8a, 0x4e, 0x01, 0, 0, 0, 0, 0],
+            luid_valid: 1,
+            preference_matched: 1,
+        };
+        let name = b"Intel(R) Arc(TM) Graphics";
+        info.name[..name.len()].copy_from_slice(name);
+        let gpu = renderer_gpu(&info);
+        assert_eq!(gpu.name, "Intel(R) Arc(TM) Graphics");
+        assert_eq!(gpu.luid, Some(Luid::from_parts(0x0001_4e8a, 0)));
+        assert_eq!(gpu.matched, Some(true));
+
+        info.luid_valid = 0;
+        info.preference_matched = 0;
+        let gpu = renderer_gpu(&info);
+        assert_eq!(gpu.luid, None);
+        assert_eq!(gpu.matched, Some(false));
+
+        info.preference_matched = -1;
+        assert_eq!(renderer_gpu(&info).matched, None);
     }
 }

@@ -51,8 +51,8 @@ git -C "$mesa_dir" checkout --detach "$mesa_revision"
 git -C "$mesa_dir" reset --hard "$mesa_revision"
 git -C "$mesa_dir" clean -fdx
 
-# 0007 lets the driver run without a virtio-gpu device; it follows 0003 in the same files.
-mesa_patches=("$patch_dir"/0002-*.patch "$patch_dir"/0003-*.patch "$patch_dir"/0007-*.patch)
+# 0008 lets the driver run without a virtio-gpu device; it follows 0003 in the same files.
+mesa_patches=("$patch_dir"/0002-*.patch "$patch_dir"/0003-*.patch "$patch_dir"/0008-*.patch)
 if ((${#mesa_patches[@]})); then
     git -C "$mesa_dir" apply --recount --check "${mesa_patches[@]}"
     git -C "$mesa_dir" apply --recount "${mesa_patches[@]}"

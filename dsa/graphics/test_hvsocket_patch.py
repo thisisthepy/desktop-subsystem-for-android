@@ -9,7 +9,7 @@ PATCH_0002 = Path(__file__).resolve().parent / "patches" / "0002-add-hyper-v-vul
 PATCH_0003 = Path(__file__).resolve().parent / "patches" / "0003-copy-host-visible-memory-without-shared-memory.patch"
 PATCH_0005 = Path(__file__).resolve().parent / "patches" / "0005-give-each-task-window-a-display-and-share-color-buffers.patch"
 PATCH_0006 = Path(__file__).resolve().parent / "patches" / "0006-reject-vulkan-handles-the-host-does-not-know.patch"
-PATCH_0007 = Path(__file__).resolve().parent / "patches" / "0007-work-without-a-virtio-gpu-device.patch"
+PATCH_0008 = Path(__file__).resolve().parent / "patches" / "0008-work-without-a-virtio-gpu-device.patch"
 HWC_HOST_RENDERER = Path(__file__).resolve().parents[1] / "guest" / "hwcomposer" / "src" / "host_renderer.cpp"
 HOST_FETCH = Path(__file__).resolve().parent / "host" / "fetch.ps1"
 SHARED_HANDLE = Path(__file__).resolve().parent / "include" / "dsa_shared_color_buffer.h"
@@ -91,16 +91,16 @@ class HvSocketPatchTests(unittest.TestCase):
         patch_0002 = PATCH_0002.read_text()
         self.assertIn("if (mDevice && mDevice->getDeviceHandle() < 0)", patch_0002)
         self.assertIn("return static_cast<size_t>(cros_handle->total_size);", patch_0002)
-        patch_0007 = PATCH_0007.read_text()
-        self.assertIn('strcmp(version->name, "virtio_gpu") == 0', patch_0007)
-        self.assertIn("mDeviceHandle = -1;", patch_0007)
-        self.assertIn('"$patch_dir"/0007-*.patch', FETCH.read_text())
+        patch_0008 = PATCH_0008.read_text()
+        self.assertIn('strcmp(version->name, "virtio_gpu") == 0', patch_0008)
+        self.assertIn("mDeviceHandle = -1;", patch_0008)
+        self.assertIn('"$patch_dir"/0008-*.patch', FETCH.read_text())
 
     def test_fr3_frames_are_released_without_virtio_gpu_fences(self):
         # Without virtio-gpu a native-sync fence goes out as an execbuffer the render node
         # rejects, and vkQueueSignalReleaseImageANDROID failed on every frame ("halting
         # rendering"). The release now waits on the host instead.
-        patch = PATCH_0007.read_text()
+        patch = PATCH_0008.read_text()
         self.assertIn("mFeatureInfo.hasVirtioGpuNativeSync = false;", patch)
         self.assertIn("mFeatureInfo.hasVulkanAsyncQsri = false;", patch)
         self.assertIn("mFeatureInfo.hasVirtioGpuNext = false;", patch)

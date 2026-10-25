@@ -9,6 +9,7 @@
 //! [`present`]). When the user closes a window, the guest is asked to end its task.
 
 pub mod adapter;
+pub mod display_gpu;
 pub mod frames;
 pub mod log;
 pub mod present;
