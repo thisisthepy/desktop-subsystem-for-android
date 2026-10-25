@@ -32,6 +32,8 @@ metadata its virtual SCSI uevents omit.
   dm-crypt, quotas, and the eBPF and netfilter pieces netd uses.
 - **Everything built in.** The VM boots one image with no modules, so options
   `config-wsl` builds as modules, and their dependencies, are set to `y`.
+- **Bootconfig**, which carries each boot's control channel secret from the host. The
+  guest reads it from `/proc/bootconfig`, which apps cannot read.
 - **Its own release name** (`-dsa`), so it is never mistaken for the WSL kernel.
 
 ashmem is not enabled and does not exist in this kernel; Android uses memfd.

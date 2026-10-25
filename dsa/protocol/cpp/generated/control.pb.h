@@ -45,6 +45,12 @@ struct TableStruct_control_2eproto {
 namespace dsa {
 namespace control {
 namespace v1 {
+class AuthChallenge;
+struct AuthChallengeDefaultTypeInternal;
+extern AuthChallengeDefaultTypeInternal _AuthChallenge_default_instance_;
+class AuthProof;
+struct AuthProofDefaultTypeInternal;
+extern AuthProofDefaultTypeInternal _AuthProof_default_instance_;
 class Envelope;
 struct EnvelopeDefaultTypeInternal;
 extern EnvelopeDefaultTypeInternal _Envelope_default_instance_;
@@ -61,6 +67,8 @@ extern HelloRejectedDefaultTypeInternal _HelloRejected_default_instance_;
 }  // namespace control
 }  // namespace dsa
 PROTOBUF_NAMESPACE_OPEN
+template<> ::dsa::control::v1::AuthChallenge* Arena::CreateMaybeMessage<::dsa::control::v1::AuthChallenge>(Arena*);
+template<> ::dsa::control::v1::AuthProof* Arena::CreateMaybeMessage<::dsa::control::v1::AuthProof>(Arena*);
 template<> ::dsa::control::v1::Envelope* Arena::CreateMaybeMessage<::dsa::control::v1::Envelope>(Arena*);
 template<> ::dsa::control::v1::Hello* Arena::CreateMaybeMessage<::dsa::control::v1::Hello>(Arena*);
 template<> ::dsa::control::v1::HelloAccepted* Arena::CreateMaybeMessage<::dsa::control::v1::HelloAccepted>(Arena*);
@@ -119,12 +127,13 @@ enum RejectReason : int {
   REJECT_REASON_SCHEMA_HASH_MISMATCH = 2,
   REJECT_REASON_UNEXPECTED_ROLE = 3,
   REJECT_REASON_MALFORMED_HELLO = 4,
+  REJECT_REASON_AUTHENTICATION_FAILED = 5,
   RejectReason_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
   RejectReason_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
 };
 bool RejectReason_IsValid(int value);
 constexpr RejectReason RejectReason_MIN = REJECT_REASON_UNSPECIFIED;
-constexpr RejectReason RejectReason_MAX = REJECT_REASON_MALFORMED_HELLO;
+constexpr RejectReason RejectReason_MAX = REJECT_REASON_AUTHENTICATION_FAILED;
 constexpr int RejectReason_ARRAYSIZE = RejectReason_MAX + 1;
 
 const std::string& RejectReason_Name(RejectReason value);
@@ -617,6 +626,276 @@ class HelloRejected final :
 };
 // -------------------------------------------------------------------
 
+class AuthChallenge final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AuthChallenge) */ {
+ public:
+  inline AuthChallenge() : AuthChallenge(nullptr) {}
+  ~AuthChallenge() override;
+  explicit PROTOBUF_CONSTEXPR AuthChallenge(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  AuthChallenge(const AuthChallenge& from);
+  AuthChallenge(AuthChallenge&& from) noexcept
+    : AuthChallenge() {
+    *this = ::std::move(from);
+  }
+
+  inline AuthChallenge& operator=(const AuthChallenge& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline AuthChallenge& operator=(AuthChallenge&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const AuthChallenge& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const AuthChallenge* internal_default_instance() {
+    return reinterpret_cast<const AuthChallenge*>(
+               &_AuthChallenge_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    3;
+
+  friend void swap(AuthChallenge& a, AuthChallenge& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(AuthChallenge* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(AuthChallenge* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  AuthChallenge* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<AuthChallenge>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const AuthChallenge& from);
+  void MergeFrom(const AuthChallenge& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(AuthChallenge* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.AuthChallenge";
+  }
+  protected:
+  explicit AuthChallenge(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kNonceFieldNumber = 1,
+  };
+  // bytes nonce = 1;
+  void clear_nonce();
+  const std::string& nonce() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_nonce(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_nonce();
+  PROTOBUF_NODISCARD std::string* release_nonce();
+  void set_allocated_nonce(std::string* nonce);
+  private:
+  const std::string& _internal_nonce() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_nonce(const std::string& value);
+  std::string* _internal_mutable_nonce();
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.AuthChallenge)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr nonce_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class AuthProof final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AuthProof) */ {
+ public:
+  inline AuthProof() : AuthProof(nullptr) {}
+  ~AuthProof() override;
+  explicit PROTOBUF_CONSTEXPR AuthProof(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  AuthProof(const AuthProof& from);
+  AuthProof(AuthProof&& from) noexcept
+    : AuthProof() {
+    *this = ::std::move(from);
+  }
+
+  inline AuthProof& operator=(const AuthProof& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline AuthProof& operator=(AuthProof&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const AuthProof& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const AuthProof* internal_default_instance() {
+    return reinterpret_cast<const AuthProof*>(
+               &_AuthProof_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    4;
+
+  friend void swap(AuthProof& a, AuthProof& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(AuthProof* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(AuthProof* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  AuthProof* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<AuthProof>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const AuthProof& from);
+  void MergeFrom(const AuthProof& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(AuthProof* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.AuthProof";
+  }
+  protected:
+  explicit AuthProof(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kMacFieldNumber = 1,
+  };
+  // bytes mac = 1;
+  void clear_mac();
+  const std::string& mac() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_mac(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_mac();
+  PROTOBUF_NODISCARD std::string* release_mac();
+  void set_allocated_mac(std::string* mac);
+  private:
+  const std::string& _internal_mac() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_mac(const std::string& value);
+  std::string* _internal_mutable_mac();
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.AuthProof)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr mac_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class Envelope final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.Envelope) */ {
  public:
@@ -655,6 +934,8 @@ class Envelope final :
     kHello = 1,
     kHelloAccepted = 2,
     kHelloRejected = 3,
+    kAuthChallenge = 4,
+    kAuthProof = 5,
     BODY_NOT_SET = 0,
   };
 
@@ -663,7 +944,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    3;
+    5;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -730,6 +1011,8 @@ class Envelope final :
     kHelloFieldNumber = 1,
     kHelloAcceptedFieldNumber = 2,
     kHelloRejectedFieldNumber = 3,
+    kAuthChallengeFieldNumber = 4,
+    kAuthProofFieldNumber = 5,
   };
   // .dsa.control.v1.Hello hello = 1;
   bool has_hello() const;
@@ -785,6 +1068,42 @@ class Envelope final :
       ::dsa::control::v1::HelloRejected* hello_rejected);
   ::dsa::control::v1::HelloRejected* unsafe_arena_release_hello_rejected();
 
+  // .dsa.control.v1.AuthChallenge auth_challenge = 4;
+  bool has_auth_challenge() const;
+  private:
+  bool _internal_has_auth_challenge() const;
+  public:
+  void clear_auth_challenge();
+  const ::dsa::control::v1::AuthChallenge& auth_challenge() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::AuthChallenge* release_auth_challenge();
+  ::dsa::control::v1::AuthChallenge* mutable_auth_challenge();
+  void set_allocated_auth_challenge(::dsa::control::v1::AuthChallenge* auth_challenge);
+  private:
+  const ::dsa::control::v1::AuthChallenge& _internal_auth_challenge() const;
+  ::dsa::control::v1::AuthChallenge* _internal_mutable_auth_challenge();
+  public:
+  void unsafe_arena_set_allocated_auth_challenge(
+      ::dsa::control::v1::AuthChallenge* auth_challenge);
+  ::dsa::control::v1::AuthChallenge* unsafe_arena_release_auth_challenge();
+
+  // .dsa.control.v1.AuthProof auth_proof = 5;
+  bool has_auth_proof() const;
+  private:
+  bool _internal_has_auth_proof() const;
+  public:
+  void clear_auth_proof();
+  const ::dsa::control::v1::AuthProof& auth_proof() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::AuthProof* release_auth_proof();
+  ::dsa::control::v1::AuthProof* mutable_auth_proof();
+  void set_allocated_auth_proof(::dsa::control::v1::AuthProof* auth_proof);
+  private:
+  const ::dsa::control::v1::AuthProof& _internal_auth_proof() const;
+  ::dsa::control::v1::AuthProof* _internal_mutable_auth_proof();
+  public:
+  void unsafe_arena_set_allocated_auth_proof(
+      ::dsa::control::v1::AuthProof* auth_proof);
+  ::dsa::control::v1::AuthProof* unsafe_arena_release_auth_proof();
+
   void clear_body();
   BodyCase body_case() const;
   // @@protoc_insertion_point(class_scope:dsa.control.v1.Envelope)
@@ -793,6 +1112,8 @@ class Envelope final :
   void set_has_hello();
   void set_has_hello_accepted();
   void set_has_hello_rejected();
+  void set_has_auth_challenge();
+  void set_has_auth_proof();
 
   inline bool has_body() const;
   inline void clear_has_body();
@@ -807,6 +1128,8 @@ class Envelope final :
       ::dsa::control::v1::Hello* hello_;
       ::dsa::control::v1::HelloAccepted* hello_accepted_;
       ::dsa::control::v1::HelloRejected* hello_rejected_;
+      ::dsa::control::v1::AuthChallenge* auth_challenge_;
+      ::dsa::control::v1::AuthProof* auth_proof_;
     } body_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -1226,6 +1549,114 @@ inline void HelloRejected::set_allocated_host(::dsa::control::v1::Hello* host) {
 
 // -------------------------------------------------------------------
 
+// AuthChallenge
+
+// bytes nonce = 1;
+inline void AuthChallenge::clear_nonce() {
+  _impl_.nonce_.ClearToEmpty();
+}
+inline const std::string& AuthChallenge::nonce() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AuthChallenge.nonce)
+  return _internal_nonce();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void AuthChallenge::set_nonce(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.nonce_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AuthChallenge.nonce)
+}
+inline std::string* AuthChallenge::mutable_nonce() {
+  std::string* _s = _internal_mutable_nonce();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AuthChallenge.nonce)
+  return _s;
+}
+inline const std::string& AuthChallenge::_internal_nonce() const {
+  return _impl_.nonce_.Get();
+}
+inline void AuthChallenge::_internal_set_nonce(const std::string& value) {
+  
+  _impl_.nonce_.Set(value, GetArenaForAllocation());
+}
+inline std::string* AuthChallenge::_internal_mutable_nonce() {
+  
+  return _impl_.nonce_.Mutable(GetArenaForAllocation());
+}
+inline std::string* AuthChallenge::release_nonce() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AuthChallenge.nonce)
+  return _impl_.nonce_.Release();
+}
+inline void AuthChallenge::set_allocated_nonce(std::string* nonce) {
+  if (nonce != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.nonce_.SetAllocated(nonce, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.nonce_.IsDefault()) {
+    _impl_.nonce_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AuthChallenge.nonce)
+}
+
+// -------------------------------------------------------------------
+
+// AuthProof
+
+// bytes mac = 1;
+inline void AuthProof::clear_mac() {
+  _impl_.mac_.ClearToEmpty();
+}
+inline const std::string& AuthProof::mac() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AuthProof.mac)
+  return _internal_mac();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void AuthProof::set_mac(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.mac_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AuthProof.mac)
+}
+inline std::string* AuthProof::mutable_mac() {
+  std::string* _s = _internal_mutable_mac();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AuthProof.mac)
+  return _s;
+}
+inline const std::string& AuthProof::_internal_mac() const {
+  return _impl_.mac_.Get();
+}
+inline void AuthProof::_internal_set_mac(const std::string& value) {
+  
+  _impl_.mac_.Set(value, GetArenaForAllocation());
+}
+inline std::string* AuthProof::_internal_mutable_mac() {
+  
+  return _impl_.mac_.Mutable(GetArenaForAllocation());
+}
+inline std::string* AuthProof::release_mac() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AuthProof.mac)
+  return _impl_.mac_.Release();
+}
+inline void AuthProof::set_allocated_mac(std::string* mac) {
+  if (mac != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.mac_.SetAllocated(mac, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.mac_.IsDefault()) {
+    _impl_.mac_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AuthProof.mac)
+}
+
+// -------------------------------------------------------------------
+
 // Envelope
 
 // .dsa.control.v1.Hello hello = 1;
@@ -1450,6 +1881,154 @@ inline ::dsa::control::v1::HelloRejected* Envelope::mutable_hello_rejected() {
   return _msg;
 }
 
+// .dsa.control.v1.AuthChallenge auth_challenge = 4;
+inline bool Envelope::_internal_has_auth_challenge() const {
+  return body_case() == kAuthChallenge;
+}
+inline bool Envelope::has_auth_challenge() const {
+  return _internal_has_auth_challenge();
+}
+inline void Envelope::set_has_auth_challenge() {
+  _impl_._oneof_case_[0] = kAuthChallenge;
+}
+inline void Envelope::clear_auth_challenge() {
+  if (_internal_has_auth_challenge()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.auth_challenge_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::AuthChallenge* Envelope::release_auth_challenge() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.auth_challenge)
+  if (_internal_has_auth_challenge()) {
+    clear_has_body();
+    ::dsa::control::v1::AuthChallenge* temp = _impl_.body_.auth_challenge_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.auth_challenge_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::AuthChallenge& Envelope::_internal_auth_challenge() const {
+  return _internal_has_auth_challenge()
+      ? *_impl_.body_.auth_challenge_
+      : reinterpret_cast< ::dsa::control::v1::AuthChallenge&>(::dsa::control::v1::_AuthChallenge_default_instance_);
+}
+inline const ::dsa::control::v1::AuthChallenge& Envelope::auth_challenge() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.auth_challenge)
+  return _internal_auth_challenge();
+}
+inline ::dsa::control::v1::AuthChallenge* Envelope::unsafe_arena_release_auth_challenge() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.auth_challenge)
+  if (_internal_has_auth_challenge()) {
+    clear_has_body();
+    ::dsa::control::v1::AuthChallenge* temp = _impl_.body_.auth_challenge_;
+    _impl_.body_.auth_challenge_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_auth_challenge(::dsa::control::v1::AuthChallenge* auth_challenge) {
+  clear_body();
+  if (auth_challenge) {
+    set_has_auth_challenge();
+    _impl_.body_.auth_challenge_ = auth_challenge;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.auth_challenge)
+}
+inline ::dsa::control::v1::AuthChallenge* Envelope::_internal_mutable_auth_challenge() {
+  if (!_internal_has_auth_challenge()) {
+    clear_body();
+    set_has_auth_challenge();
+    _impl_.body_.auth_challenge_ = CreateMaybeMessage< ::dsa::control::v1::AuthChallenge >(GetArenaForAllocation());
+  }
+  return _impl_.body_.auth_challenge_;
+}
+inline ::dsa::control::v1::AuthChallenge* Envelope::mutable_auth_challenge() {
+  ::dsa::control::v1::AuthChallenge* _msg = _internal_mutable_auth_challenge();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.auth_challenge)
+  return _msg;
+}
+
+// .dsa.control.v1.AuthProof auth_proof = 5;
+inline bool Envelope::_internal_has_auth_proof() const {
+  return body_case() == kAuthProof;
+}
+inline bool Envelope::has_auth_proof() const {
+  return _internal_has_auth_proof();
+}
+inline void Envelope::set_has_auth_proof() {
+  _impl_._oneof_case_[0] = kAuthProof;
+}
+inline void Envelope::clear_auth_proof() {
+  if (_internal_has_auth_proof()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.auth_proof_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::AuthProof* Envelope::release_auth_proof() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.auth_proof)
+  if (_internal_has_auth_proof()) {
+    clear_has_body();
+    ::dsa::control::v1::AuthProof* temp = _impl_.body_.auth_proof_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.auth_proof_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::AuthProof& Envelope::_internal_auth_proof() const {
+  return _internal_has_auth_proof()
+      ? *_impl_.body_.auth_proof_
+      : reinterpret_cast< ::dsa::control::v1::AuthProof&>(::dsa::control::v1::_AuthProof_default_instance_);
+}
+inline const ::dsa::control::v1::AuthProof& Envelope::auth_proof() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.auth_proof)
+  return _internal_auth_proof();
+}
+inline ::dsa::control::v1::AuthProof* Envelope::unsafe_arena_release_auth_proof() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.auth_proof)
+  if (_internal_has_auth_proof()) {
+    clear_has_body();
+    ::dsa::control::v1::AuthProof* temp = _impl_.body_.auth_proof_;
+    _impl_.body_.auth_proof_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_auth_proof(::dsa::control::v1::AuthProof* auth_proof) {
+  clear_body();
+  if (auth_proof) {
+    set_has_auth_proof();
+    _impl_.body_.auth_proof_ = auth_proof;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.auth_proof)
+}
+inline ::dsa::control::v1::AuthProof* Envelope::_internal_mutable_auth_proof() {
+  if (!_internal_has_auth_proof()) {
+    clear_body();
+    set_has_auth_proof();
+    _impl_.body_.auth_proof_ = CreateMaybeMessage< ::dsa::control::v1::AuthProof >(GetArenaForAllocation());
+  }
+  return _impl_.body_.auth_proof_;
+}
+inline ::dsa::control::v1::AuthProof* Envelope::mutable_auth_proof() {
+  ::dsa::control::v1::AuthProof* _msg = _internal_mutable_auth_proof();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.auth_proof)
+  return _msg;
+}
+
 inline bool Envelope::has_body() const {
   return body_case() != BODY_NOT_SET;
 }
@@ -1462,6 +2041,10 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

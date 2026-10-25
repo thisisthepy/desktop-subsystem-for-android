@@ -19,6 +19,13 @@ import java.util.TreeMap;
 public final class VectorsTest {
     private static final List<String> failures = new ArrayList<>();
 
+    /** {@code count} bytes counting up from {@code first}. */
+    private static byte[] bytes(int first, int count) {
+        byte[] out = new byte[count];
+        for (int i = 0; i < count; i++) out[i] = (byte) (first + i);
+        return out;
+    }
+
     private static Hello guestHello() {
         byte[] hash = new byte[32];
         for (int i = 0; i < 32; i++) hash[i] = (byte) i;
@@ -57,6 +64,17 @@ public final class VectorsTest {
                         .setReason(RejectReason.REJECT_REASON_SCHEMA_HASH_MISMATCH)
                         .setDetail("스키마가 다릅니다 (schema differs)")
                         .setHost(hostHello()))
+                .build());
+        cases.put("auth_challenge", Envelope.newBuilder()
+                .setAuthChallenge(AuthChallenge.newBuilder().setNonce(ByteString.copyFrom(bytes(0x40, 32))))
+                .build());
+        cases.put("auth_proof", Envelope.newBuilder()
+                .setAuthProof(AuthProof.newBuilder().setMac(ByteString.copyFrom(bytes(0x60, 32))))
+                .build());
+        cases.put("hello_rejected_authentication", Envelope.newBuilder()
+                .setHelloRejected(HelloRejected.newBuilder()
+                        .setReason(RejectReason.REJECT_REASON_AUTHENTICATION_FAILED)
+                        .setDetail("no proof"))
                 .build());
         return cases;
     }

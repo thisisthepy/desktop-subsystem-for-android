@@ -25,6 +25,11 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertIn(".unlocked_ioctl\t= shmem_file_ioctl,", patch)
         self.assertIn("config MEMFD_ASHMEM_SHIM", patch)
 
+    def test_pr6_the_kernel_reads_the_bootconfig_that_carries_the_boot_secret(self):
+        # Without it the kernel ignores the bootconfig the host appends to the initrd, the
+        # guest's control daemon finds no secret, and the session never becomes active.
+        self.assertIn("CONFIG_BOOT_CONFIG=y", CONFIG.read_text())
+
     def test_fr1_netd_firewall_and_traffic_rules_are_built_in(self):
         # The image ships no kernel modules, and netd exits when it cannot create the
         # iptables filter and mangle tables; init then restarts zygote with it.

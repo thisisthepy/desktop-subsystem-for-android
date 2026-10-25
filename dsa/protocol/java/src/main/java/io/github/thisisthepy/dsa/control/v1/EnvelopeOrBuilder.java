@@ -40,5 +40,27 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.HelloRejected getHelloRejected();
 
+  /**
+   * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+   * @return Whether the authChallenge field is set.
+   */
+  boolean hasAuthChallenge();
+  /**
+   * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+   * @return The authChallenge.
+   */
+  io.github.thisisthepy.dsa.control.v1.AuthChallenge getAuthChallenge();
+
+  /**
+   * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+   * @return Whether the authProof field is set.
+   */
+  boolean hasAuthProof();
+  /**
+   * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+   * @return The authProof.
+   */
+  io.github.thisisthepy.dsa.control.v1.AuthProof getAuthProof();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

@@ -15,6 +15,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{Hello, RejectReason};
 use dsa_protocol::handshake::{guest_connect, HandshakeError};
 use dsa_transport::{Connection, Connector, TransportError};
@@ -38,6 +39,14 @@ impl Default for RetryPolicy {
             attempt_timeout: Duration::from_secs(10),
         }
     }
+}
+
+/// What the daemon shows the host: this build's `Hello`, and the secret the host gave this
+/// boot, which answers the host's challenge.
+#[derive(Debug, Clone)]
+pub struct Credentials {
+    pub hello: Hello,
+    pub secret: BootSecret,
 }
 
 /// Why the daemon stopped trying.
@@ -82,7 +91,7 @@ fn pause(delay: Duration, stop: &AtomicBool) -> bool {
 /// `Hello`.
 pub fn connect(
     connector: &mut dyn Connector,
-    local: &Hello,
+    credentials: &Credentials,
     policy: RetryPolicy,
     stop: &AtomicBool,
 ) -> Result<(Box<dyn Connection>, Hello), ChannelError> {
@@ -95,8 +104,13 @@ pub fn connect(
             .connect(policy.attempt_timeout)
             .map_err(HandshakeError::Transport)
             .and_then(|mut connection| {
-                guest_connect(connection.as_mut(), local, policy.attempt_timeout)
-                    .map(|host| (connection, host))
+                guest_connect(
+                    connection.as_mut(),
+                    &credentials.hello,
+                    &credentials.secret,
+                    policy.attempt_timeout,
+                )
+                .map(|host| (connection, host))
             });
         match attempt {
             Ok(connected) => return Ok(connected),
@@ -164,7 +178,7 @@ pub enum ChannelEvent {
 /// lost, until the host refuses this guest or `stop` is set.
 pub fn run(
     connector: &mut dyn Connector,
-    local: &Hello,
+    credentials: &Credentials,
     policy: RetryPolicy,
     to_guest: &Sender<Vec<u8>>,
     from_guest: &Receiver<Vec<u8>>,
@@ -172,7 +186,7 @@ pub fn run(
     stop: &AtomicBool,
 ) -> ChannelError {
     loop {
-        let (mut connection, host) = match connect(connector, local, policy, stop) {
+        let (mut connection, host) = match connect(connector, credentials, policy, stop) {
             Ok(connected) => connected,
             Err(error) => return error,
         };

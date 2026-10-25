@@ -22,9 +22,15 @@ the frames.
 ## Rules
 
 - Generated code is never edited by hand. Change `control.proto` and run the generator.
-- Every frame is one `Envelope`. The first frame on a connection is the guest's `Hello`;
-  the host answers `HelloAccepted` or `HelloRejected` and refuses a guest whose protocol
-  version or schema hash differs from its own, saying which values differ.
+- Every frame is one `Envelope`. The first frame on a connection is the guest's `Hello`.
+  The host refuses a guest whose protocol version or schema hash differs from its own with
+  `HelloRejected`, saying which values differ. Otherwise it sends an `AuthChallenge` with a
+  fresh nonce, the guest answers with an `AuthProof` (HMAC-SHA256 of the nonce, keyed with
+  the secret the host gave this boot), and the host answers `HelloAccepted` or
+  `HelloRejected`. Any app in the guest can reach the control port, because the graphics
+  path needs vsock; only the guest's control daemon can read the secret, so only it gets in.
+  The secret itself never crosses the connection, and a proof is never accepted twice
+  because each connection gets its own nonce.
 - No map fields, no `Any`, no extensions, and nothing that depends on unknown fields, so
   the three languages encode the same message to the same bytes.
 - The local API follows the same handshake (the client sends the `Hello`, the service
