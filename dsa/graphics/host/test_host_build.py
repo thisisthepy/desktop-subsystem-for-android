@@ -37,6 +37,8 @@ class HostGraphicsBuildTests(unittest.TestCase):
     def test_fr3_host_fetch_applies_the_patch_that_lends_out_the_vulkan_queue(self):
         script = FETCH_SCRIPT.read_text(encoding="utf-8")
         self.assertIn('"0004-*.patch"', script)
+        # The script is in dsa/graphics/host, three levels below the repository root.
+        self.assertIn('"$PSScriptRoot/../../.."', script)
         self.assertIn("throw", script)
         patch = (HERE.parent / "patches" / "0004-expose-the-vulkan-queue-to-the-host-backend.patch")
         text = patch.read_text(encoding="utf-8")

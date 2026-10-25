@@ -13,7 +13,8 @@ if (-not $ScratchPath) {
     $ScratchPath = $ScratchPath.Path
 }
 
-$RepoRoot = (Resolve-Path "$PSScriptRoot/../../../..").Path
+# The repository root: this script is in dsa/graphics/host.
+$RepoRoot = (Resolve-Path "$PSScriptRoot/../../..").Path
 $GfxstreamDir = Join-Path $ScratchPath "gfxstream"
 $AemuDir = Join-Path $ScratchPath "aemu"
 $AngleDir = Join-Path $ScratchPath "angle"
