@@ -736,6 +736,10 @@ def kernel_cmdline(partition_cmdline):
         "androidboot.hardware.hwcomposer.mode=noop",
         "androidboot.hardware.hwcomposer.display_finder_mode=noop",
         "androidboot.cpuvulkan.version=0",
+        # The Cuttlefish lights HAL listens on this vsock port for a host client; without
+        # one it binds port 0, which only privileged processes may, and aborts. No host
+        # client connects; DSA's own ports are 5000 and 5566-5567.
+        "androidboot.vsock_lights_port=6900",
         *(f"androidboot.vendor.apex.{module}={apex}"
           for module, apex in VENDOR_APEX_BOOTCONFIG.items()),
     ])
