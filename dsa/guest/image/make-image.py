@@ -716,6 +716,11 @@ def kernel_cmdline(partition_cmdline):
         "androidboot.hardware.egl=angle",
         "androidboot.hardware.vulkan=ranchu",
         "androidboot.hardware.gralloc=minigbm",
+        # Cuttlefish's composer needs a virtio-gpu card or a goldfish display, and Hyper-V
+        # has neither. Until DSA's own composer hands layers to the host, it runs with
+        # no display device and composes nothing.
+        "androidboot.hardware.hwcomposer.mode=noop",
+        "androidboot.hardware.hwcomposer.display_finder_mode=noop",
         "androidboot.cpuvulkan.version=0",
         *(f"androidboot.vendor.apex.{module}={apex}"
           for module, apex in VENDOR_APEX_BOOTCONFIG.items()),
