@@ -458,3 +458,80 @@ fn fr2_dsa_stop_does_not_start_stopped_service() {
     assert!(result.is_err());
     assert!(!started.load(std::sync::atomic::Ordering::Relaxed));
 }
+
+#[test]
+fn fr3_dsa_launch_and_dsa_tasks_are_parsed() {
+    let launch = parse(&args("launch com.android.settings --pipe p")).unwrap();
+    assert_eq!(launch.command, Cmd::Launch);
+    assert_eq!(launch.package.as_deref(), Some("com.android.settings"));
+    assert_eq!(launch.endpoint.as_deref(), Some("p"));
+    assert_eq!(parse(&args("tasks")).unwrap().command, Cmd::Tasks);
+    let missing = parse(&args("launch")).unwrap_err();
+    assert!(missing.contains("package"), "{missing}");
+    assert!(missing.contains("usage"), "{missing}");
+    let odd = parse(&args("launch ../evil")).unwrap_err();
+    assert!(odd.contains("not a package name"), "{odd}");
+    assert!(parse(&args("launch a.b c.d")).is_err(), "one app at a time");
+}
+
+#[test]
+fn fr3_dsa_launch_asks_the_users_android_to_start_the_app() {
+    use dsa_host_core::tasks::TaskRequest;
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    assert!(dsa(&endpoint, "start").status.success());
+
+    let output = dsa(&endpoint, "launch com.example.clock");
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Launching com.example.clock");
+    assert_eq!(
+        *androids.of(&user).unwrap().requests.lock().unwrap(),
+        vec![TaskRequest::Launch {
+            package_name: "com.example.clock".into()
+        }]
+    );
+}
+
+#[test]
+fn fr3_dsa_launch_says_when_android_is_not_running() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let output = dsa(&endpoint, "launch com.example.clock");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("not running"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn fr3_dsa_tasks_lists_the_tasks_android_shows_as_windows() {
+    use dsa_host_core::host_api_conformance::sample_task;
+    use dsa_host_core::tasks::TaskEvent;
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+
+    let none = dsa(&endpoint, "tasks");
+    assert!(none.status.success(), "{}", stderr(&none));
+    assert_eq!(stdout(&none), "Android has no app tasks");
+
+    let android = androids.of(&user).unwrap();
+    android.publish(TaskEvent::Updated(sample_task(3, "Clock")));
+    let mut focused = sample_task(8, "");
+    focused.focused = true;
+    android.publish(TaskEvent::Updated(focused));
+    android.publish(TaskEvent::Frames {
+        task_id: 3,
+        display_id: 2,
+    });
+    let output = dsa(&endpoint, "tasks");
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        "Task 3: Clock (com.example.app), 1080x1920, display 2\n\
+         Task 8: com.example.app (com.example.app), 1080x1920, focused"
+    );
+}
