@@ -22,7 +22,9 @@ them with the project's keys.
 dsa/guest/image/fetch.sh 17
 dsa/guest/image/make-keys.sh .scratch/image-keys
 ANDROID_NDK_HOME=/path/to/ndk dsa/guest/channeld/build-android.sh .scratch/channeld
-uv run dsa/guest/image/make-image.py --major 17 --keys .scratch/image-keys --channeld .scratch/channeld/dsa-channeld
+(cd dsa/guest/agent && ./gradlew assembleRelease)
+uv run dsa/guest/image/make-image.py --major 17 --keys .scratch/image-keys --channeld .scratch/channeld/dsa-channeld \
+    --agent dsa/guest/agent/build/outputs/apk/release/dsa-agent-release-unsigned.apk
 uv run dsa/guest/image/check-image.py dsa/target/image/17.0.0-16373615 .scratch/image-keys
 ```
 
@@ -41,6 +43,9 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
 - The control channel daemon (`/vendor/bin/dsa-channeld`) is added and runs in its own
   SELinux domain, the only one that may read `/proc/bootconfig`, where the host puts the
   boot's secret. It connects to the host, which makes the session active.
+- The agent (`dsa/guest/agent/`) is added as a privileged app in
+  `/system_ext/priv-app/DsaAgent/`, with its privileged permission list, and is signed with
+  the platform key. It tells the host about each app task, so each gets its own window.
 - The published kernel modules are dropped. They belong to Google's kernel; DSA boots its
   own kernel with the drivers built in.
 - `fstab.dsa` replaces the mount table. All partitions are on the user's one Android
