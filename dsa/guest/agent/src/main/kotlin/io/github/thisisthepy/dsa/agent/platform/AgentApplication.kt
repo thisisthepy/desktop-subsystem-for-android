@@ -19,6 +19,7 @@ class AgentApplication : Application() {
             actions = AndroidTaskActions(this, log),
             locator = BinderChannelLocator(log),
             windowing = AndroidWindowing(this),
+            injector = AndroidInputInjector(this),
             scheduler = HandlerScheduler(thread.looper),
             log = log,
         ).start()

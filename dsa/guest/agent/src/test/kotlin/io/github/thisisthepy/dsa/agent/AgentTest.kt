@@ -1,11 +1,15 @@
 package io.github.thisisthepy.dsa.agent
 
+import android.view.MotionEvent
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.tasks.TaskSource
 import io.github.thisisthepy.dsa.agent.windowing.WINDOWING_MODE_FREEFORM
 import io.github.thisisthepy.dsa.control.v1.CloseTask
 import io.github.thisisthepy.dsa.control.v1.Envelope
 import io.github.thisisthepy.dsa.control.v1.LaunchApp
+import io.github.thisisthepy.dsa.control.v1.PointerAction
+import io.github.thisisthepy.dsa.control.v1.PointerEvent
+import io.github.thisisthepy.dsa.control.v1.PointerTool
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -18,13 +22,14 @@ class AgentTest {
     private val daemon = FakeEndpoint()
     private val windowing = FakeWindowing()
     private val log = RecordingLog()
+    private val injector = FakeInjector()
 
     // Where Android's freeform launch put both Settings and Clock on a real machine.
     private val defaultPlace = TaskBounds(686, 53, 1234, 1027)
 
     private fun started(source: TaskSource = tasks): Agent {
         locator.up = daemon
-        val agent = Agent(AGENT, source, actions, locator, windowing, scheduler, log)
+        val agent = Agent(AGENT, source, actions, locator, windowing, injector, scheduler, log)
         agent.start()
         scheduler.runDue()
         return agent
@@ -202,5 +207,57 @@ class AgentTest {
         scheduler.runDue()
 
         assertEquals(listOf(1, 2), daemon.sentMessages().map { it.taskUpdated.taskId })
+    }
+
+    private fun pointerFrame(taskId: Int, action: PointerAction, x: Float, y: Float, buttons: Int = 0): ByteArray =
+        Envelope.newBuilder().setPointerEvent(
+            PointerEvent.newBuilder()
+                .setTaskId(taskId)
+                .setAction(action)
+                .setTool(PointerTool.POINTER_TOOL_MOUSE)
+                .setX(x)
+                .setY(y)
+                .setButtons(buttons)
+                .setPressure(if (buttons != 0) 1f else 0f),
+        ).build().toByteArray()
+
+    @Test
+    fun fr5_a_right_click_from_the_host_lands_in_its_task_as_a_secondary_click() {
+        tasks.running = listOf(appTask(4))
+        started()
+        val sentBefore = daemon.sent.size
+
+        daemon.deliver(pointerFrame(4, PointerAction.POINTER_ACTION_DOWN, 10.5f, 30f, buttons = 2))
+        daemon.deliver(pointerFrame(4, PointerAction.POINTER_ACTION_UP, 10.5f, 30f))
+        scheduler.runDue()
+
+        assertEquals(
+            listOf(
+                MotionEvent.ACTION_DOWN,
+                MotionEvent.ACTION_BUTTON_PRESS,
+                MotionEvent.ACTION_BUTTON_RELEASE,
+                MotionEvent.ACTION_UP,
+            ),
+            injector.injected.map { it.action },
+        )
+        val down = injector.injected.first()
+        assertEquals(MotionEvent.BUTTON_SECONDARY, down.buttonState)
+        // appTask(4) sits at (40, 20) on the display.
+        assertEquals(50.5f, down.pointers.single().x)
+        assertEquals(50f, down.pointers.single().y)
+        assertEquals(MotionEvent.BUTTON_SECONDARY, injector.injected[1].actionButton)
+        // Input is not a request: it reports nothing.
+        assertEquals(sentBefore, daemon.sent.size)
+    }
+
+    @Test
+    fun fr5_input_for_a_task_the_host_was_never_told_about_is_dropped() {
+        tasks.running = listOf(appTask(4), appTask(5, packageName = AGENT))
+        started()
+
+        daemon.deliver(pointerFrame(5, PointerAction.POINTER_ACTION_DOWN, 1f, 1f, buttons = 1))
+        scheduler.runDue()
+
+        assertTrue(injector.injected.isEmpty())
     }
 }
