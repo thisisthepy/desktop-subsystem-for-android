@@ -1,5 +1,6 @@
 """Regression tests for the guest image layout helpers."""
 
+import base64
 import gzip
 import importlib.util
 import json
@@ -473,6 +474,60 @@ class ImageLayoutTests(unittest.TestCase):
                 self.assertTrue(ueventd.splitlines()[-1].split() == ["/dev/ttyS0", "0660", "system", "logd"])
                 fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
                 self.assertIn("vendor/etc/init/dsa-console-logcat.rc 0 0 644 capabilities=0x0", fs_config)
+
+    def test_fr1_signing_finds_the_certificates_it_replaces(self):
+        # sign_target_files_apks swaps AOSP's certificates for ours in mac_permissions.xml,
+        # reading them at the paths META/apkcerts.txt names, relative to where it runs, and
+        # silently skips any it cannot open. Then the platform apps get seinfo "default",
+        # match nothing in seapp_contexts, and zygote aborts starting them.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            security = root / "otatools/build/target/product/security"
+            security.mkdir(parents=True)
+            (security / "platform.x509.pem").write_text("platform")
+            (security / "platform.pk8").write_bytes(b"key")
+
+            cwd = make_image.aosp_test_certificates(root / "otatools", root / "aosp")
+
+            for prefix in ["build/make/target/product/security", "build/target/product/security"]:
+                self.assertEqual((cwd / prefix / "platform.x509.pem").read_text(), "platform")
+
+    def test_fr1_signing_fails_when_otatools_has_no_test_certificates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "otatools").mkdir()
+            with self.assertRaises(RuntimeError):
+                make_image.aosp_test_certificates(root / "otatools", root / "aosp")
+
+    def test_fr1_check_image_rejects_mac_permissions_with_the_old_platform_certificate(self):
+        check_script = Path(__file__).with_name("check-image.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_dir = root / "image"
+            img_dir.mkdir()
+            keys_dir = root / "keys"
+            keys_dir.mkdir()
+            ours = base64.b64encode(b"our platform certificate").decode()
+            (keys_dir / "platform.x509.pem").write_text(
+                f"-----BEGIN CERTIFICATE-----\n{ours}\n-----END CERTIFICATE-----\n"
+            )
+            (img_dir / "image.json").write_text(json.dumps({"files": {}, "kernel_cmdline": ""}))
+            (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
+            aosp = b"aosp test platform certificate".hex()
+            with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
+                archive.writestr("META/apkcerts.txt", "")
+                archive.writestr(
+                    "SYSTEM/etc/selinux/plat_mac_permissions.xml",
+                    f'<policy><signer signature="{aosp}"><seinfo value="platform"/></signer></policy>',
+                )
+
+            proc = subprocess.run(
+                [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("plat_mac_permissions.xml does not name our platform certificate", proc.stdout)
 
     def test_pr3_check_image_verifies_graphics_stack(self):
         check_script = Path(__file__).with_name("check-image.py")
