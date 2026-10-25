@@ -1,18 +1,23 @@
 //! The first exchange on every control channel connection.
 //!
 //! The guest sends a `Hello` carrying its protocol version and the schema hash of the
-//! definition it was generated from. The host compares both with its own and answers
+//! definition it was generated from. The host compares both with its own. When they match it
+//! sends an `AuthChallenge` with a fresh nonce, and the guest answers with an `AuthProof`
+//! keyed with this boot's secret (see [`crate::auth`]). The host then answers
 //! `HelloAccepted` or `HelloRejected`, and after a rejection closes the connection. Nothing
 //! else is sent until the host has accepted, so two builds generated from different
-//! definitions never exchange messages they would read differently.
+//! definitions never exchange messages they would read differently, and no process but the
+//! guest's own daemon gets past the handshake.
 
 use std::fmt;
 use std::time::Duration;
 
 use dsa_transport::{Connection, TransportError};
 
+use crate::auth::{self, BootSecret};
 use crate::control::{
-    envelope::Body, Envelope, Hello, HelloAccepted, HelloRejected, RejectReason, Role,
+    envelope::Body, AuthChallenge, AuthProof, Envelope, Hello, HelloAccepted, HelloRejected,
+    RejectReason, Role,
 };
 use crate::{decode, encode, PROTOCOL_VERSION, SCHEMA_HASH};
 
@@ -150,10 +155,12 @@ fn refuse(
 }
 
 /// The host side: waits at most `timeout` for the guest's `Hello`, checks it against
-/// `local`, and answers. Returns the guest's `Hello` when accepted.
+/// `local`, has the guest prove it knows `secret`, and answers. Each wait is bounded by
+/// `timeout`. Returns the guest's `Hello` when accepted.
 pub fn host_accept(
     connection: &mut dyn Connection,
     local: &Hello,
+    secret: &BootSecret,
     timeout: Duration,
 ) -> Result<Hello, HandshakeError> {
     let frame = connection.recv(Some(timeout))?;
@@ -182,6 +189,39 @@ pub fn host_accept(
     if let Err((reason, detail)) = check(&peer, local, Role::Guest) {
         return Err(refuse(connection, local, reason, detail));
     }
+    let nonce = match auth::nonce() {
+        Ok(nonce) => nonce,
+        Err(why) => {
+            // Refuse rather than ask a question whose answer could be guessed.
+            return Err(refuse(connection, local, RejectReason::Unspecified, why));
+        }
+    };
+    send(
+        connection,
+        Body::AuthChallenge(AuthChallenge {
+            nonce: nonce.to_vec(),
+        }),
+    )?;
+    let frame = connection.recv(Some(timeout))?;
+    let proven = match decode(&frame) {
+        Ok(Envelope {
+            body: Some(Body::AuthProof(AuthProof { mac })),
+        }) => secret.verify(&nonce, &mac),
+        _ => false,
+    };
+    if !proven {
+        let detail = format!(
+            "the peer ({}) did not prove it knows the secret the host gave this boot, so it \
+             is not the guest's control daemon",
+            peer.build
+        );
+        return Err(refuse(
+            connection,
+            local,
+            RejectReason::AuthenticationFailed,
+            detail,
+        ));
+    }
     send(
         connection,
         Body::HelloAccepted(HelloAccepted {
@@ -191,15 +231,25 @@ pub fn host_accept(
     Ok(peer)
 }
 
-/// The guest side: sends `local` and waits at most `timeout` for the host's answer. Returns
-/// the host's `Hello` when accepted.
+/// The guest side: sends `local`, answers the host's challenge with `secret`, and waits at
+/// most `timeout` for each of the host's messages. Returns the host's `Hello` when accepted.
 pub fn guest_connect(
     connection: &mut dyn Connection,
     local: &Hello,
+    secret: &BootSecret,
     timeout: Duration,
 ) -> Result<Hello, HandshakeError> {
     send(connection, Body::Hello(local.clone()))?;
-    let frame = connection.recv(Some(timeout))?;
+    let mut frame = connection.recv(Some(timeout))?;
+    // A host that refuses the Hello answers at once, without a challenge.
+    if let Ok(Envelope {
+        body: Some(Body::AuthChallenge(challenge)),
+    }) = decode(&frame)
+    {
+        let mac = secret.proof(&challenge.nonce).to_vec();
+        send(connection, Body::AuthProof(AuthProof { mac }))?;
+        frame = connection.recv(Some(timeout))?;
+    }
     match decode(&frame) {
         Ok(Envelope {
             body: Some(Body::HelloAccepted(accepted)),

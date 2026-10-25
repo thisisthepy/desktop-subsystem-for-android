@@ -23,6 +23,8 @@ public  final class Envelope extends
     HELLO(1),
     HELLO_ACCEPTED(2),
     HELLO_REJECTED(3),
+    AUTH_CHALLENGE(4),
+    AUTH_PROOF(5),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -41,6 +43,8 @@ public  final class Envelope extends
         case 1: return HELLO;
         case 2: return HELLO_ACCEPTED;
         case 3: return HELLO_REJECTED;
+        case 4: return AUTH_CHALLENGE;
+        case 5: return AUTH_PROOF;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -207,6 +211,106 @@ public  final class Envelope extends
    */
   private void clearHelloRejected() {
     if (bodyCase_ == 3) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int AUTH_CHALLENGE_FIELD_NUMBER = 4;
+  /**
+   * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+   */
+  @java.lang.Override
+  public boolean hasAuthChallenge() {
+    return bodyCase_ == 4;
+  }
+  /**
+   * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.AuthChallenge getAuthChallenge() {
+    if (bodyCase_ == 4) {
+       return (io.github.thisisthepy.dsa.control.v1.AuthChallenge) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.AuthChallenge.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+   */
+  private void setAuthChallenge(io.github.thisisthepy.dsa.control.v1.AuthChallenge value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 4;
+  }
+  /**
+   * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+   */
+  private void mergeAuthChallenge(io.github.thisisthepy.dsa.control.v1.AuthChallenge value) {
+    value.getClass();
+  if (bodyCase_ == 4 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.AuthChallenge.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.AuthChallenge.newBuilder((io.github.thisisthepy.dsa.control.v1.AuthChallenge) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 4;
+  }
+  /**
+   * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+   */
+  private void clearAuthChallenge() {
+    if (bodyCase_ == 4) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int AUTH_PROOF_FIELD_NUMBER = 5;
+  /**
+   * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+   */
+  @java.lang.Override
+  public boolean hasAuthProof() {
+    return bodyCase_ == 5;
+  }
+  /**
+   * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.AuthProof getAuthProof() {
+    if (bodyCase_ == 5) {
+       return (io.github.thisisthepy.dsa.control.v1.AuthProof) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.AuthProof.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+   */
+  private void setAuthProof(io.github.thisisthepy.dsa.control.v1.AuthProof value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 5;
+  }
+  /**
+   * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+   */
+  private void mergeAuthProof(io.github.thisisthepy.dsa.control.v1.AuthProof value) {
+    value.getClass();
+  if (bodyCase_ == 5 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.AuthProof.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.AuthProof.newBuilder((io.github.thisisthepy.dsa.control.v1.AuthProof) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 5;
+  }
+  /**
+   * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+   */
+  private void clearAuthProof() {
+    if (bodyCase_ == 5) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -467,6 +571,102 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+     */
+    @java.lang.Override
+    public boolean hasAuthChallenge() {
+      return instance.hasAuthChallenge();
+    }
+    /**
+     * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.AuthChallenge getAuthChallenge() {
+      return instance.getAuthChallenge();
+    }
+    /**
+     * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+     */
+    public Builder setAuthChallenge(io.github.thisisthepy.dsa.control.v1.AuthChallenge value) {
+      copyOnWrite();
+      instance.setAuthChallenge(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+     */
+    public Builder setAuthChallenge(
+        io.github.thisisthepy.dsa.control.v1.AuthChallenge.Builder builderForValue) {
+      copyOnWrite();
+      instance.setAuthChallenge(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+     */
+    public Builder mergeAuthChallenge(io.github.thisisthepy.dsa.control.v1.AuthChallenge value) {
+      copyOnWrite();
+      instance.mergeAuthChallenge(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+     */
+    public Builder clearAuthChallenge() {
+      copyOnWrite();
+      instance.clearAuthChallenge();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+     */
+    @java.lang.Override
+    public boolean hasAuthProof() {
+      return instance.hasAuthProof();
+    }
+    /**
+     * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.AuthProof getAuthProof() {
+      return instance.getAuthProof();
+    }
+    /**
+     * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+     */
+    public Builder setAuthProof(io.github.thisisthepy.dsa.control.v1.AuthProof value) {
+      copyOnWrite();
+      instance.setAuthProof(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+     */
+    public Builder setAuthProof(
+        io.github.thisisthepy.dsa.control.v1.AuthProof.Builder builderForValue) {
+      copyOnWrite();
+      instance.setAuthProof(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+     */
+    public Builder mergeAuthProof(io.github.thisisthepy.dsa.control.v1.AuthProof value) {
+      copyOnWrite();
+      instance.mergeAuthProof(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+     */
+    public Builder clearAuthProof() {
+      copyOnWrite();
+      instance.clearAuthProof();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -488,10 +688,12 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.Hello.class,
             io.github.thisisthepy.dsa.control.v1.HelloAccepted.class,
             io.github.thisisthepy.dsa.control.v1.HelloRejected.class,
+            io.github.thisisthepy.dsa.control.v1.AuthChallenge.class,
+            io.github.thisisthepy.dsa.control.v1.AuthProof.class,
           };
           java.lang.String info =
-              "\u0000\u0003\u0001\u0000\u0001\u0003\u0003\u0000\u0000\u0000\u0001<\u0000\u0002<" +
-              "\u0000\u0003<\u0000";
+              "\u0000\u0005\u0001\u0000\u0001\u0005\u0005\u0000\u0000\u0000\u0001<\u0000\u0002<" +
+              "\u0000\u0003<\u0000\u0004<\u0000\u0005<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

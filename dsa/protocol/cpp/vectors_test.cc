@@ -64,6 +64,13 @@ std::map<std::string, v1::Envelope> Cases() {
     rejected->set_detail("스키마가 다릅니다 (schema differs)");
     *rejected->mutable_host() = HostHello();
   }
+  cases["auth_challenge"].mutable_auth_challenge()->set_nonce(Bytes(0x40, 32));
+  cases["auth_proof"].mutable_auth_proof()->set_mac(Bytes(0x60, 32));
+  {
+    v1::HelloRejected* rejected = cases["hello_rejected_authentication"].mutable_hello_rejected();
+    rejected->set_reason(v1::REJECT_REASON_AUTHENTICATION_FAILED);
+    rejected->set_detail("no proof");
+  }
   return cases;
 }
 

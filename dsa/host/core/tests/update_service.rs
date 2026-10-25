@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,6 +18,7 @@ use dsa_host_core::update::service::{
 };
 use dsa_host_core::update::store::{Fetch, ImageStore};
 use dsa_host_core::update::UpdateError;
+use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::Role;
 use dsa_protocol::handshake::{guest_connect, local_hello};
 use dsa_transport::memory;
@@ -170,10 +171,13 @@ fn fr14_the_user_is_told_when_their_version_lost_support() {
 struct StoreLauncher {
     store: Arc<ImageStore>,
     broken: Vec<String>,
+    /// The running boot's secret, which the agent answers the host's challenge with.
+    secret: Arc<Mutex<Option<BootSecret>>>,
 }
 
 impl GuestLauncher for StoreLauncher {
-    fn start(&mut self) -> Result<(), String> {
+    fn start(&mut self, secret: &BootSecret) -> Result<(), String> {
+        *self.secret.lock().unwrap() = Some(secret.clone());
         let current = self.store.state().map_err(|e| e.to_string())?.current;
         if !self.store.image_dir(&current.version).is_dir() {
             return Err(format!(
@@ -197,10 +201,12 @@ fn updating_android(
     broken: &[&str],
 ) -> (UpdatingAndroid, Arc<AtomicBool>) {
     let (listener, connector) = memory::pair();
+    let secret = Arc::new(Mutex::new(None));
     let session = Arc::new(Session::new(
         StoreLauncher {
             store: Arc::clone(store),
             broken: broken.iter().map(|b| b.to_string()).collect(),
+            secret: Arc::clone(&secret),
         },
         Box::new(listener),
         ControlHandshake::new("test host", WAIT),
@@ -215,9 +221,15 @@ fn updating_android(
     thread::spawn(move || {
         let mut connector = connector;
         while !finished.load(Ordering::Relaxed) {
-            if watched.state() == SessionState::Starting {
+            let boot_secret = secret.lock().unwrap().clone();
+            if let (SessionState::Starting, Some(boot_secret)) = (watched.state(), boot_secret) {
                 if let Ok(mut agent) = connector.connect(WAIT) {
-                    let _ = guest_connect(&mut *agent, &local_hello(Role::Guest, "agent"), WAIT);
+                    let _ = guest_connect(
+                        &mut *agent,
+                        &local_hello(Role::Guest, "agent"),
+                        &boot_secret,
+                        WAIT,
+                    );
                     while watched.state() == SessionState::Active
                         && !finished.load(Ordering::Relaxed)
                     {

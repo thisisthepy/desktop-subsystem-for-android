@@ -9,8 +9,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use dsa_guest_channeld::{connect, RetryPolicy};
+use dsa_guest_channeld::{connect, Credentials, RetryPolicy};
 use dsa_guest_transport::vsock::{VsockConnector, VsockListener, VMADDR_CID_ANY, VMADDR_CID_LOCAL};
+use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::Role;
 use dsa_protocol::handshake::{host_accept, local_hello};
 use dsa_transport::Listener;
@@ -24,6 +25,7 @@ fn pr1_the_guest_daemon_connects_and_is_accepted_over_vsock() {
         let guest = host_accept(
             connection.as_mut(),
             &local_hello(Role::Host, "dsa-hostd vsock"),
+            &BootSecret::from_bytes([0x22; 32]),
             Duration::from_secs(10),
         )
         .ok()?;
@@ -44,7 +46,10 @@ fn pr1_the_guest_daemon_connects_and_is_accepted_over_vsock() {
     }
     let (_connection, host_hello) = connect(
         &mut connector,
-        &local_hello(Role::Guest, "dsa-channeld vsock"),
+        &Credentials {
+            hello: local_hello(Role::Guest, "dsa-channeld vsock"),
+            secret: BootSecret::from_bytes([0x22; 32]),
+        },
         RetryPolicy::default(),
         &stop,
     )

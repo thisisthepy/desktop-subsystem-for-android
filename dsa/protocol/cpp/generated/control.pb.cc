@@ -64,6 +64,32 @@ struct HelloRejectedDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 HelloRejectedDefaultTypeInternal _HelloRejected_default_instance_;
+PROTOBUF_CONSTEXPR AuthChallenge::AuthChallenge(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.nonce_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct AuthChallengeDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR AuthChallengeDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~AuthChallengeDefaultTypeInternal() {}
+  union {
+    AuthChallenge _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 AuthChallengeDefaultTypeInternal _AuthChallenge_default_instance_;
+PROTOBUF_CONSTEXPR AuthProof::AuthProof(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.mac_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct AuthProofDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR AuthProofDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~AuthProofDefaultTypeInternal() {}
+  union {
+    AuthProof _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 AuthProofDefaultTypeInternal _AuthProof_default_instance_;
 PROTOBUF_CONSTEXPR Envelope::Envelope(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.body_)*/{}
@@ -197,15 +223,17 @@ bool RejectReason_IsValid(int value) {
     case 2:
     case 3:
     case 4:
+    case 5:
       return true;
     default:
       return false;
   }
 }
 
-static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> RejectReason_strings[5] = {};
+static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> RejectReason_strings[6] = {};
 
 static const char RejectReason_names[] =
+  "REJECT_REASON_AUTHENTICATION_FAILED"
   "REJECT_REASON_MALFORMED_HELLO"
   "REJECT_REASON_PROTOCOL_VERSION_MISMATCH"
   "REJECT_REASON_SCHEMA_HASH_MISMATCH"
@@ -213,19 +241,21 @@ static const char RejectReason_names[] =
   "REJECT_REASON_UNSPECIFIED";
 
 static const ::PROTOBUF_NAMESPACE_ID::internal::EnumEntry RejectReason_entries[] = {
-  { {RejectReason_names + 0, 29}, 4 },
-  { {RejectReason_names + 29, 39}, 1 },
-  { {RejectReason_names + 68, 34}, 2 },
-  { {RejectReason_names + 102, 29}, 3 },
-  { {RejectReason_names + 131, 25}, 0 },
+  { {RejectReason_names + 0, 35}, 5 },
+  { {RejectReason_names + 35, 29}, 4 },
+  { {RejectReason_names + 64, 39}, 1 },
+  { {RejectReason_names + 103, 34}, 2 },
+  { {RejectReason_names + 137, 29}, 3 },
+  { {RejectReason_names + 166, 25}, 0 },
 };
 
 static const int RejectReason_entries_by_number[] = {
-  4, // 0 -> REJECT_REASON_UNSPECIFIED
-  1, // 1 -> REJECT_REASON_PROTOCOL_VERSION_MISMATCH
-  2, // 2 -> REJECT_REASON_SCHEMA_HASH_MISMATCH
-  3, // 3 -> REJECT_REASON_UNEXPECTED_ROLE
-  0, // 4 -> REJECT_REASON_MALFORMED_HELLO
+  5, // 0 -> REJECT_REASON_UNSPECIFIED
+  2, // 1 -> REJECT_REASON_PROTOCOL_VERSION_MISMATCH
+  3, // 2 -> REJECT_REASON_SCHEMA_HASH_MISMATCH
+  4, // 3 -> REJECT_REASON_UNEXPECTED_ROLE
+  1, // 4 -> REJECT_REASON_MALFORMED_HELLO
+  0, // 5 -> REJECT_REASON_AUTHENTICATION_FAILED
 };
 
 const std::string& RejectReason_Name(
@@ -234,12 +264,12 @@ const std::string& RejectReason_Name(
       ::PROTOBUF_NAMESPACE_ID::internal::InitializeEnumStrings(
           RejectReason_entries,
           RejectReason_entries_by_number,
-          5, RejectReason_strings);
+          6, RejectReason_strings);
   (void) dummy;
   int idx = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumName(
       RejectReason_entries,
       RejectReason_entries_by_number,
-      5, value);
+      6, value);
   return idx == -1 ? ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString() :
                      RejectReason_strings[idx].get();
 }
@@ -247,7 +277,7 @@ bool RejectReason_Parse(
     ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, RejectReason* value) {
   int int_value;
   bool success = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumValue(
-      RejectReason_entries, 5, name, &int_value);
+      RejectReason_entries, 6, name, &int_value);
   if (success) {
     *value = static_cast<RejectReason>(int_value);
   }
@@ -1045,11 +1075,413 @@ std::string HelloRejected::GetTypeName() const {
 
 // ===================================================================
 
+class AuthChallenge::_Internal {
+ public:
+};
+
+AuthChallenge::AuthChallenge(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.AuthChallenge)
+}
+AuthChallenge::AuthChallenge(const AuthChallenge& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  AuthChallenge* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.nonce_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.nonce_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.nonce_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_nonce().empty()) {
+    _this->_impl_.nonce_.Set(from._internal_nonce(), 
+      _this->GetArenaForAllocation());
+  }
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.AuthChallenge)
+}
+
+inline void AuthChallenge::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.nonce_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.nonce_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.nonce_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+AuthChallenge::~AuthChallenge() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.AuthChallenge)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void AuthChallenge::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.nonce_.Destroy();
+}
+
+void AuthChallenge::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void AuthChallenge::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.AuthChallenge)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.nonce_.ClearToEmpty();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* AuthChallenge::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // bytes nonce = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          auto str = _internal_mutable_nonce();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* AuthChallenge::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.AuthChallenge)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // bytes nonce = 1;
+  if (!this->_internal_nonce().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        1, this->_internal_nonce(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.AuthChallenge)
+  return target;
+}
+
+size_t AuthChallenge::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.AuthChallenge)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // bytes nonce = 1;
+  if (!this->_internal_nonce().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_nonce());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void AuthChallenge::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const AuthChallenge*>(
+      &from));
+}
+
+void AuthChallenge::MergeFrom(const AuthChallenge& from) {
+  AuthChallenge* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.AuthChallenge)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_nonce().empty()) {
+    _this->_internal_set_nonce(from._internal_nonce());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void AuthChallenge::CopyFrom(const AuthChallenge& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.AuthChallenge)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool AuthChallenge::IsInitialized() const {
+  return true;
+}
+
+void AuthChallenge::InternalSwap(AuthChallenge* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.nonce_, lhs_arena,
+      &other->_impl_.nonce_, rhs_arena
+  );
+}
+
+std::string AuthChallenge::GetTypeName() const {
+  return "dsa.control.v1.AuthChallenge";
+}
+
+
+// ===================================================================
+
+class AuthProof::_Internal {
+ public:
+};
+
+AuthProof::AuthProof(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.AuthProof)
+}
+AuthProof::AuthProof(const AuthProof& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  AuthProof* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.mac_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.mac_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.mac_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_mac().empty()) {
+    _this->_impl_.mac_.Set(from._internal_mac(), 
+      _this->GetArenaForAllocation());
+  }
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.AuthProof)
+}
+
+inline void AuthProof::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.mac_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.mac_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.mac_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+AuthProof::~AuthProof() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.AuthProof)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void AuthProof::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.mac_.Destroy();
+}
+
+void AuthProof::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void AuthProof::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.AuthProof)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.mac_.ClearToEmpty();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* AuthProof::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // bytes mac = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          auto str = _internal_mutable_mac();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* AuthProof::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.AuthProof)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // bytes mac = 1;
+  if (!this->_internal_mac().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        1, this->_internal_mac(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.AuthProof)
+  return target;
+}
+
+size_t AuthProof::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.AuthProof)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // bytes mac = 1;
+  if (!this->_internal_mac().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_mac());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void AuthProof::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const AuthProof*>(
+      &from));
+}
+
+void AuthProof::MergeFrom(const AuthProof& from) {
+  AuthProof* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.AuthProof)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_mac().empty()) {
+    _this->_internal_set_mac(from._internal_mac());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void AuthProof::CopyFrom(const AuthProof& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.AuthProof)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool AuthProof::IsInitialized() const {
+  return true;
+}
+
+void AuthProof::InternalSwap(AuthProof* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.mac_, lhs_arena,
+      &other->_impl_.mac_, rhs_arena
+  );
+}
+
+std::string AuthProof::GetTypeName() const {
+  return "dsa.control.v1.AuthProof";
+}
+
+
+// ===================================================================
+
 class Envelope::_Internal {
  public:
   static const ::dsa::control::v1::Hello& hello(const Envelope* msg);
   static const ::dsa::control::v1::HelloAccepted& hello_accepted(const Envelope* msg);
   static const ::dsa::control::v1::HelloRejected& hello_rejected(const Envelope* msg);
+  static const ::dsa::control::v1::AuthChallenge& auth_challenge(const Envelope* msg);
+  static const ::dsa::control::v1::AuthProof& auth_proof(const Envelope* msg);
 };
 
 const ::dsa::control::v1::Hello&
@@ -1063,6 +1495,14 @@ Envelope::_Internal::hello_accepted(const Envelope* msg) {
 const ::dsa::control::v1::HelloRejected&
 Envelope::_Internal::hello_rejected(const Envelope* msg) {
   return *msg->_impl_.body_.hello_rejected_;
+}
+const ::dsa::control::v1::AuthChallenge&
+Envelope::_Internal::auth_challenge(const Envelope* msg) {
+  return *msg->_impl_.body_.auth_challenge_;
+}
+const ::dsa::control::v1::AuthProof&
+Envelope::_Internal::auth_proof(const Envelope* msg) {
+  return *msg->_impl_.body_.auth_proof_;
 }
 void Envelope::set_allocated_hello(::dsa::control::v1::Hello* hello) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -1109,6 +1549,36 @@ void Envelope::set_allocated_hello_rejected(::dsa::control::v1::HelloRejected* h
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.hello_rejected)
 }
+void Envelope::set_allocated_auth_challenge(::dsa::control::v1::AuthChallenge* auth_challenge) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (auth_challenge) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(auth_challenge);
+    if (message_arena != submessage_arena) {
+      auth_challenge = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, auth_challenge, submessage_arena);
+    }
+    set_has_auth_challenge();
+    _impl_.body_.auth_challenge_ = auth_challenge;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.auth_challenge)
+}
+void Envelope::set_allocated_auth_proof(::dsa::control::v1::AuthProof* auth_proof) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (auth_proof) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(auth_proof);
+    if (message_arena != submessage_arena) {
+      auth_proof = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, auth_proof, submessage_arena);
+    }
+    set_has_auth_proof();
+    _impl_.body_.auth_proof_ = auth_proof;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.auth_proof)
+}
 Envelope::Envelope(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
@@ -1139,6 +1609,16 @@ Envelope::Envelope(const Envelope& from)
     case kHelloRejected: {
       _this->_internal_mutable_hello_rejected()->::dsa::control::v1::HelloRejected::MergeFrom(
           from._internal_hello_rejected());
+      break;
+    }
+    case kAuthChallenge: {
+      _this->_internal_mutable_auth_challenge()->::dsa::control::v1::AuthChallenge::MergeFrom(
+          from._internal_auth_challenge());
+      break;
+    }
+    case kAuthProof: {
+      _this->_internal_mutable_auth_proof()->::dsa::control::v1::AuthProof::MergeFrom(
+          from._internal_auth_proof());
       break;
     }
     case BODY_NOT_SET: {
@@ -1201,6 +1681,18 @@ void Envelope::clear_body() {
       }
       break;
     }
+    case kAuthChallenge: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.auth_challenge_;
+      }
+      break;
+    }
+    case kAuthProof: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.auth_proof_;
+      }
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -1245,6 +1737,22 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
           ptr = ctx->ParseMessage(_internal_mutable_hello_rejected(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.AuthChallenge auth_challenge = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          ptr = ctx->ParseMessage(_internal_mutable_auth_challenge(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.AuthProof auth_proof = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
+          ptr = ctx->ParseMessage(_internal_mutable_auth_proof(), ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -1299,6 +1807,20 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::hello_rejected(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.AuthChallenge auth_challenge = 4;
+  if (_internal_has_auth_challenge()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(4, _Internal::auth_challenge(this),
+        _Internal::auth_challenge(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.AuthProof auth_proof = 5;
+  if (_internal_has_auth_proof()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(5, _Internal::auth_proof(this),
+        _Internal::auth_proof(this).GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -1335,6 +1857,20 @@ size_t Envelope::ByteSizeLong() const {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.body_.hello_rejected_);
+      break;
+    }
+    // .dsa.control.v1.AuthChallenge auth_challenge = 4;
+    case kAuthChallenge: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.auth_challenge_);
+      break;
+    }
+    // .dsa.control.v1.AuthProof auth_proof = 5;
+    case kAuthProof: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.auth_proof_);
       break;
     }
     case BODY_NOT_SET: {
@@ -1376,6 +1912,16 @@ void Envelope::MergeFrom(const Envelope& from) {
     case kHelloRejected: {
       _this->_internal_mutable_hello_rejected()->::dsa::control::v1::HelloRejected::MergeFrom(
           from._internal_hello_rejected());
+      break;
+    }
+    case kAuthChallenge: {
+      _this->_internal_mutable_auth_challenge()->::dsa::control::v1::AuthChallenge::MergeFrom(
+          from._internal_auth_challenge());
+      break;
+    }
+    case kAuthProof: {
+      _this->_internal_mutable_auth_proof()->::dsa::control::v1::AuthProof::MergeFrom(
+          from._internal_auth_proof());
       break;
     }
     case BODY_NOT_SET: {
@@ -1424,6 +1970,14 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::HelloAccepted >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::HelloRejected*
 Arena::CreateMaybeMessage< ::dsa::control::v1::HelloRejected >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::HelloRejected >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::AuthChallenge*
+Arena::CreateMaybeMessage< ::dsa::control::v1::AuthChallenge >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::AuthChallenge >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::AuthProof*
+Arena::CreateMaybeMessage< ::dsa::control::v1::AuthProof >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::AuthProof >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::Envelope*
 Arena::CreateMaybeMessage< ::dsa::control::v1::Envelope >(Arena* arena) {

@@ -237,7 +237,9 @@ version = "0.1.0"
 dependencies = [
  "dsa-protocol-schema",
  "dsa-transport",
+ "getrandom",
  "prost",
+ "sha2 0.11.1",
 ]
 
 [[package]]
