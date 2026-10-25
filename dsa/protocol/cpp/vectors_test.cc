@@ -67,6 +67,32 @@ std::map<std::string, v1::Envelope> Cases() {
   cases["auth_challenge"].mutable_auth_challenge()->set_nonce(Bytes(0x40, 32));
   cases["auth_proof"].mutable_auth_proof()->set_mac(Bytes(0x60, 32));
   {
+    v1::TaskUpdated* task = cases["task_updated"].mutable_task_updated();
+    task->set_task_id(42);
+    task->mutable_bounds()->set_left(100);
+    task->mutable_bounds()->set_top(80);
+    task->mutable_bounds()->set_right(1180);
+    task->mutable_bounds()->set_bottom(800);
+    task->set_package_name("com.example.notes");
+    task->set_label("메모 (Notes)");
+    task->set_focused(true);
+  }
+  {
+    v1::TaskUpdated* task = cases["task_updated_negative_origin"].mutable_task_updated();
+    task->set_task_id(7);
+    task->mutable_bounds()->set_left(-40);
+    task->mutable_bounds()->set_top(-10);
+    task->mutable_bounds()->set_right(600);
+    task->mutable_bounds()->set_bottom(400);
+  }
+  cases["task_removed"].mutable_task_removed()->set_task_id(42);
+  {
+    v1::TaskFrames* frames = cases["task_frames"].mutable_task_frames();
+    frames->set_task_id(42);
+    frames->set_display_id(3);
+  }
+  cases["close_task"].mutable_close_task()->set_task_id(42);
+  {
     v1::HelloRejected* rejected = cases["hello_rejected_authentication"].mutable_hello_rejected();
     rejected->set_reason(v1::REJECT_REASON_AUTHENTICATION_FAILED);
     rejected->set_detail("no proof");

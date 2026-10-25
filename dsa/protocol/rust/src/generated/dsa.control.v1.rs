@@ -48,10 +48,64 @@ pub struct AuthProof {
     #[prost(bytes = "vec", tag = "1")]
     pub mac: ::prost::alloc::vec::Vec<u8>,
 }
+/// A rectangle in guest display pixels: left and top inclusive, right and bottom exclusive.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Rect {
+    #[prost(int32, tag = "1")]
+    pub left: i32,
+    #[prost(int32, tag = "2")]
+    pub top: i32,
+    #[prost(int32, tag = "3")]
+    pub right: i32,
+    #[prost(int32, tag = "4")]
+    pub bottom: i32,
+}
+/// Guest to host, from the agent: an app task the host shows as one window appeared, or
+/// something the window shows about it changed. Every field is sent each time, so the host
+/// keeps only the latest.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TaskUpdated {
+    /// The guest's task ID, unique while the task lives.
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    /// Where the task's window is on the guest's freeform display.
+    #[prost(message, optional, tag = "2")]
+    pub bounds: ::core::option::Option<Rect>,
+    /// The package of the task's root activity, for the window's icon and grouping.
+    #[prost(string, tag = "3")]
+    pub package_name: ::prost::alloc::string::String,
+    /// The title the window shows.
+    #[prost(string, tag = "4")]
+    pub label: ::prost::alloc::string::String,
+    /// Whether the task has input focus in the guest.
+    #[prost(bool, tag = "5")]
+    pub focused: bool,
+}
+/// Guest to host, from the agent: the task ended; the host closes its window.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TaskRemoved {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+}
+/// Guest to host, from the hwcomposer: the frames of the task now arrive on the graphics
+/// stream as posts to `display_id`. Sent when the pairing begins or changes.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TaskFrames {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub display_id: u32,
+}
+/// Host to guest: the user closed the task's window; the agent ends the task.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CloseTask {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Envelope {
-    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5")]
+    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9")]
     pub body: ::core::option::Option<envelope::Body>,
 }
 /// Nested message and enum types in `Envelope`.
@@ -68,6 +122,14 @@ pub mod envelope {
         AuthChallenge(super::AuthChallenge),
         #[prost(message, tag = "5")]
         AuthProof(super::AuthProof),
+        #[prost(message, tag = "6")]
+        TaskUpdated(super::TaskUpdated),
+        #[prost(message, tag = "7")]
+        TaskRemoved(super::TaskRemoved),
+        #[prost(message, tag = "8")]
+        TaskFrames(super::TaskFrames),
+        #[prost(message, tag = "9")]
+        CloseTask(super::CloseTask),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.

@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use dsa_protocol::control::{
-    envelope::Body, AuthChallenge, AuthProof, Envelope, Hello, HelloAccepted, HelloRejected,
-    RejectReason, Role,
+    envelope::Body, AuthChallenge, AuthProof, CloseTask, Envelope, Hello, HelloAccepted,
+    HelloRejected, Rect, RejectReason, Role, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
 
@@ -76,6 +76,49 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
             wrap(Body::AuthProof(AuthProof {
                 mac: (0x60u8..0x80).collect(),
             })),
+        ),
+        (
+            "task_updated",
+            wrap(Body::TaskUpdated(TaskUpdated {
+                task_id: 42,
+                bounds: Some(Rect {
+                    left: 100,
+                    top: 80,
+                    right: 1180,
+                    bottom: 800,
+                }),
+                package_name: "com.example.notes".into(),
+                label: "메모 (Notes)".into(),
+                focused: true,
+            })),
+        ),
+        (
+            "task_updated_negative_origin",
+            wrap(Body::TaskUpdated(TaskUpdated {
+                task_id: 7,
+                bounds: Some(Rect {
+                    left: -40,
+                    top: -10,
+                    right: 600,
+                    bottom: 400,
+                }),
+                ..TaskUpdated::default()
+            })),
+        ),
+        (
+            "task_removed",
+            wrap(Body::TaskRemoved(TaskRemoved { task_id: 42 })),
+        ),
+        (
+            "task_frames",
+            wrap(Body::TaskFrames(TaskFrames {
+                task_id: 42,
+                display_id: 3,
+            })),
+        ),
+        (
+            "close_task",
+            wrap(Body::CloseTask(CloseTask { task_id: 42 })),
         ),
         (
             "hello_rejected_authentication",

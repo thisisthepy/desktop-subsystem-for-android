@@ -640,6 +640,17 @@ impl Worker {
                                 "control channel: dropping unexpected handshake message on active session"
                             );
                         }
+                        // The compositor takes these once the session hands them on.
+                        Some(dsa_protocol::control::envelope::Body::TaskUpdated(_))
+                        | Some(dsa_protocol::control::envelope::Body::TaskRemoved(_))
+                        | Some(dsa_protocol::control::envelope::Body::TaskFrames(_)) => {
+                            eprintln!("control channel: no window takes task messages yet");
+                        }
+                        Some(dsa_protocol::control::envelope::Body::CloseTask(_)) => {
+                            eprintln!(
+                                "control channel: dropping CloseTask, which only the host sends"
+                            );
+                        }
                         None => {
                             eprintln!("control channel: dropping message with unknown body");
                         }

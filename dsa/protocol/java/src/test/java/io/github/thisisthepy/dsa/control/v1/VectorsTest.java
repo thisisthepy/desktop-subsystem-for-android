@@ -71,6 +71,28 @@ public final class VectorsTest {
         cases.put("auth_proof", Envelope.newBuilder()
                 .setAuthProof(AuthProof.newBuilder().setMac(ByteString.copyFrom(bytes(0x60, 32))))
                 .build());
+        cases.put("task_updated", Envelope.newBuilder()
+                .setTaskUpdated(TaskUpdated.newBuilder()
+                        .setTaskId(42)
+                        .setBounds(Rect.newBuilder().setLeft(100).setTop(80).setRight(1180).setBottom(800))
+                        .setPackageName("com.example.notes")
+                        .setLabel("메모 (Notes)")
+                        .setFocused(true))
+                .build());
+        cases.put("task_updated_negative_origin", Envelope.newBuilder()
+                .setTaskUpdated(TaskUpdated.newBuilder()
+                        .setTaskId(7)
+                        .setBounds(Rect.newBuilder().setLeft(-40).setTop(-10).setRight(600).setBottom(400)))
+                .build());
+        cases.put("task_removed", Envelope.newBuilder()
+                .setTaskRemoved(TaskRemoved.newBuilder().setTaskId(42))
+                .build());
+        cases.put("task_frames", Envelope.newBuilder()
+                .setTaskFrames(TaskFrames.newBuilder().setTaskId(42).setDisplayId(3))
+                .build());
+        cases.put("close_task", Envelope.newBuilder()
+                .setCloseTask(CloseTask.newBuilder().setTaskId(42))
+                .build());
         cases.put("hello_rejected_authentication", Envelope.newBuilder()
                 .setHelloRejected(HelloRejected.newBuilder()
                         .setReason(RejectReason.REJECT_REASON_AUTHENTICATION_FAILED)
