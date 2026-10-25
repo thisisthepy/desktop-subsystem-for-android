@@ -646,10 +646,9 @@ impl Worker {
                         | Some(dsa_protocol::control::envelope::Body::TaskFrames(_)) => {
                             eprintln!("control channel: no window takes task messages yet");
                         }
-                        Some(dsa_protocol::control::envelope::Body::CloseTask(_)) => {
-                            eprintln!(
-                                "control channel: dropping CloseTask, which only the host sends"
-                            );
+                        Some(dsa_protocol::control::envelope::Body::CloseTask(_))
+                        | Some(dsa_protocol::control::envelope::Body::LaunchApp(_)) => {
+                            eprintln!("control channel: dropping a request only the host sends");
                         }
                         None => {
                             eprintln!("control channel: dropping message with unknown body");

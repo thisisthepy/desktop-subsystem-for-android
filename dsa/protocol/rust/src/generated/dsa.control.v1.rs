@@ -102,10 +102,17 @@ pub struct CloseTask {
     #[prost(int32, tag = "1")]
     pub task_id: i32,
 }
+/// Host to guest: start the app's launcher activity as a new task in its own window. The
+/// agent answers with TaskUpdated once the task is there.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LaunchApp {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Envelope {
-    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9")]
+    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10")]
     pub body: ::core::option::Option<envelope::Body>,
 }
 /// Nested message and enum types in `Envelope`.
@@ -130,6 +137,8 @@ pub mod envelope {
         TaskFrames(super::TaskFrames),
         #[prost(message, tag = "9")]
         CloseTask(super::CloseTask),
+        #[prost(message, tag = "10")]
+        LaunchApp(super::LaunchApp),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.

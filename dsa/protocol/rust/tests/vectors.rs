@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use dsa_protocol::control::{
     envelope::Body, AuthChallenge, AuthProof, CloseTask, Envelope, Hello, HelloAccepted,
-    HelloRejected, Rect, RejectReason, Role, TaskFrames, TaskRemoved, TaskUpdated,
+    HelloRejected, LaunchApp, Rect, RejectReason, Role, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
 
@@ -119,6 +119,12 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
         (
             "close_task",
             wrap(Body::CloseTask(CloseTask { task_id: 42 })),
+        ),
+        (
+            "launch_app",
+            wrap(Body::LaunchApp(LaunchApp {
+                package_name: "com.example.notes".into(),
+            })),
         ),
         (
             "hello_rejected_authentication",

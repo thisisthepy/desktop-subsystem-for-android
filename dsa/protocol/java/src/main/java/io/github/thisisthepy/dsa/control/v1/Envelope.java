@@ -29,6 +29,7 @@ public  final class Envelope extends
     TASK_REMOVED(7),
     TASK_FRAMES(8),
     CLOSE_TASK(9),
+    LAUNCH_APP(10),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -53,6 +54,7 @@ public  final class Envelope extends
         case 7: return TASK_REMOVED;
         case 8: return TASK_FRAMES;
         case 9: return CLOSE_TASK;
+        case 10: return LAUNCH_APP;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -519,6 +521,56 @@ public  final class Envelope extends
    */
   private void clearCloseTask() {
     if (bodyCase_ == 9) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int LAUNCH_APP_FIELD_NUMBER = 10;
+  /**
+   * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+   */
+  @java.lang.Override
+  public boolean hasLaunchApp() {
+    return bodyCase_ == 10;
+  }
+  /**
+   * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.LaunchApp getLaunchApp() {
+    if (bodyCase_ == 10) {
+       return (io.github.thisisthepy.dsa.control.v1.LaunchApp) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.LaunchApp.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+   */
+  private void setLaunchApp(io.github.thisisthepy.dsa.control.v1.LaunchApp value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 10;
+  }
+  /**
+   * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+   */
+  private void mergeLaunchApp(io.github.thisisthepy.dsa.control.v1.LaunchApp value) {
+    value.getClass();
+  if (bodyCase_ == 10 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.LaunchApp.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.LaunchApp.newBuilder((io.github.thisisthepy.dsa.control.v1.LaunchApp) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 10;
+  }
+  /**
+   * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+   */
+  private void clearLaunchApp() {
+    if (bodyCase_ == 10) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -1067,6 +1119,54 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+     */
+    @java.lang.Override
+    public boolean hasLaunchApp() {
+      return instance.hasLaunchApp();
+    }
+    /**
+     * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.LaunchApp getLaunchApp() {
+      return instance.getLaunchApp();
+    }
+    /**
+     * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+     */
+    public Builder setLaunchApp(io.github.thisisthepy.dsa.control.v1.LaunchApp value) {
+      copyOnWrite();
+      instance.setLaunchApp(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+     */
+    public Builder setLaunchApp(
+        io.github.thisisthepy.dsa.control.v1.LaunchApp.Builder builderForValue) {
+      copyOnWrite();
+      instance.setLaunchApp(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+     */
+    public Builder mergeLaunchApp(io.github.thisisthepy.dsa.control.v1.LaunchApp value) {
+      copyOnWrite();
+      instance.mergeLaunchApp(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+     */
+    public Builder clearLaunchApp() {
+      copyOnWrite();
+      instance.clearLaunchApp();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -1094,10 +1194,12 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.TaskRemoved.class,
             io.github.thisisthepy.dsa.control.v1.TaskFrames.class,
             io.github.thisisthepy.dsa.control.v1.CloseTask.class,
+            io.github.thisisthepy.dsa.control.v1.LaunchApp.class,
           };
           java.lang.String info =
-              "\u0000\t\u0001\u0000\u0001\t\t\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003" +
-              "<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000";
+              "\u0000\n\u0001\u0000\u0001\n\n\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003" +
+              "<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<" +
+              "\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

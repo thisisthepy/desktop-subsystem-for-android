@@ -106,5 +106,16 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.CloseTask getCloseTask();
 
+  /**
+   * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+   * @return Whether the launchApp field is set.
+   */
+  boolean hasLaunchApp();
+  /**
+   * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+   * @return The launchApp.
+   */
+  io.github.thisisthepy.dsa.control.v1.LaunchApp getLaunchApp();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }
