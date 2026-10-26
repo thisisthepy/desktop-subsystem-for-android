@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <memory>
+#include <utility>
 #include <unordered_map>
 
 #include <sys/system_properties.h>
@@ -54,10 +56,13 @@ void logTrace(const std::vector<std::string>& lines) {
 
 }  // namespace
 
-TaskComposer::TaskComposer()
-    : mTrace(traceDetailRequested()), mReconnector([this] { reconnectLoop(); }) {}
+TaskComposer::TaskComposer(std::function<void()> onPresentStart)
+    : mTrace(traceDetailRequested()),
+      mReconnector([this] { reconnectLoop(); }),
+      mPipeline(std::move(onPresentStart)) {}
 
 TaskComposer::~TaskComposer() {
+    mPipeline.drain();
     {
         std::lock_guard<std::mutex> lock(mReconnectMutex);
         mStopping = true;
@@ -191,6 +196,15 @@ uint32_t TaskComposer::sharedHandleLocked(const BufferRef& buffer) {
 }
 
 void TaskComposer::present(Frame& frame) {
+    // The frame (its acquire fences among it) moves to the pipeline: SurfaceFlinger's next
+    // commands change the display's layers, not this frame.
+    auto owned = std::make_shared<Frame>(std::move(frame));
+    mPipeline.submit([this, owned] { compose(*owned); });
+}
+
+void TaskComposer::drain() { mPipeline.drain(); }
+
+void TaskComposer::compose(Frame& frame) {
     std::vector<std::vector<uint8_t>> outbox;
     std::optional<int64_t> refreshAt;
     {

@@ -15,6 +15,7 @@
 #include "channel_client.h"
 #include "channel_messages.h"
 #include "composer.h"
+#include "composer_client.h"
 #include "display.h"
 #include "log.h"
 #include "task_composer.h"
@@ -26,7 +27,9 @@ int main() {
     signal(SIGPIPE, SIG_IGN);
 
     const DisplayConfig config = DisplayConfig::fromProperties();
-    auto tasks = std::make_shared<TaskComposer>();
+    // The thread that sends frames to the host runs at the display's priority, as
+    // SurfaceFlinger's next present waits for it.
+    auto tasks = std::make_shared<TaskComposer>([] { raiseToDisplayPriority("present"); });
 
     ChannelClient channel(
         [tasks](const std::vector<uint8_t>& frame) {
