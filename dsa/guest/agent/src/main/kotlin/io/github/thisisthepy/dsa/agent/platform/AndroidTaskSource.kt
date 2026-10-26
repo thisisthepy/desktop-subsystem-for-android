@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Rect
 import io.github.thisisthepy.dsa.agent.Log
+import io.github.thisisthepy.dsa.agent.tasks.ScreenDp
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.tasks.TaskKind
 import io.github.thisisthepy.dsa.agent.tasks.TaskSnapshot
@@ -64,6 +65,7 @@ class AndroidTaskSource(
             bounds = fields.bounds(info)?.let { TaskBounds(it.left, it.top, it.right, it.bottom) } ?: TaskBounds.EMPTY,
             focused = fields.focused(info),
             densityDpi = fields.densityDpi(info) ?: 0,
+            screenDp = fields.screenDp(info),
         )
     }
 
@@ -92,10 +94,10 @@ class AndroidTaskSource(
 }
 
 /**
- * The task fields the SDK does not publish: TaskInfo.configuration (its density, and its
- * windowConfiguration's bounds and activity type) and TaskInfo.isFocused. A field that cannot be read is logged once and
- * read as unknown: no bounds, not focused, and not an app task, so nothing is reported that
- * the agent cannot describe.
+ * The task fields the SDK does not publish: TaskInfo.configuration (its density and screen
+ * size, and its windowConfiguration's bounds and activity type) and TaskInfo.isFocused. A
+ * field that cannot be read is logged once and read as unknown: no bounds, not focused, and
+ * not an app task, so nothing is reported that the agent cannot describe.
  */
 private class TaskFields(private val log: Log) {
     private val taskInfo = Class.forName("android.app.TaskInfo")
@@ -115,6 +117,16 @@ private class TaskFields(private val log: Log) {
     /** The density the task's configuration gives its app, as a host window asked for it. */
     fun densityDpi(info: ActivityManager.RunningTaskInfo): Int? =
         read("density") { (configuration!!.get(info) as android.content.res.Configuration).densityDpi }
+
+    /**
+     * The screen size the task's configuration gives its app, which the agent holds while
+     * the task's window is resized. Null while any of it is undefined (0).
+     */
+    fun screenDp(info: ActivityManager.RunningTaskInfo): ScreenDp? =
+        read("screen size") {
+            val config = configuration!!.get(info) as android.content.res.Configuration
+            ScreenDp(config.screenWidthDp, config.screenHeightDp, config.smallestScreenWidthDp)
+        }?.takeIf { it.widthDp > 0 && it.heightDp > 0 && it.smallestWidthDp > 0 }
 
     fun focused(info: ActivityManager.RunningTaskInfo): Boolean =
         read("focus") { isFocused!!.getBoolean(info) } ?: false
