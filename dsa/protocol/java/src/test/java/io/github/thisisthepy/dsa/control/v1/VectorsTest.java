@@ -213,6 +213,21 @@ public final class VectorsTest {
                         .setReason(RejectReason.REJECT_REASON_AUTHENTICATION_FAILED)
                         .setDetail("no proof"))
                 .build());
+        cases.put("request_guest_memory", Envelope.newBuilder()
+                .setRequestGuestMemory(RequestGuestMemory.getDefaultInstance())
+                .build());
+        cases.put("guest_memory", Envelope.newBuilder()
+                .setGuestMemory(GuestMemory.newBuilder()
+                        .setMemTotalKb(4015356)
+                        .setCachedKb(1503112)
+                        .setZramUsedKb(30720)
+                        .setTotalPssKb(330000)
+                        .addTopProcesses(ProcessMemory.newBuilder()
+                                .setPid(500)
+                                .setName("system")
+                                .setPssKb(180000)
+                                .setSwapPssKb(1000)))
+                .build());
         return cases;
     }
 

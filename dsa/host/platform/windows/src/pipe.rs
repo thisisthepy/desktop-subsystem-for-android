@@ -303,7 +303,7 @@ pub fn current_user_sid() -> io::Result<String> {
 }
 
 /// The user SID in `token`, as an `S-1-...` string.
-fn token_user_sid(token: &OwnedHandle) -> io::Result<String> {
+pub(crate) fn token_user_sid(token: &OwnedHandle) -> io::Result<String> {
     let mut needed = 0u32;
     // SAFETY: a size query.
     unsafe { GetTokenInformation(token.0, TokenUser, std::ptr::null_mut(), 0, &mut needed) };

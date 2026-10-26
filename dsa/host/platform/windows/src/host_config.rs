@@ -128,7 +128,52 @@ fn default_processors() -> u32 {
     4
 }
 fn default_page_reporting_order() -> u8 {
-    9
+    page_reporting_order_for_build(windows_build())
+}
+
+/// The free page reporting order for a Windows build, as WSL chooses it: 5 (128 KiB) from
+/// Windows 11 (build 22000) on, 9 (2 MiB) before it or when the build is unknown. A guest's
+/// free memory is scattered, so the smaller the pieces it may report, the more of it the
+/// host gets back.
+pub fn page_reporting_order_for_build(build: Option<u32>) -> u8 {
+    match build {
+        Some(build) if build >= 22000 => 5,
+        _ => 9,
+    }
+}
+
+/// The build number of the running Windows, from the registry.
+#[cfg(windows)]
+fn windows_build() -> Option<u32> {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
+    let wide = |text: &str| text.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let key = wide(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
+    let value = wide("CurrentBuildNumber");
+    let mut buffer = [0u16; 32];
+    let mut size = std::mem::size_of_val(&buffer) as u32;
+    // SAFETY: NUL-terminated names and a buffer of the size given.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            buffer.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if status != 0 {
+        return None;
+    }
+    let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+    String::from_utf16_lossy(&buffer[..len]).trim().parse().ok()
+}
+
+/// Off Windows (in tests) there is no build to read.
+#[cfg(not(windows))]
+fn windows_build() -> Option<u32> {
+    None
 }
 fn default_control_port() -> u32 {
     5000
@@ -207,7 +252,8 @@ pub struct HostConfig {
     #[serde(default)]
     pub user_sid: Option<String>,
     /// Free page reporting granularity as a page order: 9 (2 MiB) works on every Windows
-    /// build; 5 (128 KiB) returns memory more finely on recent builds.
+    /// build; 5 (128 KiB) returns memory more finely on recent builds. By default, 5 on
+    /// Windows 11 and later and 9 before.
     #[serde(default = "default_page_reporting_order")]
     pub page_reporting_order: u8,
     /// The vsock port the guest's channel daemon connects to.
