@@ -13,6 +13,7 @@
 //! - [`input`]: pointer input in a task's window, as the guest task receives it.
 //! - [`keys`]: key input in a task's window.
 //! - [`ime`]: text input through the host's input method in a task's window.
+//! - [`memory`]: how much memory a user's Android takes, in the guest and on the host.
 //! - [`compositor`]: platform-neutral graphics stream bookkeeping, renderer interfaces, and
 //!   which window each task and each frame goes to.
 
@@ -25,6 +26,7 @@ pub mod host_api_conformance;
 pub mod ime;
 pub mod input;
 pub mod keys;
+pub mod memory;
 pub mod resize_trace;
 pub mod session;
 pub mod tasks;

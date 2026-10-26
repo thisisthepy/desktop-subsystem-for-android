@@ -535,3 +535,27 @@ fn fr3_dsa_tasks_lists_the_tasks_android_shows_as_windows() {
          Task 8: com.example.app (com.example.app), 1080x1920, focused"
     );
 }
+
+#[test]
+fn nfr1_dsa_memory_is_parsed() {
+    assert_eq!(parse(&args("memory")).unwrap().command, Cmd::Memory);
+    assert_eq!(
+        parse(&args("memory --pipe p")).unwrap().endpoint.as_deref(),
+        Some("p")
+    );
+}
+
+#[test]
+fn nfr1_dsa_memory_says_what_it_knows_of_the_host_and_android() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let output = dsa(&endpoint, "memory");
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.starts_with("Host: 0 MiB in all"), "{text}");
+    assert!(
+        text.contains("no process of this Android is running"),
+        "{text}"
+    );
+    assert!(text.contains("Android: no report yet"), "{text}");
+}

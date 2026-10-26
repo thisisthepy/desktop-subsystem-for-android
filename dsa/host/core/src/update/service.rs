@@ -15,6 +15,7 @@ use super::store::{Fetch, ImageStore};
 use super::trial::{self, Boot, Outcome};
 use super::UpdateError;
 use crate::host_api::UserAndroid;
+use crate::memory::GuestMemoryReport;
 use crate::session::{Session, SessionState};
 use crate::tasks::{TaskRequest, TaskRequestError, TaskWatch};
 
@@ -230,6 +231,12 @@ impl UserAndroid for UpdatingAndroid {
     }
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
         UserAndroid::request(&*self.session, request)
+    }
+    fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        UserAndroid::guest_memory(&*self.session)
+    }
+    fn request_guest_memory(&self) -> Result<(), TaskRequestError> {
+        UserAndroid::request_guest_memory(&*self.session)
     }
 
     fn start(&self) {

@@ -33,6 +33,7 @@ use super::service::UpdateNotices;
 use super::store::{download_checked, DownloadFailure, Expected, Fetch};
 use super::{from_hex, to_hex};
 use crate::host_api::{ProgramUpdate, UpdateProgram, UserAndroid, UserAndroids};
+use crate::memory::GuestMemoryReport;
 use crate::session::SessionState;
 use crate::tasks::{TaskRequest, TaskRequestError, TaskWatch};
 
@@ -712,5 +713,11 @@ impl UserAndroid for WithProgramStatus {
     }
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
         self.android.request(request)
+    }
+    fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        self.android.guest_memory()
+    }
+    fn request_guest_memory(&self) -> Result<(), TaskRequestError> {
+        self.android.request_guest_memory()
     }
 }
