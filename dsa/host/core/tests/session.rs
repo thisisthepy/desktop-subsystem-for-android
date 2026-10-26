@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
+use dsa_host_core::keys::{keycode, meta, KeyAction, KeyEvent};
 use dsa_host_core::session::{
     GuestLauncher, Session, SessionConfig, SessionError, SessionEvent, SessionState, StopReason,
 };
@@ -967,6 +968,40 @@ fn fr5_pointer_input_while_the_guest_is_not_running_says_so() {
     let (session, _connector) = session_with(FakeLauncher::default(), WAIT);
     assert_eq!(
         session.pointer(&pointer_down(7)),
+        Err(SessionError::NotActive(SessionState::Stopped))
+    );
+}
+
+fn enter(task_id: i32, action: KeyAction) -> KeyEvent {
+    KeyEvent {
+        task_id,
+        action,
+        key_code: keycode::ENTER,
+        repeat_count: 0,
+        meta_state: meta::SHIFT_ON | meta::SHIFT_LEFT_ON,
+        event_time_ms: 42,
+        canceled: false,
+    }
+}
+
+#[test]
+fn fr16_key_input_reaches_the_guest_as_one_message_per_event() {
+    let (session, mut agent, _launcher) = active_session();
+    let down = enter(7, KeyAction::Down);
+    let up = enter(7, KeyAction::Up);
+    session.key(&down).expect("the down is sent");
+    session.key(&up).expect("the up is sent");
+    for expected in [down, up] {
+        let message = dsa_protocol::decode(&agent.recv(Some(WAIT)).unwrap()).unwrap();
+        assert_eq!(message.body, Some(Body::KeyEvent(expected.to_control())));
+    }
+}
+
+#[test]
+fn fr16_key_input_while_the_guest_is_not_running_says_so() {
+    let (session, _connector) = session_with(FakeLauncher::default(), WAIT);
+    assert_eq!(
+        session.key(&enter(7, KeyAction::Down)),
         Err(SessionError::NotActive(SessionState::Stopped))
     );
 }

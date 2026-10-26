@@ -161,5 +161,16 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.AppInfo getAppInfo();
 
+  /**
+   * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+   * @return Whether the keyEvent field is set.
+   */
+  boolean hasKeyEvent();
+  /**
+   * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+   * @return The keyEvent.
+   */
+  io.github.thisisthepy.dsa.control.v1.KeyEvent getKeyEvent();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

@@ -3,6 +3,7 @@ package io.github.thisisthepy.dsa.agent
 import io.github.thisisthepy.dsa.agent.channel.ChannelEndpoint
 import io.github.thisisthepy.dsa.agent.channel.ChannelLocator
 import io.github.thisisthepy.dsa.agent.requests.ResizeOutcome
+import io.github.thisisthepy.dsa.agent.input.InjectedKey
 import io.github.thisisthepy.dsa.agent.input.InjectedMotion
 import io.github.thisisthepy.dsa.agent.input.InputInjector
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
@@ -199,6 +200,15 @@ class FakeActions : TaskActions {
         endedLive += Triple(taskId, bounds, densityDpi)
         return ResizeOutcome.APPLIED
     }
+
+    /** Each task given the input focus, in order. */
+    val focused = mutableListOf<Int>()
+    var focusable = true
+
+    override fun focusTask(taskId: Int): Boolean {
+        focused += taskId
+        return focusable
+    }
 }
 
 class FakeWindowing(var acceptAfter: Int = 0) : WindowingControl {
@@ -232,6 +242,14 @@ class FakeInjector : InputInjector {
     override fun inject(motion: InjectedMotion): Boolean {
         if (refuse) return false
         injected += motion
+        return true
+    }
+
+    val keys = mutableListOf<InjectedKey>()
+
+    override fun injectKey(key: InjectedKey): Boolean {
+        if (refuse) return false
+        keys += key
         return true
     }
 }

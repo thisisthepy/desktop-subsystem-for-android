@@ -164,6 +164,31 @@ std::map<std::string, v1::Envelope> Cases() {
     event->set_buttons(32);
   }
   {
+    v1::KeyEvent* event = cases["key_event_ctrl_a_down"].mutable_key_event();
+    event->set_task_id(42);
+    event->set_action(v1::KEY_ACTION_DOWN);
+    event->set_key_code(29);
+    event->set_meta_state(0x3000);
+    event->set_event_time_ms(123456);
+  }
+  {
+    v1::KeyEvent* event = cases["key_event_backspace_repeat"].mutable_key_event();
+    event->set_task_id(42);
+    event->set_action(v1::KEY_ACTION_DOWN);
+    event->set_key_code(67);
+    event->set_repeat_count(3);
+    event->set_event_time_ms(500);
+  }
+  {
+    v1::KeyEvent* event = cases["key_event_canceled_up"].mutable_key_event();
+    event->set_task_id(7);
+    event->set_action(v1::KEY_ACTION_UP);
+    event->set_key_code(66);
+    event->set_meta_state(0x100000);
+    event->set_event_time_ms(4294967000u);
+    event->set_canceled(true);
+  }
+  {
     v1::HelloRejected* rejected = cases["hello_rejected_authentication"].mutable_hello_rejected();
     rejected->set_reason(v1::REJECT_REASON_AUTHENTICATION_FAILED);
     rejected->set_detail("no proof");

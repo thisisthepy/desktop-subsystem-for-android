@@ -30,6 +30,9 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
 - **Pointer input.** The host sends the mouse, touch and pen input of each task's window
   (`PointerEvent`, relative to the task). The agent injects it into the task at the
   place it last reported for the task (see below).
+- **Key input.** The host sends the keys pressed in each task's window (`KeyEvent`). The
+  agent gives the task the input focus if it does not hold it, and injects the key (see
+  below).
 - **The channel.** It reaches the host through the control daemon's binder service,
   `io.github.thisisthepy.dsa.channel.IChannel/default` (`dsa/guest/aidl/`). It looks for
   the service every second until the daemon is up, subscribes, and sends every app task
@@ -156,6 +159,23 @@ Injection rather than a uinput device: a uinput device needs `/dev/uinput` opene
 process the SELinux policy allows, which an app is not, and a mouse there reports movement,
 not places. Injection takes each event's place, source, tool and buttons as they are.
 
+## Key input
+
+The host sends one `KeyEvent` per key press, repeat and release, with Android's key code,
+the repeat count, the meta state (Shift, Ctrl, Alt and Meta with their sides, and the
+locks) and the time on the host's clock (`input/KeyInput.kt`).
+
+- Android sends a key to the focused window, so before the first press in a task that does
+  not hold the input focus, the agent focuses it (`IActivityTaskManager.setFocusedTask`).
+  Moving between host windows with the keyboard alone moves the guest's focus too.
+- The key is injected on the default display as `SOURCE_KEYBOARD` from the framework's
+  virtual keyboard, whose key character map is a full US keyboard, so a letter, digit or
+  punctuation key with its meta state types its character into a text field.
+- A held key keeps the time it went down; its repeats and its release are placed after it
+  by the host's times. A release for a key the agent never saw go down is dropped. A
+  release the host marks canceled (the window lost the focus) carries `FLAG_CANCELED`, so
+  the app lets the key go without acting on it.
+
 ## The home activity
 
 Android always keeps a home activity at the bottom of the display, and gives it input focus
@@ -191,7 +211,8 @@ A platform app may use framework interfaces the SDK does not publish. The agent 
 | `ActivityOptions.setLaunchWindowingMode` | A freeform window for a launched app (reflection) |
 | `ServiceManager.checkService` | The control daemon's service (reflection) |
 | `Binder.markVintfStability` | Marking the listener the daemon calls as a stable interface (reflection) |
-| `InputManager.injectInputEvent`, `MotionEvent.setActionButton` | Injecting the host's pointer input (reflection) |
+| `InputManager.injectInputEvent`, `MotionEvent.setActionButton`, `InputEvent.setDisplayId` | Injecting the host's pointer and key input (reflection) |
+| `IActivityTaskManager.setFocusedTask` | Giving a task the input focus before its keys |
 
 `hidden-api/` declares the classes the agent links against. It is compile-only: at run time
 the classes are the guest's own.

@@ -19,6 +19,7 @@ use dsa_host_core::compositor::FakeRenderer;
 use dsa_host_core::host_api::{UserAndroid, UserAndroids};
 use dsa_host_core::host_api_conformance::{FakeAndroid, FakeAndroids, RunningService};
 use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
+use dsa_host_core::keys::{keycode, meta, KeyAction, KeyEvent};
 use dsa_host_core::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest};
 use dsa_host_windows::app_window::window::OpenWindow;
 use dsa_host_windows::app_window::{self, HostSetup};
@@ -32,10 +33,14 @@ use dsa_transport::{Connection, Connector, Listener, TransportError};
 use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
 use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+    VK_A, VK_BACK, VK_CONTROL, VK_MENU, VK_OEM_1, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_TAB,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetWindowTextW, GetWindowThreadProcessId, IsWindow, IsWindowVisible,
     PostMessageW, SendMessageW, SetWindowPos, SWP_NOMOVE, SWP_NOZORDER, WM_CLOSE, WM_ENTERSIZEMOVE,
-    WM_EXITSIZEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP,
+    WM_EXITSIZEMOVE, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -909,14 +914,14 @@ fn fr5_input_while_the_service_is_away_is_dropped_and_input_after_it_returns_arr
     let thread = thread::spawn(move || serve_input(Box::new(connector), received, None));
     let event =
         |x: f32| PointerEvent::new(7, PointerAction::HoverMove, PointerTool::Mouse, (x, 1.0));
-    events.send(event(1.0)).unwrap();
+    events.send(event(1.0).into()).unwrap();
     thread::sleep(Duration::from_millis(100));
     up.store(true, Ordering::SeqCst);
     androids.android(USER).unwrap().start();
     let android = androids.of(USER).unwrap();
     // The thread tries the service again after a short wait; input from then on arrives.
     let delivered = wait_for("input to arrive once the service is back", || {
-        events.send(event(2.0)).unwrap();
+        events.send(event(2.0).into()).unwrap();
         thread::sleep(Duration::from_millis(50));
         let given = android.pointers.lock().unwrap().clone();
         (!given.is_empty()).then_some(given)
@@ -927,4 +932,152 @@ fn fr5_input_while_the_service_is_away_is_dropped_and_input_after_it_returns_arr
     );
     drop(events);
     thread.join().unwrap();
+}
+
+/// The `lparam` of a key message: a repeat count of one, the scan code, the extended-key
+/// flag, and for a release the previous-state and transition bits.
+fn key_lparam(scan: u32, extended: bool, down: bool) -> isize {
+    let mut bits = 1usize | ((scan as usize) << 16);
+    if extended {
+        bits |= 1 << 24;
+    }
+    if !down {
+        bits |= (1 << 30) | (1 << 31);
+    }
+    bits as isize
+}
+
+/// Sends a key message to the window and returns once the window has handled it.
+fn send_key(hwnd: HWND, message: u32, vk: u16, scan: u32, extended: bool) {
+    let down = matches!(message, WM_KEYDOWN | WM_SYSKEYDOWN);
+    unsafe { SendMessageW(hwnd, message, vk as usize, key_lparam(scan, extended, down)) };
+}
+
+/// Waits until the fake Android has been given `count` key events, and returns them with
+/// the lock bits cleared, since those follow the locks of the machine the test runs on.
+fn keys(running: &Running, count: usize) -> Vec<KeyEvent> {
+    wait_for(&format!("{count} key events in Android"), || {
+        let given: Vec<KeyEvent> = running
+            .android
+            .keys
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| KeyEvent {
+                meta_state: event.meta_state & !meta::LOCKS,
+                ..*event
+            })
+            .collect();
+        (given.len() >= count).then_some(given)
+    })
+}
+
+fn one_task_window(running: &Running) -> HWND {
+    running.android.start();
+    running
+        .android
+        .publish(TaskEvent::Updated(task(7, "Notes", 400, 300)));
+    windows_of(running, 1)[0].hwnd as HWND
+}
+
+#[test]
+fn fr16_keys_in_a_task_window_reach_its_task_with_their_codes_and_modifiers() {
+    let running = start(None);
+    let hwnd = one_task_window(&running);
+    // Ctrl+A, then a held Backspace that repeats, then the keypad's Enter.
+    send_key(hwnd, WM_KEYDOWN, VK_CONTROL, 0x1d, false);
+    send_key(hwnd, WM_KEYDOWN, VK_A, 0x1e, false);
+    send_key(hwnd, WM_KEYUP, VK_A, 0x1e, false);
+    send_key(hwnd, WM_KEYUP, VK_CONTROL, 0x1d, false);
+    send_key(hwnd, WM_KEYDOWN, VK_BACK, 0x0e, false);
+    send_key(hwnd, WM_KEYDOWN, VK_BACK, 0x0e, false);
+    send_key(hwnd, WM_KEYUP, VK_BACK, 0x0e, false);
+    send_key(hwnd, WM_KEYDOWN, VK_RETURN, 0x1c, true);
+    send_key(hwnd, WM_KEYUP, VK_RETURN, 0x1c, true);
+    let ctrl = meta::CTRL_ON | meta::CTRL_LEFT_ON;
+    let summary: Vec<(i32, KeyAction, u32, u32, u32)> = keys(&running, 9)
+        .iter()
+        .map(|event| {
+            (
+                event.task_id,
+                event.action,
+                event.key_code,
+                event.repeat_count,
+                event.meta_state,
+            )
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            (7, KeyAction::Down, keycode::CTRL_LEFT, 0, ctrl),
+            (7, KeyAction::Down, keycode::A, 0, ctrl),
+            (7, KeyAction::Up, keycode::A, 0, ctrl),
+            (7, KeyAction::Up, keycode::CTRL_LEFT, 0, 0),
+            (7, KeyAction::Down, keycode::DEL, 0, 0),
+            (7, KeyAction::Down, keycode::DEL, 1, 0),
+            (7, KeyAction::Up, keycode::DEL, 0, 0),
+            (7, KeyAction::Down, keycode::NUMPAD_ENTER, 0, 0),
+            (7, KeyAction::Up, keycode::NUMPAD_ENTER, 0, 0),
+        ]
+    );
+}
+
+#[test]
+fn fr16_right_modifiers_and_alt_keys_reach_the_task() {
+    let running = start(None);
+    let hwnd = one_task_window(&running);
+    send_key(hwnd, WM_KEYDOWN, VK_SHIFT, 0x36, false);
+    send_key(hwnd, WM_KEYDOWN, VK_OEM_1, 0x27, false);
+    send_key(hwnd, WM_KEYUP, VK_OEM_1, 0x27, false);
+    send_key(hwnd, WM_KEYUP, VK_SHIFT, 0x36, false);
+    // Alt comes as system key messages.
+    send_key(hwnd, WM_SYSKEYDOWN, VK_MENU, 0x38, false);
+    send_key(hwnd, WM_SYSKEYDOWN, VK_TAB, 0x0f, false);
+    send_key(hwnd, WM_SYSKEYUP, VK_TAB, 0x0f, false);
+    send_key(hwnd, WM_KEYUP, VK_MENU, 0x38, false);
+    let shift = meta::SHIFT_ON | meta::SHIFT_RIGHT_ON;
+    let alt = meta::ALT_ON | meta::ALT_LEFT_ON;
+    let summary: Vec<(KeyAction, u32, u32)> = keys(&running, 8)
+        .iter()
+        .map(|event| (event.action, event.key_code, event.meta_state))
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            (KeyAction::Down, keycode::SHIFT_RIGHT, shift),
+            (KeyAction::Down, keycode::SEMICOLON, shift),
+            (KeyAction::Up, keycode::SEMICOLON, shift),
+            (KeyAction::Up, keycode::SHIFT_RIGHT, 0),
+            (KeyAction::Down, keycode::ALT_LEFT, alt),
+            (KeyAction::Down, keycode::TAB, alt),
+            (KeyAction::Up, keycode::TAB, alt),
+            (KeyAction::Up, keycode::ALT_LEFT, 0),
+        ]
+    );
+}
+
+#[test]
+fn fr16_losing_the_focus_releases_every_key_still_held() {
+    let running = start(None);
+    let hwnd = one_task_window(&running);
+    send_key(hwnd, WM_KEYDOWN, VK_SHIFT, 0x2a, false);
+    send_key(hwnd, WM_KEYDOWN, VK_RIGHT, 0x4d, true);
+    unsafe { SendMessageW(hwnd, WM_KILLFOCUS, 0, 0) };
+    let given = keys(&running, 4);
+    let released: Vec<(KeyAction, u32, bool)> = given[2..]
+        .iter()
+        .map(|event| (event.action, event.key_code, event.canceled))
+        .collect();
+    assert_eq!(
+        released,
+        vec![
+            (KeyAction::Up, keycode::DPAD_RIGHT, true),
+            (KeyAction::Up, keycode::SHIFT_LEFT, true),
+        ]
+    );
+    // The real releases, which arrive wherever the focus went, are not sent again.
+    send_key(hwnd, WM_KEYUP, VK_RIGHT, 0x4d, true);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(running.android.keys.lock().unwrap().len(), 4);
 }
