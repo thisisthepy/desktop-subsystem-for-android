@@ -3,9 +3,33 @@
 
 #include "composer_client.h"
 
+#include <sched.h>
+
+#include <cerrno>
+#include <cstring>
+
 #include "log.h"
 
 namespace dsa::hwc {
+
+void raiseToDisplayPriority(const char* what) {
+    // The priority SurfaceFlinger's own main thread runs at: a display thread that is
+    // not real-time waits behind every busy normal thread in the composer's cpuset, and
+    // SurfaceFlinger then fakes vsync and every app's frame starts up to a second late.
+    sched_param param{};
+    param.sched_priority = kDisplaySchedPriority;
+    if (sched_setscheduler(0, SCHED_FIFO | SCHED_RESET_ON_FORK, &param) != 0) {
+        HWC_LOGW("cannot make the %s thread real-time (%s); vsync may come late under load",
+                 what, strerror(errno));
+    }
+}
+
+void makeBinderRealtime(AIBinder* binder) {
+    // Calls from SurfaceFlinger's real-time threads are served at real-time priority too, so
+    // a present is not left waiting behind normal threads while SurfaceFlinger waits on it.
+    AIBinder_setMinSchedulerPolicy(binder, SCHED_FIFO, kDisplaySchedPriority);
+    AIBinder_setInheritRt(binder, true);
+}
 
 namespace common = aidl::android::hardware::graphics::common;
 using composer3::CommandResultPayload;
@@ -36,11 +60,16 @@ void addError(std::vector<CommandResultPayload>* results, int32_t index, int32_t
 
 ComposerClient::ComposerClient(std::shared_ptr<TaskComposer> tasks, const DisplayConfig& config)
     : mTasks(std::move(tasks)), mDisplay(config) {
-    mVsync = std::make_unique<VsyncThread>(config.vsyncPeriodNanos, [this](int64_t timestamp) {
-        if (auto cb = callback()) {
-            cb->onVsync(kDisplayId, timestamp, mDisplay.config().vsyncPeriodNanos);
-        }
-    });
+    // The vsync thread touches only mCallbackMutex, never mMutex, so a present that waits on
+    // the host never holds a tick back. onVsync is a oneway call.
+    mVsync = std::make_unique<VsyncThread>(
+        config.vsyncPeriodNanos,
+        [this](int64_t timestamp) {
+            if (auto cb = callback()) {
+                cb->onVsync(kDisplayId, timestamp, mDisplay.config().vsyncPeriodNanos);
+            }
+        },
+        [] { raiseToDisplayPriority("vsync"); });
 }
 
 ComposerClient::~ComposerClient() {

@@ -24,6 +24,7 @@ ndk::ScopedAStatus Composer::createClient(std::shared_ptr<composer3::IComposerCl
         }
     });
     mClient = client;
+    makeBinderRealtime(client->asBinder().get());
     *out = client;
     HWC_LOGI("SurfaceFlinger connected: one %dx%d display at %d dpi", mConfig.width, mConfig.height,
              mConfig.dpi);
