@@ -8,8 +8,8 @@
 // A connection carries requests and their responses, until the client sends WatchTasks.
 // From the answer to that request on, the connection carries only TaskEvent frames from
 // the service; a client that sends anything more on it is disconnected. In the same way,
-// from the answer to StreamInput on, the connection carries only PointerEvent and KeyEvent
-// frames from the client, and the service answers none of them.
+// from the answer to StreamInput on, the connection carries only PointerEvent, KeyEvent,
+// ImeComposition and ImeCommit frames from the client, and the service answers none of them.
 //
 // The caller's identity is the user the operating system reports for the connection.
 // Nothing in these messages names a user, so a client cannot claim to be someone else, and
@@ -140,7 +140,7 @@ message SetTaskDensity {
 }
 
 // Turns the connection into a stream of input for the caller's Android: after the answer
-// (Done), the client sends only PointerEvent and KeyEvent frames, which the service passes on
+// (Done), the client sends only PointerEvent, KeyEvent, ImeComposition and ImeCommit frames, which the service passes on
 // as they come, without answering them. Input is never waited on, so a pointer that moves
 // fast is not held back by the answers.
 message StreamInput {}
@@ -222,6 +222,30 @@ message KeyEvent {
   bool canceled = 7;
 }
 
+// The text the host's input method is composing in a task's window, sent on a connection that
+// streams input. It replaces the whole composition; an empty `text` removes it.
+message ImeComposition {
+  int32 task_id = 1;
+  string text = 2;
+  // Where the cursor is in `text`, in UTF-16 code units from its start.
+  uint32 cursor = 3;
+}
+
+// Text typed in a task's window, sent on a connection that streams input: what the input
+// method committed, or a character a key typed without one. It takes the place of the
+// composition, which ends.
+message ImeCommit {
+  int32 task_id = 1;
+  string text = 2;
+}
+
+// Where the cursor of the editor focused in a task is, in the task's own pixels from its top
+// left corner, which are its window's client pixels.
+message ImeCursor {
+  int32 task_id = 1;
+  Rect cursor = 2;
+}
+
 // A rectangle in Android display pixels: left and top inclusive, right and bottom
 // exclusive.
 message Rect {
@@ -281,6 +305,7 @@ message TaskEvent {
     TaskRemoved removed = 2;
     TaskFrames frames = 3;
     AppInfo app = 4;
+    ImeCursor ime_cursor = 5;
   }
 }
 
@@ -386,5 +411,7 @@ message Envelope {
     TaskEvent task_event = 6;
     PointerEvent pointer_event = 7;
     KeyEvent key_event = 8;
+    ImeComposition ime_composition = 9;
+    ImeCommit ime_commit = 10;
   }
 }

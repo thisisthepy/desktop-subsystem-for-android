@@ -161,10 +161,18 @@ writes its messages to `%LOCALAPPDATA%\DSA\logs\dsa-wm.log`. Earlier releases ca
   which answers none of it, so a fast pointer is never held back.
 - The keys pressed in the window that has the keyboard focus go to its task on the same
   connection, as Android key codes with their repeats and with Shift, Ctrl, Alt and the
-  Windows key (each with its side) and the locks. Letters, digits and punctuation go as
-  keys too, so typing reaches a text field; a key the input method is composing with stays
-  with the input method. Alt+F4 still closes the window. When the window loses the focus,
-  every key still held is released in Android, so none stays down there.
+  Windows key (each with its side) and the locks: the keys that type nothing or a control
+  character (arrows, Enter, Backspace, Delete, Tab, Esc, function keys, Ctrl and Alt
+  shortcuts). Alt+F4 still closes the window. When the window loses the focus, every key
+  still held is released in Android, so none stays down there.
+- Text goes to the task as text, on the same connection: what the Windows input method
+  composes (the composing text with its cursor, which the Android editor shows underlined)
+  and commits, and every character a key types without it, so any keyboard layout types what
+  its keys show. A key that types a character is never also sent as a key. The window takes
+  the input method through IMM32, which the text services framework serves every input
+  method to, the Microsoft Korean IME included. It hides the input method's own composition
+  window, since the Android editor shows the composition, and places the candidate list
+  below the cursor of the focused Android editor, which the agent reports.
 - Without a GPU device, the windows still open and close with their tasks but stay
   empty, and the log says why.
 

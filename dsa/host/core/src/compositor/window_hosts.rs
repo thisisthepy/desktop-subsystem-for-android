@@ -80,6 +80,11 @@ pub enum ToHost {
         height: u32,
         max: Option<(u32, u32)>,
     },
+    /// Where the cursor of the task's focused editor is, in the window's client pixels.
+    ImeCursor {
+        task_id: i32,
+        cursor: crate::ime::ImeCursor,
+    },
 }
 
 impl ToHost {
@@ -89,6 +94,7 @@ impl ToHost {
             | ToHost::Retitle { task_id, .. }
             | ToHost::Resize { task_id, .. }
             | ToHost::TaskSize { task_id, .. }
+            | ToHost::ImeCursor { task_id, .. }
             | ToHost::Close { task_id } => *task_id,
         }
     }
@@ -327,6 +333,10 @@ impl WindowHosts {
                 width: *width,
                 height: *height,
                 max: *max,
+            }),
+            WindowChange::ImeCursor { task_id, cursor } => self.forward(ToHost::ImeCursor {
+                task_id: *task_id,
+                cursor: *cursor,
             }),
         }
     }
@@ -640,6 +650,15 @@ pub fn to_wire(message: &ToHost) -> Body {
                 max_height,
             })
         }
+        ToHost::ImeCursor { task_id, cursor } => {
+            Body::ImeCursor(dsa_protocol::window_host::types::ImeCursor {
+                task_id,
+                left: cursor.left,
+                top: cursor.top,
+                right: cursor.right,
+                bottom: cursor.bottom,
+            })
+        }
     }
 }
 
@@ -671,6 +690,15 @@ pub fn to_host_from_wire(body: &Body) -> Option<ToHost> {
             height: size.height,
             max: (size.max_width > 0 && size.max_height > 0)
                 .then_some((size.max_width, size.max_height)),
+        },
+        Body::ImeCursor(cursor) => ToHost::ImeCursor {
+            task_id: cursor.task_id,
+            cursor: crate::ime::ImeCursor {
+                left: cursor.left,
+                top: cursor.top,
+                right: cursor.right,
+                bottom: cursor.bottom,
+            },
         },
         _ => return None,
     })
@@ -1160,6 +1188,15 @@ mod tests {
                 width: 600,
                 height: 400,
                 max: None,
+            },
+            ToHost::ImeCursor {
+                task_id: 7,
+                cursor: crate::ime::ImeCursor {
+                    left: 12,
+                    top: 30,
+                    right: 14,
+                    bottom: 60,
+                },
             },
         ] {
             assert_eq!(to_host_from_wire(&to_wire(&message)), Some(message));

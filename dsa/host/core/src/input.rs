@@ -204,11 +204,19 @@ impl PointerEvent {
     }
 }
 
-/// One event of a task window's input, of either kind, in the order the window saw them.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// One event of a task window's input, of any kind, in the order the window saw them.
+#[derive(Debug, Clone, PartialEq)]
 pub enum InputEvent {
     Pointer(PointerEvent),
     Key(crate::keys::KeyEvent),
+    /// Text the window's input method composed or committed, or a key typed.
+    Ime(crate::ime::ImeEvent),
+}
+
+impl From<crate::ime::ImeEvent> for InputEvent {
+    fn from(event: crate::ime::ImeEvent) -> InputEvent {
+        InputEvent::Ime(event)
+    }
 }
 
 impl From<PointerEvent> for InputEvent {

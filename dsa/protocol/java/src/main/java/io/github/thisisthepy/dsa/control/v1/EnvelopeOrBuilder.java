@@ -172,5 +172,38 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.KeyEvent getKeyEvent();
 
+  /**
+   * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+   * @return Whether the imeComposition field is set.
+   */
+  boolean hasImeComposition();
+  /**
+   * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+   * @return The imeComposition.
+   */
+  io.github.thisisthepy.dsa.control.v1.ImeComposition getImeComposition();
+
+  /**
+   * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+   * @return Whether the imeCommit field is set.
+   */
+  boolean hasImeCommit();
+  /**
+   * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+   * @return The imeCommit.
+   */
+  io.github.thisisthepy.dsa.control.v1.ImeCommit getImeCommit();
+
+  /**
+   * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+   * @return Whether the imeCursor field is set.
+   */
+  boolean hasImeCursor();
+  /**
+   * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+   * @return The imeCursor.
+   */
+  io.github.thisisthepy.dsa.control.v1.ImeCursor getImeCursor();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

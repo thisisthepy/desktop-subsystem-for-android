@@ -95,7 +95,7 @@ pub struct SetTaskDensity {
     pub density_dpi: u32,
 }
 /// Turns the connection into a stream of input for the caller's Android: after the answer
-/// (Done), the client sends only PointerEvent and KeyEvent frames, which the service passes on
+/// (Done), the client sends only PointerEvent, KeyEvent, ImeComposition and ImeCommit frames, which the service passes on
 /// as they come, without answering them. Input is never waited on, so a pointer that moves
 /// fast is not held back by the answers.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -155,6 +155,37 @@ pub struct KeyEvent {
     /// was held.
     #[prost(bool, tag = "7")]
     pub canceled: bool,
+}
+/// The text the host's input method is composing in a task's window, sent on a connection that
+/// streams input. It replaces the whole composition; an empty `text` removes it.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImeComposition {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(string, tag = "2")]
+    pub text: ::prost::alloc::string::String,
+    /// Where the cursor is in `text`, in UTF-16 code units from its start.
+    #[prost(uint32, tag = "3")]
+    pub cursor: u32,
+}
+/// Text typed in a task's window, sent on a connection that streams input: what the input
+/// method committed, or a character a key typed without one. It takes the place of the
+/// composition, which ends.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImeCommit {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(string, tag = "2")]
+    pub text: ::prost::alloc::string::String,
+}
+/// Where the cursor of the editor focused in a task is, in the task's own pixels from its top
+/// left corner, which are its window's client pixels.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImeCursor {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(message, optional, tag = "2")]
+    pub cursor: ::core::option::Option<Rect>,
 }
 /// A rectangle in Android display pixels: left and top inclusive, right and bottom
 /// exclusive.
@@ -229,7 +260,7 @@ pub struct AppInfo {
 /// A change to the tasks of the caller's Android, sent after the answer to WatchTasks.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TaskEvent {
-    #[prost(oneof = "task_event::Body", tags = "1, 2, 3, 4")]
+    #[prost(oneof = "task_event::Body", tags = "1, 2, 3, 4, 5")]
     pub body: ::core::option::Option<task_event::Body>,
 }
 /// Nested message and enum types in `TaskEvent`.
@@ -244,6 +275,8 @@ pub mod task_event {
         Frames(super::TaskFrames),
         #[prost(message, tag = "4")]
         App(super::AppInfo),
+        #[prost(message, tag = "5")]
+        ImeCursor(super::ImeCursor),
     }
 }
 /// The answer to ListTasks and WatchTasks: the tasks there are now.
@@ -369,7 +402,7 @@ pub mod response {
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
-    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5, 6, 7, 8")]
+    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10")]
     pub body: ::core::option::Option<envelope::Body>,
 }
 /// Nested message and enum types in `Envelope`.
@@ -392,6 +425,10 @@ pub mod envelope {
         PointerEvent(super::PointerEvent),
         #[prost(message, tag = "8")]
         KeyEvent(super::KeyEvent),
+        #[prost(message, tag = "9")]
+        ImeComposition(super::ImeComposition),
+        #[prost(message, tag = "10")]
+        ImeCommit(super::ImeCommit),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.

@@ -6,6 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use dsa_host_core::handshake::ControlHandshake;
+use dsa_host_core::ime::{ImeCursor, ImeEvent};
 use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use dsa_host_core::keys::{keycode, meta, KeyAction, KeyEvent};
 use dsa_host_core::session::{
@@ -1003,6 +1004,80 @@ fn fr16_key_input_while_the_guest_is_not_running_says_so() {
     assert_eq!(
         session.key(&enter(7, KeyAction::Down)),
         Err(SessionError::NotActive(SessionState::Stopped))
+    );
+}
+
+#[test]
+fn fr6_text_input_reaches_the_guest_as_one_message_per_change() {
+    let (session, mut agent, _launcher) = active_session();
+    let composing = ImeEvent::Composition {
+        task_id: 7,
+        text: "\u{d55c}".into(),
+        cursor: 1,
+    };
+    let commit = ImeEvent::Commit {
+        task_id: 7,
+        text: "\u{d55c}".into(),
+    };
+    session.ime(&composing).expect("the composition is sent");
+    session.ime(&commit).expect("the commit is sent");
+    for expected in [composing, commit] {
+        let message = dsa_protocol::decode(&agent.recv(Some(WAIT)).unwrap()).unwrap();
+        assert_eq!(message.body, Some(expected.to_control()));
+    }
+}
+
+#[test]
+fn fr6_text_input_while_the_guest_is_not_running_says_so() {
+    let (session, _connector) = session_with(FakeLauncher::default(), WAIT);
+    assert_eq!(
+        session.ime(&ImeEvent::Commit {
+            task_id: 7,
+            text: "a".into()
+        }),
+        Err(SessionError::NotActive(SessionState::Stopped))
+    );
+}
+
+#[test]
+fn fr6_the_cursor_of_a_tasks_editor_reaches_a_watcher() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_tasks();
+    send_body(&mut agent, task_updated(7, "Clock"));
+    let cursor = Body::ImeCursor(dsa_protocol::control::ImeCursor {
+        task_id: 7,
+        cursor: Some(dsa_protocol::control::Rect {
+            left: 12,
+            top: 30,
+            right: 14,
+            bottom: 60,
+        }),
+    });
+    send_body(&mut agent, cursor.clone());
+    // The same place again is not news.
+    send_body(&mut agent, cursor);
+    send_body(
+        &mut agent,
+        Body::TaskRemoved(dsa_protocol::control::TaskRemoved { task_id: 7 }),
+    );
+    let events: Vec<TaskEvent> = (0..3)
+        .map(|_| watch.events.recv_timeout(WAIT).expect("a task event"))
+        .collect();
+    assert_eq!(
+        events,
+        vec![
+            TaskEvent::Updated(clock(7, "Clock")),
+            TaskEvent::ImeCursor {
+                task_id: 7,
+                cursor: ImeCursor {
+                    left: 12,
+                    top: 30,
+                    right: 14,
+                    bottom: 60,
+                },
+            },
+            TaskEvent::Removed { task_id: 7 },
+        ]
     );
 }
 

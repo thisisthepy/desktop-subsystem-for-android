@@ -264,6 +264,36 @@ message KeyEvent {
   bool canceled = 7;
 }
 
+// Host to guest: the text the host's input method is composing in a task's window, while the
+// window has the keyboard focus. Each message replaces the whole composition: the agent puts
+// `text` into the focused editor as its composing text (underlined, not yet typed), in place
+// of the previous composition. An empty `text` removes the composition: the user deleted it
+// or the input method canceled it.
+message ImeComposition {
+  int32 task_id = 1;
+  string text = 2;
+  // Where the cursor is in `text`, in UTF-16 code units from its start: 0 before the first
+  // character, the length of `text` after the last.
+  uint32 cursor = 3;
+}
+
+// Host to guest: text the user typed in a task's window: what the host's input method
+// committed, or a character a key typed without one. The agent commits it to the focused
+// editor, in place of the composition if there is one, and the composition ends.
+message ImeCommit {
+  int32 task_id = 1;
+  string text = 2;
+}
+
+// Guest to host, from the agent: where the cursor of the editor focused in a task is, in the
+// task's own pixels from its top left corner (where a pointer event's place is measured from),
+// so the host can put its input method's windows (the candidate list, say) beside it. Sent
+// when the editor gains the focus and when its cursor moves.
+message ImeCursor {
+  int32 task_id = 1;
+  Rect cursor = 2;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -282,5 +312,8 @@ message Envelope {
     PointerEvent pointer_event = 13;
     AppInfo app_info = 15;
     KeyEvent key_event = 16;
+    ImeComposition ime_composition = 17;
+    ImeCommit ime_commit = 18;
+    ImeCursor ime_cursor = 19;
   }
 }

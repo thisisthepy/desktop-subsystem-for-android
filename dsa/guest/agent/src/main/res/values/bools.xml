@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The input method manager reads isDefault from a resource, not a literal. -->
+    <bool name="host_input_method_is_default">true</bool>
+</resources>

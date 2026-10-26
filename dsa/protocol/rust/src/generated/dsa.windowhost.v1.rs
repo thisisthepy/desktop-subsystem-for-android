@@ -198,12 +198,27 @@ pub struct TaskSize {
     #[prost(uint32, tag = "5")]
     pub max_height: u32,
 }
+/// Window manager to window host: where the cursor of the editor focused in the task is, in the
+/// window's client pixels, so the window puts the input method's windows beside it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImeCursor {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(int32, tag = "2")]
+    pub left: i32,
+    #[prost(int32, tag = "3")]
+    pub top: i32,
+    #[prost(int32, tag = "4")]
+    pub right: i32,
+    #[prost(int32, tag = "5")]
+    pub bottom: i32,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -247,6 +262,8 @@ pub mod envelope {
         WindowDragging(super::WindowDragging),
         #[prost(message, tag = "18")]
         TaskSize(super::TaskSize),
+        #[prost(message, tag = "19")]
+        ImeCursor(super::ImeCursor),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
