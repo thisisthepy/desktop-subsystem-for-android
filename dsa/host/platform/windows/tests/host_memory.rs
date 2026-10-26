@@ -55,7 +55,11 @@ fn nfr1_the_window_processes_are_the_users_own() {
         Some(HostRole::AppWindow)
     );
     assert_eq!(
-        role_of(&process(13, WINDOW_MANAGER, OTHER_USER, 508), USER, Some(VM)),
+        role_of(
+            &process(13, WINDOW_MANAGER, OTHER_USER, 508),
+            USER,
+            Some(VM)
+        ),
         None
     );
     assert_eq!(

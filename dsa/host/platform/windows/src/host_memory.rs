@@ -190,7 +190,11 @@ mod system {
         {
             return Ok(sid_text);
         }
-        Ok(format!("{}\\{}", wide_to_string(&domain), wide_to_string(&name)))
+        Ok(format!(
+            "{}\\{}",
+            wide_to_string(&domain),
+            wide_to_string(&name)
+        ))
     }
 
     fn measure(pid: u32, exe: &str) -> Option<ProcessInfo> {

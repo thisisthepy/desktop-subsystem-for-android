@@ -302,7 +302,11 @@ fn nfr1_the_service_logs_one_memory_line_for_each_running_android() {
         "{}",
         lines[0]
     );
-    assert!(lines[0].contains("guest 2048/4096 MiB used"), "{}", lines[0]);
+    assert!(
+        lines[0].contains("guest 2048/4096 MiB used"),
+        "{}",
+        lines[0]
+    );
 
     setup.session.stop();
     assert!(setup.session.wait_for(SessionState::Stopped, WAIT));

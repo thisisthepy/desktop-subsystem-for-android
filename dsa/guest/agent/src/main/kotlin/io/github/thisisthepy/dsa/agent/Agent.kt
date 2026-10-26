@@ -77,7 +77,7 @@ class Agent(
         log = log,
     )
     private val memoryReporter = memory?.let {
-        MemoryReporter(it, scheduler, log, connected = { channel.connected }, send = { frame -> channel.send(frame) })
+        MemoryReporter(it, scheduler, log, isConnected = { channel.connected }, send = { frame -> channel.send(frame) })
     }
     private val freeform = FreeformSetup(windowing, scheduler, log)
     private val arranger = TaskArranger(actions, windowing::displaySize, log)

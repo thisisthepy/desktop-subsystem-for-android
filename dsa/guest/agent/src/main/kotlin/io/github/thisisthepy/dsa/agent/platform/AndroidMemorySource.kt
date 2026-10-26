@@ -38,7 +38,8 @@ class AndroidMemorySource(context: Context) : MemorySource {
                 pid = running[i].pid,
                 name = running[i].processName,
                 pssKb = memory.totalPss.toLong(),
-                swapPssKb = memory.totalSwappedOutPss.toLong(),
+                // "summary.total-swap" is the swapped-out PSS in KiB, as dumpsys meminfo shows it.
+                swapPssKb = memory.getMemoryStat("summary.total-swap")?.toLongOrNull() ?: 0,
             )
         }
     }

@@ -124,7 +124,7 @@ class MemoryReporter(
     private val source: MemorySource,
     private val scheduler: Scheduler,
     private val log: Log,
-    private val connected: () -> Boolean,
+    private val isConnected: () -> Boolean,
     private val send: (ByteArray) -> Unit,
     private val intervalMillis: Long = INTERVAL_MILLIS,
 ) {
@@ -139,7 +139,7 @@ class MemoryReporter(
     private fun schedule(mine: Int, delay: Long) {
         scheduler.postDelayed(delay) {
             // A newer connection has its own schedule; this one ends.
-            if (mine != generation || !connected()) return@postDelayed
+            if (mine != generation || !isConnected()) return@postDelayed
             report()
             schedule(mine, intervalMillis)
         }
