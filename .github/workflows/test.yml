@@ -144,6 +144,15 @@ jobs:
             exit 1
           fi
 
+      # The diff above is cut short; the whole regenerated tree is kept so it can be
+      # committed as it is.
+      - name: Keep the regenerated protocol code
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regenerated-protocol
+          path: dsa/protocol
+
       - name: Check the Java codec against the vectors
         run: dsa/protocol/java/test.sh
 
