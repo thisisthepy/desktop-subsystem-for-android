@@ -207,28 +207,23 @@ jobs:
           . .github/scripts/installer/setup-ui.ps1
           New-Item -ItemType Directory -Force screens | Out-Null
           $exe = "$env:PROGRAM_DIR\settings\DsaSettings.exe"
+          # The app opens on the page --page names, so each picture is of one fresh start.
           foreach ($theme in 'light', 'dark') {
             Set-AppTheme -Dark:($theme -eq 'dark')
-            $app = Start-Process $exe -PassThru
-            $window = Wait-ProcessWindow $app.Id 90
-            if (-not $window) {
-              Show-Desktop "settings-$theme-timeout"
-              $exited = if ($app.HasExited) { "it exited with code $($app.ExitCode)" } else { "it is still running" }
-              throw "DSA Settings showed no window within 90 seconds; $exited"
-            }
-            Start-Sleep -Seconds 4
-            Save-WindowScreen $window "$PWD\screens\settings-$theme-general.png"
-            foreach ($page in 'Memory', 'Display & GPU', 'Updates', 'Advanced', 'About') {
-              if (Select-Named $window $page) {
-                Start-Sleep -Seconds 3
-                $file = $page.ToLowerInvariant() -replace '[^a-z]+', '-'
-                Save-WindowScreen $window "$PWD\screens\settings-$theme-$file.png"
-              } else {
-                Write-Warning "the settings app shows no navigation item '$page'"
+            foreach ($page in 'general', 'memory', 'display', 'updates', 'advanced', 'about') {
+              $app = Start-Process $exe -ArgumentList '--page', $page -PassThru
+              $window = Wait-ProcessWindow $app.Id 90
+              if (-not $window) {
+                Show-Desktop "settings-$theme-$page-timeout"
+                $exited = if ($app.HasExited) { "it exited with code $($app.ExitCode)" } else { "it is still running" }
+                throw "DSA Settings showed no window within 90 seconds; $exited"
               }
+              Start-Sleep -Seconds 5
+              Save-WindowScreen $window "$PWD\screens\settings-$theme-$page.png"
+              if ($app.HasExited) { throw "DSA Settings exited while showing $page (code $($app.ExitCode))" }
+              Stop-Process -Id $app.Id -Force
+              $app.WaitForExit(10000) | Out-Null
             }
-            if ($app.HasExited) { throw "DSA Settings exited while showing its pages (code $($app.ExitCode))" }
-            Stop-Process -Id $app.Id -Force
           }
           Set-AppTheme
 

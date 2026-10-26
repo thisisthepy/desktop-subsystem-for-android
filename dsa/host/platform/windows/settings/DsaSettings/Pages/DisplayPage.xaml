@@ -11,7 +11,7 @@
             <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
                         IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
 
-            <ui:CardControl Icon="{ui:SymbolIcon Desktop24}">
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Desktop24}">
                 <ui:CardControl.Header>
                     <StackPanel>
                         <TextBlock Text="{l:Text RenderGpuCard.Header}" Style="{StaticResource CardTitle}" />
@@ -25,7 +25,7 @@
                           IsEnabled="{Binding CanChange, Mode=OneWay}"
                           SelectionChanged="OnGpuChosen" />
             </ui:CardControl>
-            <ui:CardControl Icon="{ui:SymbolIcon DeveloperBoard24}">
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon DeveloperBoard24}">
                 <ui:CardControl.Header>
                     <StackPanel>
                         <TextBlock Text="{l:Text DisplayGpuCard.Header}" Style="{StaticResource CardTitle}" />
@@ -39,7 +39,7 @@
             <ui:InfoBar Message="{l:Text RenderGpuAppliesBar.Message}" Severity="Informational" IsClosable="False" IsOpen="True"
                         Margin="0,0,0,4" />
 
-            <ui:CardControl Icon="{ui:SymbolIcon ArrowClockwise24}">
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowClockwise24}">
                 <ui:CardControl.Header>
                     <StackPanel>
                         <TextBlock Text="{l:Text RestartWindowManagerCard.Header}" Style="{StaticResource CardTitle}" />

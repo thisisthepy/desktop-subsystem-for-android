@@ -40,9 +40,6 @@
                 <Setter Property="Margin" Value="1,6,0,0" />
                 <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
             </Style>
-            <Style TargetType="ui:CardControl" BasedOn="{StaticResource {x:Type ui:CardControl}}">
-                <Setter Property="Margin" Value="0,0,0,4" />
-            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

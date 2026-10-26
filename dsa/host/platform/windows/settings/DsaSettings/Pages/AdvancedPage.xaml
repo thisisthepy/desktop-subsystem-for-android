@@ -11,7 +11,7 @@
             <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
                         IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
 
-            <ui:CardControl Icon="{ui:SymbolIcon Snooze24}">
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Snooze24}">
                 <ui:CardControl.Header>
                     <StackPanel>
                         <TextBlock Text="{l:Text FreezeCard.Header}" Style="{StaticResource CardTitle}" />
@@ -38,7 +38,7 @@
             </ui:CardAction>
 
             <TextBlock Text="{l:Text CommandLineHeader.Text}" Style="{StaticResource SectionHeader}" />
-            <ui:CardControl Icon="{ui:SymbolIcon WindowConsole20}">
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon WindowConsole20}">
                 <ui:CardControl.Header>
                     <StackPanel>
                         <TextBlock Text="{l:Text CommandLineCard.Header}" Style="{StaticResource CardTitle}" />

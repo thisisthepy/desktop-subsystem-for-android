@@ -15,7 +15,7 @@
             <ui:InfoBar Title="{l:Text AdminBar.Title}" Message="{l:Text AdminBar.Message}" Severity="Warning"
                         IsClosable="False" IsOpen="{Binding NeedsAdministrator, Mode=OneWay}" Margin="0,0,0,4" />
 
-            <ui:CardControl Icon="{ui:SymbolIcon ArrowSync24}">
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowSync24}">
                 <ui:CardControl.Header>
                     <StackPanel>
                         <StackPanel Orientation="Horizontal">
@@ -33,7 +33,7 @@
                                      IsEnabled="{Binding CanChangeProgramUpdates, Mode=OneWay}" Click="OnProgramToggled" />
                 </StackPanel>
             </ui:CardControl>
-            <ui:CardControl Icon="{ui:SymbolIcon ArrowDownload24}">
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowDownload24}">
                 <ui:CardControl.Header>
                     <StackPanel>
                         <StackPanel Orientation="Horizontal">
@@ -54,7 +54,7 @@
             <TextBlock Text="{l:Text UpdatesMachineNote.Text}" Style="{StaticResource Note}" />
 
             <TextBlock Text="{l:Text UpdateNowHeader.Text}" Style="{StaticResource SectionHeader}" />
-            <ui:CardControl Icon="{ui:SymbolIcon ArrowUpload24}">
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowUpload24}">
                 <ui:CardControl.Header>
                     <StackPanel>
                         <TextBlock Text="{l:Text UpdateNowCard.Header}" Style="{StaticResource CardTitle}" />

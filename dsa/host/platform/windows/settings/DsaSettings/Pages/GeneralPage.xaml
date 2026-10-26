@@ -11,7 +11,7 @@
             <ui:InfoBar Title="{l:Text GeneralErrorBar.Title}" Severity="Error" IsClosable="False"
                         IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
 
-            <ui:CardControl Icon="{ui:SymbolIcon Desktop24}">
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Desktop24}">
                 <ui:CardControl.Header>
                     <StackPanel>
                         <TextBlock Text="{l:Text GeneralStateCard.Header}" Style="{StaticResource CardTitle}" />

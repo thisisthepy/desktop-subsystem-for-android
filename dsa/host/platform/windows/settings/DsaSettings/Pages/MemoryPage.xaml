@@ -6,7 +6,7 @@
     xmlns:l="clr-namespace:Dsa.Settings">
     <Page.Resources>
         <DataTemplate x:Key="MemoryRow">
-            <ui:CardControl>
+            <ui:CardControl Margin="0,0,0,4">
                 <ui:CardControl.Header>
                     <StackPanel>
                         <TextBlock Text="{Binding Label}" Style="{StaticResource CardTitle}" />
@@ -30,7 +30,7 @@
                         IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
 
             <TextBlock Text="{l:Text MemoryHostHeader.Text}" Style="{StaticResource SectionHeader}" />
-            <ui:CardControl Icon="{ui:SymbolIcon Desktop24}">
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Desktop24}">
                 <ui:CardControl.Header>
                     <StackPanel>
                         <TextBlock Text="{l:Text MemoryHostTotalCard.Header}" Style="{StaticResource CardTitle}" />
@@ -48,7 +48,7 @@
             <ui:InfoBar Title="{l:Text MemoryGuestNoneBar.Title}" Message="{l:Text MemoryGuestNoneBar.Message}"
                         Severity="Informational" IsClosable="False" IsOpen="{Binding GuestNotReported, Mode=OneWay}" />
             <StackPanel Visibility="{Binding GuestReported, Converter={StaticResource Visible}}">
-                <ui:CardControl Icon="{ui:SymbolIcon DataUsage24}">
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon DataUsage24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text MemoryGuestTotalCard.Header}" Style="{StaticResource CardTitle}" />

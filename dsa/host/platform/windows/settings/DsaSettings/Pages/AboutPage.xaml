@@ -20,13 +20,13 @@
                 </ui:CardControl.Header>
                 <TextBlock x:Name="HeaderVersion" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             </ui:CardControl>
-            <ui:CardControl>
+            <ui:CardControl Margin="0,0,0,4">
                 <ui:CardControl.Header>
                     <TextBlock Text="{l:Text AboutAppVersionCard.Header}" Style="{StaticResource CardTitle}" />
                 </ui:CardControl.Header>
                 <TextBlock x:Name="AppVersionText" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
             </ui:CardControl>
-            <ui:CardControl>
+            <ui:CardControl Margin="0,0,0,4">
                 <ui:CardControl.Header>
                     <TextBlock Text="{l:Text AboutServiceVersionCard.Header}" Style="{StaticResource CardTitle}" />
                 </ui:CardControl.Header>
@@ -38,7 +38,7 @@
                     <TextBlock Text="{l:Text AboutLicenseCard.Description}" Style="{StaticResource CardDescription}" />
                 </StackPanel>
             </ui:CardAction>
-            <ui:CardControl>
+            <ui:CardControl Margin="0,0,0,4">
                 <ui:CardControl.Header>
                     <TextBlock Text="{l:Text AboutSourceCard.Header}" Style="{StaticResource CardTitle}" />
                 </ui:CardControl.Header>
