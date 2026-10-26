@@ -143,12 +143,10 @@ mod windows_impl {
                 counters.cb,
             )
         };
-        (ok != 0).then(|| {
-            (
-                counters.WorkingSetSize as u64 / 1024,
-                counters.PrivateUsage as u64 / 1024,
-            )
-        })
+        (ok != 0).then_some((
+            counters.WorkingSetSize as u64 / 1024,
+            counters.PrivateUsage as u64 / 1024,
+        ))
     }
 
     /// Reads the process list and the memory counters of the processes that run each user's
