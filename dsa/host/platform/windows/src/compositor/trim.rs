@@ -29,9 +29,10 @@ const POLL: Duration = Duration::from_secs(1);
 fn working_set_kb() -> Option<u64> {
     // SAFETY: plain counters, zero until filled.
     let mut counters: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
-    counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    let size = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    counters.cb = size;
     // SAFETY: our own process's pseudo handle, and counters of the size given.
-    let ok = unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) };
+    let ok = unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, size) };
     (ok != 0).then_some(counters.WorkingSetSize as u64 / 1024)
 }
 
