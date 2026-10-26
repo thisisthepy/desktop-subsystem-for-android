@@ -140,8 +140,14 @@ writes its messages to `%LOCALAPPDATA%\DSA\logs\dsa-wm.log`. Earlier releases ca
   window shows its last frame stretched over the new size until a frame of that size
   arrives, then shows that frame 1:1. A window cannot grow past what Android's display
   can hold (by default 1920x1080 pixels), because a larger window could only show its
-  frames stretched; maximising stops at that size too. If Android gives the task another
-  size than the window asked for, the window takes the task's size within 2 seconds.
+  frames stretched; maximising stops at that size too, and on a larger monitor the
+  maximised window is centred on the screen. If Android gives the task another size than
+  the window asked for, the window takes the task's size within 2 seconds.
+- Every size is first given to the task live: the app lays itself out again in the new
+  size without being recreated, which takes a frame or two rather than the half second or
+  more that recreating an app can take. The task is then reconfigured for its new size
+  once, at a size it already has: when the user lets go of the window's edge, or, for a
+  maximise, a restore or a snap, as soon as Android has given the task the size.
 - The app window program reports each window's client size, its monitor's scale and the
   start and end of a drag to the window manager over the session's pipe. The window
   manager turns them into the task's size and density and sends those to the service.
