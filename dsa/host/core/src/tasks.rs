@@ -757,7 +757,10 @@ mod tests {
         // Maps is removed; Clock keeps what it was given without being described again.
         let event = table.installed_event(&["com.example.clock".into()]);
         assert!(table.apply(&event));
-        assert_eq!(table.installed(), Some(vec![app("com.example.clock", "Clock")]));
+        assert_eq!(
+            table.installed(),
+            Some(vec![app("com.example.clock", "Clock")])
+        );
 
         // An app the guest never described goes under its package's name.
         let event = table.installed_event(&["org.example.bare".into()]);
@@ -775,7 +778,10 @@ mod tests {
         table.apply(&event);
         table.apply(&TaskEvent::Updated(task(1, "a")));
         table.clear();
-        assert_eq!(table.installed(), Some(vec![app("com.example.clock", "Clock")]));
+        assert_eq!(
+            table.installed(),
+            Some(vec![app("com.example.clock", "Clock")])
+        );
         assert_eq!(table.installed_event(&[]), TaskEvent::Installed(Vec::new()));
     }
 

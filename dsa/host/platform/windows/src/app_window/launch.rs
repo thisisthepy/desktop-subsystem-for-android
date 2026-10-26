@@ -22,16 +22,16 @@ use windows_sys::Win32::Foundation::{
     WPARAM,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, DrawTextW, EndPaint, GetStockObject, SelectObject, DEFAULT_GUI_FONT,
-    DT_CENTER, DT_SINGLELINE, DT_VCENTER, HBRUSH, PAINTSTRUCT,
+    BeginPaint, DrawTextW, EndPaint, GetStockObject, SelectObject, COLOR_WINDOW,
+    DEFAULT_GUI_FONT, DT_CENTER, DT_SINGLELINE, DT_VCENTER, HBRUSH, PAINTSTRUCT,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, LoadCursorW,
     LoadIconW, PostMessageW, PostQuitMessage, RegisterClassExW, ShowWindow, TranslateMessage,
-    COLOR_WINDOW, CW_USEDEFAULT, IDC_APPSTARTING, MSG, SW_SHOW, WM_CLOSE, WM_DESTROY, WM_PAINT,
-    WNDCLASSEXW, WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
+    CW_USEDEFAULT, IDC_APPSTARTING, MSG, SW_SHOW, WM_CLOSE, WM_DESTROY, WM_PAINT, WNDCLASSEXW,
+    WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
 };
 
 /// How long Android may take to start before opening the app gives up.

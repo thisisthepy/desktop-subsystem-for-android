@@ -141,7 +141,8 @@ impl StartMenu {
 
     fn save(&self, note: &Note) -> Result<(), String> {
         if let Some(dir) = self.note.parent() {
-            fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+            fs::create_dir_all(dir)
+                .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
         }
         let text = serde_json::to_string_pretty(note).unwrap_or_default();
         let fresh = self.note.with_extension("json.new");
@@ -193,7 +194,10 @@ impl StartMenu {
             let shortcut = entry.shortcut();
             if shortcuts.read(&path).ok().as_ref() != Some(&shortcut) {
                 if let Err(why) = shortcuts.write(&path, &shortcut) {
-                    problems.push(format!("could not make {}'s shortcut: {why}", entry.package));
+                    problems.push(format!(
+                        "could not make {}'s shortcut: {why}",
+                        entry.package
+                    ));
                     continue;
                 }
             }
@@ -255,15 +259,18 @@ impl Shortcuts for ShellLinks {
 mod shell {
     use std::path::{Path, PathBuf};
 
-    use windows::core::{Interface, BSTR, GUID, HSTRING, PROPVARIANT};
+    use std::mem::ManuallyDrop;
+
+    use windows::core::{Interface, GUID, HSTRING, PWSTR};
     use windows::Win32::Foundation::PROPERTYKEY;
+    use windows::Win32::System::Com::StructuredStorage::{
+        PropVariantClear, PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0,
+    };
     use windows::Win32::System::Com::{
         CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, STGM_READ,
     };
     use windows::Win32::System::Variant::VT_LPWSTR;
-    use windows::Win32::UI::Shell::PropertiesSystem::{
-        IPropertyStore, PropVariantChangeType, PVCHF_DEFAULT,
-    };
+    use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
     use super::Shortcut;
@@ -304,11 +311,26 @@ mod shell {
             link.SetDescription(&HSTRING::from(shortcut.description.as_str()))
                 .map_err(|e| fail("description", e))?;
             let store: IPropertyStore = link.cast().map_err(|e| fail("properties", e))?;
-            let id = PROPVARIANT::from(BSTR::from(shortcut.app_user_model_id.as_str()));
-            // The shell reads the ID as a plain wide string.
-            let mut value = PROPVARIANT::default();
-            PropVariantChangeType(&mut value, &id, PVCHF_DEFAULT, VT_LPWSTR)
-                .map_err(|e| fail("app ID", e))?;
+            // The shell reads the ID as a plain wide string. The value borrows `id`, which
+            // outlives it, and the store keeps a copy, so it is never cleared.
+            let id: Vec<u16> = shortcut
+                .app_user_model_id
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let value = PROPVARIANT {
+                Anonymous: PROPVARIANT_0 {
+                    Anonymous: ManuallyDrop::new(PROPVARIANT_0_0 {
+                        vt: VT_LPWSTR,
+                        wReserved1: 0,
+                        wReserved2: 0,
+                        wReserved3: 0,
+                        Anonymous: PROPVARIANT_0_0_0 {
+                            pwszVal: PWSTR(id.as_ptr() as *mut u16),
+                        },
+                    }),
+                },
+            };
             store
                 .SetValue(&APP_USER_MODEL_ID, &value)
                 .map_err(|e| fail("app ID", e))?;
@@ -360,12 +382,16 @@ mod shell {
                 .map_err(|e| fail("description", e))?;
             let description = text(&buffer);
             let store: IPropertyStore = link.cast().map_err(|e| fail("properties", e))?;
-            let value = store
+            let mut value = store
                 .GetValue(&APP_USER_MODEL_ID)
                 .map_err(|e| fail("app ID", e))?;
-            let app_user_model_id = BSTR::try_from(&value)
-                .map(|id| id.to_string())
-                .unwrap_or_default();
+            let inner = &value.Anonymous.Anonymous;
+            let app_user_model_id = if inner.vt == VT_LPWSTR {
+                inner.Anonymous.pwszVal.to_string().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let _ = PropVariantClear(&mut value);
             Ok(Shortcut {
                 target,
                 arguments,
@@ -410,8 +436,12 @@ impl StartMenuSetup {
             if !is_valid_package(&app.package_name) {
                 continue;
             }
-            match crate::app_exe::ensure(&self.template, &self.apps_dir, &app.package_name, Some(app))
-            {
+            match crate::app_exe::ensure(
+                &self.template,
+                &self.apps_dir,
+                &app.package_name,
+                Some(app),
+            ) {
                 Ok((program, note)) => {
                     problems.extend(note);
                     let label = app.label.trim();

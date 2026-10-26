@@ -74,7 +74,7 @@ fn main() -> std::process::ExitCode {
         .and_then(|()| {
             ensure_window_manager(
                 || pipe_exists(&window_manager_pipe),
-                || match window_manager_path(Some(&program)) {
+                || match window_manager_path(Some(program.as_path())) {
                     Some(window_manager) => run_program(&window_manager, ""),
                     None => Err("the DSA Window Manager is not installed".into()),
                 },

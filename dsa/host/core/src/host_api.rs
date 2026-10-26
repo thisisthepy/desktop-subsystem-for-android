@@ -389,7 +389,11 @@ fn tasks_to_wire(events: Vec<TaskEvent>) -> types::Tasks {
 fn installed_to_wire(apps: Option<Vec<AppInfo>>) -> types::InstalledApps {
     types::InstalledApps {
         known: apps.is_some(),
-        apps: apps.unwrap_or_default().into_iter().map(app_to_wire).collect(),
+        apps: apps
+            .unwrap_or_default()
+            .into_iter()
+            .map(app_to_wire)
+            .collect(),
     }
 }
 
@@ -1056,9 +1060,7 @@ impl HostApiClient {
         let mut last = None;
         loop {
             match status.state {
-                SessionState::Active | SessionState::Dozing | SessionState::Frozen => {
-                    return Ok(())
-                }
+                SessionState::Active | SessionState::Dozing | SessionState::Frozen => return Ok(()),
                 SessionState::Stopped if started => {
                     return Err(ClientError::Service {
                         code: ErrorCode::Unavailable,

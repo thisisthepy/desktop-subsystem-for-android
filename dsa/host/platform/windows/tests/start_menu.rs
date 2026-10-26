@@ -295,7 +295,10 @@ fn fr7_the_window_manager_keeps_the_start_menu_in_step_with_androids_apps() {
     ]));
     wait_for("both shortcuts", || files(&menu_dir).len() == 2);
 
-    android.publish(TaskEvent::Installed(vec![app("com.example.clock", "Clock")]));
+    android.publish(TaskEvent::Installed(vec![app(
+        "com.example.clock",
+        "Clock",
+    )]));
     wait_for("the removed app's shortcut to go", || {
         files(&menu_dir) == vec!["Clock.lnk".to_string()]
     });

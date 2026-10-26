@@ -41,15 +41,15 @@ use dsa_transport::{Connector, Listener, TransportError};
 use self::adapter::{DisplayPresenter, DisplaySink};
 use self::frames::FrameRouter;
 use self::hosts::{HostLauncher, ManagerEvent, ManagerSetup};
-use crate::start_menu::StartMenuSetup;
-use dsa_host_core::tasks::{AppInfo, TaskEvent};
 use self::log::{note, CompositorLogger};
 use self::present::Gpu;
 use self::single_instance::DEFAULT_MUTEX_NAME;
 use crate::guid::Guid;
 use crate::hvsocket::RawHvSocketListener;
 use crate::pipe::{current_user_only_sddl, NamedPipeConnector, NamedPipeListener};
+use crate::start_menu::StartMenuSetup;
 use crate::vm_listener::{BindFn, VmBoundListener, VmIdSlot};
+use dsa_host_core::tasks::{AppInfo, TaskEvent};
 
 /// Configuration for the user-session compositor.
 #[derive(Debug, Clone)]
