@@ -32,6 +32,10 @@ mkdir -p "$out"
     "$here/src/resize_trace.cpp" "$here/tests/resize_trace_test.cpp" -o "$out/resize_trace_test"
 "$out/resize_trace_test"
 
+"$cxx" "${flags[@]}" -I"$here/tests" \
+    "$here/src/vsync_thread.cpp" "$here/tests/vsync_thread_test.cpp" -pthread -o "$out/vsync_thread_test"
+"$out/vsync_thread_test"
+
 "$cxx" "${flags[@]}" -I"$here/tests" -I"$here/../../graphics/include" \
     "$here/tests/shared_color_buffer_test.cpp" -o "$out/shared_color_buffer_test"
 "$out/shared_color_buffer_test"

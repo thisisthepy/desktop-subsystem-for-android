@@ -44,6 +44,7 @@ int main() {
     ABinderProcess_startThreadPool();
 
     auto composer = ndk::SharedRefBase::make<Composer>(tasks, config);
+    makeBinderRealtime(composer->asBinder().get());
     const std::string instance = std::string(Composer::descriptor) + "/default";
     const binder_status_t status =
         AServiceManager_addService(composer->asBinder().get(), instance.c_str());
