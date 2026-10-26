@@ -1,6 +1,10 @@
 //! Acceptance tests for the user-session compositor.
 #![cfg(windows)]
 
+use dsa_host_core::ime::ImeEvent;
+use dsa_host_core::input::PointerEvent;
+use dsa_host_core::keys::KeyEvent;
+use dsa_host_core::tasks::TaskRequestError;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -62,6 +66,15 @@ impl UserAndroid for MockAndroid {
     }
     fn vm_id(&self) -> Option<String> {
         self.vm_id.lock().unwrap().clone()
+    }
+    fn pointer(&self, _: &PointerEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn key(&self, _: &KeyEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn ime(&self, _: &ImeEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
     }
 }
 
