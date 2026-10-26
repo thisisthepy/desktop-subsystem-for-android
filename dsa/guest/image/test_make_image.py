@@ -423,6 +423,75 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertIn("ro.frp.pst=\n", props)
         self.assertNotIn("by-name/frp", props)
 
+    # The Wi-Fi init script as the pinned Android 16 and 17 builds ship it, comments trimmed.
+    WIFI_RC = (
+        "on post-fs-data\n"
+        "   restorecon_recursive /data/misc/apexdata/com.android.wifi\n"
+        "\n"
+        "on property:sys.user.0.ce_available=true\n"
+        "   restorecon_recursive /data/misc_ce/0/apexdata/com.android.wifi\n"
+        "\n"
+        "# Below are for kernel tracing related stuff.\n"
+        "on fs\n"
+        "   setprop sys.wifitracing.started 0\n"
+        "\n"
+        "on property:sys.boot_completed=1 && property:sys.wifitracing.started=0\n"
+        "   # Create trace buffer, and set basic configuration.\n"
+        "   mkdir /sys/kernel/tracing/instances/wifi 711\n"
+        "   restorecon_recursive /sys/kernel/tracing/instances/wifi\n"
+        "   write /sys/kernel/tracing/instances/wifi/tracing_on 0\n"
+        "   write /sys/kernel/tracing/instances/wifi/buffer_size_kb 1\n"
+        "   write /sys/kernel/tracing/instances/wifi/trace_options disable_on_free\n"
+        "\n"
+        "   write /sys/kernel/tracing/instances/wifi/events/cfg80211/rdev_connect/enable 1\n"
+        "   write /sys/kernel/tracing/instances/wifi/events/net/filter name==${wifi.interface:-wlan0}\n"
+        "   write /sys/kernel/tracing/instances/wifi/events/net/net_dev_queue/enable 1\n"
+        "   write /sys/kernel/tracing/instances/wifi/events/net/netif_receive_skb/enable 1\n"
+        "\n"
+        "   chown system /sys/kernel/tracing/instances/wifi/tracing_on\n"
+        "   chmod 600 /sys/kernel/tracing/instances/wifi/trace\n"
+        "   setprop sys.wifitracing.started 1\n"
+        "\n"
+        "on property:sys.boot_completed=1 && property:wifi.interface=* && property:sys.wifitracing.started=1\n"
+        "   # Override default value.\n"
+        "   write /sys/kernel/tracing/instances/wifi/events/net/filter name==${wifi.interface}\n"
+    )
+
+    def test_fr3_boot_completed_sets_up_no_wifi_trace_instance(self):
+        # On Hyper-V each write into tracefs takes up to two seconds, and lmkd attaches its
+        # memory event programs to tracepoints behind them when boot completes, past its
+        # watchdog's two seconds; the watchdog then killed the app the user had just opened.
+        rc = make_image.edit_wifi_rc(self.WIFI_RC)
+        self.assertNotIn("sys.wifitracing.started=0", rc)
+        self.assertNotIn("instances/wifi/buffer_size_kb", rc)
+        self.assertNotIn("instances/wifi/events/net/net_dev_queue/enable", rc)
+        self.assertNotIn("mkdir /sys/kernel/tracing", rc)
+        # The rest of the script stays: Wi-Fi's data migration and its other triggers.
+        self.assertIn("on post-fs-data\n   restorecon_recursive /data/misc/apexdata/com.android.wifi\n", rc)
+        self.assertIn("on property:sys.user.0.ce_available=true\n", rc)
+        self.assertIn("on fs\n   setprop sys.wifitracing.started 0\n", rc)
+        self.assertIn("property:sys.wifitracing.started=1\n", rc)
+
+    def test_fr3_an_unrecognised_wifi_rc_is_not_passed_through(self):
+        # A new build that set the trace instance up some other way would bring the stall
+        # back unnoticed, so the image is not made until this edit is looked at again.
+        with self.assertRaisesRegex(ValueError, "wifi.rc"):
+            make_image.edit_wifi_rc("on property:sys.boot_completed=1\n"
+                                    "   mkdir /sys/kernel/tracing/instances/wifi 711\n")
+
+    def test_fr3_modify_removes_the_wifi_trace_setup_from_the_system_image(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/init/wifi.rc", self.WIFI_RC)
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+            with zipfile.ZipFile(modified) as archive:
+                rc = archive.read("SYSTEM/etc/init/wifi.rc").decode()
+            self.assertNotIn("sys.wifitracing.started=0", rc)
+            self.assertIn("on post-fs-data\n", rc)
+
     def test_pr3_graphics_clients_can_open_the_drm_card_minigbm_uses(self):
         # Every process that maps a graphics buffer runs minigbm's mapper, which opens the
         # vkms card. Labelled graphics_device, as Cuttlefish labels its composer's cards,
@@ -990,6 +1059,40 @@ class ImageLayoutTests(unittest.TestCase):
             # Without DSA's composer no task window ever gets a frame.
             self.assertIn("VENDOR/bin/hw/dsa-hwcomposer is missing", proc.stdout)
             self.assertIn("androidboot.dsa.display_width", proc.stdout)
+
+    def test_fr3_check_image_rejects_the_wifi_trace_setup(self):
+        check_script = Path(__file__).with_name("check-image.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_dir = root / "image"
+            img_dir.mkdir()
+            keys_dir = root / "keys"
+            keys_dir.mkdir()
+            (img_dir / "image.json").write_text(json.dumps({"files": {}, "kernel_cmdline": ""}))
+            (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
+            with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
+                archive.writestr("META/apkcerts.txt", "")
+                archive.writestr("SYSTEM/etc/init/wifi.rc", self.WIFI_RC)
+
+            proc = subprocess.run(
+                [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("wifi.rc still sets up a kernel trace instance when boot completes", proc.stdout)
+
+            with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
+                archive.writestr("META/apkcerts.txt", "")
+                archive.writestr("SYSTEM/etc/init/wifi.rc", make_image.edit_wifi_rc(self.WIFI_RC))
+            proc = subprocess.run(
+                [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotIn("wifi.rc", proc.stdout)
 
 
 if __name__ == "__main__":
