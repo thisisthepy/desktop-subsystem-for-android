@@ -7,7 +7,9 @@
 //! other frame is dropped, so no window ever shows the guest's whole screen.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
 
+use super::window_sizing::WindowSizing;
 use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest};
 
 /// The display the guest's whole freeform screen is posted to. Its frames are never shown,
@@ -33,7 +35,8 @@ pub enum WindowChange {
     },
     /// The title of the task's window changed.
     Retitle { task_id: i32, title: String },
-    /// The guest resized the task; the window's client area follows.
+    /// The window's client area takes this size: the guest resized the task on its own, or
+    /// did not take the size the window asked for.
     Resize {
         task_id: i32,
         width: u32,
@@ -41,6 +44,15 @@ pub enum WindowChange {
     },
     /// Close the task's window.
     Close { task_id: i32 },
+    /// The task's size in the guest, which the window measures its pointer input in, and the
+    /// largest client area the window may have. It changes with every size the window asks
+    /// for, without the window itself changing.
+    TaskSize {
+        task_id: i32,
+        width: u32,
+        height: u32,
+        max: Option<(u32, u32)>,
+    },
 }
 
 /// The title of a task's window: its label, else its package, else its ID.
@@ -106,6 +118,9 @@ fn open(task: &Task) -> WindowChange {
     }
 }
 
+/// A task's size in the guest, and the largest client area its window may have.
+type TaskSize = ((u32, u32), Option<(u32, u32)>);
+
 /// The compositor's tasks and their windows.
 #[derive(Debug, Default)]
 pub struct TaskWindows {
@@ -115,6 +130,10 @@ pub struct TaskWindows {
     displays: BTreeMap<i32, u32>,
     /// Tasks whose window the user closed, while the guest ends them.
     closing: BTreeSet<i32>,
+    /// How each task's window and the task follow each other's size and scale.
+    sizes: BTreeMap<i32, WindowSizing>,
+    /// The task size and limit each window was last told.
+    told_sizes: BTreeMap<i32, TaskSize>,
 }
 
 impl TaskWindows {
@@ -143,10 +162,17 @@ impl TaskWindows {
             TaskEvent::App(_) => Vec::new(),
             TaskEvent::Updated(task) => {
                 let previous = self.tasks.insert(task.task_id, task.clone());
+                let follow = match self.sizes.get_mut(&task.task_id) {
+                    Some(sizing) if previous.is_some() => sizing.guest_updated(task),
+                    _ => {
+                        self.sizes.insert(task.task_id, WindowSizing::new(task));
+                        None
+                    }
+                };
                 if self.closing.contains(&task.task_id) {
                     return Vec::new();
                 }
-                match previous {
+                let mut changes = match previous {
                     None => vec![open(task)],
                     Some(previous) => {
                         let mut changes = Vec::new();
@@ -157,20 +183,23 @@ impl TaskWindows {
                                 title,
                             });
                         }
-                        let size = window_size(&task.bounds);
-                        if window_size(&previous.bounds) != size {
+                        if let Some((width, height)) = follow {
                             changes.push(WindowChange::Resize {
                                 task_id: task.task_id,
-                                width: size.0,
-                                height: size.1,
+                                width,
+                                height,
                             });
                         }
                         changes
                     }
-                }
+                };
+                changes.extend(self.task_size_change(task.task_id));
+                changes
             }
             TaskEvent::Removed { task_id } => {
                 self.displays.remove(task_id);
+                self.sizes.remove(task_id);
+                self.told_sizes.remove(task_id);
                 let was_closing = self.closing.remove(task_id);
                 if self.tasks.remove(task_id).is_some() && !was_closing {
                     vec![WindowChange::Close { task_id: *task_id }]
@@ -241,7 +270,148 @@ impl TaskWindows {
         if !self.closing.remove(&task_id) {
             return Vec::new();
         }
-        self.tasks.get(&task_id).map(open).into_iter().collect()
+        let Some(task) = self.tasks.get(&task_id) else {
+            return Vec::new();
+        };
+        self.sizes.insert(task_id, WindowSizing::new(task));
+        self.told_sizes.remove(&task_id);
+        let mut changes = vec![open(task)];
+        changes.extend(self.task_size_change(task_id));
+        changes
+    }
+
+    /// The change that tells the task's window its task size and limit, when they differ
+    /// from what it was last told. A new window was shown at the task's size, so only a
+    /// limit is news to it.
+    fn task_size_change(&mut self, task_id: i32) -> Option<WindowChange> {
+        let now = self.sizes.get(&task_id)?.task_size();
+        let told = match self.told_sizes.get(&task_id) {
+            Some(told) => *told,
+            None => {
+                let shown = self
+                    .tasks
+                    .get(&task_id)
+                    .map(|task| window_size(&task.bounds))?;
+                (shown, None)
+            }
+        };
+        if told == now {
+            return None;
+        }
+        self.told_sizes.insert(task_id, now);
+        let ((width, height), max) = now;
+        Some(WindowChange::TaskSize {
+            task_id,
+            width,
+            height,
+            max,
+        })
+    }
+
+    /// The task's window reports the scale of its monitor: the first report is the monitor
+    /// it opened on, every later one a move. Returns what the window must do (take a size
+    /// that keeps the app the same size to the eye, when it opened on a monitor of another
+    /// scale) and the density request.
+    pub fn window_dpi(&mut self, task_id: i32, dpi: u32) -> (Vec<WindowChange>, Vec<TaskRequest>) {
+        if !self.has_window(task_id) {
+            return (Vec::new(), Vec::new());
+        }
+        let Some(sizing) = self.sizes.get_mut(&task_id) else {
+            return (Vec::new(), Vec::new());
+        };
+        let (size, request) = sizing.dpi_reported(dpi);
+        let changes = size
+            .map(|(width, height)| WindowChange::Resize {
+                task_id,
+                width,
+                height,
+            })
+            .into_iter()
+            .collect();
+        (changes, request.into_iter().collect())
+    }
+
+    /// The task's window opened on a monitor of `dpi`. Returns the client size it takes, and
+    /// the requests that have the task draw at that monitor's density. `None` when the task
+    /// has no window.
+    pub fn window_opened(
+        &mut self,
+        task_id: i32,
+        dpi: u32,
+    ) -> Option<((u32, u32), Vec<TaskRequest>)> {
+        if !self.has_window(task_id) {
+            return None;
+        }
+        let (size, request) = self.sizes.get_mut(&task_id)?.opened(dpi);
+        Some((size, request.into_iter().collect()))
+    }
+
+    /// The task's window has a client area of `view` pixels now. Returns the request that
+    /// gives the task that size.
+    pub fn window_resized(
+        &mut self,
+        task_id: i32,
+        view: (u32, u32),
+        now: Instant,
+    ) -> Vec<TaskRequest> {
+        if !self.has_window(task_id) {
+            return Vec::new();
+        }
+        self.sizes
+            .get_mut(&task_id)
+            .and_then(|sizing| sizing.view_resized(view, now))
+            .into_iter()
+            .collect()
+    }
+
+    /// The task's window is on a monitor of `dpi` now. Returns the request that has the
+    /// task draw at that monitor's density.
+    pub fn window_dpi_changed(&mut self, task_id: i32, dpi: u32) -> Vec<TaskRequest> {
+        if !self.has_window(task_id) {
+            return Vec::new();
+        }
+        self.sizes
+            .get_mut(&task_id)
+            .and_then(|sizing| sizing.dpi_changed(dpi))
+            .into_iter()
+            .collect()
+    }
+
+    /// The user started or finished dragging the task's window.
+    pub fn window_dragging(&mut self, task_id: i32, active: bool, now: Instant) {
+        if let Some(sizing) = self.sizes.get_mut(&task_id) {
+            sizing.dragging(active, now);
+        }
+    }
+
+    /// The task's size as the guest last reported it, which its frames and its pointer
+    /// input are measured in.
+    pub fn task_size(&self, task_id: i32) -> Option<(u32, u32)> {
+        Some(self.sizes.get(&task_id)?.guest_size())
+    }
+
+    /// The largest client area the task's window may have, when the guest said.
+    pub fn max_client_size(&self, task_id: i32) -> Option<(u32, u32)> {
+        self.sizes.get(&task_id)?.max_client_size()
+    }
+
+    /// Time has passed: the windows whose task did not take the size they asked for take the
+    /// task's size instead.
+    pub fn tick(&mut self, now: Instant) -> Vec<WindowChange> {
+        let mut changes = Vec::new();
+        for (task_id, sizing) in &mut self.sizes {
+            if self.closing.contains(task_id) || !self.tasks.contains_key(task_id) {
+                continue;
+            }
+            if let Some((width, height)) = sizing.tick(now) {
+                changes.push(WindowChange::Resize {
+                    task_id: *task_id,
+                    width,
+                    height,
+                });
+            }
+        }
+        changes
     }
 
     /// Forgets every task, as when the service went away, and closes every window.
@@ -254,6 +424,8 @@ impl TaskWindows {
         self.tasks.clear();
         self.displays.clear();
         self.closing.clear();
+        self.sizes.clear();
+        self.told_sizes.clear();
         changes
     }
 
@@ -276,6 +448,9 @@ impl TaskWindows {
             .collect();
         self.tasks.retain(|task_id, _| present.contains(task_id));
         self.closing.retain(|task_id| present.contains(task_id));
+        self.sizes.retain(|task_id, _| present.contains(task_id));
+        self.told_sizes
+            .retain(|task_id, _| present.contains(task_id));
         self.displays.clear();
         for event in current {
             changes.extend(self.apply(event));
@@ -299,7 +474,7 @@ mod tests {
             },
             package_name: format!("com.example.app{task_id}"),
             label: label.into(),
-            focused: false,
+            ..Task::default()
         }
     }
 
@@ -464,6 +639,154 @@ mod tests {
         moved.bounds.left += 30;
         moved.bounds.right += 30;
         assert!(windows.apply(&TaskEvent::Updated(moved)).is_empty());
+    }
+
+    #[test]
+    fn fr4_a_resized_window_asks_its_task_for_the_size_and_does_not_jump_back() {
+        let mut windows = TaskWindows::new();
+        windows.apply(&updated(1, "Clock"));
+        let now = Instant::now();
+        windows.window_dragging(1, true, now);
+        assert_eq!(
+            windows.window_resized(1, (800, 1000), now),
+            vec![TaskRequest::Resize {
+                task_id: 1,
+                width: 800,
+                height: 1000
+            }]
+        );
+        assert_eq!(windows.window_resized(1, (800, 1000), now), vec![]);
+        // The guest catching up with an older size moves nothing.
+        assert!(windows
+            .apply(&TaskEvent::Updated(task(1, "Clock", 760, 1100)))
+            .is_empty());
+        assert!(windows
+            .apply(&TaskEvent::Updated(task(1, "Clock", 800, 1000)))
+            .is_empty());
+        windows.window_dragging(1, false, now);
+        assert!(windows
+            .tick(now + super::super::window_sizing::SETTLE)
+            .is_empty());
+    }
+
+    #[test]
+    fn fr4_a_window_whose_task_cannot_take_its_size_takes_the_tasks() {
+        let mut windows = TaskWindows::new();
+        windows.apply(&updated(1, "Clock"));
+        let now = Instant::now();
+        windows.window_resized(1, (900, 1000), now);
+        windows.apply(&TaskEvent::Updated(task(1, "Clock", 850, 1000)));
+        assert_eq!(
+            windows.tick(now + super::super::window_sizing::SETTLE),
+            vec![WindowChange::Resize {
+                task_id: 1,
+                width: 850,
+                height: 1000
+            }]
+        );
+    }
+
+    #[test]
+    fn fr4_a_window_on_another_scale_asks_for_its_monitors_density() {
+        let mut windows = TaskWindows::new();
+        let mut clock = task(1, "Clock", 400, 300);
+        clock.density_dpi = 160;
+        windows.apply(&TaskEvent::Updated(clock));
+        assert_eq!(
+            windows.window_opened(1, 192),
+            Some((
+                (800, 600),
+                vec![TaskRequest::SetDensity {
+                    task_id: 1,
+                    density_dpi: 320
+                }]
+            ))
+        );
+        assert_eq!(
+            windows.window_dpi_changed(1, 96),
+            vec![TaskRequest::SetDensity {
+                task_id: 1,
+                density_dpi: 160
+            }]
+        );
+        // Nothing is asked for a window the user closed.
+        windows.user_closed(1);
+        assert_eq!(windows.window_dpi_changed(1, 192), vec![]);
+        assert_eq!(windows.window_resized(1, (10, 10), Instant::now()), vec![]);
+        assert_eq!(windows.window_opened(1, 192), None);
+    }
+
+    #[test]
+    fn fr4_a_window_hears_its_tasks_size_whenever_the_guest_changes_it() {
+        let mut windows = TaskWindows::new();
+        let mut clock = task(1, "Clock", 400, 300);
+        // Shown at the task's size, with no limit known: nothing more to say.
+        assert_eq!(windows.apply(&TaskEvent::Updated(clock.clone())).len(), 1);
+        clock.max_width = 1920;
+        clock.max_height = 1080;
+        let size = |width, height| WindowChange::TaskSize {
+            task_id: 1,
+            width,
+            height,
+            max: Some((1920, 1080)),
+        };
+        assert_eq!(
+            windows.apply(&TaskEvent::Updated(clock.clone())),
+            vec![size(400, 300)]
+        );
+        // A size the window asked for changes the task, not the window.
+        windows.window_resized(1, (500, 300), Instant::now());
+        clock.bounds.right += 100;
+        assert_eq!(
+            windows.apply(&TaskEvent::Updated(clock.clone())),
+            vec![size(500, 300)]
+        );
+        assert!(windows.apply(&TaskEvent::Updated(clock)).is_empty());
+    }
+
+    #[test]
+    fn fr4_the_first_scale_a_window_reports_sizes_it_for_its_monitor() {
+        let mut windows = TaskWindows::new();
+        let mut clock = task(1, "Clock", 400, 300);
+        clock.density_dpi = 160;
+        windows.apply(&TaskEvent::Updated(clock));
+        assert_eq!(
+            windows.window_dpi(1, 144),
+            (
+                vec![WindowChange::Resize {
+                    task_id: 1,
+                    width: 600,
+                    height: 450
+                }],
+                vec![TaskRequest::SetDensity {
+                    task_id: 1,
+                    density_dpi: 240
+                }]
+            )
+        );
+        assert_eq!(
+            windows.window_dpi(1, 96),
+            (
+                vec![],
+                vec![TaskRequest::SetDensity {
+                    task_id: 1,
+                    density_dpi: 160
+                }]
+            )
+        );
+    }
+
+    #[test]
+    fn fr4_a_window_may_not_grow_past_what_the_guest_can_draw() {
+        let mut windows = TaskWindows::new();
+        let mut clock = task(1, "Clock", 400, 300);
+        assert_eq!(windows.max_client_size(1), None);
+        windows.apply(&TaskEvent::Updated(clock.clone()));
+        assert_eq!(windows.max_client_size(1), None);
+        clock.max_width = 1920;
+        clock.max_height = 1080;
+        windows.apply(&TaskEvent::Updated(clock));
+        assert_eq!(windows.max_client_size(1), Some((1920, 1080)));
     }
 
     #[test]

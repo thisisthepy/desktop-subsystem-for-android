@@ -80,6 +80,16 @@ pub struct TaskUpdated {
     /// Whether the task has input focus in the guest.
     #[prost(bool, tag = "5")]
     pub focused: bool,
+    /// The density the task's app draws at, in dots per inch (160 draws one pixel per
+    /// density-independent pixel). 0 when the agent cannot read it.
+    #[prost(uint32, tag = "6")]
+    pub density_dpi: u32,
+    /// The largest size the guest can give the task, in guest display pixels: its display's.
+    /// A window larger than this could only show the task's frames stretched. 0 when unknown.
+    #[prost(uint32, tag = "7")]
+    pub max_width: u32,
+    #[prost(uint32, tag = "8")]
+    pub max_height: u32,
 }
 /// Guest to host, from the agent: the task ended; the host closes its window.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -108,6 +118,30 @@ pub struct CloseTask {
 pub struct LaunchApp {
     #[prost(string, tag = "1")]
     pub package_name: ::prost::alloc::string::String,
+}
+/// Host to guest: the user resized the task's window; the task takes the window's client
+/// size, in guest display pixels. Only the latest size counts: during a live resize the host
+/// sends the size it has now, not every size it passed through. The agent keeps the task
+/// clear of other tasks, moving it if the new size would overlap one, and reports the
+/// result with TaskUpdated.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResizeTask {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub width: u32,
+    #[prost(uint32, tag = "3")]
+    pub height: u32,
+}
+/// Host to guest: the task's window is on a monitor of another scale; the task's app draws
+/// at `density_dpi` (160 at a scale of 100%). The host sends the matching ResizeTask right
+/// after it, and the agent applies both together, so the app relays out once.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetTaskDensity {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub density_dpi: u32,
 }
 /// Guest to host, from the agent: the name and launcher icon of an app the host shows a task
 /// of. The host's window for the app carries them, in the taskbar and the task list. The
@@ -161,7 +195,10 @@ pub struct PointerEvent {
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
-    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 13, 15")]
+    #[prost(
+        oneof = "envelope::Body",
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15"
+    )]
     pub body: ::core::option::Option<envelope::Body>,
 }
 /// Nested message and enum types in `Envelope`.
@@ -188,6 +225,10 @@ pub mod envelope {
         CloseTask(super::CloseTask),
         #[prost(message, tag = "10")]
         LaunchApp(super::LaunchApp),
+        #[prost(message, tag = "11")]
+        ResizeTask(super::ResizeTask),
+        #[prost(message, tag = "12")]
+        SetTaskDensity(super::SetTaskDensity),
         #[prost(message, tag = "13")]
         PointerEvent(super::PointerEvent),
         #[prost(message, tag = "15")]

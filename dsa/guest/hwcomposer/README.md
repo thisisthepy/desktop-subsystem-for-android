@@ -45,6 +45,15 @@ tasks apart and reports the bounds a task is moving to. A task that moves keeps 
 display; a new size resizes it. Until the task's surface reaches its new place, no task
 contains it and it is not sent.
 
+After a task's size changes, its app still has its old surface until it draws again. A
+frame composed at the new size then would show the old picture in a corner and nothing
+beside it, while the host is already stretching the last frame over the resized window.
+So the hwcomposer holds a resized task's frames until one of the task's drawn layers fills
+its new bounds (`ResizeGate` in `src/task_layout.cpp`), and only then resizes the task's
+host display and sends the frame. A task whose app has not drawn at the new size after
+500 ms is sent as it is and logged, so its window never stays stretched; the hwcomposer
+asks SurfaceFlinger for a frame at that moment in case nothing else changes.
+
 A layer no task contains is never sent: the wallpaper, display-wide backgrounds and dim
 layers, and anything that straddles a window's edge. Sending it would put pixels that
 belong to no window, or to another one, into a host window. A popup that reaches outside
@@ -124,7 +133,7 @@ composition paths (DRM, guest composition) do not apply to a VM without a displa
 
 | File | What it is |
 |---|---|
-| `src/task_layout.*` | The rules: which layer belongs to which task, task bounds, display pairings |
+| `src/task_layout.*` | The rules: which layer belongs to which task, task bounds, display pairings, holding a resized task's frames |
 | `src/compose_request.*` | The `ComposeDevice_v2` request renderControl's `rcCompose` takes |
 | `src/channel_messages.*` | `TaskUpdated`, `TaskRemoved` and `TaskFrames`, through the generated codec |
 | `src/task_composer.*` | Per-task composition and posting, display lifetimes, shared ColorBuffers |

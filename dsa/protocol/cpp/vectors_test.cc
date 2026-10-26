@@ -78,6 +78,29 @@ std::map<std::string, v1::Envelope> Cases() {
     task->set_focused(true);
   }
   {
+    v1::TaskUpdated* task = cases["task_updated_density"].mutable_task_updated();
+    task->set_task_id(42);
+    task->mutable_bounds()->set_left(0);
+    task->mutable_bounds()->set_top(0);
+    task->mutable_bounds()->set_right(1096);
+    task->mutable_bounds()->set_bottom(1948);
+    task->set_package_name("com.example.notes");
+    task->set_density_dpi(320);
+    task->set_max_width(3840);
+    task->set_max_height(2160);
+  }
+  {
+    v1::ResizeTask* resize = cases["resize_task"].mutable_resize_task();
+    resize->set_task_id(42);
+    resize->set_width(1280);
+    resize->set_height(720);
+  }
+  {
+    v1::SetTaskDensity* density = cases["set_task_density"].mutable_set_task_density();
+    density->set_task_id(42);
+    density->set_density_dpi(240);
+  }
+  {
     v1::TaskUpdated* task = cases["task_updated_negative_origin"].mutable_task_updated();
     task->set_task_id(7);
     task->mutable_bounds()->set_left(-40);

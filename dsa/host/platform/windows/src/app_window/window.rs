@@ -7,8 +7,14 @@
 //! [`FromHost`] report; even a close only reports, and the window closes when the window
 //! manager says so. Each window hands its mouse, touch and pen messages to its
 //! `PointerWindow` ([`super::pointer`]), which sends the task's pointer events on.
+//!
+//! A window reports its client size, its monitor's scale (once when it opens, then on every
+//! move to another monitor) and the start and end of a drag; the window manager turns them
+//! into the task's size and density. It never grows past the size the window manager says
+//! Android can draw, and it shows its last frame stretched over a new size only until a
+//! frame of that size arrives.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -18,7 +24,7 @@ use dsa_host_core::compositor::task_windows::fit_within;
 use dsa_host_core::compositor::window_hosts::{FromHost, ToHost};
 use dsa_host_core::input::PointerEvent;
 use windows_sys::Win32::Foundation::{
-    GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, RECT, WPARAM,
+    GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
 };
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, EndPaint, GetMonitorInfoW, MonitorFromWindow, MONITORINFO,
@@ -31,13 +37,14 @@ use windows_sys::Win32::UI::HiDpi::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-    GetWindowLongPtrW, LoadCursorW, LoadIconW, PostMessageW, PostQuitMessage, RegisterClassExW,
-    SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW,
-    CW_USEDEFAULT, GWLP_USERDATA, HWND_MESSAGE, IDC_ARROW, MSG, SIZE_MINIMIZED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOZORDER, SW_SHOW, SW_SHOWNOACTIVATE, WA_INACTIVE, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND, WM_NCCREATE,
-    WM_NCDESTROY, WM_PAINT, WM_SIZE, WNDCLASSEXW, WS_EX_APPWINDOW, WS_EX_NOREDIRECTIONBITMAP,
-    WS_OVERLAPPEDWINDOW,
+    GetWindowLongPtrW, KillTimer, LoadCursorW, LoadIconW, PostMessageW, PostQuitMessage,
+    RegisterClassExW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
+    TranslateMessage, CREATESTRUCTW, CW_USEDEFAULT, GWLP_USERDATA, HWND_MESSAGE, IDC_ARROW,
+    MINMAXINFO, MSG, SIZE_MINIMIZED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SW_SHOW,
+    SW_SHOWNOACTIVATE, WA_INACTIVE, WINDOW_EX_STYLE, WINDOW_STYLE, WM_ACTIVATE, WM_APP, WM_CLOSE,
+    WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCCREATE,
+    WM_NCDESTROY, WM_PAINT, WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_EX_APPWINDOW,
+    WS_EX_NOREDIRECTIONBITMAP, WS_OVERLAPPEDWINDOW,
 };
 
 use crate::compositor::log::{note, CompositorLogger};
@@ -61,6 +68,10 @@ pub type Presenters = Arc<Mutex<HashMap<i32, Arc<WindowPresenter>>>>;
 
 const WM_APP_COMMANDS: u32 = WM_APP + 1;
 const WM_APP_QUIT: u32 = WM_APP + 2;
+
+/// The message window's timer, which reports windows left showing a stretched frame.
+const TICK_TIMER: usize = 1;
+const TICK_MILLIS: u32 = 200;
 
 const TASK_CLASS: &str = "DsaAppWindow";
 const MESSAGE_CLASS: &str = "DsaAppWindowMessages";
@@ -163,6 +174,11 @@ struct WindowData {
     report: Report,
     presenter: RefCell<Option<Arc<WindowPresenter>>>,
     pointer: PointerWindow,
+    /// The largest client area Android can draw for the task, as the window manager last
+    /// said, for WM_GETMINMAXINFO.
+    max_client: Cell<Option<(u32, u32)>>,
+    /// Whether the window reports its size: not until it has been given the task's.
+    reporting: Cell<bool>,
 }
 
 /// The UI thread's state, reached from the message window's procedure.
@@ -252,6 +268,7 @@ fn run(setup: UiSetup, commands: Receiver<ToHost>, ready: Sender<Result<isize, S
             });
         });
         let _ = ready.send(Ok(message_window as isize));
+        SetTimer(message_window, TICK_TIMER, TICK_MILLIS, None);
 
         let mut message: MSG = std::mem::zeroed();
         while GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) > 0 {
@@ -267,6 +284,7 @@ fn run(setup: UiSetup, commands: Receiver<ToHost>, ready: Sender<Result<isize, S
             }
             ui.publish();
         }
+        KillTimer(message_window, TICK_TIMER);
         DestroyWindow(message_window);
     }
 }
@@ -296,6 +314,16 @@ unsafe extern "system" fn message_window_proc(
         }
         WM_APP_QUIT => {
             PostQuitMessage(0);
+            0
+        }
+        WM_TIMER => {
+            UI.with(|ui| {
+                if let Ok(ui) = ui.try_borrow() {
+                    if let Some(ui) = ui.as_ref() {
+                        ui.tick();
+                    }
+                }
+            });
             0
         }
         _ => DefWindowProcW(hwnd, message, wparam, lparam),
@@ -334,34 +362,77 @@ unsafe extern "system" fn task_window_proc(
                         // last frame is stretched to the new size before it is shown.
                         presenter.view_resized((width, height));
                     }
-                    (data.report)(FromHost::Resized {
-                        task_id: data.task_id,
-                        width,
-                        height,
-                    });
+                    // Not while the window is being made, when its size is not yet the task's.
+                    if data.reporting.get() {
+                        (data.report)(FromHost::Resized {
+                            task_id: data.task_id,
+                            width,
+                            height,
+                        });
+                    }
                 }
             }
             0
         }
+        WM_ENTERSIZEMOVE | WM_EXITSIZEMOVE => {
+            if let Some(data) = window_data(hwnd) {
+                (data.report)(FromHost::Dragging {
+                    task_id: data.task_id,
+                    dragging: message == WM_ENTERSIZEMOVE,
+                });
+            }
+            0
+        }
+        WM_GETMINMAXINFO => {
+            // Never larger than Android can draw: a larger window could only show the
+            // task's frames stretched. Maximising takes this size too.
+            if let Some(max) = window_data(hwnd).and_then(|data| data.max_client.get()) {
+                let info = &mut *(lparam as *mut MINMAXINFO);
+                let (width, height) = outer_size(max, GetDpiForWindow(hwnd).max(96));
+                info.ptMaxTrackSize = POINT {
+                    x: width.min(info.ptMaxTrackSize.x),
+                    y: height.min(info.ptMaxTrackSize.y),
+                };
+                info.ptMaxSize = POINT {
+                    x: width.min(info.ptMaxSize.x),
+                    y: height.min(info.ptMaxSize.y),
+                };
+            }
+            0
+        }
         WM_DPICHANGED => {
+            // The scale goes first, so the task gets its new density before the size that
+            // goes with it, which the resize below reports.
+            let dpi = (wparam & 0xffff) as u32;
+            let data = window_data(hwnd);
+            if let Some(data) = data {
+                (data.report)(FromHost::Dpi {
+                    task_id: data.task_id,
+                    dpi,
+                });
+            }
             // A per-monitor aware window is handed the rectangle that keeps its size in
-            // points on the new monitor, and applies it itself.
+            // points on the new monitor, and applies it itself, within what Android can
+            // draw.
             let suggested = &*(lparam as *const RECT);
+            let (mut width, mut height) = (
+                suggested.right - suggested.left,
+                suggested.bottom - suggested.top,
+            );
+            if let Some(max) = data.and_then(|data| data.max_client.get()) {
+                let (max_width, max_height) = outer_size(max, dpi.max(96));
+                width = width.min(max_width);
+                height = height.min(max_height);
+            }
             SetWindowPos(
                 hwnd,
                 std::ptr::null_mut(),
                 suggested.left,
                 suggested.top,
-                suggested.right - suggested.left,
-                suggested.bottom - suggested.top,
+                width,
+                height,
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
-            if let Some(data) = window_data(hwnd) {
-                (data.report)(FromHost::Dpi {
-                    task_id: data.task_id,
-                    dpi: (wparam & 0xffff) as u32,
-                });
-            }
             0
         }
         WM_ACTIVATE => {
@@ -483,10 +554,38 @@ impl Ui {
                         }
                     }
                     ToHost::Close { task_id } => self.close(task_id),
+                    ToHost::TaskSize {
+                        task_id,
+                        width,
+                        height,
+                        max,
+                    } => {
+                        if let Some(data) =
+                            self.open.get(&task_id).and_then(|hwnd| window_data(*hwnd))
+                        {
+                            data.pointer.task_resized((width, height));
+                            data.max_client.set(max);
+                        }
+                    }
                 }
             }
         }
         self.publish();
+    }
+
+    /// Logs the windows left showing a stretched frame.
+    fn tick(&self) {
+        let presenters: Vec<Arc<WindowPresenter>> = self
+            .setup
+            .presenters
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect();
+        for presenter in presenters {
+            presenter.tick();
+        }
     }
 
     /// Lists the windows that are open.
@@ -528,6 +627,8 @@ impl Ui {
             report: Arc::clone(&self.setup.report),
             presenter: RefCell::new(None),
             pointer: PointerWindow::new(task_id, size, self.setup.input.clone()),
+            max_client: Cell::new(None),
+            reporting: Cell::new(false),
         }));
         let class = wide(TASK_CLASS);
         let hwnd = CreateWindowExW(
@@ -555,7 +656,12 @@ impl Ui {
         }
         let client = apply_size(hwnd, size);
         let presenter = match &self.setup.gpu {
-            Some(gpu) => match WindowPresenter::new(Arc::clone(gpu), hwnd as isize, client) {
+            Some(gpu) => match WindowPresenter::new(
+                Arc::clone(gpu),
+                hwnd as isize,
+                client,
+                self.setup.logger.clone(),
+            ) {
                 Ok(presenter) => Some(presenter),
                 Err(why) => {
                     self.log(&format!(
@@ -576,6 +682,21 @@ impl Ui {
                 .unwrap_or_else(|e| e.into_inner())
                 .insert(task_id, presenter);
         }
+        // From here on the window reports its size. First the scale of the monitor it opened
+        // on, which the window manager may answer with the size that keeps the app the same
+        // size to the eye there, then the size it has.
+        if let Some(data) = window_data(hwnd) {
+            data.reporting.set(true);
+        }
+        (self.setup.report)(FromHost::Dpi {
+            task_id,
+            dpi: GetDpiForWindow(hwnd).max(96),
+        });
+        (self.setup.report)(FromHost::Resized {
+            task_id,
+            width: client.0,
+            height: client.1,
+        });
         ShowWindow(hwnd, if focused { SW_SHOW } else { SW_SHOWNOACTIVATE });
         self.open.insert(task_id, hwnd);
     }

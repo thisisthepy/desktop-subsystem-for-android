@@ -559,9 +559,35 @@ impl Manager {
     fn reported(&mut self, report: FromHost, now: Instant) {
         match report {
             FromHost::Closed { task_id } => self.user_closed(task_id, now),
-            // The guest learns of the window's size, scale and focus once the task follows
-            // them; until then the window shows the task at the size the guest gave it.
-            FromHost::Resized { .. } | FromHost::Dpi { .. } | FromHost::Focus { .. } => {}
+            // The task takes its window's client size, and draws at its monitor's density.
+            // The requests go to the request thread, which sends only the latest size of a
+            // task when several are waiting.
+            FromHost::Resized {
+                task_id,
+                width,
+                height,
+            } => {
+                let requests = self.windows.window_resized(task_id, (width, height), now);
+                self.request(requests);
+            }
+            FromHost::Dpi { task_id, dpi } => {
+                let (changes, requests) = self.windows.window_dpi(task_id, dpi);
+                self.request(requests);
+                self.change(changes, now);
+            }
+            FromHost::Dragging { task_id, dragging } => {
+                self.windows.window_dragging(task_id, dragging, now);
+            }
+            FromHost::Focus { .. } => {}
+        }
+    }
+
+    fn request(&self, requests: Vec<TaskRequest>) {
+        for request in requests {
+            if self.setup.requests.send(request).is_err() {
+                self.log("the request thread has ended; a window's change does not reach Android");
+                return;
+            }
         }
     }
 
@@ -585,6 +611,9 @@ impl Manager {
     }
 
     fn tick(&mut self) {
+        // A window whose task did not take the size it asked for takes the task's size.
+        let changes = self.windows.tick(Instant::now());
+        self.change(changes, Instant::now());
         let (failed, actions) = self.hosts.tick(Instant::now());
         for (package, tasks) in failed {
             self.log(&format!(
@@ -631,7 +660,9 @@ impl Manager {
                             }
                         }
                         ToHost::Close { task_id } => self.drop_remote(*task_id),
-                        ToHost::Retitle { .. } | ToHost::Resize { .. } => {}
+                        ToHost::Retitle { .. }
+                        | ToHost::Resize { .. }
+                        | ToHost::TaskSize { .. } => {}
                     }
                     link.send(to_wire(&message));
                 }

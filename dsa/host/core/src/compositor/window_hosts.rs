@@ -73,6 +73,13 @@ pub enum ToHost {
     Close {
         task_id: i32,
     },
+    /// The task's size in the guest and the largest client area the window may have.
+    TaskSize {
+        task_id: i32,
+        width: u32,
+        height: u32,
+        max: Option<(u32, u32)>,
+    },
 }
 
 impl ToHost {
@@ -81,6 +88,7 @@ impl ToHost {
             ToHost::Show { task_id, .. }
             | ToHost::Retitle { task_id, .. }
             | ToHost::Resize { task_id, .. }
+            | ToHost::TaskSize { task_id, .. }
             | ToHost::Close { task_id } => *task_id,
         }
     }
@@ -101,6 +109,8 @@ pub enum FromHost {
     Dpi { task_id: i32, dpi: u32 },
     /// The window became the active window, or stopped being it.
     Focus { task_id: i32, focused: bool },
+    /// The user started dragging the window, to move or resize it, or let go.
+    Dragging { task_id: i32, dragging: bool },
 }
 
 impl FromHost {
@@ -109,7 +119,8 @@ impl FromHost {
             FromHost::Closed { task_id }
             | FromHost::Resized { task_id, .. }
             | FromHost::Dpi { task_id, .. }
-            | FromHost::Focus { task_id, .. } => *task_id,
+            | FromHost::Focus { task_id, .. }
+            | FromHost::Dragging { task_id, .. } => *task_id,
         }
     }
 }
@@ -276,6 +287,17 @@ impl WindowHosts {
                 height: *height,
             }),
             WindowChange::Close { task_id } => self.close(*task_id),
+            WindowChange::TaskSize {
+                task_id,
+                width,
+                height,
+                max,
+            } => self.forward(ToHost::TaskSize {
+                task_id: *task_id,
+                width: *width,
+                height: *height,
+                max: *max,
+            }),
         }
     }
 
@@ -555,6 +577,21 @@ pub fn to_wire(message: &ToHost) -> Body {
             height,
         }),
         ToHost::Close { task_id } => Body::CloseWindow(CloseWindow { task_id }),
+        ToHost::TaskSize {
+            task_id,
+            width,
+            height,
+            max,
+        } => {
+            let (max_width, max_height) = max.unwrap_or((0, 0));
+            Body::TaskSize(dsa_protocol::window_host::types::TaskSize {
+                task_id,
+                width,
+                height,
+                max_width,
+                max_height,
+            })
+        }
     }
 }
 
@@ -580,13 +617,22 @@ pub fn to_host_from_wire(body: &Body) -> Option<ToHost> {
         Body::CloseWindow(close) => ToHost::Close {
             task_id: close.task_id,
         },
+        Body::TaskSize(size) => ToHost::TaskSize {
+            task_id: size.task_id,
+            width: size.width,
+            height: size.height,
+            max: (size.max_width > 0 && size.max_height > 0)
+                .then_some((size.max_width, size.max_height)),
+        },
         _ => return None,
     })
 }
 
 /// The frame body that carries `report`.
 pub fn report_to_wire(report: &FromHost) -> Body {
-    use dsa_protocol::window_host::types::{WindowClosed, WindowDpi, WindowFocus, WindowResized};
+    use dsa_protocol::window_host::types::{
+        WindowClosed, WindowDpi, WindowDragging, WindowFocus, WindowResized,
+    };
     match *report {
         FromHost::Closed { task_id } => Body::WindowClosed(WindowClosed { task_id }),
         FromHost::Resized {
@@ -600,6 +646,9 @@ pub fn report_to_wire(report: &FromHost) -> Body {
         }),
         FromHost::Dpi { task_id, dpi } => Body::WindowDpi(WindowDpi { task_id, dpi }),
         FromHost::Focus { task_id, focused } => Body::WindowFocus(WindowFocus { task_id, focused }),
+        FromHost::Dragging { task_id, dragging } => {
+            Body::WindowDragging(WindowDragging { task_id, dragging })
+        }
     }
 }
 
@@ -621,6 +670,10 @@ pub fn report_from_wire(body: &Body) -> Option<FromHost> {
         Body::WindowFocus(ref focus) => FromHost::Focus {
             task_id: focus.task_id,
             focused: focus.focused,
+        },
+        Body::WindowDragging(ref dragging) => FromHost::Dragging {
+            task_id: dragging.task_id,
+            dragging: dragging.dragging,
         },
         _ => return None,
     })
@@ -966,6 +1019,18 @@ mod tests {
                 height: 20,
             },
             ToHost::Close { task_id: 4 },
+            ToHost::TaskSize {
+                task_id: 5,
+                width: 600,
+                height: 400,
+                max: Some((1920, 1080)),
+            },
+            ToHost::TaskSize {
+                task_id: 6,
+                width: 600,
+                height: 400,
+                max: None,
+            },
         ] {
             assert_eq!(to_host_from_wire(&to_wire(&message)), Some(message));
         }
@@ -983,6 +1048,10 @@ mod tests {
             FromHost::Focus {
                 task_id: 6,
                 focused: true,
+            },
+            FromHost::Dragging {
+                task_id: 7,
+                dragging: true,
             },
         ] {
             assert_eq!(report_from_wire(&report_to_wire(&report)), Some(report));

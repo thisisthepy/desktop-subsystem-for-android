@@ -7,6 +7,9 @@ import io.github.thisisthepy.dsa.agent.windowing.WINDOWING_MODE_FREEFORM
 import io.github.thisisthepy.dsa.control.v1.CloseTask
 import io.github.thisisthepy.dsa.control.v1.Envelope
 import io.github.thisisthepy.dsa.control.v1.LaunchApp
+import io.github.thisisthepy.dsa.control.v1.ResizeTask
+import io.github.thisisthepy.dsa.control.v1.SetTaskDensity
+import io.github.thisisthepy.dsa.agent.requests.ResizeOutcome
 import io.github.thisisthepy.dsa.control.v1.PointerAction
 import io.github.thisisthepy.dsa.control.v1.PointerEvent
 import io.github.thisisthepy.dsa.control.v1.PointerTool
@@ -194,6 +197,176 @@ class AgentTest {
 
         assertTrue(actions.moved.isEmpty())
         assertEquals(listOf(4, 5), daemon.sentMessages().map { it.taskUpdated.taskId }.sorted())
+    }
+
+    private fun resize(taskId: Int, width: Int, height: Int) = daemon.deliver(
+        Envelope.newBuilder()
+            .setResizeTask(ResizeTask.newBuilder().setTaskId(taskId).setWidth(width).setHeight(height))
+            .build().toByteArray(),
+    )
+
+    private fun density(taskId: Int, densityDpi: Int) = daemon.deliver(
+        Envelope.newBuilder()
+            .setSetTaskDensity(SetTaskDensity.newBuilder().setTaskId(taskId).setDensityDpi(densityDpi))
+            .build().toByteArray(),
+    )
+
+    @Test
+    fun fr4_resizing_a_window_gives_its_task_the_size_and_tells_the_host_at_once() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(100, 100, 500, 400)))
+        started()
+
+        resize(1, 600, 500)
+        scheduler.runDue()
+
+        val target = TaskBounds(100, 100, 700, 600)
+        assertEquals(listOf(Triple(1, target, null as Int?)), actions.resized)
+        // Reported at the size it is taking, before the window manager applies it.
+        val reported = daemon.sentMessages().last().taskUpdated
+        assertEquals(1, reported.taskId)
+        assertEquals(700, reported.bounds.right)
+        assertEquals(600, reported.bounds.bottom)
+    }
+
+    @Test
+    fun fr4_a_density_and_its_size_are_applied_in_one_change() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 548, 974)))
+        started()
+
+        density(1, 320)
+        resize(1, 1096, 1080)
+        scheduler.runDue()
+
+        assertEquals(listOf(Triple(1, TaskBounds(0, 0, 1096, 1080), 320 as Int?)), actions.resized)
+    }
+
+    @Test
+    fun fr4_a_task_that_grows_into_a_newer_one_moves_the_newer_one() {
+        tasks.running = listOf(
+            appTask(1, bounds = TaskBounds(0, 0, 500, 400)),
+            appTask(2, bounds = TaskBounds(500, 0, 900, 400)),
+        )
+        started()
+
+        resize(1, 700, 400)
+        scheduler.runDue()
+
+        assertEquals(listOf(Triple(1, TaskBounds(0, 0, 700, 400), null as Int?)), actions.resized)
+        assertEquals(listOf(2 to TaskBounds(700, 0, 1100, 400)), actions.moved)
+    }
+
+    @Test
+    fun fr4_a_newer_task_that_grows_into_an_older_one_moves_itself() {
+        tasks.running = listOf(
+            appTask(1, bounds = TaskBounds(500, 0, 900, 400)),
+            appTask(2, bounds = TaskBounds(0, 0, 500, 400)),
+        )
+        started()
+
+        resize(2, 400, 700)
+        resize(2, 700, 400)
+        scheduler.runDue()
+
+        // Only the latest size counts. At its place it would cover task 1, which is older,
+        // so it takes its new size at the first free place instead.
+        assertEquals(listOf(Triple(2, TaskBounds(900, 0, 1600, 400), null as Int?)), actions.resized)
+        assertTrue(actions.moved.isEmpty())
+    }
+
+    @Test
+    fun fr4_a_task_is_never_larger_than_the_display_nor_past_its_edge() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(1500, 700, 1900, 1000)))
+        started()
+
+        resize(1, 4000, 600)
+        scheduler.runDue()
+
+        assertEquals(listOf(Triple(1, TaskBounds(0, 480, 1920, 1080), null as Int?)), actions.resized)
+    }
+
+    @Test
+    fun fr4_the_next_size_waits_for_the_last_one_to_land() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+
+        resize(1, 500, 300)
+        scheduler.runDue()
+        resize(1, 600, 300)
+        scheduler.runDue()
+        assertEquals(1, actions.resized.size)
+
+        // The window manager applies the first size; the agent sees it within a frame and
+        // asks for the next.
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 500, 300)))
+        scheduler.advance(20)
+        assertEquals(TaskBounds(0, 0, 600, 300), actions.resized.last().second)
+    }
+
+    @Test
+    fun fr4_a_resize_the_window_manager_never_applies_is_given_up() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+
+        resize(1, 500, 300)
+        scheduler.advance(3000)
+
+        assertTrue(log.lines.any { it.startsWith("warn: task 1 did not take [0,0][500,300]") })
+        assertEquals(400, daemon.sentMessages().last().taskUpdated.bounds.right)
+    }
+
+    @Test
+    fun fr4_a_framework_without_task_densities_still_resizes_and_says_so() {
+        actions.onResize = { _, _, densityDpi -> if (densityDpi == null) ResizeOutcome.APPLIED else ResizeOutcome.BOUNDS_ONLY }
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+
+        density(1, 240)
+        resize(1, 600, 450)
+        scheduler.runDue()
+
+        assertEquals(TaskBounds(0, 0, 600, 450), actions.resized.single().second)
+        assertTrue(log.lines.any { it.startsWith("warn: the framework cannot set a task's density") })
+    }
+
+    @Test
+    fun fr4_a_resize_the_framework_refuses_leaves_the_task_where_it_is() {
+        actions.onResize = { _, _, _ -> ResizeOutcome.REFUSED }
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+
+        resize(1, 600, 450)
+        scheduler.runDue()
+
+        assertEquals(400, daemon.sentMessages().last().taskUpdated.bounds.right)
+        assertTrue(log.lines.any { it.startsWith("warn: the framework refused to give task 1") })
+    }
+
+    @Test
+    fun fr4_the_host_hears_each_tasks_density_and_the_largest_size_it_can_have() {
+        tasks.running = listOf(appTask(1, densityDpi = 240))
+        started()
+
+        val update = daemon.sentMessages().single().taskUpdated
+        assertEquals(240, update.densityDpi)
+        assertEquals(1920, update.maxWidth)
+        assertEquals(1080, update.maxHeight)
+
+        // A new density is news.
+        tasks.change(listOf(appTask(1, densityDpi = 320)))
+        scheduler.runDue()
+        assertEquals(320, daemon.sentMessages().last().taskUpdated.densityDpi)
+    }
+
+    @Test
+    fun fr4_a_size_for_a_task_the_host_never_heard_of_is_refused() {
+        tasks.running = listOf(appTask(1, packageName = AGENT))
+        started()
+
+        resize(1, 600, 450)
+        scheduler.runDue()
+
+        assertTrue(actions.resized.isEmpty())
+        assertTrue(log.lines.any { it.startsWith("warn: did not resize task 1") })
     }
 
     @Test

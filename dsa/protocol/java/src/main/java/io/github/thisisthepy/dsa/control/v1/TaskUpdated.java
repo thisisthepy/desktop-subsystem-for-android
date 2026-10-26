@@ -297,6 +297,114 @@ public  final class TaskUpdated extends
     focused_ = false;
   }
 
+  public static final int DENSITY_DPI_FIELD_NUMBER = 6;
+  private int densityDpi_;
+  /**
+   * <pre>
+   * The density the task's app draws at, in dots per inch (160 draws one pixel per
+   * density-independent pixel). 0 when the agent cannot read it.
+   * </pre>
+   *
+   * <code>uint32 density_dpi = 6;</code>
+   * @return The densityDpi.
+   */
+  @java.lang.Override
+  public int getDensityDpi() {
+    return densityDpi_;
+  }
+  /**
+   * <pre>
+   * The density the task's app draws at, in dots per inch (160 draws one pixel per
+   * density-independent pixel). 0 when the agent cannot read it.
+   * </pre>
+   *
+   * <code>uint32 density_dpi = 6;</code>
+   * @param value The densityDpi to set.
+   */
+  private void setDensityDpi(int value) {
+    
+    densityDpi_ = value;
+  }
+  /**
+   * <pre>
+   * The density the task's app draws at, in dots per inch (160 draws one pixel per
+   * density-independent pixel). 0 when the agent cannot read it.
+   * </pre>
+   *
+   * <code>uint32 density_dpi = 6;</code>
+   */
+  private void clearDensityDpi() {
+    
+    densityDpi_ = 0;
+  }
+
+  public static final int MAX_WIDTH_FIELD_NUMBER = 7;
+  private int maxWidth_;
+  /**
+   * <pre>
+   * The largest size the guest can give the task, in guest display pixels: its display's.
+   * A window larger than this could only show the task's frames stretched. 0 when unknown.
+   * </pre>
+   *
+   * <code>uint32 max_width = 7;</code>
+   * @return The maxWidth.
+   */
+  @java.lang.Override
+  public int getMaxWidth() {
+    return maxWidth_;
+  }
+  /**
+   * <pre>
+   * The largest size the guest can give the task, in guest display pixels: its display's.
+   * A window larger than this could only show the task's frames stretched. 0 when unknown.
+   * </pre>
+   *
+   * <code>uint32 max_width = 7;</code>
+   * @param value The maxWidth to set.
+   */
+  private void setMaxWidth(int value) {
+    
+    maxWidth_ = value;
+  }
+  /**
+   * <pre>
+   * The largest size the guest can give the task, in guest display pixels: its display's.
+   * A window larger than this could only show the task's frames stretched. 0 when unknown.
+   * </pre>
+   *
+   * <code>uint32 max_width = 7;</code>
+   */
+  private void clearMaxWidth() {
+    
+    maxWidth_ = 0;
+  }
+
+  public static final int MAX_HEIGHT_FIELD_NUMBER = 8;
+  private int maxHeight_;
+  /**
+   * <code>uint32 max_height = 8;</code>
+   * @return The maxHeight.
+   */
+  @java.lang.Override
+  public int getMaxHeight() {
+    return maxHeight_;
+  }
+  /**
+   * <code>uint32 max_height = 8;</code>
+   * @param value The maxHeight to set.
+   */
+  private void setMaxHeight(int value) {
+    
+    maxHeight_ = value;
+  }
+  /**
+   * <code>uint32 max_height = 8;</code>
+   */
+  private void clearMaxHeight() {
+    
+    maxHeight_ = 0;
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.TaskUpdated parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -687,6 +795,120 @@ public  final class TaskUpdated extends
       return this;
     }
 
+    /**
+     * <pre>
+     * The density the task's app draws at, in dots per inch (160 draws one pixel per
+     * density-independent pixel). 0 when the agent cannot read it.
+     * </pre>
+     *
+     * <code>uint32 density_dpi = 6;</code>
+     * @return The densityDpi.
+     */
+    @java.lang.Override
+    public int getDensityDpi() {
+      return instance.getDensityDpi();
+    }
+    /**
+     * <pre>
+     * The density the task's app draws at, in dots per inch (160 draws one pixel per
+     * density-independent pixel). 0 when the agent cannot read it.
+     * </pre>
+     *
+     * <code>uint32 density_dpi = 6;</code>
+     * @param value The densityDpi to set.
+     * @return This builder for chaining.
+     */
+    public Builder setDensityDpi(int value) {
+      copyOnWrite();
+      instance.setDensityDpi(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The density the task's app draws at, in dots per inch (160 draws one pixel per
+     * density-independent pixel). 0 when the agent cannot read it.
+     * </pre>
+     *
+     * <code>uint32 density_dpi = 6;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearDensityDpi() {
+      copyOnWrite();
+      instance.clearDensityDpi();
+      return this;
+    }
+
+    /**
+     * <pre>
+     * The largest size the guest can give the task, in guest display pixels: its display's.
+     * A window larger than this could only show the task's frames stretched. 0 when unknown.
+     * </pre>
+     *
+     * <code>uint32 max_width = 7;</code>
+     * @return The maxWidth.
+     */
+    @java.lang.Override
+    public int getMaxWidth() {
+      return instance.getMaxWidth();
+    }
+    /**
+     * <pre>
+     * The largest size the guest can give the task, in guest display pixels: its display's.
+     * A window larger than this could only show the task's frames stretched. 0 when unknown.
+     * </pre>
+     *
+     * <code>uint32 max_width = 7;</code>
+     * @param value The maxWidth to set.
+     * @return This builder for chaining.
+     */
+    public Builder setMaxWidth(int value) {
+      copyOnWrite();
+      instance.setMaxWidth(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The largest size the guest can give the task, in guest display pixels: its display's.
+     * A window larger than this could only show the task's frames stretched. 0 when unknown.
+     * </pre>
+     *
+     * <code>uint32 max_width = 7;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearMaxWidth() {
+      copyOnWrite();
+      instance.clearMaxWidth();
+      return this;
+    }
+
+    /**
+     * <code>uint32 max_height = 8;</code>
+     * @return The maxHeight.
+     */
+    @java.lang.Override
+    public int getMaxHeight() {
+      return instance.getMaxHeight();
+    }
+    /**
+     * <code>uint32 max_height = 8;</code>
+     * @param value The maxHeight to set.
+     * @return This builder for chaining.
+     */
+    public Builder setMaxHeight(int value) {
+      copyOnWrite();
+      instance.setMaxHeight(value);
+      return this;
+    }
+    /**
+     * <code>uint32 max_height = 8;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearMaxHeight() {
+      copyOnWrite();
+      instance.clearMaxHeight();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.TaskUpdated)
   }
   @java.lang.Override
@@ -708,10 +930,13 @@ public  final class TaskUpdated extends
             "packageName_",
             "label_",
             "focused_",
+            "densityDpi_",
+            "maxWidth_",
+            "maxHeight_",
           };
           java.lang.String info =
-              "\u0000\u0005\u0000\u0000\u0001\u0005\u0005\u0000\u0000\u0000\u0001\u0004\u0002\t" +
-              "\u0003\u0208\u0004\u0208\u0005\u0007";
+              "\u0000\b\u0000\u0000\u0001\b\b\u0000\u0000\u0000\u0001\u0004\u0002\t\u0003\u0208" +
+              "\u0004\u0208\u0005\u0007\u0006\u000b\u0007\u000b\b\u000b";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through
