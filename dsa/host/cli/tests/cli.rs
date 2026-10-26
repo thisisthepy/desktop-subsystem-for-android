@@ -674,8 +674,7 @@ fn fr17_dsa_memory_json_says_what_it_knows_of_the_host_and_android() {
 #[test]
 fn fr17_dsa_memory_json_carries_the_guest_breakdown_and_the_host_processes() {
     use dsa_host_core::memory::{
-        GuestMemory, GuestMemoryReport, HostProcessMemory, HostRole, MemorySnapshot,
-        ProcessMemory,
+        GuestMemory, GuestMemoryReport, HostProcessMemory, HostRole, MemorySnapshot, ProcessMemory,
     };
     let json = dsa_cli::memory_json(&MemorySnapshot {
         guest: Some(GuestMemoryReport {

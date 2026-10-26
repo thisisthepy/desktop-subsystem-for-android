@@ -1023,7 +1023,10 @@ impl HostApiService {
                 "program updates",
                 wanted.program_updates != machine.program_updates,
             ),
-            ("image updates", wanted.image_updates != machine.image_updates),
+            (
+                "image updates",
+                wanted.image_updates != machine.image_updates,
+            ),
         ]
         .into_iter()
         .filter_map(|(name, changed)| changed.then_some(name))

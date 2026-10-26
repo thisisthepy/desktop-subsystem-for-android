@@ -53,7 +53,10 @@ fn settings_service(
     let store = Arc::new(dsa_host_core::settings::MemorySettings::default());
     let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
         .with_settings(store.clone(), ServiceFacts::default());
-    (RunningService::start_service(Box::new(listener), service), store)
+    (
+        RunningService::start_service(Box::new(listener), service),
+        store,
+    )
 }
 
 #[test]
