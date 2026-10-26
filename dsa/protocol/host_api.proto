@@ -320,6 +320,62 @@ message Tasks {
   repeated AppInfo apps = 3;
 }
 
+// Asks how much memory the caller's Android takes: inside the guest, as it last reported,
+// and on the host, the processes that run it.
+message GetMemory {}
+
+// One Android process's share of the guest's memory.
+message GuestProcessMemory {
+  int32 pid = 1;
+  string name = 2;
+  // Its proportional set size in KiB: its private pages plus its share of shared pages.
+  uint64 pss_kb = 3;
+  // How much of it is swapped out to compressed memory, proportionally, in KiB.
+  uint64 swap_pss_kb = 4;
+}
+
+// How Android uses the guest's memory, as it last reported it. Sizes in KiB; 0 when Android
+// could not read the value.
+message GuestMemory {
+  uint64 mem_total_kb = 1;
+  uint64 mem_free_kb = 2;
+  uint64 mem_available_kb = 3;
+  uint64 buffers_kb = 4;
+  uint64 cached_kb = 5;
+  uint64 anon_pages_kb = 6;
+  uint64 shmem_kb = 7;
+  uint64 slab_reclaimable_kb = 8;
+  uint64 swap_total_kb = 9;
+  uint64 swap_free_kb = 10;
+  uint64 zram_original_kb = 11;
+  uint64 zram_used_kb = 12;
+  uint64 total_pss_kb = 13;
+  // Largest first, at most 10.
+  repeated GuestProcessMemory top_processes = 14;
+  // How long ago Android sent this report, in seconds.
+  uint64 age_seconds = 15;
+}
+
+// One host process that runs the caller's Android: its VM's memory process, the window
+// manager, an app window.
+message HostProcessMemory {
+  // What it is: "vm", "window manager" or "app window".
+  string role = 1;
+  uint32 pid = 2;
+  // The memory of it resident in RAM now, in KiB.
+  uint64 working_set_kb = 3;
+  // The memory committed to it alone, in KiB.
+  uint64 private_kb = 4;
+}
+
+// The answer to GetMemory.
+message Memory {
+  // Absent until Android has sent its first report since it started.
+  GuestMemory guest = 1;
+  // In the order: the VM, the window manager, the app windows.
+  repeated HostProcessMemory host = 2;
+}
+
 // The answer to a request that has nothing to report but that it was carried out.
 message Done {}
 
@@ -385,6 +441,7 @@ message Request {
     StreamInput stream_input = 11;
     ResizeTask resize_task = 12;
     SetTaskDensity set_task_density = 13;
+    GetMemory get_memory = 14;
   }
 }
 
@@ -397,6 +454,7 @@ message Response {
     VmId vm_id = 5;
     Tasks tasks = 6;
     Done done = 7;
+    Memory memory = 8;
   }
 }
 
