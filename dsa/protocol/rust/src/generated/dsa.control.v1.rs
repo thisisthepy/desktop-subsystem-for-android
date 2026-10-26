@@ -169,6 +169,32 @@ pub struct AppInfo {
     #[prost(bytes = "vec", tag = "3")]
     pub icon_png: ::prost::alloc::vec::Vec<u8>,
 }
+/// Guest to host, from the agent: an app a launcher lists is installed in the guest, or its
+/// name or icon changed. The host shows it in its own start menu. The agent sends it on each
+/// connection for every such app, and again whenever the app is installed again or updated;
+/// the InstalledApps that follows says which apps are still there.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InstalledApp {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+    /// The app's own name, as a launcher shows it.
+    #[prost(string, tag = "2")]
+    pub label: ::prost::alloc::string::String,
+    /// The app's launcher icon, as a square PNG image of at most 256 pixels on a side. Empty
+    /// when the app has no icon the agent could draw.
+    #[prost(bytes = "vec", tag = "3")]
+    pub icon_png: ::prost::alloc::vec::Vec<u8>,
+}
+/// Guest to host, from the agent: every app a launcher lists, by package, in package order.
+/// It follows the InstalledApp of each app it names that the host has not been told about on
+/// this connection. The agent sends it on each connection and whenever an app is installed,
+/// updated or removed; an app it no longer names has been removed. Each app goes in a message
+/// of its own, so no message has to carry every icon at once.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InstalledApps {
+    #[prost(string, repeated, tag = "1")]
+    pub package_names: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
 /// Host to guest: pointer input in a task's window. One message per event, sent as it
 /// happens; the agent injects it into the task at once.
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -335,7 +361,7 @@ pub struct GuestMemory {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -383,6 +409,10 @@ pub mod envelope {
         RequestGuestMemory(super::RequestGuestMemory),
         #[prost(message, tag = "21")]
         GuestMemory(super::GuestMemory),
+        #[prost(message, tag = "22")]
+        InstalledApp(super::InstalledApp),
+        #[prost(message, tag = "23")]
+        InstalledApps(super::InstalledApps),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.

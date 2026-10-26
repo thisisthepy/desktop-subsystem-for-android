@@ -81,6 +81,12 @@ extern ImeCompositionDefaultTypeInternal _ImeComposition_default_instance_;
 class ImeCursor;
 struct ImeCursorDefaultTypeInternal;
 extern ImeCursorDefaultTypeInternal _ImeCursor_default_instance_;
+class InstalledApp;
+struct InstalledAppDefaultTypeInternal;
+extern InstalledAppDefaultTypeInternal _InstalledApp_default_instance_;
+class InstalledApps;
+struct InstalledAppsDefaultTypeInternal;
+extern InstalledAppsDefaultTypeInternal _InstalledApps_default_instance_;
 class KeyEvent;
 struct KeyEventDefaultTypeInternal;
 extern KeyEventDefaultTypeInternal _KeyEvent_default_instance_;
@@ -130,6 +136,8 @@ template<> ::dsa::control::v1::HelloRejected* Arena::CreateMaybeMessage<::dsa::c
 template<> ::dsa::control::v1::ImeCommit* Arena::CreateMaybeMessage<::dsa::control::v1::ImeCommit>(Arena*);
 template<> ::dsa::control::v1::ImeComposition* Arena::CreateMaybeMessage<::dsa::control::v1::ImeComposition>(Arena*);
 template<> ::dsa::control::v1::ImeCursor* Arena::CreateMaybeMessage<::dsa::control::v1::ImeCursor>(Arena*);
+template<> ::dsa::control::v1::InstalledApp* Arena::CreateMaybeMessage<::dsa::control::v1::InstalledApp>(Arena*);
+template<> ::dsa::control::v1::InstalledApps* Arena::CreateMaybeMessage<::dsa::control::v1::InstalledApps>(Arena*);
 template<> ::dsa::control::v1::KeyEvent* Arena::CreateMaybeMessage<::dsa::control::v1::KeyEvent>(Arena*);
 template<> ::dsa::control::v1::LaunchApp* Arena::CreateMaybeMessage<::dsa::control::v1::LaunchApp>(Arena*);
 template<> ::dsa::control::v1::PointerEvent* Arena::CreateMaybeMessage<::dsa::control::v1::PointerEvent>(Arena*);
@@ -2433,6 +2441,318 @@ class AppInfo final :
 };
 // -------------------------------------------------------------------
 
+class InstalledApp final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.InstalledApp) */ {
+ public:
+  inline InstalledApp() : InstalledApp(nullptr) {}
+  ~InstalledApp() override;
+  explicit PROTOBUF_CONSTEXPR InstalledApp(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  InstalledApp(const InstalledApp& from);
+  InstalledApp(InstalledApp&& from) noexcept
+    : InstalledApp() {
+    *this = ::std::move(from);
+  }
+
+  inline InstalledApp& operator=(const InstalledApp& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline InstalledApp& operator=(InstalledApp&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const InstalledApp& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const InstalledApp* internal_default_instance() {
+    return reinterpret_cast<const InstalledApp*>(
+               &_InstalledApp_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    14;
+
+  friend void swap(InstalledApp& a, InstalledApp& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(InstalledApp* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(InstalledApp* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  InstalledApp* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<InstalledApp>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const InstalledApp& from);
+  void MergeFrom(const InstalledApp& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(InstalledApp* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.InstalledApp";
+  }
+  protected:
+  explicit InstalledApp(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kPackageNameFieldNumber = 1,
+    kLabelFieldNumber = 2,
+    kIconPngFieldNumber = 3,
+  };
+  // string package_name = 1;
+  void clear_package_name();
+  const std::string& package_name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_package_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_package_name();
+  PROTOBUF_NODISCARD std::string* release_package_name();
+  void set_allocated_package_name(std::string* package_name);
+  private:
+  const std::string& _internal_package_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_package_name(const std::string& value);
+  std::string* _internal_mutable_package_name();
+  public:
+
+  // string label = 2;
+  void clear_label();
+  const std::string& label() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_label(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_label();
+  PROTOBUF_NODISCARD std::string* release_label();
+  void set_allocated_label(std::string* label);
+  private:
+  const std::string& _internal_label() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_label(const std::string& value);
+  std::string* _internal_mutable_label();
+  public:
+
+  // bytes icon_png = 3;
+  void clear_icon_png();
+  const std::string& icon_png() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_icon_png(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_icon_png();
+  PROTOBUF_NODISCARD std::string* release_icon_png();
+  void set_allocated_icon_png(std::string* icon_png);
+  private:
+  const std::string& _internal_icon_png() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_icon_png(const std::string& value);
+  std::string* _internal_mutable_icon_png();
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.InstalledApp)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr package_name_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr label_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr icon_png_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class InstalledApps final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.InstalledApps) */ {
+ public:
+  inline InstalledApps() : InstalledApps(nullptr) {}
+  ~InstalledApps() override;
+  explicit PROTOBUF_CONSTEXPR InstalledApps(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  InstalledApps(const InstalledApps& from);
+  InstalledApps(InstalledApps&& from) noexcept
+    : InstalledApps() {
+    *this = ::std::move(from);
+  }
+
+  inline InstalledApps& operator=(const InstalledApps& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline InstalledApps& operator=(InstalledApps&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const InstalledApps& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const InstalledApps* internal_default_instance() {
+    return reinterpret_cast<const InstalledApps*>(
+               &_InstalledApps_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    15;
+
+  friend void swap(InstalledApps& a, InstalledApps& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(InstalledApps* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(InstalledApps* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  InstalledApps* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<InstalledApps>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const InstalledApps& from);
+  void MergeFrom(const InstalledApps& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(InstalledApps* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.InstalledApps";
+  }
+  protected:
+  explicit InstalledApps(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kPackageNamesFieldNumber = 1,
+  };
+  // repeated string package_names = 1;
+  int package_names_size() const;
+  private:
+  int _internal_package_names_size() const;
+  public:
+  void clear_package_names();
+  const std::string& package_names(int index) const;
+  std::string* mutable_package_names(int index);
+  void set_package_names(int index, const std::string& value);
+  void set_package_names(int index, std::string&& value);
+  void set_package_names(int index, const char* value);
+  void set_package_names(int index, const char* value, size_t size);
+  std::string* add_package_names();
+  void add_package_names(const std::string& value);
+  void add_package_names(std::string&& value);
+  void add_package_names(const char* value);
+  void add_package_names(const char* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& package_names() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_package_names();
+  private:
+  const std::string& _internal_package_names(int index) const;
+  std::string* _internal_add_package_names();
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.InstalledApps)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> package_names_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class PointerEvent final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.PointerEvent) */ {
  public:
@@ -2472,7 +2792,7 @@ class PointerEvent final :
                &_PointerEvent_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    14;
+    16;
 
   friend void swap(PointerEvent& a, PointerEvent& b) {
     a.Swap(&b);
@@ -2701,7 +3021,7 @@ class KeyEvent final :
                &_KeyEvent_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    15;
+    17;
 
   friend void swap(KeyEvent& a, KeyEvent& b) {
     a.Swap(&b);
@@ -2897,7 +3217,7 @@ class ImeComposition final :
                &_ImeComposition_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    16;
+    18;
 
   friend void swap(ImeComposition& a, ImeComposition& b) {
     a.Swap(&b);
@@ -3054,7 +3374,7 @@ class ImeCommit final :
                &_ImeCommit_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    17;
+    19;
 
   friend void swap(ImeCommit& a, ImeCommit& b) {
     a.Swap(&b);
@@ -3200,7 +3520,7 @@ class ImeCursor final :
                &_ImeCursor_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    18;
+    20;
 
   friend void swap(ImeCursor& a, ImeCursor& b) {
     a.Swap(&b);
@@ -3350,7 +3670,7 @@ class RequestGuestMemory final :
                &_RequestGuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    19;
+    21;
 
   friend void swap(RequestGuestMemory& a, RequestGuestMemory& b) {
     a.Swap(&b);
@@ -3467,7 +3787,7 @@ class ProcessMemory final :
                &_ProcessMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    20;
+    22;
 
   friend void swap(ProcessMemory& a, ProcessMemory& b) {
     a.Swap(&b);
@@ -3635,7 +3955,7 @@ class GuestMemory final :
                &_GuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    21;
+    23;
 
   friend void swap(GuestMemory& a, GuestMemory& b) {
     a.Swap(&b);
@@ -3933,6 +4253,8 @@ class Envelope final :
     kImeCursor = 19,
     kRequestGuestMemory = 20,
     kGuestMemory = 21,
+    kInstalledApp = 22,
+    kInstalledApps = 23,
     BODY_NOT_SET = 0,
   };
 
@@ -3941,7 +4263,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    22;
+    24;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -4025,6 +4347,8 @@ class Envelope final :
     kImeCursorFieldNumber = 19,
     kRequestGuestMemoryFieldNumber = 20,
     kGuestMemoryFieldNumber = 21,
+    kInstalledAppFieldNumber = 22,
+    kInstalledAppsFieldNumber = 23,
   };
   // .dsa.control.v1.Hello hello = 1;
   bool has_hello() const;
@@ -4386,6 +4710,42 @@ class Envelope final :
       ::dsa::control::v1::GuestMemory* guest_memory);
   ::dsa::control::v1::GuestMemory* unsafe_arena_release_guest_memory();
 
+  // .dsa.control.v1.InstalledApp installed_app = 22;
+  bool has_installed_app() const;
+  private:
+  bool _internal_has_installed_app() const;
+  public:
+  void clear_installed_app();
+  const ::dsa::control::v1::InstalledApp& installed_app() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::InstalledApp* release_installed_app();
+  ::dsa::control::v1::InstalledApp* mutable_installed_app();
+  void set_allocated_installed_app(::dsa::control::v1::InstalledApp* installed_app);
+  private:
+  const ::dsa::control::v1::InstalledApp& _internal_installed_app() const;
+  ::dsa::control::v1::InstalledApp* _internal_mutable_installed_app();
+  public:
+  void unsafe_arena_set_allocated_installed_app(
+      ::dsa::control::v1::InstalledApp* installed_app);
+  ::dsa::control::v1::InstalledApp* unsafe_arena_release_installed_app();
+
+  // .dsa.control.v1.InstalledApps installed_apps = 23;
+  bool has_installed_apps() const;
+  private:
+  bool _internal_has_installed_apps() const;
+  public:
+  void clear_installed_apps();
+  const ::dsa::control::v1::InstalledApps& installed_apps() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::InstalledApps* release_installed_apps();
+  ::dsa::control::v1::InstalledApps* mutable_installed_apps();
+  void set_allocated_installed_apps(::dsa::control::v1::InstalledApps* installed_apps);
+  private:
+  const ::dsa::control::v1::InstalledApps& _internal_installed_apps() const;
+  ::dsa::control::v1::InstalledApps* _internal_mutable_installed_apps();
+  public:
+  void unsafe_arena_set_allocated_installed_apps(
+      ::dsa::control::v1::InstalledApps* installed_apps);
+  ::dsa::control::v1::InstalledApps* unsafe_arena_release_installed_apps();
+
   void clear_body();
   BodyCase body_case() const;
   // @@protoc_insertion_point(class_scope:dsa.control.v1.Envelope)
@@ -4411,6 +4771,8 @@ class Envelope final :
   void set_has_ime_cursor();
   void set_has_request_guest_memory();
   void set_has_guest_memory();
+  void set_has_installed_app();
+  void set_has_installed_apps();
 
   inline bool has_body() const;
   inline void clear_has_body();
@@ -4442,6 +4804,8 @@ class Envelope final :
       ::dsa::control::v1::ImeCursor* ime_cursor_;
       ::dsa::control::v1::RequestGuestMemory* request_guest_memory_;
       ::dsa::control::v1::GuestMemory* guest_memory_;
+      ::dsa::control::v1::InstalledApp* installed_app_;
+      ::dsa::control::v1::InstalledApps* installed_apps_;
     } body_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -5771,6 +6135,239 @@ inline void AppInfo::set_allocated_icon_png(std::string* icon_png) {
   }
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AppInfo.icon_png)
+}
+
+// -------------------------------------------------------------------
+
+// InstalledApp
+
+// string package_name = 1;
+inline void InstalledApp::clear_package_name() {
+  _impl_.package_name_.ClearToEmpty();
+}
+inline const std::string& InstalledApp::package_name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.InstalledApp.package_name)
+  return _internal_package_name();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void InstalledApp::set_package_name(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.package_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstalledApp.package_name)
+}
+inline std::string* InstalledApp::mutable_package_name() {
+  std::string* _s = _internal_mutable_package_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.InstalledApp.package_name)
+  return _s;
+}
+inline const std::string& InstalledApp::_internal_package_name() const {
+  return _impl_.package_name_.Get();
+}
+inline void InstalledApp::_internal_set_package_name(const std::string& value) {
+  
+  _impl_.package_name_.Set(value, GetArenaForAllocation());
+}
+inline std::string* InstalledApp::_internal_mutable_package_name() {
+  
+  return _impl_.package_name_.Mutable(GetArenaForAllocation());
+}
+inline std::string* InstalledApp::release_package_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.InstalledApp.package_name)
+  return _impl_.package_name_.Release();
+}
+inline void InstalledApp::set_allocated_package_name(std::string* package_name) {
+  if (package_name != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.package_name_.SetAllocated(package_name, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.package_name_.IsDefault()) {
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.InstalledApp.package_name)
+}
+
+// string label = 2;
+inline void InstalledApp::clear_label() {
+  _impl_.label_.ClearToEmpty();
+}
+inline const std::string& InstalledApp::label() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.InstalledApp.label)
+  return _internal_label();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void InstalledApp::set_label(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.label_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstalledApp.label)
+}
+inline std::string* InstalledApp::mutable_label() {
+  std::string* _s = _internal_mutable_label();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.InstalledApp.label)
+  return _s;
+}
+inline const std::string& InstalledApp::_internal_label() const {
+  return _impl_.label_.Get();
+}
+inline void InstalledApp::_internal_set_label(const std::string& value) {
+  
+  _impl_.label_.Set(value, GetArenaForAllocation());
+}
+inline std::string* InstalledApp::_internal_mutable_label() {
+  
+  return _impl_.label_.Mutable(GetArenaForAllocation());
+}
+inline std::string* InstalledApp::release_label() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.InstalledApp.label)
+  return _impl_.label_.Release();
+}
+inline void InstalledApp::set_allocated_label(std::string* label) {
+  if (label != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.label_.SetAllocated(label, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.label_.IsDefault()) {
+    _impl_.label_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.InstalledApp.label)
+}
+
+// bytes icon_png = 3;
+inline void InstalledApp::clear_icon_png() {
+  _impl_.icon_png_.ClearToEmpty();
+}
+inline const std::string& InstalledApp::icon_png() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.InstalledApp.icon_png)
+  return _internal_icon_png();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void InstalledApp::set_icon_png(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.icon_png_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstalledApp.icon_png)
+}
+inline std::string* InstalledApp::mutable_icon_png() {
+  std::string* _s = _internal_mutable_icon_png();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.InstalledApp.icon_png)
+  return _s;
+}
+inline const std::string& InstalledApp::_internal_icon_png() const {
+  return _impl_.icon_png_.Get();
+}
+inline void InstalledApp::_internal_set_icon_png(const std::string& value) {
+  
+  _impl_.icon_png_.Set(value, GetArenaForAllocation());
+}
+inline std::string* InstalledApp::_internal_mutable_icon_png() {
+  
+  return _impl_.icon_png_.Mutable(GetArenaForAllocation());
+}
+inline std::string* InstalledApp::release_icon_png() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.InstalledApp.icon_png)
+  return _impl_.icon_png_.Release();
+}
+inline void InstalledApp::set_allocated_icon_png(std::string* icon_png) {
+  if (icon_png != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.icon_png_.SetAllocated(icon_png, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.icon_png_.IsDefault()) {
+    _impl_.icon_png_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.InstalledApp.icon_png)
+}
+
+// -------------------------------------------------------------------
+
+// InstalledApps
+
+// repeated string package_names = 1;
+inline int InstalledApps::_internal_package_names_size() const {
+  return _impl_.package_names_.size();
+}
+inline int InstalledApps::package_names_size() const {
+  return _internal_package_names_size();
+}
+inline void InstalledApps::clear_package_names() {
+  _impl_.package_names_.Clear();
+}
+inline std::string* InstalledApps::add_package_names() {
+  std::string* _s = _internal_add_package_names();
+  // @@protoc_insertion_point(field_add_mutable:dsa.control.v1.InstalledApps.package_names)
+  return _s;
+}
+inline const std::string& InstalledApps::_internal_package_names(int index) const {
+  return _impl_.package_names_.Get(index);
+}
+inline const std::string& InstalledApps::package_names(int index) const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.InstalledApps.package_names)
+  return _internal_package_names(index);
+}
+inline std::string* InstalledApps::mutable_package_names(int index) {
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.InstalledApps.package_names)
+  return _impl_.package_names_.Mutable(index);
+}
+inline void InstalledApps::set_package_names(int index, const std::string& value) {
+  _impl_.package_names_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstalledApps.package_names)
+}
+inline void InstalledApps::set_package_names(int index, std::string&& value) {
+  _impl_.package_names_.Mutable(index)->assign(std::move(value));
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstalledApps.package_names)
+}
+inline void InstalledApps::set_package_names(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  _impl_.package_names_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:dsa.control.v1.InstalledApps.package_names)
+}
+inline void InstalledApps::set_package_names(int index, const char* value, size_t size) {
+  _impl_.package_names_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:dsa.control.v1.InstalledApps.package_names)
+}
+inline std::string* InstalledApps::_internal_add_package_names() {
+  return _impl_.package_names_.Add();
+}
+inline void InstalledApps::add_package_names(const std::string& value) {
+  _impl_.package_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:dsa.control.v1.InstalledApps.package_names)
+}
+inline void InstalledApps::add_package_names(std::string&& value) {
+  _impl_.package_names_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:dsa.control.v1.InstalledApps.package_names)
+}
+inline void InstalledApps::add_package_names(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  _impl_.package_names_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:dsa.control.v1.InstalledApps.package_names)
+}
+inline void InstalledApps::add_package_names(const char* value, size_t size) {
+  _impl_.package_names_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:dsa.control.v1.InstalledApps.package_names)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+InstalledApps::package_names() const {
+  // @@protoc_insertion_point(field_list:dsa.control.v1.InstalledApps.package_names)
+  return _impl_.package_names_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+InstalledApps::mutable_package_names() {
+  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.InstalledApps.package_names)
+  return &_impl_.package_names_;
 }
 
 // -------------------------------------------------------------------
@@ -8309,6 +8906,154 @@ inline ::dsa::control::v1::GuestMemory* Envelope::mutable_guest_memory() {
   return _msg;
 }
 
+// .dsa.control.v1.InstalledApp installed_app = 22;
+inline bool Envelope::_internal_has_installed_app() const {
+  return body_case() == kInstalledApp;
+}
+inline bool Envelope::has_installed_app() const {
+  return _internal_has_installed_app();
+}
+inline void Envelope::set_has_installed_app() {
+  _impl_._oneof_case_[0] = kInstalledApp;
+}
+inline void Envelope::clear_installed_app() {
+  if (_internal_has_installed_app()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.installed_app_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::InstalledApp* Envelope::release_installed_app() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.installed_app)
+  if (_internal_has_installed_app()) {
+    clear_has_body();
+    ::dsa::control::v1::InstalledApp* temp = _impl_.body_.installed_app_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.installed_app_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::InstalledApp& Envelope::_internal_installed_app() const {
+  return _internal_has_installed_app()
+      ? *_impl_.body_.installed_app_
+      : reinterpret_cast< ::dsa::control::v1::InstalledApp&>(::dsa::control::v1::_InstalledApp_default_instance_);
+}
+inline const ::dsa::control::v1::InstalledApp& Envelope::installed_app() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.installed_app)
+  return _internal_installed_app();
+}
+inline ::dsa::control::v1::InstalledApp* Envelope::unsafe_arena_release_installed_app() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.installed_app)
+  if (_internal_has_installed_app()) {
+    clear_has_body();
+    ::dsa::control::v1::InstalledApp* temp = _impl_.body_.installed_app_;
+    _impl_.body_.installed_app_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_installed_app(::dsa::control::v1::InstalledApp* installed_app) {
+  clear_body();
+  if (installed_app) {
+    set_has_installed_app();
+    _impl_.body_.installed_app_ = installed_app;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.installed_app)
+}
+inline ::dsa::control::v1::InstalledApp* Envelope::_internal_mutable_installed_app() {
+  if (!_internal_has_installed_app()) {
+    clear_body();
+    set_has_installed_app();
+    _impl_.body_.installed_app_ = CreateMaybeMessage< ::dsa::control::v1::InstalledApp >(GetArenaForAllocation());
+  }
+  return _impl_.body_.installed_app_;
+}
+inline ::dsa::control::v1::InstalledApp* Envelope::mutable_installed_app() {
+  ::dsa::control::v1::InstalledApp* _msg = _internal_mutable_installed_app();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.installed_app)
+  return _msg;
+}
+
+// .dsa.control.v1.InstalledApps installed_apps = 23;
+inline bool Envelope::_internal_has_installed_apps() const {
+  return body_case() == kInstalledApps;
+}
+inline bool Envelope::has_installed_apps() const {
+  return _internal_has_installed_apps();
+}
+inline void Envelope::set_has_installed_apps() {
+  _impl_._oneof_case_[0] = kInstalledApps;
+}
+inline void Envelope::clear_installed_apps() {
+  if (_internal_has_installed_apps()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.installed_apps_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::InstalledApps* Envelope::release_installed_apps() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.installed_apps)
+  if (_internal_has_installed_apps()) {
+    clear_has_body();
+    ::dsa::control::v1::InstalledApps* temp = _impl_.body_.installed_apps_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.installed_apps_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::InstalledApps& Envelope::_internal_installed_apps() const {
+  return _internal_has_installed_apps()
+      ? *_impl_.body_.installed_apps_
+      : reinterpret_cast< ::dsa::control::v1::InstalledApps&>(::dsa::control::v1::_InstalledApps_default_instance_);
+}
+inline const ::dsa::control::v1::InstalledApps& Envelope::installed_apps() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.installed_apps)
+  return _internal_installed_apps();
+}
+inline ::dsa::control::v1::InstalledApps* Envelope::unsafe_arena_release_installed_apps() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.installed_apps)
+  if (_internal_has_installed_apps()) {
+    clear_has_body();
+    ::dsa::control::v1::InstalledApps* temp = _impl_.body_.installed_apps_;
+    _impl_.body_.installed_apps_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_installed_apps(::dsa::control::v1::InstalledApps* installed_apps) {
+  clear_body();
+  if (installed_apps) {
+    set_has_installed_apps();
+    _impl_.body_.installed_apps_ = installed_apps;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.installed_apps)
+}
+inline ::dsa::control::v1::InstalledApps* Envelope::_internal_mutable_installed_apps() {
+  if (!_internal_has_installed_apps()) {
+    clear_body();
+    set_has_installed_apps();
+    _impl_.body_.installed_apps_ = CreateMaybeMessage< ::dsa::control::v1::InstalledApps >(GetArenaForAllocation());
+  }
+  return _impl_.body_.installed_apps_;
+}
+inline ::dsa::control::v1::InstalledApps* Envelope::mutable_installed_apps() {
+  ::dsa::control::v1::InstalledApps* _msg = _internal_mutable_installed_apps();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.installed_apps)
+  return _msg;
+}
+
 inline bool Envelope::has_body() const {
   return body_case() != BODY_NOT_SET;
 }
@@ -8321,6 +9066,10 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
