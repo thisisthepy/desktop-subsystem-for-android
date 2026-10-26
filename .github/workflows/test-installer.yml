@@ -162,6 +162,76 @@ jobs:
           $currentHash = (Get-FileHash -Path $wslconfig -Algorithm SHA256).Hash
           if ($currentHash -ne $env:INITIAL_WSLCONFIG_HASH) { throw ".wslconfig was modified by installation or service startup" }
 
+      # The settings app is installed with a Start menu shortcut, and the settings it shows
+      # go through the service, which keeps them in its own folder.
+      - name: fr17_settings_app_is_installed_and_settings_go_through_the_service
+        run: |
+          $exe = "$env:PROGRAM_DIR\settings\DsaSettings.exe"
+          if (-not (Test-Path $exe)) { throw "DsaSettings.exe is not installed in $env:PROGRAM_DIR\settings" }
+          $info = (Get-Item $exe).VersionInfo
+          Write-Host "DsaSettings.exe: $($info.FileDescription) | $($info.ProductName) | $($info.CompanyName) | $($info.ProductVersion)"
+          if ($info.FileDescription -cne 'DSA Settings') { throw "DsaSettings.exe calls itself '$($info.FileDescription)'" }
+          if ($info.ProductName -cne 'Desktop Subsystem for Android') { throw "DsaSettings.exe names its product '$($info.ProductName)'" }
+          if ($info.ProductVersion -notlike '0.0.9*') { throw "DsaSettings.exe says it is version '$($info.ProductVersion)', not 0.0.9" }
+          $shortcut = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\DSA Settings.lnk"
+          if (-not (Test-Path $shortcut)) { throw "there is no Start menu shortcut $shortcut" }
+          $target = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath
+          if ($target -ne $exe) { throw "the Start menu shortcut points at '$target', not $exe" }
+
+          $dsa = "$env:PROGRAM_DIR\dsa.exe"
+          $settings = & $dsa settings --json
+          if ($LASTEXITCODE -ne 0) { throw "dsa settings failed: $settings" }
+          Write-Host $settings
+          $settings = $settings | ConvertFrom-Json
+          if ($settings.render_gpu -ne 'display') { throw "the render GPU is '$($settings.render_gpu)' by default, not display" }
+          if ($settings.freeze) { throw "freeze is on by default" }
+          if ($settings.version -ne '0.0.9') { throw "the service reports version '$($settings.version)'" }
+          if (-not $settings.program_updates_available) { throw "this package updates DSA, but the service says it cannot" }
+          $changed = & $dsa settings set render-gpu discrete --json
+          if ($LASTEXITCODE -ne 0) { throw "dsa settings set failed: $changed" }
+          if (($changed | ConvertFrom-Json).render_gpu -ne 'discrete') { throw "the render GPU did not change: $changed" }
+          if (-not (Test-Path "$env:DATA_DIR\settings\users")) { throw "the service keeps no settings in $env:DATA_DIR\settings" }
+          $again = & $dsa settings --json | ConvertFrom-Json
+          if ($again.render_gpu -ne 'discrete') { throw "the service did not keep the render GPU" }
+          & $dsa settings set render-gpu display --json | Out-Null
+          $memory = & $dsa memory --json
+          if ($LASTEXITCODE -ne 0) { throw "dsa memory failed: $memory" }
+          Write-Host $memory
+          $gpus = & $dsa gpus --json
+          if ($LASTEXITCODE -ne 0) { throw "dsa gpus failed: $gpus" }
+          Write-Host $gpus
+
+      # The app starts, shows its window and every page, in the light and the dark theme.
+      - name: Take pictures of the settings app's pages
+        run: |
+          . .github/scripts/installer/setup-ui.ps1
+          New-Item -ItemType Directory -Force screens | Out-Null
+          $exe = "$env:PROGRAM_DIR\settings\DsaSettings.exe"
+          foreach ($theme in 'light', 'dark') {
+            Set-AppTheme -Dark:($theme -eq 'dark')
+            $app = Start-Process $exe -PassThru
+            $window = Wait-ProcessWindow $app.Id 90
+            if (-not $window) {
+              Show-Desktop "settings-$theme-timeout"
+              $exited = if ($app.HasExited) { "it exited with code $($app.ExitCode)" } else { "it is still running" }
+              throw "DSA Settings showed no window within 90 seconds; $exited"
+            }
+            Start-Sleep -Seconds 4
+            Save-WindowScreen $window "$PWD\screens\settings-$theme-general.png"
+            foreach ($page in 'Memory', 'Display & GPU', 'Updates', 'Advanced', 'About') {
+              if (Select-Named $window $page) {
+                Start-Sleep -Seconds 3
+                $file = $page.ToLowerInvariant() -replace '[^a-z]+', '-'
+                Save-WindowScreen $window "$PWD\screens\settings-$theme-$file.png"
+              } else {
+                Write-Warning "the settings app shows no navigation item '$page'"
+              }
+            }
+            if ($app.HasExited) { throw "DSA Settings exited while showing its pages (code $($app.ExitCode))" }
+            Stop-Process -Id $app.Id -Force
+          }
+          Set-AppTheme
+
       # Task Manager and the taskbar name a program by its version information.
       - name: fr3_every_program_carries_its_name_and_version
         run: |
@@ -323,7 +393,7 @@ jobs:
           $noticeFile = Join-Path $env:PROGRAM_DIR "NOTICE.txt"
           if (-not (Test-Path $licDir)) { throw "no licenses folder in $env:PROGRAM_DIR" }
           if (-not (Test-Path $noticeFile)) { throw "no NOTICE.txt in $env:PROGRAM_DIR" }
-          foreach ($name in @("NOTICE.txt", "rust-crates.txt", "kernel-GPL-2.0.txt", "wix-MS-RL.txt", "setup-ui.txt", "gfxstream.txt", "aosp-notice.txt")) {
+          foreach ($name in @("NOTICE.txt", "rust-crates.txt", "kernel-GPL-2.0.txt", "wix-MS-RL.txt", "setup-ui.txt", "settings-app.txt", "gfxstream.txt", "aosp-notice.txt")) {
             if (-not (Test-Path (Join-Path $licDir $name))) { throw "licence bundle is missing $name" }
           }
           $bundle = Get-Content -Raw (Join-Path $licDir "rust-crates.txt")

@@ -562,6 +562,24 @@ It incorporates or links against the following third-party components:
   Licensed under the MIT License.
 """
 
+SETTINGS_APP_NOTICE = """DSA Settings
+
+The settings app (settings\\DsaSettings.exe) is developed as part of Desktop Subsystem for
+Android and is licensed under the Apache License, Version 2.0. It is a self-contained
+WinUI 3 app: its folder carries the runtimes it is built on.
+
+It incorporates the following third-party components:
+- .NET runtime (8.0):
+  Licensed under the MIT License. Source code: https://github.com/dotnet/runtime
+- Windows App SDK and WinUI 3 runtime (1.6, Microsoft.WindowsAppSDK):
+  The Windows App SDK is developed in the open under the MIT License
+  (https://github.com/microsoft/WindowsAppSDK, https://github.com/microsoft/microsoft-ui-xaml).
+  The runtime binaries in the settings folder are redistributed under the license terms of
+  the Microsoft.WindowsAppSDK package, which permit their redistribution with an app.
+- Windows Community Toolkit (CommunityToolkit.WinUI.Controls.SettingsControls 8.1):
+  Licensed under the MIT License. Source code: https://github.com/CommunityToolkit/Windows
+"""
+
 GFXSTREAM_NOTICE = """gfxstream Graphics Remoting Transport
 
 Desktop Subsystem for Android includes patches and components from the Android Open Source
@@ -731,6 +749,7 @@ def generate_bundle(workspace_dir: Path, out_dir: Path, master_notice: Path | No
     (out_dir / "kernel-GPL-2.0.txt").write_text(KERNEL_GPL_TEXT, encoding="utf-8")
     (out_dir / "wix-MS-RL.txt").write_text(WIX_MSRL_TEXT, encoding="utf-8")
     (out_dir / "setup-ui.txt").write_text(SETUP_UI_NOTICE, encoding="utf-8")
+    (out_dir / "settings-app.txt").write_text(SETTINGS_APP_NOTICE, encoding="utf-8")
     (out_dir / "gfxstream.txt").write_text(GFXSTREAM_NOTICE, encoding="utf-8")
     (out_dir / "aosp-notice.txt").write_text(AOSP_NOTICE, encoding="utf-8")
     (out_dir / "apache-2.0.txt").write_text(APACHE_2_0_TEXT, encoding="utf-8")
@@ -782,7 +801,12 @@ def generate_bundle(workspace_dir: Path, out_dir: Path, master_notice: Path | No
         "   - License: Apache License 2.0, GNU General Public License v2.0, BSD, MIT",
         "   - Detailed attribution notices: carried alongside each image release asset",
         "",
-        "5. Rust Host Binaries and Crate Dependencies",
+        "5. Settings App (settings\\DsaSettings.exe)",
+        "   - .NET runtime, Windows App SDK and WinUI 3 runtime, Windows Community Toolkit",
+        "   - License: MIT License, and the Microsoft.WindowsAppSDK package's redistribution terms",
+        "   - Full details: see licenses/settings-app.txt",
+        "",
+        "6. Rust Host Binaries and Crate Dependencies",
         "   - Full list of all Rust dependencies, versions and licenses:",
         "",
     ]

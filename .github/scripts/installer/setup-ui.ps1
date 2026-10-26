@@ -62,8 +62,43 @@ function Get-SetupText([string]$Id) {
 function Save-SetupScreen([string]$Path) {
     $window = Find-SetupWindow
     if (-not $window) { throw "no setup window to take a picture of" }
+    Save-WindowScreen $window $Path
+}
+
+# The top-level window of the process with this id, waiting for it to appear.
+function Wait-ProcessWindow([int]$ProcessId, [int]$Seconds = 60) {
+    $condition = New-Object System.Windows.Automation.PropertyCondition($Auto::ProcessIdProperty, $ProcessId)
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        $window = $Auto::RootElement.FindFirst($Scope::Children, $condition)
+        if ($window) { return $window }
+        Start-Sleep -Milliseconds 500
+    }
+    $null
+}
+
+# Selects the item named $Name inside $Window (such as a navigation item). Returns whether it
+# could.
+function Select-Named($Window, [string]$Name) {
+    $condition = New-Object System.Windows.Automation.PropertyCondition($Auto::NameProperty, $Name)
+    $item = $Window.FindFirst($Scope::Descendants, $condition)
+    if (-not $item) { return $false }
+    $pattern = $null
+    if ($item.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$pattern)) {
+        $pattern.Select()
+        return $true
+    }
+    if ($item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) {
+        $pattern.Invoke()
+        return $true
+    }
+    $false
+}
+
+# Saves a picture of $Window and 32 px around it.
+function Save-WindowScreen($Window, [string]$Path) {
     Start-Sleep -Milliseconds 600   # let the window finish drawing
-    $r = $window.Current.BoundingRectangle
+    $r = $Window.Current.BoundingRectangle
     $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
     $x = [Math]::Max(0, [int]$r.X - 32)
     $y = [Math]::Max(0, [int]$r.Y - 32)
