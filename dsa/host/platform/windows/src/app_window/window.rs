@@ -664,6 +664,7 @@ impl Ui {
         let client = apply_size(hwnd, size);
         let presenter = match &self.setup.gpu {
             Some(gpu) => match WindowPresenter::new(
+                task_id,
                 Arc::clone(gpu),
                 hwnd as isize,
                 client,
