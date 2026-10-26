@@ -228,6 +228,9 @@ impl UserAndroid for UpdatingAndroid {
     fn vm_id(&self) -> Option<String> {
         UserAndroid::vm_id(&*self.session)
     }
+    fn guest_memory(&self) -> Option<crate::memory::GuestMemory> {
+        UserAndroid::guest_memory(&*self.session)
+    }
     fn watch_tasks(&self) -> Option<TaskWatch> {
         UserAndroid::watch_tasks(&*self.session)
     }

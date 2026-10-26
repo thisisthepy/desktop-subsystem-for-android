@@ -33,8 +33,12 @@ use dsa_transport::{Connection, Connector, TransportError};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{InputEvent, PointerEvent};
 use crate::keys::KeyEvent;
+use crate::memory::{
+    sort_host, GuestMemory, GuestProcessMemory, HostMemory, HostProcessMemory, HostRole, Memory,
+};
 use crate::resize_trace::{self, detail_requested, ResizeTrace, DETAIL_ENV};
 use crate::session::{Session, SessionError, SessionState};
+use crate::settings::{Settings, SettingsStore};
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskWatch};
 
 /// One user's Android, as the service drives it.
@@ -50,6 +54,11 @@ pub trait UserAndroid: Send + Sync {
     }
     /// The runtime ID of the VM (such as a GUID on Windows), if running.
     fn vm_id(&self) -> Option<String> {
+        None
+    }
+    /// How Android uses the guest's memory, as it last reported it. `None` until it has
+    /// reported since it started, or when this Android does not report it.
+    fn guest_memory(&self) -> Option<GuestMemory> {
         None
     }
     /// The app tasks of this Android now, and every change to them from now on. `None` when
@@ -397,10 +406,32 @@ fn from_wire(state: i32) -> Option<SessionState> {
     }
 }
 
+/// What the service tells a client about itself with the settings, which no client changes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServiceFacts {
+    /// The version of DSA the service runs.
+    pub version: String,
+    /// The folder the service writes its log to, if it keeps one.
+    pub log_dir: Option<String>,
+    /// Whether this installation can update DSA itself.
+    pub program_updates_available: bool,
+    /// Whether this installation can download new Android images.
+    pub image_updates_available: bool,
+}
+
+/// The settings as the service reported them, with what it says about itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingsReport {
+    pub settings: Settings,
+    pub facts: ServiceFacts,
+}
+
 /// The service end of the local API.
 pub struct HostApiService {
     androids: Arc<dyn UserAndroids>,
     program: Option<Arc<dyn UpdateProgram>>,
+    settings: Option<(Arc<dyn SettingsStore>, ServiceFacts)>,
+    host_memory: Option<Arc<dyn HostMemory>>,
     hello: types::Hello,
     handshake_timeout: Duration,
     /// Logs when each resize was handed to Android, and how long that took.
@@ -412,6 +443,8 @@ impl HostApiService {
         HostApiService {
             androids,
             program: None,
+            settings: None,
+            host_memory: None,
             hello: local_hello(Role::Service, build),
             handshake_timeout: Duration::from_secs(5),
             resize_trace: Mutex::new(ResizeTrace::new(
@@ -434,6 +467,22 @@ impl HostApiService {
     /// The service that answers `dsa update` with `program`.
     pub fn with_program_updates(mut self, program: Arc<dyn UpdateProgram>) -> HostApiService {
         self.program = Some(program);
+        self
+    }
+
+    /// The service that keeps the settings in `store` and reports `facts` with them.
+    pub fn with_settings(
+        mut self,
+        store: Arc<dyn SettingsStore>,
+        facts: ServiceFacts,
+    ) -> HostApiService {
+        self.settings = Some((store, facts));
+        self
+    }
+
+    /// The service that measures the host processes of each caller's Android with `memory`.
+    pub fn with_host_memory(mut self, memory: Arc<dyn HostMemory>) -> HostApiService {
+        self.host_memory = Some(memory);
         self
     }
 
@@ -681,6 +730,9 @@ impl HostApiService {
                     .into(),
             ),
             Some(request::Body::UpdateProgram(_)) => self.update_program(peer),
+            Some(request::Body::GetSettings(_)) => self.get_settings(peer),
+            Some(request::Body::SetSettings(set)) => self.set_settings(peer, set),
+            Some(request::Body::GetMemory(_)) => self.memory(peer),
             Some(request::Body::GetVmId(_)) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => response::Body::VmId(types::VmId {
@@ -744,6 +796,9 @@ impl HostApiService {
                         | request::Body::LaunchApp(_)
                         | request::Body::ResizeTask(_)
                         | request::Body::SetTaskDensity(_)
+                        | request::Body::GetSettings(_)
+                        | request::Body::SetSettings(_)
+                        | request::Body::GetMemory(_)
                         | request::Body::StreamInput(_) => unreachable!("answered above"),
                     }
                     response::Body::Status(types::Status {
@@ -828,6 +883,205 @@ impl HostApiService {
             Err(why) => error(ErrorCode::UpdateFailed, why),
         }
     }
+}
+
+impl HostApiService {
+    fn settings_store(&self) -> Result<&(Arc<dyn SettingsStore>, ServiceFacts), response::Body> {
+        self.settings.as_ref().ok_or_else(|| {
+            error(
+                ErrorCode::Unavailable,
+                "this service keeps no settings; update the service".into(),
+            )
+        })
+    }
+
+    fn get_settings(&self, peer: &Peer) -> response::Body {
+        let (store, facts) = match self.settings_store() {
+            Ok(found) => found,
+            Err(answer) => return answer,
+        };
+        match store.get(&peer.user) {
+            Ok(settings) => response::Body::Settings(settings_to_wire(&settings, facts)),
+            Err(why) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
+    fn set_settings(&self, peer: &Peer, set: types::SetSettings) -> response::Body {
+        let (store, facts) = match self.settings_store() {
+            Ok(found) => found,
+            Err(answer) => return answer,
+        };
+        let Some(wanted) = set.settings else {
+            return error(
+                ErrorCode::InvalidSetting,
+                "the request carries no settings".into(),
+            );
+        };
+        let wanted = Settings {
+            render_gpu: wanted.render_gpu,
+            freeze: wanted.freeze,
+            program_updates: wanted.program_updates,
+            image_updates: wanted.image_updates,
+        };
+        match store.set(&peer.user, &wanted) {
+            Ok(settings) => {
+                eprintln!(
+                    "local API: {} changed the settings: render GPU {}, freeze {}, program \
+                     updates {}, image updates {}",
+                    peer.user,
+                    settings.render_gpu,
+                    on_off(settings.freeze),
+                    on_off(settings.program_updates),
+                    on_off(settings.image_updates)
+                );
+                response::Body::Settings(settings_to_wire(&settings, facts))
+            }
+            Err(why) => error(ErrorCode::InvalidSetting, why),
+        }
+    }
+
+    fn memory(&self, peer: &Peer) -> response::Body {
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        let vm_id = android.vm_id();
+        let mut host = self
+            .host_memory
+            .as_ref()
+            .map(|memory| memory.processes(&peer.user, vm_id.as_deref()))
+            .unwrap_or_default();
+        sort_host(&mut host);
+        response::Body::Memory(memory_to_wire(&Memory {
+            guest: android.guest_memory(),
+            host,
+        }))
+    }
+}
+
+fn on_off(value: bool) -> &'static str {
+    if value {
+        "on"
+    } else {
+        "off"
+    }
+}
+
+fn settings_to_wire(settings: &Settings, facts: &ServiceFacts) -> types::Settings {
+    types::Settings {
+        render_gpu: settings.render_gpu.clone(),
+        freeze: settings.freeze,
+        program_updates: settings.program_updates,
+        image_updates: settings.image_updates,
+        program_updates_available: facts.program_updates_available,
+        image_updates_available: facts.image_updates_available,
+        version: facts.version.clone(),
+        log_dir: facts.log_dir.clone().unwrap_or_default(),
+    }
+}
+
+fn settings_from_wire(settings: types::Settings) -> SettingsReport {
+    SettingsReport {
+        settings: Settings {
+            render_gpu: settings.render_gpu,
+            freeze: settings.freeze,
+            program_updates: settings.program_updates,
+            image_updates: settings.image_updates,
+        },
+        facts: ServiceFacts {
+            version: settings.version,
+            log_dir: Some(settings.log_dir).filter(|dir| !dir.is_empty()),
+            program_updates_available: settings.program_updates_available,
+            image_updates_available: settings.image_updates_available,
+        },
+    }
+}
+
+fn memory_to_wire(memory: &Memory) -> types::Memory {
+    types::Memory {
+        guest: memory.guest.as_ref().map(|guest| types::GuestMemory {
+            mem_total_kb: guest.mem_total_kb,
+            mem_free_kb: guest.mem_free_kb,
+            mem_available_kb: guest.mem_available_kb,
+            buffers_kb: guest.buffers_kb,
+            cached_kb: guest.cached_kb,
+            anon_pages_kb: guest.anon_pages_kb,
+            shmem_kb: guest.shmem_kb,
+            slab_reclaimable_kb: guest.slab_reclaimable_kb,
+            swap_total_kb: guest.swap_total_kb,
+            swap_free_kb: guest.swap_free_kb,
+            zram_original_kb: guest.zram_original_kb,
+            zram_used_kb: guest.zram_used_kb,
+            total_pss_kb: guest.total_pss_kb,
+            top_processes: guest
+                .top_processes
+                .iter()
+                .map(|p| types::GuestProcessMemory {
+                    pid: p.pid,
+                    name: p.name.clone(),
+                    pss_kb: p.pss_kb,
+                    swap_pss_kb: p.swap_pss_kb,
+                })
+                .collect(),
+            age_seconds: guest.age_seconds,
+        }),
+        host: memory
+            .host
+            .iter()
+            .map(|p| types::HostProcessMemory {
+                role: p.role.as_str().into(),
+                pid: p.pid,
+                working_set_kb: p.working_set_kb,
+                private_kb: p.private_kb,
+            })
+            .collect(),
+    }
+}
+
+fn memory_from_wire(memory: types::Memory) -> Result<Memory, ClientError> {
+    let host = memory
+        .host
+        .into_iter()
+        .map(|p| {
+            Ok(HostProcessMemory {
+                role: HostRole::parse(&p.role).ok_or_else(|| {
+                    ClientError::Malformed(format!("unknown host process role {:?}", p.role))
+                })?,
+                pid: p.pid,
+                working_set_kb: p.working_set_kb,
+                private_kb: p.private_kb,
+            })
+        })
+        .collect::<Result<Vec<_>, ClientError>>()?;
+    Ok(Memory {
+        guest: memory.guest.map(|guest| GuestMemory {
+            mem_total_kb: guest.mem_total_kb,
+            mem_free_kb: guest.mem_free_kb,
+            mem_available_kb: guest.mem_available_kb,
+            buffers_kb: guest.buffers_kb,
+            cached_kb: guest.cached_kb,
+            anon_pages_kb: guest.anon_pages_kb,
+            shmem_kb: guest.shmem_kb,
+            slab_reclaimable_kb: guest.slab_reclaimable_kb,
+            swap_total_kb: guest.swap_total_kb,
+            swap_free_kb: guest.swap_free_kb,
+            zram_original_kb: guest.zram_original_kb,
+            zram_used_kb: guest.zram_used_kb,
+            total_pss_kb: guest.total_pss_kb,
+            top_processes: guest
+                .top_processes
+                .into_iter()
+                .map(|p| GuestProcessMemory {
+                    pid: p.pid,
+                    name: p.name,
+                    pss_kb: p.pss_kb,
+                    swap_pss_kb: p.swap_pss_kb,
+                })
+                .collect(),
+            age_seconds: guest.age_seconds,
+        }),
+        host,
+    })
 }
 
 fn error(code: ErrorCode, detail: String) -> response::Body {
@@ -972,6 +1226,37 @@ impl HostApiClient {
         match self.exchange(request::Body::ListTasks(types::ListTasks {}), self.timeout)? {
             response::Body::Tasks(tasks) => Ok(tasks_from_wire(tasks)),
             _ => Err(ClientError::Malformed("expected the list of tasks".into())),
+        }
+    }
+
+    /// The settings of the caller's DSA, with what the service says about itself.
+    pub fn settings(&mut self) -> Result<SettingsReport, ClientError> {
+        match self.exchange(
+            request::Body::GetSettings(types::GetSettings {}),
+            self.timeout,
+        )? {
+            response::Body::Settings(settings) => Ok(settings_from_wire(settings)),
+            _ => Err(ClientError::Malformed("expected the settings".into())),
+        }
+    }
+
+    /// Replaces the settings of the caller's DSA, and returns them as the service now keeps
+    /// them.
+    pub fn set_settings(&mut self, settings: &Settings) -> Result<SettingsReport, ClientError> {
+        let body = request::Body::SetSettings(types::SetSettings {
+            settings: Some(settings_to_wire(settings, &ServiceFacts::default())),
+        });
+        match self.exchange(body, self.timeout)? {
+            response::Body::Settings(settings) => Ok(settings_from_wire(settings)),
+            _ => Err(ClientError::Malformed("expected the settings".into())),
+        }
+    }
+
+    /// How much memory the caller's Android takes, on the host and in the guest.
+    pub fn memory(&mut self) -> Result<Memory, ClientError> {
+        match self.exchange(request::Body::GetMemory(types::GetMemory {}), self.timeout)? {
+            response::Body::Memory(memory) => memory_from_wire(memory),
+            _ => Err(ClientError::Malformed("expected the memory report".into())),
         }
     }
 

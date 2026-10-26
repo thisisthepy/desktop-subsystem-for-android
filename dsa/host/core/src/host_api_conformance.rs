@@ -19,8 +19,10 @@ use dsa_transport::Connector;
 
 use crate::host_api::{
     running_of, stop_every, ClientError, HostApiClient, HostApiService, ProgramUpdate,
-    UpdateProgram, UserAndroid, UserAndroids,
+    ServiceFacts, UpdateProgram, UserAndroid, UserAndroids,
 };
+use crate::memory::{HostMemory, HostProcessMemory, HostRole};
+use crate::settings::{MemorySettings, Settings, SettingsStore};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use crate::keys::{keycode, meta, KeyAction, KeyEvent};
@@ -241,7 +243,8 @@ impl RunningService {
         Self::start_service(listener, service)
     }
 
-    fn start_service(listener: Box<dyn LocalListener>, service: HostApiService) -> Self {
+    /// Runs `service` as it is.
+    pub fn start_service(listener: Box<dyn LocalListener>, service: HostApiService) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let service = Arc::new(service);
         let flag = Arc::clone(&stop);
@@ -353,6 +356,18 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::input_stream_that_sends_a_request_is_disconnected(
                 &mut || $make,
             );
+        }
+        #[test]
+        fn fr17_settings_are_read_and_changed_through_the_service() {
+            $crate::host_api_conformance::settings_round_trip(&mut || $make);
+        }
+        #[test]
+        fn fr17_an_invalid_setting_is_refused_with_its_reason() {
+            $crate::host_api_conformance::invalid_setting_is_refused(&mut || $make);
+        }
+        #[test]
+        fn fr17_the_memory_report_names_the_callers_host_processes() {
+            $crate::host_api_conformance::memory_reports_host_processes(&mut || $make);
         }
         #[test]
         fn fr15_an_update_request_reaches_the_program_updater() {
@@ -971,5 +986,127 @@ pub fn input_stream_that_sends_a_request_is_disconnected(make: MakeLocal<'_>) {
     assert_eq!(
         connect(&mut *connector).status().unwrap().state,
         SessionState::Stopped
+    );
+}
+
+/// Reports one process of each role for every user, out of order.
+pub struct FakeHostMemory {
+    /// The users and VM IDs it was asked about, in order.
+    pub asked: Mutex<Vec<(String, Option<String>)>>,
+}
+
+impl HostMemory for FakeHostMemory {
+    fn processes(&self, user: &str, vm_id: Option<&str>) -> Vec<HostProcessMemory> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push((user.to_string(), vm_id.map(str::to_string)));
+        vec![
+            HostProcessMemory {
+                role: HostRole::AppWindow,
+                pid: 30,
+                working_set_kb: 20_000,
+                private_kb: 15_000,
+            },
+            HostProcessMemory {
+                role: HostRole::Vm,
+                pid: 10,
+                working_set_kb: 900_000,
+                private_kb: 880_000,
+            },
+            HostProcessMemory {
+                role: HostRole::WindowManager,
+                pid: 20,
+                working_set_kb: 40_000,
+                private_kb: 30_000,
+            },
+        ]
+    }
+}
+
+fn facts() -> ServiceFacts {
+    ServiceFacts {
+        version: "0.0.9".into(),
+        log_dir: Some("C:\\ProgramData\\DSA\\logs".into()),
+        program_updates_available: true,
+        image_updates_available: false,
+    }
+}
+
+pub fn settings_round_trip(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+        .with_settings(store.clone(), facts());
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    let report = client.settings().expect("the settings");
+    assert_eq!(report.settings, Settings::default());
+    assert!(!report.settings.freeze, "freeze is off by default");
+    assert_eq!(report.facts, facts());
+
+    let changed = client
+        .set_settings(&Settings {
+            render_gpu: "Discrete".into(),
+            freeze: true,
+            program_updates: false,
+            image_updates: true,
+        })
+        .expect("changing the settings");
+    assert_eq!(changed.settings.render_gpu, "discrete");
+    assert!(changed.settings.freeze);
+    assert_eq!(
+        changed.facts.version, "0.0.9",
+        "a client cannot change the facts"
+    );
+    assert_eq!(store.get(&user).unwrap().render_gpu, "discrete");
+    assert!(!store.machine().program_updates);
+    assert_eq!(client.settings().unwrap().settings, changed.settings);
+}
+
+pub fn invalid_setting_is_refused(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+        .with_settings(Arc::new(MemorySettings::default()), facts());
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    match client.set_settings(&Settings {
+        render_gpu: "  ".into(),
+        ..Settings::default()
+    }) {
+        Err(ClientError::Service { code, detail }) => {
+            assert_eq!(code, ErrorCode::InvalidSetting);
+            assert!(detail.contains("render GPU"), "{detail}");
+        }
+        other => panic!("expected the service to refuse, got {other:?}"),
+    }
+    assert_eq!(client.settings().unwrap().settings, Settings::default());
+}
+
+pub fn memory_reports_host_processes(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let memory = Arc::new(FakeHostMemory {
+        asked: Mutex::new(Vec::new()),
+    });
+    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+        .with_host_memory(memory.clone());
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    client.start().unwrap();
+    let report = client.memory().expect("the memory report");
+    assert_eq!(report.guest, None, "the fake Android reports no guest memory");
+    let roles: Vec<(HostRole, u32)> = report.host.iter().map(|p| (p.role, p.pid)).collect();
+    assert_eq!(
+        roles,
+        vec![
+            (HostRole::Vm, 10),
+            (HostRole::WindowManager, 20),
+            (HostRole::AppWindow, 30)
+        ]
+    );
+    assert_eq!(report.host_total_kb(), 960_000);
+    assert_eq!(
+        memory.asked.lock().unwrap().as_slice(),
+        &[(user, Some("fake-vm-id-1234".to_string()))]
     );
 }
