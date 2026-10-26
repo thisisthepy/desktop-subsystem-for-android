@@ -159,6 +159,12 @@ writes its messages to `%LOCALAPPDATA%\DSA\logs\dsa-wm.log`. Earlier releases ca
   is its own pointer. The window holds the mouse while a button is down, so a drag that
   leaves it still ends in the task. Input goes to the service on a connection of its own,
   which answers none of it, so a fast pointer is never held back.
+- The keys pressed in the window that has the keyboard focus go to its task on the same
+  connection, as Android key codes with their repeats and with Shift, Ctrl, Alt and the
+  Windows key (each with its side) and the locks. Letters, digits and punctuation go as
+  keys too, so typing reaches a text field; a key the input method is composing with stays
+  with the input method. Alt+F4 still closes the window. When the window loses the focus,
+  every key still held is released in Android, so none stays down there.
 - Without a GPU device, the windows still open and close with their tasks but stay
   empty, and the log says why.
 
