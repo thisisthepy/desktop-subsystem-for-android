@@ -349,6 +349,8 @@ message GuestMemory {
   uint64 swap_free_kb = 10;
   uint64 zram_original_kb = 11;
   uint64 zram_used_kb = 12;
+  // The proportional set size of the apps and the system server together; native daemons
+  // are not counted.
   uint64 total_pss_kb = 13;
   // Largest first, at most 10.
   repeated GuestProcessMemory top_processes = 14;

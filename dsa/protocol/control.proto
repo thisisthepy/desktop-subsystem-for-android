@@ -331,7 +331,8 @@ message GuestMemory {
   // hold them compressed.
   uint64 zram_original_kb = 11;
   uint64 zram_used_kb = 12;
-  // The proportional set size of every guest process together.
+  // The proportional set size of the processes the guest's activity manager runs (the apps
+  // and the system server) together. Native daemons are not counted.
   uint64 total_pss_kb = 13;
   // The processes with the largest proportional set size, largest first, at most 10.
   repeated ProcessMemory top_processes = 14;
