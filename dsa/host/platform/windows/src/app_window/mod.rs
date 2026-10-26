@@ -14,6 +14,7 @@
 
 pub mod ime;
 pub mod keys;
+pub mod launch;
 pub mod pointer;
 pub mod window;
 
@@ -77,6 +78,38 @@ pub fn package_of(program: &std::path::Path, args: &[String]) -> Option<String> 
         .flatten()
         .find(|package| is_valid_package(package))
         .map(str::to_string)
+}
+
+/// Gives this process the app's own AppUserModelID, the one its Start menu shortcut carries,
+/// so the taskbar groups the app's windows on one button with the app's icon, apart from
+/// every other app, and pinning the button pins the shortcut.
+pub fn use_app_user_model_id(package: &str) -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+    let id = crate::start_menu::app_user_model_id(package);
+    let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();
+    // SAFETY: a NUL-terminated string, read during the call.
+    let result = unsafe { SetCurrentProcessExplicitAppUserModelID(wide.as_ptr()) };
+    if result < 0 {
+        return Err(format!(
+            "could not take the app ID {id} (error 0x{:08x}); the taskbar may group the app \
+             with the window manager",
+            result as u32
+        ));
+    }
+    Ok(())
+}
+
+/// The AppUserModelID this process took, if it took one.
+pub fn this_process_app_user_model_id() -> Option<String> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::GetCurrentProcessExplicitAppUserModelID;
+    // SAFETY: the shell allocates the string, which is read and then freed once.
+    unsafe {
+        let id = GetCurrentProcessExplicitAppUserModelID().ok()?;
+        let text = id.to_string().ok();
+        CoTaskMemFree(Some(id.0 as *const std::ffi::c_void));
+        text
+    }
 }
 
 /// How long connecting and the handshake may take.

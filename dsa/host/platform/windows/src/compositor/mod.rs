@@ -40,7 +40,9 @@ use dsa_transport::{Connector, Listener, TransportError};
 
 use self::adapter::{DisplayPresenter, DisplaySink};
 use self::frames::FrameRouter;
-use self::hosts::{HostLauncher, ManagerSetup};
+use self::hosts::{HostLauncher, ManagerEvent, ManagerSetup};
+use crate::start_menu::StartMenuSetup;
+use dsa_host_core::tasks::{AppInfo, TaskEvent};
 use self::log::{note, CompositorLogger};
 use self::present::Gpu;
 use self::single_instance::DEFAULT_MUTEX_NAME;
@@ -96,6 +98,20 @@ pub struct Compositor {
     /// Starts each app's window host.
     launcher: Option<Box<dyn HostLauncher>>,
     windows: Arc<Mutex<Vec<i32>>>,
+    /// Where the apps' Start menu shortcuts go, when they are kept.
+    start_menu: Option<StartMenuSetup>,
+}
+
+/// The installed apps an event from the watch of the tasks carries, if it carries them.
+pub fn installed_in(event: &ManagerEvent) -> Option<Vec<AppInfo>> {
+    match event {
+        ManagerEvent::Sync(current) => current.iter().find_map(|event| match event {
+            TaskEvent::Installed(apps) => Some(apps.clone()),
+            _ => None,
+        }),
+        ManagerEvent::Task(TaskEvent::Installed(apps)) => Some(apps.clone()),
+        _ => None,
+    }
 }
 
 /// Opens the listener the app window hosts connect to.
@@ -157,6 +173,7 @@ impl Compositor {
             host_listener: Some(session_host_listener()),
             launcher: None,
             windows: Arc::new(Mutex::new(Vec::new())),
+            start_menu: crate::start_menu::StartMenuSetup::default_for_user(),
         }
     }
 
@@ -181,7 +198,15 @@ impl Compositor {
             host_listener: None,
             launcher: None,
             windows: Arc::new(Mutex::new(Vec::new())),
+            start_menu: None,
         }
+    }
+
+    /// Keeps a Start menu shortcut for each app installed in the user's Android, as `setup`
+    /// says where. [`Compositor::new`] keeps the user's own Start menu.
+    pub fn with_start_menu(mut self, setup: StartMenuSetup) -> Compositor {
+        self.start_menu = Some(setup);
+        self
     }
 
     /// Takes the app window hosts' connections from `listener`, and starts each app's window
@@ -515,6 +540,21 @@ impl Compositor {
             .map_err(|e| log(&format!("could not take the app windows' connections: {e}")))
             .ok();
 
+        // The Start menu follows the installed apps on a thread of its own, since making the
+        // apps' programs and shortcuts takes a while and the windows must not wait on it.
+        let mut start_menu = None;
+        let mut installed_tx = None;
+        if let Some(setup) = self.start_menu.take() {
+            let (tx, rx) = mpsc::channel();
+            let menu_logger = self.logger.clone();
+            start_menu = thread::Builder::new()
+                .name("dsa-wm-start-menu".into())
+                .spawn(move || crate::start_menu::keep(rx, setup, menu_logger))
+                .map_err(|e| log(&format!("could not start the Start menu's thread: {e}")))
+                .ok();
+            installed_tx = Some(tx);
+        }
+
         let watch_events = events_tx.clone();
         let watch_connector = (self.local_api_connector)();
         let watch_stop = Arc::clone(stop);
@@ -524,7 +564,12 @@ impl Compositor {
             .spawn(move || {
                 tasks::watch(
                     watch_connector,
-                    |event| watch_events.send(event).is_ok(),
+                    |event| {
+                        if let (Some(tx), Some(apps)) = (&installed_tx, installed_in(&event)) {
+                            let _ = tx.send(apps);
+                        }
+                        watch_events.send(event).is_ok()
+                    },
                     watch_stop,
                     watch_logger,
                 )
@@ -550,7 +595,7 @@ impl Compositor {
 
         TaskWindowThreads {
             stop: Some(manager_stop),
-            threads: [manager, acceptor, watcher, requester]
+            threads: [manager, acceptor, watcher, requester, start_menu]
                 .into_iter()
                 .flatten()
                 .collect(),

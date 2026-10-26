@@ -197,15 +197,50 @@ installed beside the window manager:
   handle. For each frame it tells the program, which copies the frame into the window's
   swapchain on the GPU and says when it is done; the renderer writes the texture again only
   then.
-- Started by the user rather than the window manager, the program asks Android to start
-  its app; a copy that runs already only asks again. It writes its messages to
+- Started by the user rather than the window manager (from the app's Start menu shortcut,
+  a pinned taskbar button or Windows search), the program first asks the service to start
+  Android when it is stopped and waits until it runs, showing a small window under the
+  app's name and icon meanwhile, so the taskbar shows the app at once. It starts the window
+  manager when its pipe is not there, from the path the installer's sign-in entry gives.
+  Then it becomes the app's window host and asks Android to start the app; when the app
+  has a window host already, that one gets the app and this program ends, so an app never
+  has two. If Android does not start, a message box says why. It writes its messages to
   `%LOCALAPPDATA%\DSA\logs\dsa-app-window.log`.
-- Uninstalling DSA leaves the copies in the user's profile, like the user's Android disk.
+- Every copy takes the app's own AppUserModelID, `DSA.<package>`, the one its Start menu
+  shortcut carries, so the taskbar groups each app's windows on a button of its own with
+  the app's icon, and pinning that button pins the shortcut.
+- Uninstalling DSA leaves the copies in the user's profile, like the user's Android disk,
+  but removes the Start menu shortcuts that open them (see below), in every profile.
 - The renderer runs on the GPU that drives the primary monitor, so frames never cross
   from one GPU to another and a laptop's discrete GPU stays asleep. The renderer uses one
   GPU, so a window on a monitor that another GPU drives is still rendered there, and
   Windows copies its frames across. When no Vulkan GPU matches (in a remote desktop
   session, for example), the renderer picks one itself, preferring a discrete GPU.
+
+### The Start menu
+
+Each app that a launcher lists in the user's Android gets a shortcut in the user's Start
+menu, so Windows search finds it by name and opens it, even while Android is stopped.
+
+- The agent tells the host which apps it has when its channel connects and whenever one is
+  installed, updated or removed. The service keeps the list per user, also while Android is
+  stopped, and the window manager makes each app's window program and its shortcut from it.
+- The shortcut is `%APPDATA%\Microsoft\Windows\Start Menu\Programs\<Label>.lnk`, named and
+  drawn as the app. It runs the app's window program with `--package <package>` and carries
+  the app's AppUserModelID.
+- The shortcuts go straight into `Programs`, not a folder of their own. Windows search finds
+  both the same way, but the list of all apps would show the apps inside one folder, apart
+  from every other program; directly in `Programs` each app is listed under its own name.
+- A name another program's shortcut already has gets the package after it
+  (`Clock (com.example.clock).lnk`). The window manager records the shortcuts it made in
+  `%LOCALAPPDATA%\DSA\start-menu.json` and only ever changes or removes those, so a shortcut
+  it did not make is never touched.
+- When an app is removed from Android, its shortcut goes, and so does its window program
+  once it no longer runs.
+- Uninstalling DSA removes the shortcuts the note names in each profile's default Start
+  menu folder (`dsa-hostd remove-start-menu`). A Start menu moved elsewhere by folder
+  redirection keeps its shortcuts, because the uninstaller cannot read another user's
+  redirection.
 
 ### Choosing the render GPU
 
