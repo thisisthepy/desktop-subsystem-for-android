@@ -5,7 +5,11 @@ use std::time::Duration;
 
 use dsa_host_core::host_api::{HostApiClient, PerUser, UserAndroid, UserAndroids};
 use dsa_host_core::host_api_conformance::{FakeAndroid, FakeAndroids, RunningService};
+use dsa_host_core::ime::ImeEvent;
+use dsa_host_core::input::PointerEvent;
+use dsa_host_core::keys::KeyEvent;
 use dsa_host_core::session::SessionState;
+use dsa_host_core::tasks::TaskRequestError;
 use dsa_transport::local::{self, MemoryLocalConnector, Peer};
 use dsa_transport::{Connection, Connector, TransportError};
 
@@ -111,6 +115,15 @@ impl UserAndroid for Notifying {
     fn update_notice(&self) -> Option<String> {
         Some("Android 16.0.3 is downloaded and will be used at the next start".into())
     }
+    fn pointer(&self, _: &PointerEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn key(&self, _: &KeyEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn ime(&self, _: &ImeEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
 }
 
 #[test]
@@ -148,6 +161,15 @@ impl UserAndroid for CrashedAndroid {
     fn stop(&self) {
         *self.state.lock().unwrap() = SessionState::Stopped;
         *self.reason.lock().unwrap() = Some("stopped on request".into());
+    }
+    fn pointer(&self, _: &PointerEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn key(&self, _: &KeyEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn ime(&self, _: &ImeEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
     }
 }
 

@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use dsa_host_core::host_api::{UserAndroid, UserAndroids};
 use dsa_host_core::host_api_conformance::{FakeAndroid, FakeAndroids};
+use dsa_host_core::input::{PointerAction, PointerEvent, PointerTool};
 use dsa_host_core::session::SessionState;
 use dsa_host_core::update::manifest;
 use dsa_host_core::update::program::{
@@ -485,6 +486,23 @@ fn fr15_no_android_starts_while_setup_runs_and_the_user_is_told_why() {
     assert!(why.contains("DSA 0.1.1 is being installed"), "{why}");
     let notice = android.update_notice().unwrap();
     assert!(notice.contains("installing DSA 0.1.1"), "{notice}");
+}
+
+#[test]
+fn fr5_pointer_input_reaches_an_android_through_the_updating_service() {
+    // The installed service wraps each user's Android to report program updates; input in
+    // a task window must pass through the wrapper, not stop at it.
+    let h = Harness::new();
+    let (_updates, status) = h.service("0.1.0");
+    let inner = Arc::new(FakeAndroid::new());
+    inner.start();
+    let android = WithProgramStatus {
+        android: Arc::clone(&inner) as Arc<dyn UserAndroid>,
+        status,
+    };
+    let click = PointerEvent::new(5, PointerAction::Down, PointerTool::Mouse, (330.0, 56.0));
+    android.pointer(&click).unwrap();
+    assert_eq!(inner.pointers.lock().unwrap().as_slice(), &[click]);
 }
 
 #[test]
