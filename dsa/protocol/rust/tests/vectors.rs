@@ -9,10 +9,10 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use dsa_protocol::control::{
-    envelope::Body, AppInfo, AuthChallenge, AuthProof, CloseTask, Envelope, Hello, HelloAccepted,
-    HelloRejected, ImeCommit, ImeComposition, ImeCursor, KeyAction, KeyEvent, LaunchApp,
-    PointerAction, PointerEvent, PointerTool, Rect, RejectReason, ResizeTask, Role, SetTaskDensity,
-    TaskFrames, TaskRemoved, TaskUpdated,
+    envelope::Body, AppInfo, AuthChallenge, AuthProof, CloseTask, Envelope, GuestMemory, Hello,
+    HelloAccepted, HelloRejected, ImeCommit, ImeComposition, ImeCursor, KeyAction, KeyEvent,
+    LaunchApp, PointerAction, PointerEvent, PointerTool, ProcessMemory, Rect, RejectReason,
+    RequestGuestMemory, ResizeTask, Role, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
 
@@ -297,6 +297,26 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                 reason: RejectReason::AuthenticationFailed as i32,
                 detail: "no proof".into(),
                 host: None,
+            })),
+        ),
+        (
+            "request_guest_memory",
+            wrap(Body::RequestGuestMemory(RequestGuestMemory {})),
+        ),
+        (
+            "guest_memory",
+            wrap(Body::GuestMemory(GuestMemory {
+                mem_total_kb: 4015356,
+                cached_kb: 1503112,
+                zram_used_kb: 30720,
+                total_pss_kb: 330000,
+                top_processes: vec![ProcessMemory {
+                    pid: 500,
+                    name: "system".into(),
+                    pss_kb: 180000,
+                    swap_pss_kb: 1000,
+                }],
+                ..GuestMemory::default()
             })),
         ),
     ])

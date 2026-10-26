@@ -62,6 +62,19 @@ pub fn clamp_size(size: (u32, u32), max: Option<(u32, u32)>) -> (u32, u32) {
     }
 }
 
+/// Where a maximised window of `outer` pixels goes, along one direction, on a work area
+/// that starts at `start` and is `area` pixels long, when the window manager proposed
+/// `proposed`. A window is never larger than the guest can draw, so on a monitor larger
+/// than that it maximises to the guest's largest size, shown 1:1, and is centred on the work
+/// area rather than left in its corner. A window that fills the work area stays where the
+/// window manager put it.
+pub fn maximized_position(proposed: i32, start: i32, area: i32, outer: i32) -> i32 {
+    if outer >= area {
+        return proposed;
+    }
+    start + (area - outer) / 2
+}
+
 /// One task window's size and density, as the host and the guest each see them.
 #[derive(Debug, Clone)]
 pub struct WindowSizing {
@@ -83,6 +96,9 @@ pub struct WindowSizing {
     /// Whether the task was given a size live during this drag, so it must be reconfigured
     /// when the drag ends.
     resized_live: bool,
+    /// Whether the task was given a size live outside a drag (a maximise, a snap) and still
+    /// has to be reconfigured for it once it has taken it.
+    reconfigure: bool,
     /// Whether the window has said which monitor scale it opened on.
     placed: bool,
 }
@@ -101,6 +117,7 @@ impl WindowSizing {
             asked_density: None,
             dragging: false,
             resized_live: false,
+            reconfigure: false,
             placed: false,
         }
     }
@@ -180,11 +197,16 @@ impl WindowSizing {
     /// size, unless the task has it or it was asked for already. Called for every step of a
     /// live resize; the requests are folded together before they are sent.
     ///
-    /// While the user drags the window, the request is live: the task takes the size
-    /// without being reconfigured, so an app that does not handle a change of screen size is
-    /// laid out again rather than recreated at every step. Any other change of size (a
-    /// maximise, a snap, a move to a monitor of another scale) reconfigures the task at
-    /// once.
+    /// The request is always live: the task takes the size without being reconfigured, so an
+    /// app that does not handle a change of screen size is laid out again within a frame
+    /// rather than recreated at the new size. Recreating an app can take longer than the
+    /// guest holds a resized task's frames, and a maximise asked for at once then showed the
+    /// old, small picture on black before the app had drawn again.
+    ///
+    /// The task is reconfigured afterwards, at a size it already has: at the end of the drag
+    /// ([`dragging`](Self::dragging)), or, for a change of size outside a drag (a maximise,
+    /// a snap, a move to a monitor of another scale), once the guest has taken the size
+    /// ([`reconfigure`](Self::reconfigure)).
     pub fn view_resized(&mut self, view: (u32, u32), now: Instant) -> Option<TaskRequest> {
         if view.0 == 0 || view.1 == 0 {
             return None;
@@ -198,12 +220,39 @@ impl WindowSizing {
         self.asked = Some((size, now));
         if self.dragging {
             self.resized_live = true;
+        } else {
+            self.reconfigure = true;
         }
         Some(TaskRequest::Resize {
             task_id: self.task_id,
             width: size.0,
             height: size.1,
-            live: self.dragging,
+            live: true,
+        })
+    }
+
+    /// Returns the request (not live) that reconfigures the task for a size it was given
+    /// live outside a drag, once the guest has taken that size, or once it has had
+    /// [`SETTLE`] to and the window has gone back to the size the task has
+    /// ([`tick`](Self::tick)). The task has that size already, so it is recreated in place
+    /// and the window waits for nothing. `None` while there is nothing to reconfigure, while
+    /// the guest is still on its way, and while the user drags the window, whose end
+    /// reconfigures the task instead.
+    pub fn reconfigure(&mut self, now: Instant) -> Option<TaskRequest> {
+        if !self.reconfigure || self.dragging {
+            return None;
+        }
+        if let Some((_, since)) = self.asked {
+            if now.saturating_duration_since(since) < SETTLE {
+                return None;
+            }
+        }
+        self.reconfigure = false;
+        Some(TaskRequest::Resize {
+            task_id: self.task_id,
+            width: self.guest.0,
+            height: self.guest.1,
+            live: false,
         })
     }
 
@@ -220,7 +269,8 @@ impl WindowSizing {
         if active {
             if !self.dragging {
                 self.dragging = true;
-                self.resized_live = false;
+                // A size given live just before the drag is reconfigured with the drag's.
+                self.resized_live = std::mem::take(&mut self.reconfigure);
             }
             return None;
         }
@@ -353,8 +403,86 @@ mod tests {
         // The guest's report of it carries the same bounds and changes nothing.
         assert_eq!(sizing.guest_updated(&task(600, 300, 160)), None);
         assert_eq!(sizing.tick(now + SETTLE * 2), None);
-        // A change of size outside a drag (a maximise, a snap) is not live.
-        assert_eq!(sizing.view_resized((900, 700), now), resize(900, 700));
+        // A change of size outside a drag (a maximise, a snap) is live too.
+        assert_eq!(sizing.view_resized((900, 700), now), live_resize(900, 700));
+    }
+
+    #[test]
+    fn fr4_a_maximise_gives_the_task_its_size_live_then_reconfigures_it_at_that_size() {
+        // A 608x1080 task on a monitor at 200%; the guest draws at most 1920x1080.
+        let mut sizing = WindowSizing::new(&task(608, 1080, 320));
+        let now = Instant::now();
+        assert_eq!(sizing.reconfigure(now), None, "nothing to reconfigure");
+        // The window is maximised to the most the guest can draw: no drag, one size.
+        assert_eq!(
+            sizing.view_resized((1920, 1080), now),
+            live_resize(1920, 1080)
+        );
+        // Not before the guest has taken the size: the app would be recreated at a size it
+        // has not drawn at, and the window would show the old picture on black meanwhile.
+        assert_eq!(sizing.reconfigure(now), None);
+        assert_eq!(sizing.guest_updated(&task(1920, 1080, 320)), None);
+        // Then once, at the size the task has, which the window keeps.
+        assert_eq!(sizing.reconfigure(now), resize(1920, 1080));
+        assert_eq!(sizing.reconfigure(now), None, "asked once");
+        assert_eq!(sizing.guest_updated(&task(1920, 1080, 320)), None);
+        assert_eq!(sizing.tick(now + SETTLE * 2), None);
+        // Restoring the window goes the same way.
+        assert_eq!(
+            sizing.view_resized((608, 1080), now),
+            live_resize(608, 1080)
+        );
+        assert_eq!(sizing.guest_updated(&task(608, 1080, 320)), None);
+        assert_eq!(sizing.reconfigure(now), resize(608, 1080));
+    }
+
+    #[test]
+    fn fr4_a_maximise_on_a_monitor_larger_than_the_guest_asks_for_no_more_than_it_draws() {
+        // A 4K monitor's work area at 200% is larger than the 1920x1080 the guest draws.
+        let mut sizing = WindowSizing::new(&task(608, 1080, 320));
+        assert_eq!(
+            sizing.view_resized((3840, 2054), Instant::now()),
+            live_resize(1920, 1080)
+        );
+        assert_eq!(sizing.max_client_size(), Some((1920, 1080)));
+    }
+
+    #[test]
+    fn fr4_a_size_the_guest_never_takes_still_ends_with_the_task_reconfigured() {
+        let mut sizing = WindowSizing::new(&task(608, 1080, 320));
+        let start = Instant::now();
+        sizing.view_resized((1920, 1080), start);
+        assert_eq!(sizing.reconfigure(start + SETTLE / 2), None);
+        // The window goes back to the task's size, and the task is reconfigured at it, so
+        // it does not keep the configuration the live size held.
+        assert_eq!(sizing.tick(start + SETTLE), Some((608, 1080)));
+        assert_eq!(sizing.reconfigure(start + SETTLE), resize(608, 1080));
+    }
+
+    #[test]
+    fn fr4_a_drag_that_starts_before_a_maximise_is_reconfigured_reconfigures_it_once() {
+        let mut sizing = WindowSizing::new(&task(608, 1080, 320));
+        let now = Instant::now();
+        sizing.view_resized((1920, 1080), now);
+        sizing.guest_updated(&task(1920, 1080, 320));
+        // The user takes hold of the window before the reconfigure went out.
+        assert_eq!(sizing.dragging(true, now), None);
+        assert_eq!(sizing.reconfigure(now), None, "not under a drag");
+        // A drag that only moves it still ends with the task reconfigured, once.
+        assert_eq!(sizing.dragging(false, now), resize(1920, 1080));
+        assert_eq!(sizing.reconfigure(now), None);
+    }
+
+    #[test]
+    fn fr4_a_window_maximised_smaller_than_the_work_area_is_centred_on_it() {
+        // A 1920x1080 client (1936x1119 outer at 100%) on a 3840x2100 work area at (0, 0).
+        assert_eq!(maximized_position(-8, 0, 3840, 1936), 952);
+        assert_eq!(maximized_position(-8, 0, 2100, 1119), 490);
+        // On a second monitor, from its own corner.
+        assert_eq!(maximized_position(2552, 2560, 3840, 1936), 2560 + 952);
+        // A window as large as the work area, borders and all, stays where it was put.
+        assert_eq!(maximized_position(-8, 0, 1920, 1936), -8);
+        assert_eq!(maximized_position(-8, 0, 1920, 1920), -8);
     }
 
     #[test]
@@ -447,7 +575,7 @@ mod tests {
     fn fr4_resizing_the_window_asks_the_guest_for_its_client_size() {
         let mut sizing = WindowSizing::new(&task(400, 300, 160));
         let now = Instant::now();
-        assert_eq!(sizing.view_resized((640, 480), now), resize(640, 480));
+        assert_eq!(sizing.view_resized((640, 480), now), live_resize(640, 480));
         // The same size again, or the size the task already has, asks nothing.
         assert_eq!(sizing.view_resized((640, 480), now), None);
         let mut fresh = WindowSizing::new(&task(400, 300, 160));
@@ -465,7 +593,7 @@ mod tests {
         assert_eq!(sizing.max_client_size(), Some((1920, 1080)));
         assert_eq!(
             sizing.view_resized((2560, 900), Instant::now()),
-            resize(1920, 900)
+            live_resize(1920, 900)
         );
     }
 
@@ -535,7 +663,10 @@ mod tests {
         assert_eq!(sizing.dpi_changed(192), density(320));
         assert_eq!(sizing.dpi_changed(192), None, "asked once");
         // The window manager doubles the window; the size follows the density.
-        assert_eq!(sizing.view_resized((1096, 1948), now), resize(1096, 1080));
+        assert_eq!(
+            sizing.view_resized((1096, 1948), now),
+            live_resize(1096, 1080)
+        );
         // And back.
         assert_eq!(sizing.dpi_changed(96), density(160));
     }
@@ -547,7 +678,7 @@ mod tests {
         // The window reports its new size; the task is asked for it.
         assert_eq!(
             sizing.view_resized((800, 600), Instant::now()),
-            resize(800, 600)
+            live_resize(800, 600)
         );
         // A later report is a move.
         assert_eq!(sizing.dpi_reported(96), (None, density(160)));

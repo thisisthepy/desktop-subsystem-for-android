@@ -224,34 +224,6 @@ struct AppInfoDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 AppInfoDefaultTypeInternal _AppInfo_default_instance_;
-PROTOBUF_CONSTEXPR InstalledApp::InstalledApp(
-    ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_.package_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.label_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.icon_png_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_._cached_size_)*/{}} {}
-struct InstalledAppDefaultTypeInternal {
-  PROTOBUF_CONSTEXPR InstalledAppDefaultTypeInternal()
-      : _instance(::_pbi::ConstantInitialized{}) {}
-  ~InstalledAppDefaultTypeInternal() {}
-  union {
-    InstalledApp _instance;
-  };
-};
-PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 InstalledAppDefaultTypeInternal _InstalledApp_default_instance_;
-PROTOBUF_CONSTEXPR InstalledApps::InstalledApps(
-    ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_.package_names_)*/{}
-  , /*decltype(_impl_._cached_size_)*/{}} {}
-struct InstalledAppsDefaultTypeInternal {
-  PROTOBUF_CONSTEXPR InstalledAppsDefaultTypeInternal()
-      : _instance(::_pbi::ConstantInitialized{}) {}
-  ~InstalledAppsDefaultTypeInternal() {}
-  union {
-    InstalledApps _instance;
-  };
-};
-PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 InstalledAppsDefaultTypeInternal _InstalledApps_default_instance_;
 PROTOBUF_CONSTEXPR PointerEvent::PointerEvent(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.task_id_)*/0
@@ -336,6 +308,60 @@ struct ImeCursorDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ImeCursorDefaultTypeInternal _ImeCursor_default_instance_;
+PROTOBUF_CONSTEXPR RequestGuestMemory::RequestGuestMemory(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._cached_size_)*/{}} {}
+struct RequestGuestMemoryDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR RequestGuestMemoryDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~RequestGuestMemoryDefaultTypeInternal() {}
+  union {
+    RequestGuestMemory _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 RequestGuestMemoryDefaultTypeInternal _RequestGuestMemory_default_instance_;
+PROTOBUF_CONSTEXPR ProcessMemory::ProcessMemory(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.pss_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.swap_pss_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.pid_)*/0
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct ProcessMemoryDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ProcessMemoryDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ProcessMemoryDefaultTypeInternal() {}
+  union {
+    ProcessMemory _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ProcessMemoryDefaultTypeInternal _ProcessMemory_default_instance_;
+PROTOBUF_CONSTEXPR GuestMemory::GuestMemory(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.top_processes_)*/{}
+  , /*decltype(_impl_.mem_total_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.mem_free_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.mem_available_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.buffers_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.cached_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.anon_pages_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.shmem_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.slab_reclaimable_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.swap_total_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.swap_free_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.zram_original_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.zram_used_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.total_pss_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct GuestMemoryDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GuestMemoryDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GuestMemoryDefaultTypeInternal() {}
+  union {
+    GuestMemory _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GuestMemoryDefaultTypeInternal _GuestMemory_default_instance_;
 PROTOBUF_CONSTEXPR Envelope::Envelope(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.body_)*/{}
@@ -4155,498 +4181,6 @@ std::string AppInfo::GetTypeName() const {
 
 // ===================================================================
 
-class InstalledApp::_Internal {
- public:
-};
-
-InstalledApp::InstalledApp(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                         bool is_message_owned)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
-  SharedCtor(arena, is_message_owned);
-  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.InstalledApp)
-}
-InstalledApp::InstalledApp(const InstalledApp& from)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
-  InstalledApp* const _this = this; (void)_this;
-  new (&_impl_) Impl_{
-      decltype(_impl_.package_name_){}
-    , decltype(_impl_.label_){}
-    , decltype(_impl_.icon_png_){}
-    , /*decltype(_impl_._cached_size_)*/{}};
-
-  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  _impl_.package_name_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.package_name_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (!from._internal_package_name().empty()) {
-    _this->_impl_.package_name_.Set(from._internal_package_name(), 
-      _this->GetArenaForAllocation());
-  }
-  _impl_.label_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.label_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (!from._internal_label().empty()) {
-    _this->_impl_.label_.Set(from._internal_label(), 
-      _this->GetArenaForAllocation());
-  }
-  _impl_.icon_png_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.icon_png_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (!from._internal_icon_png().empty()) {
-    _this->_impl_.icon_png_.Set(from._internal_icon_png(), 
-      _this->GetArenaForAllocation());
-  }
-  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.InstalledApp)
-}
-
-inline void InstalledApp::SharedCtor(
-    ::_pb::Arena* arena, bool is_message_owned) {
-  (void)arena;
-  (void)is_message_owned;
-  new (&_impl_) Impl_{
-      decltype(_impl_.package_name_){}
-    , decltype(_impl_.label_){}
-    , decltype(_impl_.icon_png_){}
-    , /*decltype(_impl_._cached_size_)*/{}
-  };
-  _impl_.package_name_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.package_name_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  _impl_.label_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.label_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  _impl_.icon_png_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.icon_png_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-}
-
-InstalledApp::~InstalledApp() {
-  // @@protoc_insertion_point(destructor:dsa.control.v1.InstalledApp)
-  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
-  (void)arena;
-    return;
-  }
-  SharedDtor();
-}
-
-inline void InstalledApp::SharedDtor() {
-  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
-  _impl_.package_name_.Destroy();
-  _impl_.label_.Destroy();
-  _impl_.icon_png_.Destroy();
-}
-
-void InstalledApp::SetCachedSize(int size) const {
-  _impl_._cached_size_.Set(size);
-}
-
-void InstalledApp::Clear() {
-// @@protoc_insertion_point(message_clear_start:dsa.control.v1.InstalledApp)
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  _impl_.package_name_.ClearToEmpty();
-  _impl_.label_.ClearToEmpty();
-  _impl_.icon_png_.ClearToEmpty();
-  _internal_metadata_.Clear<std::string>();
-}
-
-const char* InstalledApp::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
-#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
-  while (!ctx->Done(&ptr)) {
-    uint32_t tag;
-    ptr = ::_pbi::ReadTag(ptr, &tag);
-    switch (tag >> 3) {
-      // string package_name = 1;
-      case 1:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
-          auto str = _internal_mutable_package_name();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-          CHK_(::_pbi::VerifyUTF8(str, nullptr));
-        } else
-          goto handle_unusual;
-        continue;
-      // string label = 2;
-      case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
-          auto str = _internal_mutable_label();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-          CHK_(::_pbi::VerifyUTF8(str, nullptr));
-        } else
-          goto handle_unusual;
-        continue;
-      // bytes icon_png = 3;
-      case 3:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
-          auto str = _internal_mutable_icon_png();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      default:
-        goto handle_unusual;
-    }  // switch
-  handle_unusual:
-    if ((tag == 0) || ((tag & 7) == 4)) {
-      CHK_(ptr);
-      ctx->SetLastTag(tag);
-      goto message_done;
-    }
-    ptr = UnknownFieldParse(
-        tag,
-        _internal_metadata_.mutable_unknown_fields<std::string>(),
-        ptr, ctx);
-    CHK_(ptr != nullptr);
-  }  // while
-message_done:
-  return ptr;
-failure:
-  ptr = nullptr;
-  goto message_done;
-#undef CHK_
-}
-
-uint8_t* InstalledApp::_InternalSerialize(
-    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
-  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.InstalledApp)
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  // string package_name = 1;
-  if (!this->_internal_package_name().empty()) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->_internal_package_name().data(), static_cast<int>(this->_internal_package_name().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "dsa.control.v1.InstalledApp.package_name");
-    target = stream->WriteStringMaybeAliased(
-        1, this->_internal_package_name(), target);
-  }
-
-  // string label = 2;
-  if (!this->_internal_label().empty()) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->_internal_label().data(), static_cast<int>(this->_internal_label().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "dsa.control.v1.InstalledApp.label");
-    target = stream->WriteStringMaybeAliased(
-        2, this->_internal_label(), target);
-  }
-
-  // bytes icon_png = 3;
-  if (!this->_internal_icon_png().empty()) {
-    target = stream->WriteBytesMaybeAliased(
-        3, this->_internal_icon_png(), target);
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
-        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
-  }
-  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.InstalledApp)
-  return target;
-}
-
-size_t InstalledApp::ByteSizeLong() const {
-// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.InstalledApp)
-  size_t total_size = 0;
-
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  // string package_name = 1;
-  if (!this->_internal_package_name().empty()) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-        this->_internal_package_name());
-  }
-
-  // string label = 2;
-  if (!this->_internal_label().empty()) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-        this->_internal_label());
-  }
-
-  // bytes icon_png = 3;
-  if (!this->_internal_icon_png().empty()) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-        this->_internal_icon_png());
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
-  }
-  int cached_size = ::_pbi::ToCachedSize(total_size);
-  SetCachedSize(cached_size);
-  return total_size;
-}
-
-void InstalledApp::CheckTypeAndMergeFrom(
-    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
-  MergeFrom(*::_pbi::DownCast<const InstalledApp*>(
-      &from));
-}
-
-void InstalledApp::MergeFrom(const InstalledApp& from) {
-  InstalledApp* const _this = this;
-  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.InstalledApp)
-  GOOGLE_DCHECK_NE(&from, _this);
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  if (!from._internal_package_name().empty()) {
-    _this->_internal_set_package_name(from._internal_package_name());
-  }
-  if (!from._internal_label().empty()) {
-    _this->_internal_set_label(from._internal_label());
-  }
-  if (!from._internal_icon_png().empty()) {
-    _this->_internal_set_icon_png(from._internal_icon_png());
-  }
-  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-}
-
-void InstalledApp::CopyFrom(const InstalledApp& from) {
-// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.InstalledApp)
-  if (&from == this) return;
-  Clear();
-  MergeFrom(from);
-}
-
-bool InstalledApp::IsInitialized() const {
-  return true;
-}
-
-void InstalledApp::InternalSwap(InstalledApp* other) {
-  using std::swap;
-  auto* lhs_arena = GetArenaForAllocation();
-  auto* rhs_arena = other->GetArenaForAllocation();
-  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.package_name_, lhs_arena,
-      &other->_impl_.package_name_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.label_, lhs_arena,
-      &other->_impl_.label_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.icon_png_, lhs_arena,
-      &other->_impl_.icon_png_, rhs_arena
-  );
-}
-
-std::string InstalledApp::GetTypeName() const {
-  return "dsa.control.v1.InstalledApp";
-}
-
-
-// ===================================================================
-
-class InstalledApps::_Internal {
- public:
-};
-
-InstalledApps::InstalledApps(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                         bool is_message_owned)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
-  SharedCtor(arena, is_message_owned);
-  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.InstalledApps)
-}
-InstalledApps::InstalledApps(const InstalledApps& from)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
-  InstalledApps* const _this = this; (void)_this;
-  new (&_impl_) Impl_{
-      decltype(_impl_.package_names_){from._impl_.package_names_}
-    , /*decltype(_impl_._cached_size_)*/{}};
-
-  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.InstalledApps)
-}
-
-inline void InstalledApps::SharedCtor(
-    ::_pb::Arena* arena, bool is_message_owned) {
-  (void)arena;
-  (void)is_message_owned;
-  new (&_impl_) Impl_{
-      decltype(_impl_.package_names_){arena}
-    , /*decltype(_impl_._cached_size_)*/{}
-  };
-}
-
-InstalledApps::~InstalledApps() {
-  // @@protoc_insertion_point(destructor:dsa.control.v1.InstalledApps)
-  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
-  (void)arena;
-    return;
-  }
-  SharedDtor();
-}
-
-inline void InstalledApps::SharedDtor() {
-  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
-  _impl_.package_names_.~RepeatedPtrField();
-}
-
-void InstalledApps::SetCachedSize(int size) const {
-  _impl_._cached_size_.Set(size);
-}
-
-void InstalledApps::Clear() {
-// @@protoc_insertion_point(message_clear_start:dsa.control.v1.InstalledApps)
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  _impl_.package_names_.Clear();
-  _internal_metadata_.Clear<std::string>();
-}
-
-const char* InstalledApps::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
-#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
-  while (!ctx->Done(&ptr)) {
-    uint32_t tag;
-    ptr = ::_pbi::ReadTag(ptr, &tag);
-    switch (tag >> 3) {
-      // repeated string package_names = 1;
-      case 1:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
-          ptr -= 1;
-          do {
-            ptr += 1;
-            auto str = _internal_add_package_names();
-            ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-            CHK_(ptr);
-            CHK_(::_pbi::VerifyUTF8(str, nullptr));
-            if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<10>(ptr));
-        } else
-          goto handle_unusual;
-        continue;
-      default:
-        goto handle_unusual;
-    }  // switch
-  handle_unusual:
-    if ((tag == 0) || ((tag & 7) == 4)) {
-      CHK_(ptr);
-      ctx->SetLastTag(tag);
-      goto message_done;
-    }
-    ptr = UnknownFieldParse(
-        tag,
-        _internal_metadata_.mutable_unknown_fields<std::string>(),
-        ptr, ctx);
-    CHK_(ptr != nullptr);
-  }  // while
-message_done:
-  return ptr;
-failure:
-  ptr = nullptr;
-  goto message_done;
-#undef CHK_
-}
-
-uint8_t* InstalledApps::_InternalSerialize(
-    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
-  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.InstalledApps)
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  // repeated string package_names = 1;
-  for (int i = 0, n = this->_internal_package_names_size(); i < n; i++) {
-    const auto& s = this->_internal_package_names(i);
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      s.data(), static_cast<int>(s.length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "dsa.control.v1.InstalledApps.package_names");
-    target = stream->WriteString(1, s, target);
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
-        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
-  }
-  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.InstalledApps)
-  return target;
-}
-
-size_t InstalledApps::ByteSizeLong() const {
-// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.InstalledApps)
-  size_t total_size = 0;
-
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  // repeated string package_names = 1;
-  total_size += 1 *
-      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(_impl_.package_names_.size());
-  for (int i = 0, n = _impl_.package_names_.size(); i < n; i++) {
-    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-      _impl_.package_names_.Get(i));
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
-  }
-  int cached_size = ::_pbi::ToCachedSize(total_size);
-  SetCachedSize(cached_size);
-  return total_size;
-}
-
-void InstalledApps::CheckTypeAndMergeFrom(
-    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
-  MergeFrom(*::_pbi::DownCast<const InstalledApps*>(
-      &from));
-}
-
-void InstalledApps::MergeFrom(const InstalledApps& from) {
-  InstalledApps* const _this = this;
-  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.InstalledApps)
-  GOOGLE_DCHECK_NE(&from, _this);
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  _this->_impl_.package_names_.MergeFrom(from._impl_.package_names_);
-  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-}
-
-void InstalledApps::CopyFrom(const InstalledApps& from) {
-// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.InstalledApps)
-  if (&from == this) return;
-  Clear();
-  MergeFrom(from);
-}
-
-bool InstalledApps::IsInitialized() const {
-  return true;
-}
-
-void InstalledApps::InternalSwap(InstalledApps* other) {
-  using std::swap;
-  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
-  _impl_.package_names_.InternalSwap(&other->_impl_.package_names_);
-}
-
-std::string InstalledApps::GetTypeName() const {
-  return "dsa.control.v1.InstalledApps";
-}
-
-
-// ===================================================================
-
 class PointerEvent::_Internal {
  public:
 };
@@ -6177,6 +5711,954 @@ std::string ImeCursor::GetTypeName() const {
 
 // ===================================================================
 
+class RequestGuestMemory::_Internal {
+ public:
+};
+
+RequestGuestMemory::RequestGuestMemory(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.RequestGuestMemory)
+}
+RequestGuestMemory::RequestGuestMemory(const RequestGuestMemory& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  RequestGuestMemory* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.RequestGuestMemory)
+}
+
+inline void RequestGuestMemory::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+RequestGuestMemory::~RequestGuestMemory() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.RequestGuestMemory)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void RequestGuestMemory::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void RequestGuestMemory::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void RequestGuestMemory::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.RequestGuestMemory)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* RequestGuestMemory::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* RequestGuestMemory::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.RequestGuestMemory)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.RequestGuestMemory)
+  return target;
+}
+
+size_t RequestGuestMemory::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.RequestGuestMemory)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void RequestGuestMemory::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const RequestGuestMemory*>(
+      &from));
+}
+
+void RequestGuestMemory::MergeFrom(const RequestGuestMemory& from) {
+  RequestGuestMemory* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.RequestGuestMemory)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void RequestGuestMemory::CopyFrom(const RequestGuestMemory& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.RequestGuestMemory)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool RequestGuestMemory::IsInitialized() const {
+  return true;
+}
+
+void RequestGuestMemory::InternalSwap(RequestGuestMemory* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+}
+
+std::string RequestGuestMemory::GetTypeName() const {
+  return "dsa.control.v1.RequestGuestMemory";
+}
+
+
+// ===================================================================
+
+class ProcessMemory::_Internal {
+ public:
+};
+
+ProcessMemory::ProcessMemory(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ProcessMemory)
+}
+ProcessMemory::ProcessMemory(const ProcessMemory& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ProcessMemory* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.name_){}
+    , decltype(_impl_.pss_kb_){}
+    , decltype(_impl_.swap_pss_kb_){}
+    , decltype(_impl_.pid_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_name().empty()) {
+    _this->_impl_.name_.Set(from._internal_name(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.pss_kb_, &from._impl_.pss_kb_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.pid_) -
+    reinterpret_cast<char*>(&_impl_.pss_kb_)) + sizeof(_impl_.pid_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ProcessMemory)
+}
+
+inline void ProcessMemory::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.name_){}
+    , decltype(_impl_.pss_kb_){uint64_t{0u}}
+    , decltype(_impl_.swap_pss_kb_){uint64_t{0u}}
+    , decltype(_impl_.pid_){0}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+ProcessMemory::~ProcessMemory() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ProcessMemory)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ProcessMemory::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.name_.Destroy();
+}
+
+void ProcessMemory::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ProcessMemory::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ProcessMemory)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.name_.ClearToEmpty();
+  ::memset(&_impl_.pss_kb_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.pid_) -
+      reinterpret_cast<char*>(&_impl_.pss_kb_)) + sizeof(_impl_.pid_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ProcessMemory::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 pid = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.pid_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // string name = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_name();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 pss_kb = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.pss_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 swap_pss_kb = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.swap_pss_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ProcessMemory::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ProcessMemory)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 pid = 1;
+  if (this->_internal_pid() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_pid(), target);
+  }
+
+  // string name = 2;
+  if (!this->_internal_name().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_name().data(), static_cast<int>(this->_internal_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.ProcessMemory.name");
+    target = stream->WriteStringMaybeAliased(
+        2, this->_internal_name(), target);
+  }
+
+  // uint64 pss_kb = 3;
+  if (this->_internal_pss_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(3, this->_internal_pss_kb(), target);
+  }
+
+  // uint64 swap_pss_kb = 4;
+  if (this->_internal_swap_pss_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(4, this->_internal_swap_pss_kb(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ProcessMemory)
+  return target;
+}
+
+size_t ProcessMemory::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ProcessMemory)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string name = 2;
+  if (!this->_internal_name().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_name());
+  }
+
+  // uint64 pss_kb = 3;
+  if (this->_internal_pss_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_pss_kb());
+  }
+
+  // uint64 swap_pss_kb = 4;
+  if (this->_internal_swap_pss_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_swap_pss_kb());
+  }
+
+  // int32 pid = 1;
+  if (this->_internal_pid() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_pid());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ProcessMemory::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ProcessMemory*>(
+      &from));
+}
+
+void ProcessMemory::MergeFrom(const ProcessMemory& from) {
+  ProcessMemory* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ProcessMemory)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_name().empty()) {
+    _this->_internal_set_name(from._internal_name());
+  }
+  if (from._internal_pss_kb() != 0) {
+    _this->_internal_set_pss_kb(from._internal_pss_kb());
+  }
+  if (from._internal_swap_pss_kb() != 0) {
+    _this->_internal_set_swap_pss_kb(from._internal_swap_pss_kb());
+  }
+  if (from._internal_pid() != 0) {
+    _this->_internal_set_pid(from._internal_pid());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ProcessMemory::CopyFrom(const ProcessMemory& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ProcessMemory)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ProcessMemory::IsInitialized() const {
+  return true;
+}
+
+void ProcessMemory::InternalSwap(ProcessMemory* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.name_, lhs_arena,
+      &other->_impl_.name_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(ProcessMemory, _impl_.pid_)
+      + sizeof(ProcessMemory::_impl_.pid_)
+      - PROTOBUF_FIELD_OFFSET(ProcessMemory, _impl_.pss_kb_)>(
+          reinterpret_cast<char*>(&_impl_.pss_kb_),
+          reinterpret_cast<char*>(&other->_impl_.pss_kb_));
+}
+
+std::string ProcessMemory::GetTypeName() const {
+  return "dsa.control.v1.ProcessMemory";
+}
+
+
+// ===================================================================
+
+class GuestMemory::_Internal {
+ public:
+};
+
+GuestMemory::GuestMemory(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.GuestMemory)
+}
+GuestMemory::GuestMemory(const GuestMemory& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GuestMemory* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.top_processes_){from._impl_.top_processes_}
+    , decltype(_impl_.mem_total_kb_){}
+    , decltype(_impl_.mem_free_kb_){}
+    , decltype(_impl_.mem_available_kb_){}
+    , decltype(_impl_.buffers_kb_){}
+    , decltype(_impl_.cached_kb_){}
+    , decltype(_impl_.anon_pages_kb_){}
+    , decltype(_impl_.shmem_kb_){}
+    , decltype(_impl_.slab_reclaimable_kb_){}
+    , decltype(_impl_.swap_total_kb_){}
+    , decltype(_impl_.swap_free_kb_){}
+    , decltype(_impl_.zram_original_kb_){}
+    , decltype(_impl_.zram_used_kb_){}
+    , decltype(_impl_.total_pss_kb_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.mem_total_kb_, &from._impl_.mem_total_kb_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.total_pss_kb_) -
+    reinterpret_cast<char*>(&_impl_.mem_total_kb_)) + sizeof(_impl_.total_pss_kb_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.GuestMemory)
+}
+
+inline void GuestMemory::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.top_processes_){arena}
+    , decltype(_impl_.mem_total_kb_){uint64_t{0u}}
+    , decltype(_impl_.mem_free_kb_){uint64_t{0u}}
+    , decltype(_impl_.mem_available_kb_){uint64_t{0u}}
+    , decltype(_impl_.buffers_kb_){uint64_t{0u}}
+    , decltype(_impl_.cached_kb_){uint64_t{0u}}
+    , decltype(_impl_.anon_pages_kb_){uint64_t{0u}}
+    , decltype(_impl_.shmem_kb_){uint64_t{0u}}
+    , decltype(_impl_.slab_reclaimable_kb_){uint64_t{0u}}
+    , decltype(_impl_.swap_total_kb_){uint64_t{0u}}
+    , decltype(_impl_.swap_free_kb_){uint64_t{0u}}
+    , decltype(_impl_.zram_original_kb_){uint64_t{0u}}
+    , decltype(_impl_.zram_used_kb_){uint64_t{0u}}
+    , decltype(_impl_.total_pss_kb_){uint64_t{0u}}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+GuestMemory::~GuestMemory() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.GuestMemory)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GuestMemory::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.top_processes_.~RepeatedPtrField();
+}
+
+void GuestMemory::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GuestMemory::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.GuestMemory)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.top_processes_.Clear();
+  ::memset(&_impl_.mem_total_kb_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.total_pss_kb_) -
+      reinterpret_cast<char*>(&_impl_.mem_total_kb_)) + sizeof(_impl_.total_pss_kb_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GuestMemory::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint64 mem_total_kb = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.mem_total_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 mem_free_kb = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.mem_free_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 mem_available_kb = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.mem_available_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 buffers_kb = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.buffers_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 cached_kb = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 40)) {
+          _impl_.cached_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 anon_pages_kb = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 48)) {
+          _impl_.anon_pages_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 shmem_kb = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 56)) {
+          _impl_.shmem_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 slab_reclaimable_kb = 8;
+      case 8:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 64)) {
+          _impl_.slab_reclaimable_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 swap_total_kb = 9;
+      case 9:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 72)) {
+          _impl_.swap_total_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 swap_free_kb = 10;
+      case 10:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 80)) {
+          _impl_.swap_free_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 zram_original_kb = 11;
+      case 11:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 88)) {
+          _impl_.zram_original_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 zram_used_kb = 12;
+      case 12:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 96)) {
+          _impl_.zram_used_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 total_pss_kb = 13;
+      case 13:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 104)) {
+          _impl_.total_pss_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // repeated .dsa.control.v1.ProcessMemory top_processes = 14;
+      case 14:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 114)) {
+          ptr -= 1;
+          do {
+            ptr += 1;
+            ptr = ctx->ParseMessage(_internal_add_top_processes(), ptr);
+            CHK_(ptr);
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<114>(ptr));
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GuestMemory::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.GuestMemory)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint64 mem_total_kb = 1;
+  if (this->_internal_mem_total_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(1, this->_internal_mem_total_kb(), target);
+  }
+
+  // uint64 mem_free_kb = 2;
+  if (this->_internal_mem_free_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_mem_free_kb(), target);
+  }
+
+  // uint64 mem_available_kb = 3;
+  if (this->_internal_mem_available_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(3, this->_internal_mem_available_kb(), target);
+  }
+
+  // uint64 buffers_kb = 4;
+  if (this->_internal_buffers_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(4, this->_internal_buffers_kb(), target);
+  }
+
+  // uint64 cached_kb = 5;
+  if (this->_internal_cached_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(5, this->_internal_cached_kb(), target);
+  }
+
+  // uint64 anon_pages_kb = 6;
+  if (this->_internal_anon_pages_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(6, this->_internal_anon_pages_kb(), target);
+  }
+
+  // uint64 shmem_kb = 7;
+  if (this->_internal_shmem_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(7, this->_internal_shmem_kb(), target);
+  }
+
+  // uint64 slab_reclaimable_kb = 8;
+  if (this->_internal_slab_reclaimable_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(8, this->_internal_slab_reclaimable_kb(), target);
+  }
+
+  // uint64 swap_total_kb = 9;
+  if (this->_internal_swap_total_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(9, this->_internal_swap_total_kb(), target);
+  }
+
+  // uint64 swap_free_kb = 10;
+  if (this->_internal_swap_free_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(10, this->_internal_swap_free_kb(), target);
+  }
+
+  // uint64 zram_original_kb = 11;
+  if (this->_internal_zram_original_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(11, this->_internal_zram_original_kb(), target);
+  }
+
+  // uint64 zram_used_kb = 12;
+  if (this->_internal_zram_used_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(12, this->_internal_zram_used_kb(), target);
+  }
+
+  // uint64 total_pss_kb = 13;
+  if (this->_internal_total_pss_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(13, this->_internal_total_pss_kb(), target);
+  }
+
+  // repeated .dsa.control.v1.ProcessMemory top_processes = 14;
+  for (unsigned i = 0,
+      n = static_cast<unsigned>(this->_internal_top_processes_size()); i < n; i++) {
+    const auto& repfield = this->_internal_top_processes(i);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+        InternalWriteMessage(14, repfield, repfield.GetCachedSize(), target, stream);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.GuestMemory)
+  return target;
+}
+
+size_t GuestMemory::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.GuestMemory)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // repeated .dsa.control.v1.ProcessMemory top_processes = 14;
+  total_size += 1UL * this->_internal_top_processes_size();
+  for (const auto& msg : this->_impl_.top_processes_) {
+    total_size +=
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(msg);
+  }
+
+  // uint64 mem_total_kb = 1;
+  if (this->_internal_mem_total_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_mem_total_kb());
+  }
+
+  // uint64 mem_free_kb = 2;
+  if (this->_internal_mem_free_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_mem_free_kb());
+  }
+
+  // uint64 mem_available_kb = 3;
+  if (this->_internal_mem_available_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_mem_available_kb());
+  }
+
+  // uint64 buffers_kb = 4;
+  if (this->_internal_buffers_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_buffers_kb());
+  }
+
+  // uint64 cached_kb = 5;
+  if (this->_internal_cached_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_cached_kb());
+  }
+
+  // uint64 anon_pages_kb = 6;
+  if (this->_internal_anon_pages_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_anon_pages_kb());
+  }
+
+  // uint64 shmem_kb = 7;
+  if (this->_internal_shmem_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_shmem_kb());
+  }
+
+  // uint64 slab_reclaimable_kb = 8;
+  if (this->_internal_slab_reclaimable_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_slab_reclaimable_kb());
+  }
+
+  // uint64 swap_total_kb = 9;
+  if (this->_internal_swap_total_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_swap_total_kb());
+  }
+
+  // uint64 swap_free_kb = 10;
+  if (this->_internal_swap_free_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_swap_free_kb());
+  }
+
+  // uint64 zram_original_kb = 11;
+  if (this->_internal_zram_original_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_zram_original_kb());
+  }
+
+  // uint64 zram_used_kb = 12;
+  if (this->_internal_zram_used_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_zram_used_kb());
+  }
+
+  // uint64 total_pss_kb = 13;
+  if (this->_internal_total_pss_kb() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_total_pss_kb());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GuestMemory::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GuestMemory*>(
+      &from));
+}
+
+void GuestMemory::MergeFrom(const GuestMemory& from) {
+  GuestMemory* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.GuestMemory)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  _this->_impl_.top_processes_.MergeFrom(from._impl_.top_processes_);
+  if (from._internal_mem_total_kb() != 0) {
+    _this->_internal_set_mem_total_kb(from._internal_mem_total_kb());
+  }
+  if (from._internal_mem_free_kb() != 0) {
+    _this->_internal_set_mem_free_kb(from._internal_mem_free_kb());
+  }
+  if (from._internal_mem_available_kb() != 0) {
+    _this->_internal_set_mem_available_kb(from._internal_mem_available_kb());
+  }
+  if (from._internal_buffers_kb() != 0) {
+    _this->_internal_set_buffers_kb(from._internal_buffers_kb());
+  }
+  if (from._internal_cached_kb() != 0) {
+    _this->_internal_set_cached_kb(from._internal_cached_kb());
+  }
+  if (from._internal_anon_pages_kb() != 0) {
+    _this->_internal_set_anon_pages_kb(from._internal_anon_pages_kb());
+  }
+  if (from._internal_shmem_kb() != 0) {
+    _this->_internal_set_shmem_kb(from._internal_shmem_kb());
+  }
+  if (from._internal_slab_reclaimable_kb() != 0) {
+    _this->_internal_set_slab_reclaimable_kb(from._internal_slab_reclaimable_kb());
+  }
+  if (from._internal_swap_total_kb() != 0) {
+    _this->_internal_set_swap_total_kb(from._internal_swap_total_kb());
+  }
+  if (from._internal_swap_free_kb() != 0) {
+    _this->_internal_set_swap_free_kb(from._internal_swap_free_kb());
+  }
+  if (from._internal_zram_original_kb() != 0) {
+    _this->_internal_set_zram_original_kb(from._internal_zram_original_kb());
+  }
+  if (from._internal_zram_used_kb() != 0) {
+    _this->_internal_set_zram_used_kb(from._internal_zram_used_kb());
+  }
+  if (from._internal_total_pss_kb() != 0) {
+    _this->_internal_set_total_pss_kb(from._internal_total_pss_kb());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GuestMemory::CopyFrom(const GuestMemory& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.GuestMemory)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GuestMemory::IsInitialized() const {
+  return true;
+}
+
+void GuestMemory::InternalSwap(GuestMemory* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  _impl_.top_processes_.InternalSwap(&other->_impl_.top_processes_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(GuestMemory, _impl_.total_pss_kb_)
+      + sizeof(GuestMemory::_impl_.total_pss_kb_)
+      - PROTOBUF_FIELD_OFFSET(GuestMemory, _impl_.mem_total_kb_)>(
+          reinterpret_cast<char*>(&_impl_.mem_total_kb_),
+          reinterpret_cast<char*>(&other->_impl_.mem_total_kb_));
+}
+
+std::string GuestMemory::GetTypeName() const {
+  return "dsa.control.v1.GuestMemory";
+}
+
+
+// ===================================================================
+
 class Envelope::_Internal {
  public:
   static const ::dsa::control::v1::Hello& hello(const Envelope* msg);
@@ -6197,8 +6679,8 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::ImeComposition& ime_composition(const Envelope* msg);
   static const ::dsa::control::v1::ImeCommit& ime_commit(const Envelope* msg);
   static const ::dsa::control::v1::ImeCursor& ime_cursor(const Envelope* msg);
-  static const ::dsa::control::v1::InstalledApp& installed_app(const Envelope* msg);
-  static const ::dsa::control::v1::InstalledApps& installed_apps(const Envelope* msg);
+  static const ::dsa::control::v1::RequestGuestMemory& request_guest_memory(const Envelope* msg);
+  static const ::dsa::control::v1::GuestMemory& guest_memory(const Envelope* msg);
 };
 
 const ::dsa::control::v1::Hello&
@@ -6273,13 +6755,13 @@ const ::dsa::control::v1::ImeCursor&
 Envelope::_Internal::ime_cursor(const Envelope* msg) {
   return *msg->_impl_.body_.ime_cursor_;
 }
-const ::dsa::control::v1::InstalledApp&
-Envelope::_Internal::installed_app(const Envelope* msg) {
-  return *msg->_impl_.body_.installed_app_;
+const ::dsa::control::v1::RequestGuestMemory&
+Envelope::_Internal::request_guest_memory(const Envelope* msg) {
+  return *msg->_impl_.body_.request_guest_memory_;
 }
-const ::dsa::control::v1::InstalledApps&
-Envelope::_Internal::installed_apps(const Envelope* msg) {
-  return *msg->_impl_.body_.installed_apps_;
+const ::dsa::control::v1::GuestMemory&
+Envelope::_Internal::guest_memory(const Envelope* msg) {
+  return *msg->_impl_.body_.guest_memory_;
 }
 void Envelope::set_allocated_hello(::dsa::control::v1::Hello* hello) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -6551,35 +7033,35 @@ void Envelope::set_allocated_ime_cursor(::dsa::control::v1::ImeCursor* ime_curso
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.ime_cursor)
 }
-void Envelope::set_allocated_installed_app(::dsa::control::v1::InstalledApp* installed_app) {
+void Envelope::set_allocated_request_guest_memory(::dsa::control::v1::RequestGuestMemory* request_guest_memory) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
   clear_body();
-  if (installed_app) {
+  if (request_guest_memory) {
     ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
-      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(installed_app);
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(request_guest_memory);
     if (message_arena != submessage_arena) {
-      installed_app = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, installed_app, submessage_arena);
+      request_guest_memory = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, request_guest_memory, submessage_arena);
     }
-    set_has_installed_app();
-    _impl_.body_.installed_app_ = installed_app;
+    set_has_request_guest_memory();
+    _impl_.body_.request_guest_memory_ = request_guest_memory;
   }
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.installed_app)
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.request_guest_memory)
 }
-void Envelope::set_allocated_installed_apps(::dsa::control::v1::InstalledApps* installed_apps) {
+void Envelope::set_allocated_guest_memory(::dsa::control::v1::GuestMemory* guest_memory) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
   clear_body();
-  if (installed_apps) {
+  if (guest_memory) {
     ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
-      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(installed_apps);
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(guest_memory);
     if (message_arena != submessage_arena) {
-      installed_apps = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, installed_apps, submessage_arena);
+      guest_memory = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, guest_memory, submessage_arena);
     }
-    set_has_installed_apps();
-    _impl_.body_.installed_apps_ = installed_apps;
+    set_has_guest_memory();
+    _impl_.body_.guest_memory_ = guest_memory;
   }
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.installed_apps)
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.guest_memory)
 }
 Envelope::Envelope(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
@@ -6688,14 +7170,14 @@ Envelope::Envelope(const Envelope& from)
           from._internal_ime_cursor());
       break;
     }
-    case kInstalledApp: {
-      _this->_internal_mutable_installed_app()->::dsa::control::v1::InstalledApp::MergeFrom(
-          from._internal_installed_app());
+    case kRequestGuestMemory: {
+      _this->_internal_mutable_request_guest_memory()->::dsa::control::v1::RequestGuestMemory::MergeFrom(
+          from._internal_request_guest_memory());
       break;
     }
-    case kInstalledApps: {
-      _this->_internal_mutable_installed_apps()->::dsa::control::v1::InstalledApps::MergeFrom(
-          from._internal_installed_apps());
+    case kGuestMemory: {
+      _this->_internal_mutable_guest_memory()->::dsa::control::v1::GuestMemory::MergeFrom(
+          from._internal_guest_memory());
       break;
     }
     case BODY_NOT_SET: {
@@ -6848,15 +7330,15 @@ void Envelope::clear_body() {
       }
       break;
     }
-    case kInstalledApp: {
+    case kRequestGuestMemory: {
       if (GetArenaForAllocation() == nullptr) {
-        delete _impl_.body_.installed_app_;
+        delete _impl_.body_.request_guest_memory_;
       }
       break;
     }
-    case kInstalledApps: {
+    case kGuestMemory: {
       if (GetArenaForAllocation() == nullptr) {
-        delete _impl_.body_.installed_apps_;
+        delete _impl_.body_.guest_memory_;
       }
       break;
     }
@@ -7028,18 +7510,18 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
-      // .dsa.control.v1.InstalledApp installed_app = 20;
+      // .dsa.control.v1.RequestGuestMemory request_guest_memory = 20;
       case 20:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 162)) {
-          ptr = ctx->ParseMessage(_internal_mutable_installed_app(), ptr);
+          ptr = ctx->ParseMessage(_internal_mutable_request_guest_memory(), ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
         continue;
-      // .dsa.control.v1.InstalledApps installed_apps = 21;
+      // .dsa.control.v1.GuestMemory guest_memory = 21;
       case 21:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 170)) {
-          ptr = ctx->ParseMessage(_internal_mutable_installed_apps(), ptr);
+          ptr = ctx->ParseMessage(_internal_mutable_guest_memory(), ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -7199,18 +7681,18 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::ime_cursor(this).GetCachedSize(), target, stream);
   }
 
-  // .dsa.control.v1.InstalledApp installed_app = 20;
-  if (_internal_has_installed_app()) {
+  // .dsa.control.v1.RequestGuestMemory request_guest_memory = 20;
+  if (_internal_has_request_guest_memory()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      InternalWriteMessage(20, _Internal::installed_app(this),
-        _Internal::installed_app(this).GetCachedSize(), target, stream);
+      InternalWriteMessage(20, _Internal::request_guest_memory(this),
+        _Internal::request_guest_memory(this).GetCachedSize(), target, stream);
   }
 
-  // .dsa.control.v1.InstalledApps installed_apps = 21;
-  if (_internal_has_installed_apps()) {
+  // .dsa.control.v1.GuestMemory guest_memory = 21;
+  if (_internal_has_guest_memory()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      InternalWriteMessage(21, _Internal::installed_apps(this),
-        _Internal::installed_apps(this).GetCachedSize(), target, stream);
+      InternalWriteMessage(21, _Internal::guest_memory(this),
+        _Internal::guest_memory(this).GetCachedSize(), target, stream);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -7356,18 +7838,18 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.ime_cursor_);
       break;
     }
-    // .dsa.control.v1.InstalledApp installed_app = 20;
-    case kInstalledApp: {
+    // .dsa.control.v1.RequestGuestMemory request_guest_memory = 20;
+    case kRequestGuestMemory: {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-          *_impl_.body_.installed_app_);
+          *_impl_.body_.request_guest_memory_);
       break;
     }
-    // .dsa.control.v1.InstalledApps installed_apps = 21;
-    case kInstalledApps: {
+    // .dsa.control.v1.GuestMemory guest_memory = 21;
+    case kGuestMemory: {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-          *_impl_.body_.installed_apps_);
+          *_impl_.body_.guest_memory_);
       break;
     }
     case BODY_NOT_SET: {
@@ -7486,14 +7968,14 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_ime_cursor());
       break;
     }
-    case kInstalledApp: {
-      _this->_internal_mutable_installed_app()->::dsa::control::v1::InstalledApp::MergeFrom(
-          from._internal_installed_app());
+    case kRequestGuestMemory: {
+      _this->_internal_mutable_request_guest_memory()->::dsa::control::v1::RequestGuestMemory::MergeFrom(
+          from._internal_request_guest_memory());
       break;
     }
-    case kInstalledApps: {
-      _this->_internal_mutable_installed_apps()->::dsa::control::v1::InstalledApps::MergeFrom(
-          from._internal_installed_apps());
+    case kGuestMemory: {
+      _this->_internal_mutable_guest_memory()->::dsa::control::v1::GuestMemory::MergeFrom(
+          from._internal_guest_memory());
       break;
     }
     case BODY_NOT_SET: {
@@ -7587,14 +8069,6 @@ template<> PROTOBUF_NOINLINE ::dsa::control::v1::AppInfo*
 Arena::CreateMaybeMessage< ::dsa::control::v1::AppInfo >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::AppInfo >(arena);
 }
-template<> PROTOBUF_NOINLINE ::dsa::control::v1::InstalledApp*
-Arena::CreateMaybeMessage< ::dsa::control::v1::InstalledApp >(Arena* arena) {
-  return Arena::CreateMessageInternal< ::dsa::control::v1::InstalledApp >(arena);
-}
-template<> PROTOBUF_NOINLINE ::dsa::control::v1::InstalledApps*
-Arena::CreateMaybeMessage< ::dsa::control::v1::InstalledApps >(Arena* arena) {
-  return Arena::CreateMessageInternal< ::dsa::control::v1::InstalledApps >(arena);
-}
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::PointerEvent*
 Arena::CreateMaybeMessage< ::dsa::control::v1::PointerEvent >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::PointerEvent >(arena);
@@ -7614,6 +8088,18 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::ImeCommit >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::ImeCursor*
 Arena::CreateMaybeMessage< ::dsa::control::v1::ImeCursor >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::ImeCursor >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::RequestGuestMemory*
+Arena::CreateMaybeMessage< ::dsa::control::v1::RequestGuestMemory >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::RequestGuestMemory >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ProcessMemory*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ProcessMemory >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ProcessMemory >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::GuestMemory*
+Arena::CreateMaybeMessage< ::dsa::control::v1::GuestMemory >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::GuestMemory >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::Envelope*
 Arena::CreateMaybeMessage< ::dsa::control::v1::Envelope >(Arena* arena) {

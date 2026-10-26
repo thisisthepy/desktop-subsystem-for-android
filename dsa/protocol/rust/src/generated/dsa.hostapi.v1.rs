@@ -57,10 +57,6 @@ pub struct ListTasks {}
 /// lasts across restarts of the Android: when it stops, its tasks are removed.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WatchTasks {}
-/// Asks for the apps installed in the caller's Android that a launcher lists, as the host's
-/// start menu shows them.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListApps {}
 /// The user closed a task's window: asks the caller's Android to end the task.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CloseTask {
@@ -261,27 +257,15 @@ pub struct AppInfo {
     #[prost(bytes = "vec", tag = "3")]
     pub icon_png: ::prost::alloc::vec::Vec<u8>,
 }
-/// The apps installed in the caller's Android that a launcher lists. The list is kept while
-/// the Android is stopped, because its apps stay installed.
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct InstalledApps {
-    /// False until the caller's Android has said which apps it has since the service started.
-    /// The list is then empty and says nothing about which apps are installed.
-    #[prost(bool, tag = "1")]
-    pub known: bool,
-    /// In package order.
-    #[prost(message, repeated, tag = "2")]
-    pub apps: ::prost::alloc::vec::Vec<AppInfo>,
-}
 /// A change to the tasks of the caller's Android, sent after the answer to WatchTasks.
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TaskEvent {
-    #[prost(oneof = "task_event::Body", tags = "1, 2, 3, 4, 5, 6")]
+    #[prost(oneof = "task_event::Body", tags = "1, 2, 3, 4, 5")]
     pub body: ::core::option::Option<task_event::Body>,
 }
 /// Nested message and enum types in `TaskEvent`.
 pub mod task_event {
-    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Body {
         #[prost(message, tag = "1")]
         Updated(super::Task),
@@ -293,9 +277,6 @@ pub mod task_event {
         App(super::AppInfo),
         #[prost(message, tag = "5")]
         ImeCursor(super::ImeCursor),
-        /// The apps installed in the caller's Android changed: the whole list, as it is now.
-        #[prost(message, tag = "6")]
-        Installed(super::InstalledApps),
     }
 }
 /// The answer to ListTasks and WatchTasks: the tasks there are now.
@@ -311,9 +292,89 @@ pub struct Tasks {
     /// The name and icon of each app that has a task, in package order.
     #[prost(message, repeated, tag = "3")]
     pub apps: ::prost::alloc::vec::Vec<AppInfo>,
-    /// The apps installed in the caller's Android. Unset until it has said which apps it has.
-    #[prost(message, optional, tag = "4")]
-    pub installed: ::core::option::Option<InstalledApps>,
+}
+/// Asks how much memory the caller's Android takes: inside the guest, as it last reported,
+/// and on the host, the processes that run it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetMemory {}
+/// One Android process's share of the guest's memory.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GuestProcessMemory {
+    #[prost(int32, tag = "1")]
+    pub pid: i32,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    /// Its proportional set size in KiB: its private pages plus its share of shared pages.
+    #[prost(uint64, tag = "3")]
+    pub pss_kb: u64,
+    /// How much of it is swapped out to compressed memory, proportionally, in KiB.
+    #[prost(uint64, tag = "4")]
+    pub swap_pss_kb: u64,
+}
+/// How Android uses the guest's memory, as it last reported it. Sizes in KiB; 0 when Android
+/// could not read the value.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GuestMemory {
+    #[prost(uint64, tag = "1")]
+    pub mem_total_kb: u64,
+    #[prost(uint64, tag = "2")]
+    pub mem_free_kb: u64,
+    #[prost(uint64, tag = "3")]
+    pub mem_available_kb: u64,
+    #[prost(uint64, tag = "4")]
+    pub buffers_kb: u64,
+    #[prost(uint64, tag = "5")]
+    pub cached_kb: u64,
+    #[prost(uint64, tag = "6")]
+    pub anon_pages_kb: u64,
+    #[prost(uint64, tag = "7")]
+    pub shmem_kb: u64,
+    #[prost(uint64, tag = "8")]
+    pub slab_reclaimable_kb: u64,
+    #[prost(uint64, tag = "9")]
+    pub swap_total_kb: u64,
+    #[prost(uint64, tag = "10")]
+    pub swap_free_kb: u64,
+    #[prost(uint64, tag = "11")]
+    pub zram_original_kb: u64,
+    #[prost(uint64, tag = "12")]
+    pub zram_used_kb: u64,
+    /// The proportional set size of the apps and the system server together; native daemons
+    /// are not counted.
+    #[prost(uint64, tag = "13")]
+    pub total_pss_kb: u64,
+    /// Largest first, at most 10.
+    #[prost(message, repeated, tag = "14")]
+    pub top_processes: ::prost::alloc::vec::Vec<GuestProcessMemory>,
+    /// How long ago Android sent this report, in seconds.
+    #[prost(uint64, tag = "15")]
+    pub age_seconds: u64,
+}
+/// One host process that runs the caller's Android: its VM's memory process, the window
+/// manager, an app window.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct HostProcessMemory {
+    /// What it is: "vm", "window manager" or "app window".
+    #[prost(string, tag = "1")]
+    pub role: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "2")]
+    pub pid: u32,
+    /// The memory of it resident in RAM now, in KiB.
+    #[prost(uint64, tag = "3")]
+    pub working_set_kb: u64,
+    /// The memory committed to it alone, in KiB.
+    #[prost(uint64, tag = "4")]
+    pub private_kb: u64,
+}
+/// The answer to GetMemory.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Memory {
+    /// Absent until Android has sent its first report since it started.
+    #[prost(message, optional, tag = "1")]
+    pub guest: ::core::option::Option<GuestMemory>,
+    /// In the order: the VM, the window manager, the app windows.
+    #[prost(message, repeated, tag = "2")]
+    pub host: ::prost::alloc::vec::Vec<HostProcessMemory>,
 }
 /// The answer to a request that has nothing to report but that it was carried out.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -398,7 +459,7 @@ pub mod request {
         #[prost(message, tag = "13")]
         SetTaskDensity(super::SetTaskDensity),
         #[prost(message, tag = "14")]
-        ListApps(super::ListApps),
+        GetMemory(super::GetMemory),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -425,7 +486,7 @@ pub mod response {
         #[prost(message, tag = "7")]
         Done(super::Done),
         #[prost(message, tag = "8")]
-        InstalledApps(super::InstalledApps),
+        Memory(super::Memory),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.

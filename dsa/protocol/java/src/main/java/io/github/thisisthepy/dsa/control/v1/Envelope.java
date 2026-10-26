@@ -38,8 +38,8 @@ public  final class Envelope extends
     IME_COMPOSITION(17),
     IME_COMMIT(18),
     IME_CURSOR(19),
-    INSTALLED_APP(20),
-    INSTALLED_APPS(21),
+    REQUEST_GUEST_MEMORY(20),
+    GUEST_MEMORY(21),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -73,8 +73,8 @@ public  final class Envelope extends
         case 17: return IME_COMPOSITION;
         case 18: return IME_COMMIT;
         case 19: return IME_CURSOR;
-        case 20: return INSTALLED_APP;
-        case 21: return INSTALLED_APPS;
+        case 20: return REQUEST_GUEST_MEMORY;
+        case 21: return GUEST_MEMORY;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -996,40 +996,40 @@ public  final class Envelope extends
     }
   }
 
-  public static final int INSTALLED_APP_FIELD_NUMBER = 20;
+  public static final int REQUEST_GUEST_MEMORY_FIELD_NUMBER = 20;
   /**
-   * <code>.dsa.control.v1.InstalledApp installed_app = 20;</code>
+   * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
    */
   @java.lang.Override
-  public boolean hasInstalledApp() {
+  public boolean hasRequestGuestMemory() {
     return bodyCase_ == 20;
   }
   /**
-   * <code>.dsa.control.v1.InstalledApp installed_app = 20;</code>
+   * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
    */
   @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.InstalledApp getInstalledApp() {
+  public io.github.thisisthepy.dsa.control.v1.RequestGuestMemory getRequestGuestMemory() {
     if (bodyCase_ == 20) {
-       return (io.github.thisisthepy.dsa.control.v1.InstalledApp) body_;
+       return (io.github.thisisthepy.dsa.control.v1.RequestGuestMemory) body_;
     }
-    return io.github.thisisthepy.dsa.control.v1.InstalledApp.getDefaultInstance();
+    return io.github.thisisthepy.dsa.control.v1.RequestGuestMemory.getDefaultInstance();
   }
   /**
-   * <code>.dsa.control.v1.InstalledApp installed_app = 20;</code>
+   * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
    */
-  private void setInstalledApp(io.github.thisisthepy.dsa.control.v1.InstalledApp value) {
+  private void setRequestGuestMemory(io.github.thisisthepy.dsa.control.v1.RequestGuestMemory value) {
     value.getClass();
   body_ = value;
     bodyCase_ = 20;
   }
   /**
-   * <code>.dsa.control.v1.InstalledApp installed_app = 20;</code>
+   * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
    */
-  private void mergeInstalledApp(io.github.thisisthepy.dsa.control.v1.InstalledApp value) {
+  private void mergeRequestGuestMemory(io.github.thisisthepy.dsa.control.v1.RequestGuestMemory value) {
     value.getClass();
   if (bodyCase_ == 20 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.InstalledApp.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.InstalledApp.newBuilder((io.github.thisisthepy.dsa.control.v1.InstalledApp) body_)
+        body_ != io.github.thisisthepy.dsa.control.v1.RequestGuestMemory.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.RequestGuestMemory.newBuilder((io.github.thisisthepy.dsa.control.v1.RequestGuestMemory) body_)
           .mergeFrom(value).buildPartial();
     } else {
       body_ = value;
@@ -1037,49 +1037,49 @@ public  final class Envelope extends
     bodyCase_ = 20;
   }
   /**
-   * <code>.dsa.control.v1.InstalledApp installed_app = 20;</code>
+   * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
    */
-  private void clearInstalledApp() {
+  private void clearRequestGuestMemory() {
     if (bodyCase_ == 20) {
       bodyCase_ = 0;
       body_ = null;
     }
   }
 
-  public static final int INSTALLED_APPS_FIELD_NUMBER = 21;
+  public static final int GUEST_MEMORY_FIELD_NUMBER = 21;
   /**
-   * <code>.dsa.control.v1.InstalledApps installed_apps = 21;</code>
+   * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
    */
   @java.lang.Override
-  public boolean hasInstalledApps() {
+  public boolean hasGuestMemory() {
     return bodyCase_ == 21;
   }
   /**
-   * <code>.dsa.control.v1.InstalledApps installed_apps = 21;</code>
+   * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
    */
   @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.InstalledApps getInstalledApps() {
+  public io.github.thisisthepy.dsa.control.v1.GuestMemory getGuestMemory() {
     if (bodyCase_ == 21) {
-       return (io.github.thisisthepy.dsa.control.v1.InstalledApps) body_;
+       return (io.github.thisisthepy.dsa.control.v1.GuestMemory) body_;
     }
-    return io.github.thisisthepy.dsa.control.v1.InstalledApps.getDefaultInstance();
+    return io.github.thisisthepy.dsa.control.v1.GuestMemory.getDefaultInstance();
   }
   /**
-   * <code>.dsa.control.v1.InstalledApps installed_apps = 21;</code>
+   * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
    */
-  private void setInstalledApps(io.github.thisisthepy.dsa.control.v1.InstalledApps value) {
+  private void setGuestMemory(io.github.thisisthepy.dsa.control.v1.GuestMemory value) {
     value.getClass();
   body_ = value;
     bodyCase_ = 21;
   }
   /**
-   * <code>.dsa.control.v1.InstalledApps installed_apps = 21;</code>
+   * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
    */
-  private void mergeInstalledApps(io.github.thisisthepy.dsa.control.v1.InstalledApps value) {
+  private void mergeGuestMemory(io.github.thisisthepy.dsa.control.v1.GuestMemory value) {
     value.getClass();
   if (bodyCase_ == 21 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.InstalledApps.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.InstalledApps.newBuilder((io.github.thisisthepy.dsa.control.v1.InstalledApps) body_)
+        body_ != io.github.thisisthepy.dsa.control.v1.GuestMemory.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.GuestMemory.newBuilder((io.github.thisisthepy.dsa.control.v1.GuestMemory) body_)
           .mergeFrom(value).buildPartial();
     } else {
       body_ = value;
@@ -1087,9 +1087,9 @@ public  final class Envelope extends
     bodyCase_ = 21;
   }
   /**
-   * <code>.dsa.control.v1.InstalledApps installed_apps = 21;</code>
+   * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
    */
-  private void clearInstalledApps() {
+  private void clearGuestMemory() {
     if (bodyCase_ == 21) {
       bodyCase_ = 0;
       body_ = null;
@@ -2072,98 +2072,98 @@ public  final class Envelope extends
     }
 
     /**
-     * <code>.dsa.control.v1.InstalledApp installed_app = 20;</code>
+     * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
      */
     @java.lang.Override
-    public boolean hasInstalledApp() {
-      return instance.hasInstalledApp();
+    public boolean hasRequestGuestMemory() {
+      return instance.hasRequestGuestMemory();
     }
     /**
-     * <code>.dsa.control.v1.InstalledApp installed_app = 20;</code>
+     * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
      */
     @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.InstalledApp getInstalledApp() {
-      return instance.getInstalledApp();
+    public io.github.thisisthepy.dsa.control.v1.RequestGuestMemory getRequestGuestMemory() {
+      return instance.getRequestGuestMemory();
     }
     /**
-     * <code>.dsa.control.v1.InstalledApp installed_app = 20;</code>
+     * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
      */
-    public Builder setInstalledApp(io.github.thisisthepy.dsa.control.v1.InstalledApp value) {
+    public Builder setRequestGuestMemory(io.github.thisisthepy.dsa.control.v1.RequestGuestMemory value) {
       copyOnWrite();
-      instance.setInstalledApp(value);
+      instance.setRequestGuestMemory(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.InstalledApp installed_app = 20;</code>
+     * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
      */
-    public Builder setInstalledApp(
-        io.github.thisisthepy.dsa.control.v1.InstalledApp.Builder builderForValue) {
+    public Builder setRequestGuestMemory(
+        io.github.thisisthepy.dsa.control.v1.RequestGuestMemory.Builder builderForValue) {
       copyOnWrite();
-      instance.setInstalledApp(builderForValue.build());
+      instance.setRequestGuestMemory(builderForValue.build());
       return this;
     }
     /**
-     * <code>.dsa.control.v1.InstalledApp installed_app = 20;</code>
+     * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
      */
-    public Builder mergeInstalledApp(io.github.thisisthepy.dsa.control.v1.InstalledApp value) {
+    public Builder mergeRequestGuestMemory(io.github.thisisthepy.dsa.control.v1.RequestGuestMemory value) {
       copyOnWrite();
-      instance.mergeInstalledApp(value);
+      instance.mergeRequestGuestMemory(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.InstalledApp installed_app = 20;</code>
+     * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
      */
-    public Builder clearInstalledApp() {
+    public Builder clearRequestGuestMemory() {
       copyOnWrite();
-      instance.clearInstalledApp();
+      instance.clearRequestGuestMemory();
       return this;
     }
 
     /**
-     * <code>.dsa.control.v1.InstalledApps installed_apps = 21;</code>
+     * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
      */
     @java.lang.Override
-    public boolean hasInstalledApps() {
-      return instance.hasInstalledApps();
+    public boolean hasGuestMemory() {
+      return instance.hasGuestMemory();
     }
     /**
-     * <code>.dsa.control.v1.InstalledApps installed_apps = 21;</code>
+     * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
      */
     @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.InstalledApps getInstalledApps() {
-      return instance.getInstalledApps();
+    public io.github.thisisthepy.dsa.control.v1.GuestMemory getGuestMemory() {
+      return instance.getGuestMemory();
     }
     /**
-     * <code>.dsa.control.v1.InstalledApps installed_apps = 21;</code>
+     * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
      */
-    public Builder setInstalledApps(io.github.thisisthepy.dsa.control.v1.InstalledApps value) {
+    public Builder setGuestMemory(io.github.thisisthepy.dsa.control.v1.GuestMemory value) {
       copyOnWrite();
-      instance.setInstalledApps(value);
+      instance.setGuestMemory(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.InstalledApps installed_apps = 21;</code>
+     * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
      */
-    public Builder setInstalledApps(
-        io.github.thisisthepy.dsa.control.v1.InstalledApps.Builder builderForValue) {
+    public Builder setGuestMemory(
+        io.github.thisisthepy.dsa.control.v1.GuestMemory.Builder builderForValue) {
       copyOnWrite();
-      instance.setInstalledApps(builderForValue.build());
+      instance.setGuestMemory(builderForValue.build());
       return this;
     }
     /**
-     * <code>.dsa.control.v1.InstalledApps installed_apps = 21;</code>
+     * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
      */
-    public Builder mergeInstalledApps(io.github.thisisthepy.dsa.control.v1.InstalledApps value) {
+    public Builder mergeGuestMemory(io.github.thisisthepy.dsa.control.v1.GuestMemory value) {
       copyOnWrite();
-      instance.mergeInstalledApps(value);
+      instance.mergeGuestMemory(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.InstalledApps installed_apps = 21;</code>
+     * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
      */
-    public Builder clearInstalledApps() {
+    public Builder clearGuestMemory() {
       copyOnWrite();
-      instance.clearInstalledApps();
+      instance.clearGuestMemory();
       return this;
     }
 
@@ -2203,8 +2203,8 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.ImeComposition.class,
             io.github.thisisthepy.dsa.control.v1.ImeCommit.class,
             io.github.thisisthepy.dsa.control.v1.ImeCursor.class,
-            io.github.thisisthepy.dsa.control.v1.InstalledApp.class,
-            io.github.thisisthepy.dsa.control.v1.InstalledApps.class,
+            io.github.thisisthepy.dsa.control.v1.RequestGuestMemory.class,
+            io.github.thisisthepy.dsa.control.v1.GuestMemory.class,
           };
           java.lang.String info =
               "\u0000\u0014\u0001\u0000\u0001\u0015\u0014\u0000\u0000\u0000\u0001<\u0000\u0002<" +

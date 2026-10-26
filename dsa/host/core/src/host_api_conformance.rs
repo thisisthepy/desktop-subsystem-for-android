@@ -241,7 +241,8 @@ impl RunningService {
         Self::start_service(listener, service)
     }
 
-    fn start_service(listener: Box<dyn LocalListener>, service: HostApiService) -> Self {
+    /// Serves `service`, configured as the test needs.
+    pub fn start_service(listener: Box<dyn LocalListener>, service: HostApiService) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let service = Arc::new(service);
         let flag = Arc::clone(&stop);

@@ -140,18 +140,21 @@ jobs:
           if [[ -n "$(git status --porcelain -- protocol)" ]]; then
             git status --short -- protocol
             git diff -- protocol | head -200
+            # The whole difference, as a patch to apply, because the generated Java and C++
+            # sources are too long to read from the log.
+            git add -N -- protocol
+            git diff --binary -- protocol > "$RUNNER_TEMP/generated-protocol.patch"
             echo "::error::the generated protocol code does not match control.proto, host_api.proto or window_host.proto; run dsa-protocol-codegen and commit the result"
             exit 1
           fi
 
-      # The diff above is cut short; the whole regenerated tree is kept so it can be
-      # committed as it is.
-      - name: Keep the regenerated protocol code
+      - name: Keep the generated protocol code that differs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: regenerated-protocol
-          path: dsa/protocol
+          name: generated-protocol
+          path: ${{ runner.temp }}/generated-protocol.patch
+          if-no-files-found: ignore
 
       - name: Check the Java codec against the vectors
         run: dsa/protocol/java/test.sh

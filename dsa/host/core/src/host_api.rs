@@ -33,6 +33,9 @@ use dsa_transport::{Connection, Connector, TransportError};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{InputEvent, PointerEvent};
 use crate::keys::KeyEvent;
+use crate::memory::{
+    snapshot_from_wire, snapshot_to_wire, GuestMemoryReport, HostMemory, MemorySnapshot,
+};
 use crate::resize_trace::{self, detail_requested, ResizeTrace, DETAIL_ENV};
 use crate::session::{Session, SessionError, SessionState};
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskWatch};
@@ -72,6 +75,17 @@ pub trait UserAndroid: Send + Sync {
     fn key(&self, event: &KeyEvent) -> Result<(), TaskRequestError>;
     /// Passes text composed or committed in a task's window to this Android.
     fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError>;
+    /// The last report of how this Android uses its memory, if it has sent one since it
+    /// started.
+    fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        None
+    }
+    /// Asks this Android for a memory report now.
+    fn request_guest_memory(&self) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed(
+            "this Android does not report its memory".into(),
+        ))
+    }
 }
 
 impl UserAndroid for Session {
@@ -111,6 +125,12 @@ impl UserAndroid for Session {
     }
     fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError> {
         Session::ime(self, event).map_err(request_error)
+    }
+    fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        Session::guest_memory(self)
+    }
+    fn request_guest_memory(&self) -> Result<(), TaskRequestError> {
+        Session::request_guest_memory(self).map_err(request_error)
     }
 }
 
@@ -427,6 +447,9 @@ fn from_wire(state: i32) -> Option<SessionState> {
     }
 }
 
+/// How long the service waits for the fresh memory report it asks Android for.
+const MEMORY_WAIT: Duration = Duration::from_secs(3);
+
 /// The service end of the local API.
 pub struct HostApiService {
     androids: Arc<dyn UserAndroids>,
@@ -435,6 +458,10 @@ pub struct HostApiService {
     handshake_timeout: Duration,
     /// Logs when each resize was handed to Android, and how long that took.
     resize_trace: Mutex<ResizeTrace>,
+    /// Measures the host processes of each user's Android for `dsa memory`.
+    host_memory: Option<Arc<dyn HostMemory>>,
+    /// How long `dsa memory` waits for the fresh report it asks Android for.
+    memory_wait: Duration,
 }
 
 impl HostApiService {
@@ -448,7 +475,22 @@ impl HostApiService {
                 detail_requested(std::env::var(DETAIL_ENV).ok().as_deref(), false),
                 Instant::now(),
             )),
+            host_memory: None,
+            memory_wait: MEMORY_WAIT,
         }
+    }
+
+    /// Measures the host processes of each user's Android with `host_memory`, for
+    /// `dsa memory`.
+    pub fn with_host_memory(mut self, host_memory: Arc<dyn HostMemory>) -> HostApiService {
+        self.host_memory = Some(host_memory);
+        self
+    }
+
+    /// Waits at most `wait` for the fresh memory report `dsa memory` asks Android for.
+    pub fn with_memory_wait(mut self, wait: Duration) -> HostApiService {
+        self.memory_wait = wait;
+        self
     }
 
     /// Turns on the per-stage resize trace lines, as when the file that asks for them is
@@ -711,6 +753,13 @@ impl HostApiService {
                     .into(),
             ),
             Some(request::Body::UpdateProgram(_)) => self.update_program(peer),
+            Some(request::Body::GetMemory(_)) => match self.androids.android(&peer.user) {
+                Err(why) => error(ErrorCode::Unavailable, why),
+                Ok(android) => {
+                    let memory = self.memory_of(&peer.user, &*android);
+                    response::Body::Memory(snapshot_to_wire(&memory))
+                }
+            },
             Some(request::Body::GetVmId(_)) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => response::Body::VmId(types::VmId {
@@ -783,6 +832,7 @@ impl HostApiService {
                         | request::Body::LaunchApp(_)
                         | request::Body::ResizeTask(_)
                         | request::Body::SetTaskDensity(_)
+                        | request::Body::GetMemory(_)
                         | request::Body::StreamInput(_) => unreachable!("answered above"),
                     }
                     response::Body::Status(types::Status {
@@ -848,6 +898,32 @@ impl HostApiService {
             Ok(()) => response::Body::Done(types::Done {}),
             Err(TaskRequestError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
             Err(TaskRequestError::Failed(why)) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
+    /// The memory of `user`'s Android now. A running Android is asked for a fresh report,
+    /// which is waited for a moment; a slow one leaves the last report in its place.
+    pub fn memory_of(&self, user: &str, android: &dyn UserAndroid) -> MemorySnapshot {
+        let before = android.guest_memory().map(|report| report.age);
+        if android.request_guest_memory().is_ok() {
+            let deadline = Instant::now() + self.memory_wait;
+            while Instant::now() < deadline {
+                let now = android.guest_memory().map(|report| report.age);
+                // A report younger than the one before arrived since the request.
+                if now.is_some_and(|age| before.is_none_or(|before| age < before)) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+        let vm_id = android.vm_id();
+        MemorySnapshot {
+            guest: android.guest_memory(),
+            host: self
+                .host_memory
+                .as_ref()
+                .map(|host| host.processes(user, vm_id.as_deref()))
+                .unwrap_or_default(),
         }
     }
 
@@ -1009,6 +1085,18 @@ impl HostApiClient {
         match self.exchange(request::Body::GetVmId(types::GetVmId {}), self.timeout)? {
             response::Body::VmId(vm_id) => Ok(Some(vm_id.vm_id).filter(|id| !id.is_empty())),
             _ => Err(ClientError::Malformed("expected a vm_id response".into())),
+        }
+    }
+
+    /// How much memory the caller's Android takes, in the guest and on the host. The service
+    /// asks Android for a fresh report first, so this takes a moment.
+    pub fn memory(&mut self) -> Result<MemorySnapshot, ClientError> {
+        let timeout = self.timeout + MEMORY_WAIT;
+        match self.exchange(request::Body::GetMemory(types::GetMemory {}), timeout)? {
+            response::Body::Memory(memory) => Ok(snapshot_from_wire(memory)),
+            _ => Err(ClientError::Malformed(
+                "expected the memory of the caller's Android".into(),
+            )),
         }
     }
 

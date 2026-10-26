@@ -443,6 +443,20 @@ impl TaskWindows {
         changes
     }
 
+    /// The requests that reconfigure each task for a size its window gave it live outside a
+    /// drag (a maximise, a snap), now that the task has taken it. Asked after every change
+    /// to the tasks and at every tick.
+    pub fn reconfigures(&mut self, now: Instant) -> Vec<TaskRequest> {
+        let mut requests = Vec::new();
+        for (task_id, sizing) in &mut self.sizes {
+            if self.closing.contains(task_id) || !self.tasks.contains_key(task_id) {
+                continue;
+            }
+            requests.extend(sizing.reconfigure(now));
+        }
+        requests
+    }
+
     /// Forgets every task, as when the service went away, and closes every window.
     pub fn reset(&mut self) -> Vec<WindowChange> {
         let changes = self
@@ -749,6 +763,32 @@ mod tests {
                 height: 1000
             }]
         );
+    }
+
+    #[test]
+    fn fr4_a_maximised_window_reconfigures_its_task_once_the_task_has_its_size() {
+        let mut windows = TaskWindows::new();
+        windows.apply(&updated(1, "Clock"));
+        let now = Instant::now();
+        let resize = |live| TaskRequest::Resize {
+            task_id: 1,
+            width: 900,
+            height: 1000,
+            live,
+        };
+        assert_eq!(
+            windows.window_resized(1, (900, 1000), now),
+            vec![resize(true)]
+        );
+        assert_eq!(windows.reconfigures(now), vec![]);
+        windows.apply(&TaskEvent::Updated(task(1, "Clock", 900, 1000)));
+        assert_eq!(windows.reconfigures(now), vec![resize(false)]);
+        assert_eq!(windows.reconfigures(now), vec![]);
+        // Nothing is asked for a window the user closed.
+        windows.window_resized(1, (700, 1000), now);
+        windows.apply(&TaskEvent::Updated(task(1, "Clock", 700, 1000)));
+        windows.user_closed(1);
+        assert_eq!(windows.reconfigures(now), vec![]);
     }
 
     #[test]

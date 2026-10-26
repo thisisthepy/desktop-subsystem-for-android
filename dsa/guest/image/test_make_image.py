@@ -1115,5 +1115,122 @@ class ImageLayoutTests(unittest.TestCase):
             self.assertNotIn("wifi.rc", proc.stdout)
 
 
+class GuestMemoryTests(unittest.TestCase):
+    """The image keeps the guest's memory small, so the host gets back what it does not use."""
+
+    def _modify(self, root, channeld=False, extra=None):
+        source = root / "target-files.zip"
+        with zipfile.ZipFile(source, "w") as archive:
+            archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+            archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+            for name, data in (extra or {}).items():
+                archive.writestr(name, data)
+        daemon = None
+        if channeld:
+            daemon = root / "dsa-channeld"
+            daemon.write_bytes(b"daemon")
+        modified = root / "modified.zip"
+        make_image.modify(source, modified, channeld=daemon)
+        return zipfile.ZipFile(modified)
+
+    def test_nfr1_the_guest_swaps_to_zram_of_half_its_memory(self):
+        fstab = (Path(make_image.__file__).with_name("fstab.dsa")).read_text()
+        self.assertIn("/dev/block/zram0 none swap defaults zramsize=50%", fstab)
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            rc = archive.read("VENDOR/etc/init/dsa-memory.rc").decode()
+            self.assertIn("swapon_all /vendor/etc/fstab.dsa", rc)
+            self.assertIn("write /proc/sys/vm/swappiness 100", rc)
+            self.assertIn(
+                "vendor/etc/init/dsa-memory.rc 0 0 644 capabilities=0x0",
+                archive.read("META/vendor_filesystem_config.txt").decode(),
+            )
+            for directory in make_image.FSTAB_DIRS:
+                self.assertIn(b"zramsize=50%", archive.read(directory + "fstab.dsa"))
+
+    def test_nfr1_lmkd_watches_the_zram_swap(self):
+        props = make_image.edit_props("ro.debuggable=1\n")
+        for line in [
+            "ro.lmk.use_psi=true",
+            "ro.lmk.use_minfree_levels=false",
+            "ro.lmk.swap_free_low_percentage=10",
+            "ro.lmk.swap_util_max=90",
+            "ro.lmk.thrashing_limit=30",
+        ]:
+            self.assertIn(line + "\n", props)
+
+    def test_nfr2_vendor_init_may_drop_caches_compact_and_tune_swap_only(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            self.assertIn('(genfscon proc "/sys/vm/compact_memory" (u object_r dsa_proc_vm_tunable', policy)
+            self.assertIn('(genfscon proc "/sys/vm/swappiness" (u object_r dsa_proc_vm_tunable', policy)
+            self.assertIn("(allow vendor_init dsa_proc_vm_tunable (file (write open getattr)))", policy)
+            self.assertIn("(allow vendor_init proc_drop_caches (file (write open getattr)))", policy)
+            # Nothing gains write access to plain proc.
+            self.assertNotRegex(policy, r"\(allow \S+ proc \(file \([^)]*write")
+            # The agent reads zram's statistics for its memory report.
+            self.assertIn("(allow platform_app sysfs_zram (file (read open getattr)))", policy)
+
+    def test_nfr2_only_the_control_daemon_asks_init_to_reclaim(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
+            contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
+            self.assertIn("vendor.dsa.memory.reclaim u:object_r:dsa_memory_prop:s0 exact bool", contexts)
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            self.assertIn("(typeattributeset vendor_property_type (dsa_memory_prop))", policy)
+            setters = re.findall(r"\(allow (\S+) dsa_memory_prop \(property_service \(set\)\)\)", policy)
+            self.assertEqual(sorted(setters), ["dsa_channeld", "vendor_init"])
+            rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
+            trigger = rc[rc.index("on property:vendor.dsa.memory.reclaim=1"):]
+            self.assertIn("write /proc/sys/vm/drop_caches 3", trigger)
+            self.assertIn("write /proc/sys/vm/compact_memory 1", trigger)
+            self.assertIn("setprop vendor.dsa.memory.reclaim 0", trigger)
+
+    def test_nfr2_the_reclaim_property_keeps_the_existing_vendor_contexts(self):
+        existing = "vendor.example u:object_r:vendor_default_prop:s0\n"
+        with tempfile.TemporaryDirectory() as tmp, self._modify(
+            Path(tmp), extra={"VENDOR/etc/selinux/vendor_property_contexts": existing}
+        ) as archive:
+            contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
+            self.assertEqual(contexts[0], existing.strip())
+            self.assertEqual(contexts.count(make_image.RECLAIM_PROPERTY_CONTEXT), 1)
+        self.assertEqual(
+            make_image.update_vendor_property_contexts(make_image.RECLAIM_PROPERTY_CONTEXT + "\n"),
+            make_image.RECLAIM_PROPERTY_CONTEXT + "\n",
+        )
+
+    def test_nfr1_apps_a_desktop_has_no_use_for_are_removed_and_the_ones_apps_need_are_kept(self):
+        removed = ["Dialer", "messaging", "Stk", "BasicDreams", "LiveWallpapersPicker", "QuickSearchBox"]
+        kept = [
+            "SYSTEM/app/webview/webview.apk",
+            "SYSTEM/priv-app/ContactsProvider/ContactsProvider.apk",
+            "SYSTEM/priv-app/PackageInstaller/PackageInstaller.apk",
+            "SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk",
+            "SYSTEM/app/PrintSpooler/PrintSpooler.apk",
+            "SYSTEM/priv-app/Settings/Settings.apk",
+            "SYSTEM/priv-app/Telecom/Telecom.apk",
+            "PRODUCT/app/DeskClock/DeskClock.apk",
+        ]
+        for app in removed:
+            self.assertIn(app, make_image.REMOVED_APPS)
+        extra = {f"PRODUCT/app/{app}/{app}.apk": b"apk" for app in removed}
+        extra.update({name: b"apk" for name in kept})
+        extra["META/apkcerts.txt"] = "".join(
+            f'name="{Path(name).name}" certificate="c.x509.pem" private_key="c.pk8"\n'
+            for name in list(extra) if name.endswith(".apk")
+        )
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), extra=extra) as archive:
+            names = archive.namelist()
+            certs = archive.read("META/apkcerts.txt").decode()
+            for app in removed:
+                self.assertNotIn(f"PRODUCT/app/{app}/{app}.apk", names)
+                self.assertNotIn(f'name="{app}.apk"', certs)
+            for name in kept:
+                self.assertIn(name, names)
+                self.assertIn(f'name="{Path(name).name}"', certs)
+        for needed in ["webview", "ContactsProvider", "PackageInstaller", "PermissionController",
+                       "DocumentsUI", "PrintSpooler", "Settings", "Provision", "Telecom",
+                       "TeleService", "DeskClock"]:
+            self.assertNotIn(needed, make_image.REMOVED_APPS)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -5,7 +5,8 @@
 //! - memory backed by the pagefile and committed on first touch (`AllowOvercommit`,
 //!   `EnableDeferredCommit`), and free guest pages handed back to the host
 //!   (`EnableColdDiscardHint` plus `page_reporting.page_reporting_order` on the kernel
-//!   command line);
+//!   command line, and `EnableColdHint` for zeroed pages). `EnableHotHint` is left off: it
+//!   lets the guest pull pages in ahead of use, which returns nothing to the host;
 //! - the kernel booted directly (`LinuxKernelDirect`), straight into Android's init;
 //! - the system image attached read only, the user data on a disk that may stay sparse;
 //! - Hyper-V sockets limited to SYSTEM and the user the VM belongs to;
@@ -236,9 +237,19 @@ impl AndroidVmConfig {
                 "ComputeTopology": {
                     "Memory": {
                         "SizeInMB": memory_mb,
+                        // Backed by the host's pagefile instead of reserved RAM, so the host
+                        // can page out and take back what the guest does not touch.
                         "AllowOvercommit": true,
+                        // Committed on first touch, so memory the guest never uses costs
+                        // the host nothing.
                         "EnableDeferredCommit": true,
+                        // The pages the guest frees and reports (free page reporting) are
+                        // discarded from the VM's memory and return to the host.
                         "EnableColdDiscardHint": true,
+                        // Lets the guest also hand back pages it has zeroed, which the host
+                        // then trims from the VM's working set. A guest without support for
+                        // it is unaffected.
+                        "EnableColdHint": true,
                     },
                     "Processor": { "Count": self.processors },
                 },

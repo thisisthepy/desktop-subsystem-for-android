@@ -10,7 +10,8 @@
 //! renderer copy each task's frames, on the GPU, into a texture the window host shows
 //! ([`frames`], [`present`]). When the user closes a window, the guest is asked to end its
 //! task. The mouse, touch and pen input in a window goes from the window host to the service
-//! itself, without passing through the window manager.
+//! itself, without passing through the window manager. While no task window is open, it gives
+//! back the memory it is not using ([`trim`]).
 
 pub mod adapter;
 pub mod display_gpu;
@@ -21,19 +22,21 @@ pub mod present;
 pub mod shutdown;
 pub mod single_instance;
 pub mod tasks;
+pub mod trim;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::{
     GraphicsRenderer, GraphicsStreamKind, StreamTracker, GRAPHICS_COMMAND_PORT,
     GRAPHICS_PROCESS_PIPE_PORT,
 };
 use dsa_host_core::host_api::HostApiClient;
+use dsa_host_core::memory::{IdleTrim, IDLE_TRIM_DELAY};
 use dsa_host_core::session::SessionState;
 use dsa_transport::local::PeerIgnoringListener;
 use dsa_transport::{Connector, Listener, TransportError};
@@ -554,6 +557,15 @@ impl Compositor {
                 .ok();
             installed_tx = Some(tx);
         }
+        let idle = Arc::new(Mutex::new(IdleTrim::new(IDLE_TRIM_DELAY, Instant::now())));
+        let trim_idle = Arc::clone(&idle);
+        let trim_stop = Arc::clone(&manager_stop);
+        let trim_logger = self.logger.clone();
+        let trimmer = thread::Builder::new()
+            .name("dsa-wm-trim".into())
+            .spawn(move || trim::run(trim_idle, trim_stop, trim_logger))
+            .map_err(|e| log(&format!("could not start the idle memory trim: {e}")))
+            .ok();
 
         let watch_events = events_tx.clone();
         let watch_connector = (self.local_api_connector)();
@@ -568,6 +580,7 @@ impl Compositor {
                         if let (Some(tx), Some(apps)) = (&installed_tx, installed_in(&event)) {
                             let _ = tx.send(apps);
                         }
+                        note_tasks(&idle, &event);
                         watch_events.send(event).is_ok()
                     },
                     watch_stop,
@@ -595,11 +608,23 @@ impl Compositor {
 
         TaskWindowThreads {
             stop: Some(manager_stop),
-            threads: [manager, acceptor, watcher, requester, start_menu]
+            threads: [manager, acceptor, watcher, requester, trimmer, start_menu]
                 .into_iter()
                 .flatten()
                 .collect(),
         }
+    }
+}
+
+/// Tells the idle memory trim which task windows are open.
+fn note_tasks(idle: &Mutex<IdleTrim>, event: &ManagerEvent) {
+    let mut idle = idle.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    match event {
+        ManagerEvent::Sync(events) => idle.sync(events, now),
+        ManagerEvent::Task(event) => idle.task_event(Some(event), now),
+        ManagerEvent::Lost => idle.task_event(None, now),
+        _ => {}
     }
 }
 
