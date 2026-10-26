@@ -34,6 +34,7 @@ public  final class Envelope extends
     SET_TASK_DENSITY(12),
     POINTER_EVENT(13),
     APP_INFO(15),
+    KEY_EVENT(16),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -63,6 +64,7 @@ public  final class Envelope extends
         case 12: return SET_TASK_DENSITY;
         case 13: return POINTER_EVENT;
         case 15: return APP_INFO;
+        case 16: return KEY_EVENT;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -779,6 +781,56 @@ public  final class Envelope extends
    */
   private void clearAppInfo() {
     if (bodyCase_ == 15) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int KEY_EVENT_FIELD_NUMBER = 16;
+  /**
+   * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+   */
+  @java.lang.Override
+  public boolean hasKeyEvent() {
+    return bodyCase_ == 16;
+  }
+  /**
+   * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.KeyEvent getKeyEvent() {
+    if (bodyCase_ == 16) {
+       return (io.github.thisisthepy.dsa.control.v1.KeyEvent) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.KeyEvent.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+   */
+  private void setKeyEvent(io.github.thisisthepy.dsa.control.v1.KeyEvent value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 16;
+  }
+  /**
+   * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+   */
+  private void mergeKeyEvent(io.github.thisisthepy.dsa.control.v1.KeyEvent value) {
+    value.getClass();
+  if (bodyCase_ == 16 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.KeyEvent.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.KeyEvent.newBuilder((io.github.thisisthepy.dsa.control.v1.KeyEvent) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 16;
+  }
+  /**
+   * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+   */
+  private void clearKeyEvent() {
+    if (bodyCase_ == 16) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -1567,6 +1619,54 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+     */
+    @java.lang.Override
+    public boolean hasKeyEvent() {
+      return instance.hasKeyEvent();
+    }
+    /**
+     * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.KeyEvent getKeyEvent() {
+      return instance.getKeyEvent();
+    }
+    /**
+     * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+     */
+    public Builder setKeyEvent(io.github.thisisthepy.dsa.control.v1.KeyEvent value) {
+      copyOnWrite();
+      instance.setKeyEvent(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+     */
+    public Builder setKeyEvent(
+        io.github.thisisthepy.dsa.control.v1.KeyEvent.Builder builderForValue) {
+      copyOnWrite();
+      instance.setKeyEvent(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+     */
+    public Builder mergeKeyEvent(io.github.thisisthepy.dsa.control.v1.KeyEvent value) {
+      copyOnWrite();
+      instance.mergeKeyEvent(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+     */
+    public Builder clearKeyEvent() {
+      copyOnWrite();
+      instance.clearKeyEvent();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -1599,11 +1699,12 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.SetTaskDensity.class,
             io.github.thisisthepy.dsa.control.v1.PointerEvent.class,
             io.github.thisisthepy.dsa.control.v1.AppInfo.class,
+            io.github.thisisthepy.dsa.control.v1.KeyEvent.class,
           };
           java.lang.String info =
-              "\u0000\u000e\u0001\u0000\u0001\u000f\u000e\u0000\u0000\u0000\u0001<\u0000\u0002<" +
+              "\u0000\u000f\u0001\u0000\u0001\u0010\u000f\u0000\u0000\u0000\u0001<\u0000\u0002<" +
               "\u0000\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000" +
-              "\t<\u0000\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000";
+              "\t<\u0000\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

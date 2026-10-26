@@ -48,6 +48,22 @@ class AndroidTaskActions(
     override fun closeTask(taskId: Int): Boolean = ActivityTaskManager.getService().removeTask(taskId)
 
     /**
+     * Focuses the task through IActivityTaskManager.setFocusedTask, which moves it to the
+     * front of its display and makes its top window the one keys go to. A task that has
+     * ended, or a framework without the call, refuses.
+     */
+    override fun focusTask(taskId: Int): Boolean = try {
+        ActivityTaskManager.getService().setFocusedTask(taskId)
+        true
+    } catch (e: LinkageError) {
+        log.warn("this framework has no setFocusedTask; keys go to whichever task the guest focused", e)
+        false
+    } catch (e: RuntimeException) {
+        log.warn("the framework refused to focus task $taskId", e)
+        false
+    }
+
+    /**
      * Moves a freeform task through IActivityTaskManager.resizeTask, the call behind
      * `cmd activity task resize`. It returns nothing: the window manager drops a request for a
      * task it cannot resize, and with shell transitions it may apply the bounds after the

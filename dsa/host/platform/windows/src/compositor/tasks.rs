@@ -1,5 +1,5 @@
 //! The compositor's use of the local API for tasks: it watches the guest's tasks, asks the
-//! guest to end a task whose window the user closed, and passes on the pointer input in
+//! guest to end a task whose window the user closed, and passes on the pointer and key input in
 //! the task windows.
 //!
 //! None of these parts names a window, so all run against the in-memory transport in tests.
@@ -11,7 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::host_api::{HostApiClient, InputStream};
-use dsa_host_core::input::PointerEvent;
+use dsa_host_core::input::InputEvent;
 use dsa_host_core::tasks::{coalesce, TaskRequest};
 use dsa_transport::Connector;
 
@@ -149,14 +149,15 @@ pub fn serve_requests(
     }
 }
 
-/// Passes every pointer event from the task windows to the guest until `events` closes.
+/// Passes every pointer and key event from the task windows to the guest until `events`
+/// closes.
 ///
 /// The events go on one connection that streams input, so none waits for an answer. When
 /// the service cannot be reached, the events are dropped and the connection is tried again
 /// after a short wait; a connection that breaks is made again at once, for the same event.
 pub fn serve_input(
     mut connector: Box<dyn Connector>,
-    events: Receiver<PointerEvent>,
+    events: Receiver<InputEvent>,
     logger: Option<Arc<CompositorLogger>>,
 ) {
     let mut stream: Option<InputStream> = None;
@@ -181,7 +182,7 @@ pub fn serve_input(
                         if error != last_error {
                             note(
                                 logger.as_deref(),
-                                &format!("pointer input cannot reach Android: {error}"),
+                                &format!("input cannot reach Android: {error}"),
                             );
                             last_error = error;
                         }
@@ -193,7 +194,7 @@ pub fn serve_input(
             let Some(connected) = stream.as_mut() else {
                 break;
             };
-            match connected.send(&event) {
+            match connected.send_input(&event) {
                 Ok(()) => break,
                 Err(_) => stream = None,
             }

@@ -232,6 +232,38 @@ message PointerEvent {
   float scroll_y = 10;
 }
 
+// What a key did.
+enum KeyAction {
+  KEY_ACTION_UNSPECIFIED = 0;
+  // The key went down, or, with a `repeat_count` above 0, the host repeats it while it is held.
+  KEY_ACTION_DOWN = 1;
+  // The key came up.
+  KEY_ACTION_UP = 2;
+}
+
+// Host to guest: a key pressed or released in a task's window while the window has the
+// keyboard focus. One message per event, sent as it happens; the agent injects it into the
+// task at once.
+message KeyEvent {
+  int32 task_id = 1;
+  KeyAction action = 2;
+  // The guest's key code (android.view.KeyEvent.KEYCODE_*), which the host maps its own keys
+  // to, so the guest passes it through unchanged.
+  uint32 key_code = 3;
+  // How many times the host has repeated the key since it went down: 0 for the press itself.
+  uint32 repeat_count = 4;
+  // The modifiers and locks in effect after this event, as the guest's meta state bits
+  // (android.view.KeyEvent.META_*): Shift, Ctrl, Alt and Meta, each with its left or right
+  // side, and Caps Lock, Num Lock and Scroll Lock.
+  uint32 meta_state = 5;
+  // When the host saw the event, in milliseconds of the host's own clock, which wraps around.
+  // Only the difference between two events means anything.
+  uint32 event_time_ms = 6;
+  // Set on an UP the user did not make: the window lost the keyboard focus while the key was
+  // held. The guest releases the key without acting on it.
+  bool canceled = 7;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -249,5 +281,6 @@ message Envelope {
     SetTaskDensity set_task_density = 12;
     PointerEvent pointer_event = 13;
     AppInfo app_info = 15;
+    KeyEvent key_event = 16;
   }
 }

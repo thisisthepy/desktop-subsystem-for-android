@@ -8,8 +8,8 @@
 // A connection carries requests and their responses, until the client sends WatchTasks.
 // From the answer to that request on, the connection carries only TaskEvent frames from
 // the service; a client that sends anything more on it is disconnected. In the same way,
-// from the answer to StreamInput on, the connection carries only PointerEvent frames from
-// the client, and the service answers none of them.
+// from the answer to StreamInput on, the connection carries only PointerEvent and KeyEvent
+// frames from the client, and the service answers none of them.
 //
 // The caller's identity is the user the operating system reports for the connection.
 // Nothing in these messages names a user, so a client cannot claim to be someone else, and
@@ -140,9 +140,9 @@ message SetTaskDensity {
 }
 
 // Turns the connection into a stream of input for the caller's Android: after the answer
-// (Done), the client sends only PointerEvent frames, which the service passes on as they
-// come, without answering them. Input is never waited on, so a pointer that moves fast is
-// not held back by the answers.
+// (Done), the client sends only PointerEvent and KeyEvent frames, which the service passes on
+// as they come, without answering them. Input is never waited on, so a pointer that moves
+// fast is not held back by the answers.
 message StreamInput {}
 
 // What a pointer did.
@@ -193,6 +193,33 @@ message PointerEvent {
   // positive `scroll_x` scrolls right.
   float scroll_x = 9;
   float scroll_y = 10;
+}
+
+// What a key did.
+enum KeyAction {
+  KEY_ACTION_UNSPECIFIED = 0;
+  // The key went down, or, with a `repeat_count` above 0, is repeated while it is held.
+  KEY_ACTION_DOWN = 1;
+  // The key came up.
+  KEY_ACTION_UP = 2;
+}
+
+// A key pressed or released in a task's window, sent on a connection that streams input.
+message KeyEvent {
+  int32 task_id = 1;
+  KeyAction action = 2;
+  // Android's key code (android.view.KeyEvent.KEYCODE_*).
+  uint32 key_code = 3;
+  // How many times the key has been repeated since it went down: 0 for the press itself.
+  uint32 repeat_count = 4;
+  // The modifiers and locks in effect after this event, as Android's meta state bits
+  // (android.view.KeyEvent.META_*).
+  uint32 meta_state = 5;
+  // When the window saw the event, in milliseconds of the host's clock, which wraps around.
+  uint32 event_time_ms = 6;
+  // Set on an UP the user did not make: the window lost the keyboard focus while the key
+  // was held.
+  bool canceled = 7;
 }
 
 // A rectangle in Android display pixels: left and top inclusive, right and bottom
@@ -358,5 +385,6 @@ message Envelope {
     Response response = 5;
     TaskEvent task_event = 6;
     PointerEvent pointer_event = 7;
+    KeyEvent key_event = 8;
   }
 }

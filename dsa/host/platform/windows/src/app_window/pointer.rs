@@ -14,7 +14,7 @@ use std::cell::{Cell, RefCell};
 use std::sync::mpsc::Sender;
 
 use dsa_host_core::input::{
-    buttons, Capture, ContactPhase, MouseButton, PointerEvent, PointerMapper, PointerTool,
+    buttons, Capture, ContactPhase, InputEvent, MouseButton, PointerMapper, PointerTool,
     WindowGeometry, WindowInput,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -147,11 +147,11 @@ pub struct PointerWindow {
     task_size: Cell<(u32, u32)>,
     /// Whether Windows will say when the mouse leaves the window.
     tracking_leave: Cell<bool>,
-    events: Sender<PointerEvent>,
+    events: Sender<InputEvent>,
 }
 
 impl PointerWindow {
-    pub fn new(task_id: i32, task_size: (u32, u32), events: Sender<PointerEvent>) -> Self {
+    pub fn new(task_id: i32, task_size: (u32, u32), events: Sender<InputEvent>) -> Self {
         PointerWindow {
             mapper: RefCell::new(PointerMapper::new(task_id)),
             task_size: Cell::new(task_size),
@@ -338,7 +338,7 @@ impl PointerWindow {
         }
         for event in mapped.events {
             // The sender ends only when the compositor stops; input then has nowhere to go.
-            let _ = self.events.send(event);
+            let _ = self.events.send(InputEvent::Pointer(event));
         }
     }
 }

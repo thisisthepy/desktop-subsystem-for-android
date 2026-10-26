@@ -22,6 +22,7 @@ use crate::host_api::{
     UpdateProgram, UserAndroid, UserAndroids,
 };
 use crate::input::{buttons, PointerAction, PointerEvent, PointerTool};
+use crate::keys::{keycode, meta, KeyAction, KeyEvent};
 use crate::session::SessionState;
 use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskTable, TaskWatch};
 
@@ -41,6 +42,8 @@ pub struct FakeAndroid {
     pub requests: Mutex<Vec<TaskRequest>>,
     /// The pointer events it was given, in order.
     pub pointers: Mutex<Vec<PointerEvent>>,
+    /// The key events it was given, in order.
+    pub keys: Mutex<Vec<KeyEvent>>,
 }
 
 impl FakeAndroid {
@@ -50,6 +53,7 @@ impl FakeAndroid {
             tasks: Mutex::new((TaskTable::new(), Vec::new())),
             requests: Mutex::new(Vec::new()),
             pointers: Mutex::new(Vec::new()),
+            keys: Mutex::new(Vec::new()),
         }
     }
 
@@ -118,6 +122,16 @@ impl UserAndroid for FakeAndroid {
             )));
         }
         self.pointers.lock().unwrap().push(*event);
+        Ok(())
+    }
+    fn key(&self, event: &KeyEvent) -> Result<(), TaskRequestError> {
+        if self.state() != SessionState::Active {
+            return Err(TaskRequestError::NotRunning(format!(
+                "Android is {}, not running",
+                self.state()
+            )));
+        }
+        self.keys.lock().unwrap().push(*event);
         Ok(())
     }
 }
@@ -299,6 +313,14 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::pointer_input_to_stopped_android_is_dropped(&mut || {
                 $make
             });
+        }
+        #[test]
+        fn fr16_key_input_reaches_the_callers_android_in_order_with_pointer_input() {
+            $crate::host_api_conformance::key_input_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr16_a_key_event_that_makes_no_sense_is_dropped_and_the_stream_goes_on() {
+            $crate::host_api_conformance::bad_key_event_is_dropped(&mut || $make);
         }
         #[test]
         fn nfr5_a_client_that_streams_input_and_sends_a_request_is_disconnected() {
@@ -710,6 +732,81 @@ pub fn pointer_input_to_stopped_android_is_dropped(make: MakeLocal<'_>) {
     input.send(&up).expect("the event is sent");
     let android = androids.of(&user).unwrap();
     assert_eq!(pointers_given(&android, 1), vec![up]);
+}
+
+fn key(task_id: i32, action: KeyAction, key_code: u32, meta_state: u32) -> KeyEvent {
+    KeyEvent {
+        task_id,
+        action,
+        key_code,
+        repeat_count: 0,
+        meta_state,
+        event_time_ms: 100,
+        canceled: false,
+    }
+}
+
+/// Waits until `android` has been given `count` key events, and returns them.
+fn keys_given(android: &FakeAndroid, count: usize) -> Vec<KeyEvent> {
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let given = android.keys.lock().unwrap().clone();
+        if given.len() >= count || std::time::Instant::now() >= deadline {
+            return given;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+pub fn key_input_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let mut input = connect(&mut *connector)
+        .stream_input()
+        .expect("streaming input");
+    let ctrl = meta::CTRL_ON | meta::CTRL_LEFT_ON;
+    let keys = [
+        key(4, KeyAction::Down, keycode::CTRL_LEFT, ctrl),
+        key(4, KeyAction::Down, keycode::A, ctrl),
+        key(4, KeyAction::Up, keycode::A, ctrl),
+        key(4, KeyAction::Up, keycode::CTRL_LEFT, 0),
+    ];
+    // Both kinds share the one stream.
+    input
+        .send(&pointer(4, PointerAction::Down, 1.0))
+        .expect("the event is sent");
+    for event in &keys {
+        input.send_key(event).expect("the event is sent");
+    }
+    input
+        .send_input(&crate::input::InputEvent::Pointer(pointer(
+            4,
+            PointerAction::Up,
+            1.0,
+        )))
+        .expect("the event is sent");
+    let android = androids.of(&user).unwrap();
+    assert_eq!(keys_given(&android, keys.len()), keys.to_vec());
+    assert_eq!(pointers_given(&android, 2).len(), 2);
+}
+
+pub fn bad_key_event_is_dropped(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let mut input = connect(&mut *connector)
+        .stream_input()
+        .expect("streaming input");
+    input
+        .send_key(&key(4, KeyAction::Down, 0, 0))
+        .expect("the event is sent");
+    let good = key(4, KeyAction::Down, keycode::ENTER, 0);
+    input.send_key(&good).expect("the event is sent");
+    let android = androids.of(&user).unwrap();
+    assert_eq!(keys_given(&android, 1), vec![good]);
 }
 
 pub fn input_stream_that_sends_a_request_is_disconnected(make: MakeLocal<'_>) {

@@ -48,6 +48,12 @@ interface TaskActions {
      * later. Returns what the framework took.
      */
     fun endLiveResize(taskId: Int, bounds: TaskBounds, densityDpi: Int?): ResizeOutcome
+
+    /**
+     * Gives the task the input focus, and brings it to the front of its display, so the keys
+     * the host sends next reach its focused window. False when the framework refused.
+     */
+    fun focusTask(taskId: Int): Boolean
 }
 
 /** What the framework took of a resize. */

@@ -13,4 +13,6 @@ public interface IActivityTaskManager extends IInterface {
     boolean removeTask(int taskId) throws RemoteException;
 
     void resizeTask(int taskId, Rect bounds, int resizeMode) throws RemoteException;
+
+    void setFocusedTask(int taskId) throws RemoteException;
 }
