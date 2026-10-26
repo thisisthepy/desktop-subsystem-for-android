@@ -504,7 +504,8 @@ impl Manager {
             ManagerEvent::Sync(current) => {
                 for event in &current {
                     if let TaskEvent::App(app) = event {
-                        self.hosts.app(app);
+                        let actions = self.hosts.app(app, now);
+                        self.carry_out(actions);
                     }
                 }
                 let changes = self.windows.sync(&current);
@@ -512,7 +513,8 @@ impl Manager {
             }
             ManagerEvent::Task(event) => {
                 if let TaskEvent::App(app) = &event {
-                    self.hosts.app(app);
+                    let actions = self.hosts.app(app, now);
+                    self.carry_out(actions);
                 }
                 let changes = self.windows.apply(&event);
                 self.change(changes, now);
