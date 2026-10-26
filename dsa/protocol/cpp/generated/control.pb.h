@@ -45,6 +45,9 @@ struct TableStruct_control_2eproto {
 namespace dsa {
 namespace control {
 namespace v1 {
+class AppInfo;
+struct AppInfoDefaultTypeInternal;
+extern AppInfoDefaultTypeInternal _AppInfo_default_instance_;
 class AuthChallenge;
 struct AuthChallengeDefaultTypeInternal;
 extern AuthChallengeDefaultTypeInternal _AuthChallenge_default_instance_;
@@ -88,6 +91,7 @@ extern TaskUpdatedDefaultTypeInternal _TaskUpdated_default_instance_;
 }  // namespace control
 }  // namespace dsa
 PROTOBUF_NAMESPACE_OPEN
+template<> ::dsa::control::v1::AppInfo* Arena::CreateMaybeMessage<::dsa::control::v1::AppInfo>(Arena*);
 template<> ::dsa::control::v1::AuthChallenge* Arena::CreateMaybeMessage<::dsa::control::v1::AuthChallenge>(Arena*);
 template<> ::dsa::control::v1::AuthProof* Arena::CreateMaybeMessage<::dsa::control::v1::AuthProof>(Arena*);
 template<> ::dsa::control::v1::CloseTask* Arena::CreateMaybeMessage<::dsa::control::v1::CloseTask>(Arena*);
@@ -1867,6 +1871,173 @@ class LaunchApp final :
 };
 // -------------------------------------------------------------------
 
+class AppInfo final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AppInfo) */ {
+ public:
+  inline AppInfo() : AppInfo(nullptr) {}
+  ~AppInfo() override;
+  explicit PROTOBUF_CONSTEXPR AppInfo(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  AppInfo(const AppInfo& from);
+  AppInfo(AppInfo&& from) noexcept
+    : AppInfo() {
+    *this = ::std::move(from);
+  }
+
+  inline AppInfo& operator=(const AppInfo& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline AppInfo& operator=(AppInfo&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const AppInfo& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const AppInfo* internal_default_instance() {
+    return reinterpret_cast<const AppInfo*>(
+               &_AppInfo_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    11;
+
+  friend void swap(AppInfo& a, AppInfo& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(AppInfo* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(AppInfo* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  AppInfo* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<AppInfo>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const AppInfo& from);
+  void MergeFrom(const AppInfo& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(AppInfo* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.AppInfo";
+  }
+  protected:
+  explicit AppInfo(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kPackageNameFieldNumber = 1,
+    kLabelFieldNumber = 2,
+    kIconPngFieldNumber = 3,
+  };
+  // string package_name = 1;
+  void clear_package_name();
+  const std::string& package_name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_package_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_package_name();
+  PROTOBUF_NODISCARD std::string* release_package_name();
+  void set_allocated_package_name(std::string* package_name);
+  private:
+  const std::string& _internal_package_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_package_name(const std::string& value);
+  std::string* _internal_mutable_package_name();
+  public:
+
+  // string label = 2;
+  void clear_label();
+  const std::string& label() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_label(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_label();
+  PROTOBUF_NODISCARD std::string* release_label();
+  void set_allocated_label(std::string* label);
+  private:
+  const std::string& _internal_label() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_label(const std::string& value);
+  std::string* _internal_mutable_label();
+  public:
+
+  // bytes icon_png = 3;
+  void clear_icon_png();
+  const std::string& icon_png() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_icon_png(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_icon_png();
+  PROTOBUF_NODISCARD std::string* release_icon_png();
+  void set_allocated_icon_png(std::string* icon_png);
+  private:
+  const std::string& _internal_icon_png() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_icon_png(const std::string& value);
+  std::string* _internal_mutable_icon_png();
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.AppInfo)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr package_name_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr label_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr icon_png_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class PointerEvent final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.PointerEvent) */ {
  public:
@@ -1906,7 +2077,7 @@ class PointerEvent final :
                &_PointerEvent_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    11;
+    12;
 
   friend void swap(PointerEvent& a, PointerEvent& b) {
     a.Swap(&b);
@@ -2142,6 +2313,7 @@ class Envelope final :
     kCloseTask = 9,
     kLaunchApp = 10,
     kPointerEvent = 13,
+    kAppInfo = 15,
     BODY_NOT_SET = 0,
   };
 
@@ -2150,7 +2322,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    12;
+    13;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -2225,6 +2397,7 @@ class Envelope final :
     kCloseTaskFieldNumber = 9,
     kLaunchAppFieldNumber = 10,
     kPointerEventFieldNumber = 13,
+    kAppInfoFieldNumber = 15,
   };
   // .dsa.control.v1.Hello hello = 1;
   bool has_hello() const;
@@ -2424,6 +2597,24 @@ class Envelope final :
       ::dsa::control::v1::PointerEvent* pointer_event);
   ::dsa::control::v1::PointerEvent* unsafe_arena_release_pointer_event();
 
+  // .dsa.control.v1.AppInfo app_info = 15;
+  bool has_app_info() const;
+  private:
+  bool _internal_has_app_info() const;
+  public:
+  void clear_app_info();
+  const ::dsa::control::v1::AppInfo& app_info() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::AppInfo* release_app_info();
+  ::dsa::control::v1::AppInfo* mutable_app_info();
+  void set_allocated_app_info(::dsa::control::v1::AppInfo* app_info);
+  private:
+  const ::dsa::control::v1::AppInfo& _internal_app_info() const;
+  ::dsa::control::v1::AppInfo* _internal_mutable_app_info();
+  public:
+  void unsafe_arena_set_allocated_app_info(
+      ::dsa::control::v1::AppInfo* app_info);
+  ::dsa::control::v1::AppInfo* unsafe_arena_release_app_info();
+
   void clear_body();
   BodyCase body_case() const;
   // @@protoc_insertion_point(class_scope:dsa.control.v1.Envelope)
@@ -2440,6 +2631,7 @@ class Envelope final :
   void set_has_close_task();
   void set_has_launch_app();
   void set_has_pointer_event();
+  void set_has_app_info();
 
   inline bool has_body() const;
   inline void clear_has_body();
@@ -2462,6 +2654,7 @@ class Envelope final :
       ::dsa::control::v1::CloseTask* close_task_;
       ::dsa::control::v1::LaunchApp* launch_app_;
       ::dsa::control::v1::PointerEvent* pointer_event_;
+      ::dsa::control::v1::AppInfo* app_info_;
     } body_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -3449,6 +3642,160 @@ inline void LaunchApp::set_allocated_package_name(std::string* package_name) {
   }
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.LaunchApp.package_name)
+}
+
+// -------------------------------------------------------------------
+
+// AppInfo
+
+// string package_name = 1;
+inline void AppInfo::clear_package_name() {
+  _impl_.package_name_.ClearToEmpty();
+}
+inline const std::string& AppInfo::package_name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AppInfo.package_name)
+  return _internal_package_name();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void AppInfo::set_package_name(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.package_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AppInfo.package_name)
+}
+inline std::string* AppInfo::mutable_package_name() {
+  std::string* _s = _internal_mutable_package_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AppInfo.package_name)
+  return _s;
+}
+inline const std::string& AppInfo::_internal_package_name() const {
+  return _impl_.package_name_.Get();
+}
+inline void AppInfo::_internal_set_package_name(const std::string& value) {
+  
+  _impl_.package_name_.Set(value, GetArenaForAllocation());
+}
+inline std::string* AppInfo::_internal_mutable_package_name() {
+  
+  return _impl_.package_name_.Mutable(GetArenaForAllocation());
+}
+inline std::string* AppInfo::release_package_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AppInfo.package_name)
+  return _impl_.package_name_.Release();
+}
+inline void AppInfo::set_allocated_package_name(std::string* package_name) {
+  if (package_name != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.package_name_.SetAllocated(package_name, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.package_name_.IsDefault()) {
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AppInfo.package_name)
+}
+
+// string label = 2;
+inline void AppInfo::clear_label() {
+  _impl_.label_.ClearToEmpty();
+}
+inline const std::string& AppInfo::label() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AppInfo.label)
+  return _internal_label();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void AppInfo::set_label(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.label_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AppInfo.label)
+}
+inline std::string* AppInfo::mutable_label() {
+  std::string* _s = _internal_mutable_label();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AppInfo.label)
+  return _s;
+}
+inline const std::string& AppInfo::_internal_label() const {
+  return _impl_.label_.Get();
+}
+inline void AppInfo::_internal_set_label(const std::string& value) {
+  
+  _impl_.label_.Set(value, GetArenaForAllocation());
+}
+inline std::string* AppInfo::_internal_mutable_label() {
+  
+  return _impl_.label_.Mutable(GetArenaForAllocation());
+}
+inline std::string* AppInfo::release_label() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AppInfo.label)
+  return _impl_.label_.Release();
+}
+inline void AppInfo::set_allocated_label(std::string* label) {
+  if (label != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.label_.SetAllocated(label, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.label_.IsDefault()) {
+    _impl_.label_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AppInfo.label)
+}
+
+// bytes icon_png = 3;
+inline void AppInfo::clear_icon_png() {
+  _impl_.icon_png_.ClearToEmpty();
+}
+inline const std::string& AppInfo::icon_png() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AppInfo.icon_png)
+  return _internal_icon_png();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void AppInfo::set_icon_png(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.icon_png_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AppInfo.icon_png)
+}
+inline std::string* AppInfo::mutable_icon_png() {
+  std::string* _s = _internal_mutable_icon_png();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AppInfo.icon_png)
+  return _s;
+}
+inline const std::string& AppInfo::_internal_icon_png() const {
+  return _impl_.icon_png_.Get();
+}
+inline void AppInfo::_internal_set_icon_png(const std::string& value) {
+  
+  _impl_.icon_png_.Set(value, GetArenaForAllocation());
+}
+inline std::string* AppInfo::_internal_mutable_icon_png() {
+  
+  return _impl_.icon_png_.Mutable(GetArenaForAllocation());
+}
+inline std::string* AppInfo::release_icon_png() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AppInfo.icon_png)
+  return _impl_.icon_png_.Release();
+}
+inline void AppInfo::set_allocated_icon_png(std::string* icon_png) {
+  if (icon_png != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.icon_png_.SetAllocated(icon_png, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.icon_png_.IsDefault()) {
+    _impl_.icon_png_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AppInfo.icon_png)
 }
 
 // -------------------------------------------------------------------
@@ -4473,6 +4820,80 @@ inline ::dsa::control::v1::PointerEvent* Envelope::mutable_pointer_event() {
   return _msg;
 }
 
+// .dsa.control.v1.AppInfo app_info = 15;
+inline bool Envelope::_internal_has_app_info() const {
+  return body_case() == kAppInfo;
+}
+inline bool Envelope::has_app_info() const {
+  return _internal_has_app_info();
+}
+inline void Envelope::set_has_app_info() {
+  _impl_._oneof_case_[0] = kAppInfo;
+}
+inline void Envelope::clear_app_info() {
+  if (_internal_has_app_info()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.app_info_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::AppInfo* Envelope::release_app_info() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.app_info)
+  if (_internal_has_app_info()) {
+    clear_has_body();
+    ::dsa::control::v1::AppInfo* temp = _impl_.body_.app_info_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.app_info_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::AppInfo& Envelope::_internal_app_info() const {
+  return _internal_has_app_info()
+      ? *_impl_.body_.app_info_
+      : reinterpret_cast< ::dsa::control::v1::AppInfo&>(::dsa::control::v1::_AppInfo_default_instance_);
+}
+inline const ::dsa::control::v1::AppInfo& Envelope::app_info() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.app_info)
+  return _internal_app_info();
+}
+inline ::dsa::control::v1::AppInfo* Envelope::unsafe_arena_release_app_info() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.app_info)
+  if (_internal_has_app_info()) {
+    clear_has_body();
+    ::dsa::control::v1::AppInfo* temp = _impl_.body_.app_info_;
+    _impl_.body_.app_info_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_app_info(::dsa::control::v1::AppInfo* app_info) {
+  clear_body();
+  if (app_info) {
+    set_has_app_info();
+    _impl_.body_.app_info_ = app_info;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.app_info)
+}
+inline ::dsa::control::v1::AppInfo* Envelope::_internal_mutable_app_info() {
+  if (!_internal_has_app_info()) {
+    clear_body();
+    set_has_app_info();
+    _impl_.body_.app_info_ = CreateMaybeMessage< ::dsa::control::v1::AppInfo >(GetArenaForAllocation());
+  }
+  return _impl_.body_.app_info_;
+}
+inline ::dsa::control::v1::AppInfo* Envelope::mutable_app_info() {
+  ::dsa::control::v1::AppInfo* _msg = _internal_mutable_app_info();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.app_info)
+  return _msg;
+}
+
 inline bool Envelope::has_body() const {
   return body_case() != BODY_NOT_SET;
 }
@@ -4485,6 +4906,8 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

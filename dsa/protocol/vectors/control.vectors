@@ -1,6 +1,7 @@
 # Control protocol vectors. Each line: a case name, then the bytes of one Envelope in
 # hex ("-" for none). Every language's generated codec must encode each case to
 # exactly these bytes and decode them back to the same message.
+app_info 7a240a11636f6d2e6578616d706c652e6e6f74657312054e6f7465731a0889504e470d0a1a0a
 auth_challenge 22220a20404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f
 auth_proof 2a220a20606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f
 close_task 4a02082a

@@ -19,3 +19,28 @@ fn pr1_connecting_without_a_listener_is_reported_as_closed() {
         Some(dsa_transport::TransportError::Closed)
     );
 }
+
+#[test]
+fn pr1_a_cloned_sender_sends_while_another_thread_waits_to_receive() {
+    let (mut listener, mut connector) = memory::pair();
+    let mut near = connector
+        .connect(std::time::Duration::from_secs(1))
+        .unwrap();
+    let mut far = listener.accept(std::time::Duration::from_secs(1)).unwrap();
+    let mut sender = near
+        .try_clone_sender()
+        .expect("memory connections share a sender");
+    let reader = std::thread::spawn(move || near.recv(Some(std::time::Duration::from_secs(5))));
+    sender.send(b"one").unwrap();
+    sender.send(b"two").unwrap();
+    assert_eq!(
+        far.recv(Some(std::time::Duration::from_secs(5))).unwrap(),
+        b"one"
+    );
+    assert_eq!(
+        far.recv(Some(std::time::Duration::from_secs(5))).unwrap(),
+        b"two"
+    );
+    far.send(b"back").unwrap();
+    assert_eq!(reader.join().unwrap().unwrap(), b"back");
+}

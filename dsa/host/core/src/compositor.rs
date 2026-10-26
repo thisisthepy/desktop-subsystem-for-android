@@ -3,9 +3,11 @@
 //!
 //! The compositor receives guest graphics streams over the transport and delegates them
 //! to a [`GraphicsRenderer`]. [`task_windows`] decides which window each task has and
-//! which window each display's frames go to; the platform only carries it out.
+//! which window each display's frames go to, and [`window_hosts`] which app window host
+//! shows each window; the platform only carries it out.
 
 pub mod task_windows;
+pub mod window_hosts;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;

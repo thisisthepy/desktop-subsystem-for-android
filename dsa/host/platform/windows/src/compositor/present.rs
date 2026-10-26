@@ -1,10 +1,13 @@
 //! Direct3D 11 and DirectComposition: how a task's frames appear in its window.
 //!
-//! Each task window has a DirectComposition visual holding a flip-model swapchain. The
-//! renderer copies the task's frame into a shared texture on the GPU, and
-//! [`WindowPresenter::present`] copies that into the swapchain and presents it. The visual
-//! is scaled to fill the window, so while the user resizes it, the last frame is stretched
-//! over the new size until a frame of that size arrives. No frame passes through the CPU.
+//! The window manager makes a [`SharedTexture`] for each task window and the renderer copies
+//! the task's frame into it on the GPU. The texture is shared by an NT handle, which the
+//! window manager places in the app window host's process; the window host opens it
+//! ([`Gpu::open_shared`]) on the same GPU. Each task window there has a DirectComposition
+//! visual holding a flip-model swapchain, and [`WindowPresenter::present`] copies the frame
+//! into the swapchain and presents it. The visual is scaled to fill the window, so while the
+//! user resizes it, the last frame is stretched over the new size until a frame of that size
+//! arrives. No frame passes through the CPU.
 
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
@@ -17,11 +20,11 @@ use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN, D3D_DRIVER_TYPE_WARP,
 };
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Query, ID3D11Texture2D,
-    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-    D3D11_QUERY_DESC, D3D11_QUERY_EVENT, D3D11_RESOURCE_MISC_SHARED,
-    D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
-    D3D11_USAGE_DEFAULT,
+    D3D11CreateDevice, ID3D11Device, ID3D11Device1, ID3D11DeviceContext, ID3D11Query,
+    ID3D11Texture2D, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
+    D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION,
+    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
 };
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual,
@@ -37,9 +40,6 @@ use windows::Win32::Graphics::Dxgi::{
 };
 use windows_numerics::Matrix3x2;
 
-use super::frames::FrameTarget;
-use super::log::{note, CompositorLogger};
-
 /// How long a present waits for the GPU to finish reading the shared texture.
 const COPY_WAIT: Duration = Duration::from_millis(500);
 
@@ -47,12 +47,13 @@ fn failed(what: &str, error: windows::core::Error) -> String {
     format!("{what}: {error}")
 }
 
-/// The Direct3D 11 device and DirectComposition device every task window shares.
+/// The Direct3D 11 device, and the DirectComposition device every task window of a process
+/// shares when the process has windows.
 pub struct Gpu {
     device: ID3D11Device,
     context: Mutex<ID3D11DeviceContext>,
     factory: IDXGIFactory2,
-    dcomp: Mutex<IDCompositionDevice>,
+    dcomp: Option<Mutex<IDCompositionDevice>>,
     /// Whether the device is on the GPU the renderer named; frames cannot cross GPUs.
     pub on_renderer_gpu: bool,
 }
@@ -64,8 +65,9 @@ unsafe impl Sync for Gpu {}
 
 impl Gpu {
     /// Creates the devices on the GPU `luid` names (the renderer's), else on the default
-    /// GPU, else on the software rasteriser.
-    pub fn new(luid: Option<[u8; 8]>) -> Result<Arc<Gpu>, String> {
+    /// GPU, else on the software rasteriser. `composition` adds the DirectComposition device
+    /// that windows need; the window manager, which has none, leaves it out.
+    pub fn new(luid: Option<[u8; 8]>, composition: bool) -> Result<Arc<Gpu>, String> {
         // SAFETY: plain COM calls; every out pointer is a local.
         unsafe {
             let factory: IDXGIFactory2 = CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0))
@@ -108,16 +110,21 @@ impl Gpu {
                         let (Some(device), Some(context)) = (device, context) else {
                             continue;
                         };
-                        let dxgi: IDXGIDevice = device
-                            .cast()
-                            .map_err(|e| failed("reaching the DXGI device", e))?;
-                        let dcomp: IDCompositionDevice = DCompositionCreateDevice(&dxgi)
-                            .map_err(|e| failed("creating the DirectComposition device", e))?;
+                        let dcomp = if composition {
+                            let dxgi: IDXGIDevice = device
+                                .cast()
+                                .map_err(|e| failed("reaching the DXGI device", e))?;
+                            let dcomp: IDCompositionDevice = DCompositionCreateDevice(&dxgi)
+                                .map_err(|e| failed("creating the DirectComposition device", e))?;
+                            Some(Mutex::new(dcomp))
+                        } else {
+                            None
+                        };
                         return Ok(Arc::new(Gpu {
                             device,
                             context: Mutex::new(context),
                             factory,
-                            dcomp: Mutex::new(dcomp),
+                            dcomp,
                             on_renderer_gpu,
                         }));
                     }
@@ -168,18 +175,65 @@ impl Gpu {
                 )
                 .map_err(|e| failed("sharing a task window's texture", e))?;
             Ok(SharedTexture {
-                texture,
+                _texture: texture,
                 handle,
                 size: (width, height),
             })
         }
     }
+
+    /// Opens the texture another process shared by `handle`, which is a handle of this
+    /// process. The handle stays the caller's to close.
+    pub fn open_shared(&self, handle: isize, size: (u32, u32)) -> Result<OpenedTexture, String> {
+        // SAFETY: plain COM calls; the handle is only read.
+        unsafe {
+            let device: ID3D11Device1 = self
+                .device
+                .cast()
+                .map_err(|e| failed("reaching the Direct3D 11.1 device", e))?;
+            let texture: ID3D11Texture2D = device
+                .OpenSharedResource1(HANDLE(handle as *mut c_void))
+                .map_err(|e| failed("opening a task's shared frame texture", e))?;
+            let mut desc = D3D11_TEXTURE2D_DESC::default();
+            texture.GetDesc(&mut desc);
+            if (desc.Width, desc.Height) != size {
+                return Err(format!(
+                    "a task's frame texture is {}x{}, not the {}x{} it was announced as",
+                    desc.Width, desc.Height, size.0, size.1
+                ));
+            }
+            Ok(OpenedTexture { texture, size })
+        }
+    }
+
+    fn dcomp(&self) -> Result<&Mutex<IDCompositionDevice>, String> {
+        self.dcomp
+            .as_ref()
+            .ok_or_else(|| "these devices were made without DirectComposition".to_string())
+    }
 }
 
-/// A texture the renderer copies a task's frame into, opened by its shared NT handle. The
-/// handle closes when the last reference goes.
-pub struct SharedTexture {
+/// A texture another process shares, opened in this one: where a task's frames arrive.
+pub struct OpenedTexture {
     texture: ID3D11Texture2D,
+    size: (u32, u32),
+}
+
+// SAFETY: a Direct3D 11 resource may be used from any thread.
+unsafe impl Send for OpenedTexture {}
+unsafe impl Sync for OpenedTexture {}
+
+impl OpenedTexture {
+    pub fn size(&self) -> (u32, u32) {
+        self.size
+    }
+}
+
+/// A texture the renderer copies a task's frame into, and an app window host shows it from,
+/// each opening it by its shared NT handle. The handle closes when the last reference goes.
+pub struct SharedTexture {
+    /// Held so the texture is this process's for as long as its handle is handed out.
+    _texture: ID3D11Texture2D,
     handle: HANDLE,
     size: (u32, u32),
 }
@@ -187,6 +241,17 @@ pub struct SharedTexture {
 // SAFETY: a Direct3D 11 resource may be used from any thread; the handle is a kernel handle.
 unsafe impl Send for SharedTexture {}
 unsafe impl Sync for SharedTexture {}
+
+impl SharedTexture {
+    /// The NT handle the texture is shared by, in this process.
+    pub fn handle(&self) -> isize {
+        self.handle.0 as isize
+    }
+
+    pub fn size(&self) -> (u32, u32) {
+        self.size
+    }
+}
 
 impl Drop for SharedTexture {
     fn drop(&mut self) {
@@ -205,7 +270,6 @@ struct State {
     frame: (u32, u32),
     /// The size of the window's client area.
     view: (u32, u32),
-    texture: Option<Arc<SharedTexture>>,
     query: Option<ID3D11Query>,
     closed: bool,
 }
@@ -214,7 +278,6 @@ struct State {
 pub struct WindowPresenter {
     gpu: Arc<Gpu>,
     state: Mutex<State>,
-    logger: Option<Arc<CompositorLogger>>,
 }
 
 // SAFETY: every COM object in the state is used under the state's lock, and the
@@ -225,13 +288,8 @@ unsafe impl Sync for WindowPresenter {}
 impl WindowPresenter {
     /// Puts a visual on the window `hwnd`, whose client area is `view` pixels. Called on the
     /// thread that owns the window.
-    pub fn new(
-        gpu: Arc<Gpu>,
-        hwnd: isize,
-        view: (u32, u32),
-        logger: Option<Arc<CompositorLogger>>,
-    ) -> Result<Arc<Self>, String> {
-        let dcomp = gpu.dcomp.lock().unwrap_or_else(|e| e.into_inner());
+    pub fn new(gpu: Arc<Gpu>, hwnd: isize, view: (u32, u32)) -> Result<Arc<Self>, String> {
+        let dcomp = gpu.dcomp()?.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: `hwnd` is a live window of this thread; the rest are plain COM calls.
         let (target, visual) = unsafe {
             let target = dcomp
@@ -257,11 +315,9 @@ impl WindowPresenter {
                 swapchain: None,
                 frame: (0, 0),
                 view,
-                texture: None,
                 query: None,
                 closed: false,
             }),
-            logger,
         }))
     }
 
@@ -281,13 +337,25 @@ impl WindowPresenter {
     pub fn close(&self) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.closed = true;
-        state.texture = None;
-        let dcomp = self.gpu.dcomp.lock().unwrap_or_else(|e| e.into_inner());
+        let Ok(dcomp) = self.gpu.dcomp() else {
+            return;
+        };
+        let dcomp = dcomp.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: plain COM calls on objects this presenter owns.
         unsafe {
             let _ = state.target.SetRoot(None::<&IDCompositionVisual>);
             let _ = dcomp.Commit();
         }
+    }
+
+    /// Shows the frame in `texture`, and returns once it has been copied out, so the texture
+    /// may be written again.
+    pub fn present(&self, texture: &OpenedTexture) -> Result<(), String> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.closed {
+            return Ok(());
+        }
+        self.present_locked(&mut state, &texture.texture, texture.size)
     }
 
     /// Scales the visual so the frame fills the client area, and commits it. `wait` waits
@@ -303,7 +371,10 @@ impl WindowPresenter {
             M31: 0.0,
             M32: 0.0,
         };
-        let dcomp = self.gpu.dcomp.lock().unwrap_or_else(|e| e.into_inner());
+        let Ok(dcomp) = self.gpu.dcomp() else {
+            return;
+        };
+        let dcomp = dcomp.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: plain COM calls on objects this presenter owns.
         unsafe {
             let _ = state.visual.SetTransform2(&matrix);
@@ -314,8 +385,12 @@ impl WindowPresenter {
         }
     }
 
-    fn present_locked(&self, state: &mut State, texture: &SharedTexture) -> Result<(), String> {
-        let (width, height) = texture.size;
+    fn present_locked(
+        &self,
+        state: &mut State,
+        texture: &ID3D11Texture2D,
+        (width, height): (u32, u32),
+    ) -> Result<(), String> {
         // SAFETY: plain COM calls on objects this presenter owns, and the immediate context
         // under its lock.
         unsafe {
@@ -343,7 +418,7 @@ impl WindowPresenter {
                         .CreateSwapChainForComposition(&self.gpu.device, &desc, None)
                         .map_err(|e| failed("creating a task window's swapchain", e))?;
                     {
-                        let _dcomp = self.gpu.dcomp.lock().unwrap_or_else(|e| e.into_inner());
+                        let _dcomp = self.gpu.dcomp()?.lock().unwrap_or_else(|e| e.into_inner());
                         state
                             .visual
                             .SetContent(&swapchain)
@@ -374,7 +449,7 @@ impl WindowPresenter {
                 .GetBuffer(0)
                 .map_err(|e| failed("reaching a task window's back buffer", e))?;
             let context = self.gpu.context.lock().unwrap_or_else(|e| e.into_inner());
-            context.CopyResource(&back, &texture.texture);
+            context.CopyResource(&back, texture);
             drop(back);
             swapchain
                 .Present(0, DXGI_PRESENT(0))
@@ -415,47 +490,5 @@ impl WindowPresenter {
             }
         }
         Ok(())
-    }
-}
-
-impl FrameTarget for WindowPresenter {
-    type Texture = SharedTexture;
-
-    fn texture(&self, width: u32, height: u32) -> Option<Arc<SharedTexture>> {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if state.closed {
-            return None;
-        }
-        if let Some(texture) = &state.texture {
-            if texture.size == (width, height) {
-                return Some(Arc::clone(texture));
-            }
-        }
-        match self.gpu.shared_texture(width, height) {
-            Ok(texture) => {
-                let texture = Arc::new(texture);
-                state.texture = Some(Arc::clone(&texture));
-                Some(texture)
-            }
-            Err(why) => {
-                note(self.logger.as_deref(), &why);
-                state.texture = None;
-                None
-            }
-        }
-    }
-
-    fn handle(texture: &SharedTexture) -> isize {
-        texture.handle.0 as isize
-    }
-
-    fn present(&self, texture: &SharedTexture) {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if state.closed {
-            return;
-        }
-        if let Err(why) = self.present_locked(&mut state, texture) {
-            note(self.logger.as_deref(), &why);
-        }
     }
 }

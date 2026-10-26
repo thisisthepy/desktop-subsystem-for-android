@@ -1,10 +1,14 @@
-//! The compositor's task windows, as native windows on this machine: one per guest task,
-//! opened and closed with its task, and a window close that ends its task.
+//! The task windows, as native windows on this machine: one per guest task, each in its app's
+//! own window host, opened and closed with its task, and a window close that ends its task.
 //!
 //! The service runs on the in-memory local API with a fake Android whose tasks the tests
-//! change, as the guest's task messages would.
+//! change, as the guest's task messages would. The window hosts run in this process, on
+//! threads, and reach the window manager over the in-memory transport; everything between
+//! them is what the real programs say over their pipe, down to the frames' textures, whose
+//! handles the window manager places in the window host's process (here, this one).
 #![cfg(windows)]
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -14,19 +18,22 @@ use dsa_host_core::compositor::FakeRenderer;
 use dsa_host_core::host_api::{UserAndroid, UserAndroids};
 use dsa_host_core::host_api_conformance::{FakeAndroid, FakeAndroids, RunningService};
 use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
-use dsa_host_core::tasks::{Bounds, Task, TaskEvent, TaskRequest};
+use dsa_host_core::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest};
+use dsa_host_windows::app_window::window::OpenWindow;
+use dsa_host_windows::app_window::{self, HostSetup};
 use dsa_host_windows::compositor::adapter::{DisplayPresenter, DisplaySink};
+use dsa_host_windows::compositor::hosts::HostLauncher;
 use dsa_host_windows::compositor::tasks::serve_input;
-use dsa_host_windows::compositor::window::OpenWindow;
 use dsa_host_windows::compositor::{Compositor, CompositorConfig};
 use dsa_transport::local::{self, MemoryLocalConnector, Peer};
+use dsa_transport::memory::{self, MemoryConnector};
 use dsa_transport::{Connection, Connector, Listener, TransportError};
 use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
 use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, GetWindowTextW, IsWindow, IsWindowVisible, PostMessageW, SetWindowPos,
-    SWP_NOMOVE, SWP_NOZORDER, WM_CLOSE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL,
-    WM_RBUTTONDOWN, WM_RBUTTONUP,
+    GetClientRect, GetWindowTextW, GetWindowThreadProcessId, IsWindow, IsWindowVisible,
+    PostMessageW, SetWindowPos, SWP_NOMOVE, SWP_NOZORDER, WM_CLOSE, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -41,7 +48,7 @@ impl Connector for AsUser {
     }
 }
 
-/// A presenter that keeps the sink the compositor gives it, so a test can post frames.
+/// A presenter that keeps the sink the window manager gives it, so a test can post frames.
 #[derive(Default)]
 struct CapturingPresenter {
     sink: Mutex<Option<Arc<dyn DisplaySink>>>,
@@ -57,12 +64,57 @@ impl DisplayPresenter for CapturingPresenter {
     }
 }
 
+/// The window hosts this test started, by package: each one's open windows.
+type Hosts = Arc<Mutex<BTreeMap<String, Arc<Mutex<Vec<OpenWindow>>>>>>;
+
+/// Each window host this test was asked to start: its package and its app's details.
+type Started = Arc<Mutex<Vec<(String, Option<AppInfo>)>>>;
+
+/// Starts each app's window host on a thread of this process.
+struct InProcessHosts {
+    connector: MemoryConnector,
+    /// The local API, which the windows' pointer input goes to.
+    api: MemoryLocalConnector,
+    hosts: Hosts,
+    started: Started,
+}
+
+impl HostLauncher for InProcessHosts {
+    fn start(&mut self, package: &str, app: Option<&AppInfo>) -> Result<(), String> {
+        self.started
+            .lock()
+            .unwrap()
+            .push((package.to_string(), app.cloned()));
+        let listing: Arc<Mutex<Vec<OpenWindow>>> = Arc::default();
+        self.hosts
+            .lock()
+            .unwrap()
+            .insert(package.to_string(), Arc::clone(&listing));
+        let setup = HostSetup {
+            package: package.to_string(),
+            launch: false,
+            connector: Box::new(self.connector.clone()),
+            input: Box::new(AsUser(self.api.clone())),
+            process_id: std::process::id(),
+            logger: None,
+            listing,
+        };
+        thread::spawn(move || {
+            if let Err(why) = app_window::run(setup) {
+                eprintln!("window host: {why}");
+            }
+        });
+        Ok(())
+    }
+}
+
 struct Running {
     android: Arc<FakeAndroid>,
-    windows: Arc<Mutex<Vec<OpenWindow>>>,
+    hosts: Hosts,
+    started: Started,
     stop: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
-    _service: RunningService,
+    service: Option<RunningService>,
 }
 
 impl Drop for Running {
@@ -71,6 +123,21 @@ impl Drop for Running {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+impl Running {
+    /// Every open window of every window host, in task ID order.
+    fn windows(&self) -> Vec<OpenWindow> {
+        let mut all: Vec<OpenWindow> = self
+            .hosts
+            .lock()
+            .unwrap()
+            .values()
+            .flat_map(|listing| listing.lock().unwrap().clone())
+            .collect();
+        all.sort_by_key(|window| window.task_id);
+        all
     }
 }
 
@@ -85,27 +152,42 @@ fn start(presenter: Option<Arc<CapturingPresenter>>) -> Running {
     let unbound = || -> Result<Box<dyn Listener>, TransportError> {
         Err(TransportError::Unsupported("no VM in this test".into()))
     };
+    let (host_listener, host_connector) = memory::pair();
+    let hosts: Hosts = Arc::default();
+    let started = Arc::default();
+    let launcher = InProcessHosts {
+        connector: host_connector,
+        api: api_connector.clone(),
+        hosts: Arc::clone(&hosts),
+        started: Arc::clone(&started),
+    };
     let mut compositor = Compositor::with_custom_transport(
         config,
         Arc::new(FakeRenderer::new()),
         Box::new(move || Box::new(AsUser(api_connector.clone())) as Box<dyn Connector>),
         Box::new(move |_| unbound()),
         Box::new(move |_| unbound()),
+    )
+    .with_window_hosts(
+        Box::new(move || Ok(Box::new(host_listener) as Box<dyn Listener>)),
+        Box::new(launcher),
     );
     if let Some(presenter) = presenter {
         compositor = compositor.with_display_presenter(presenter);
     }
-    let windows = compositor.open_windows();
     let stop = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&stop);
     let thread = thread::spawn(move || compositor.run(flag));
-    let android = wait_for("the compositor to watch the tasks", || androids.of(USER));
+    let android = wait_for("the window manager to watch the tasks", || {
+        androids.of(USER)
+    });
     Running {
         android,
-        windows,
+        hosts,
+        started,
         stop,
         thread: Some(thread),
-        _service: service,
+        service: Some(service),
     }
 }
 
@@ -137,7 +219,7 @@ fn task(task_id: i32, label: &str, width: i32, height: i32) -> Task {
 
 fn windows_of(running: &Running, count: usize) -> Vec<OpenWindow> {
     wait_for(&format!("{count} task windows"), || {
-        let open = running.windows.lock().unwrap().clone();
+        let open = running.windows();
         (open.len() == count).then_some(open)
     })
 }
@@ -159,8 +241,12 @@ fn client_size(hwnd: isize) -> (i32, i32) {
     (rect.right - rect.left, rect.bottom - rect.top)
 }
 
+fn window_thread(hwnd: isize) -> u32 {
+    unsafe { GetWindowThreadProcessId(hwnd as HWND, std::ptr::null_mut()) }
+}
+
 #[test]
-fn fr3_two_apps_open_two_native_windows_titled_and_sized_by_their_tasks() {
+fn fr3_two_apps_open_two_native_windows_each_in_its_own_window_host() {
     let running = start(None);
     running
         .android
@@ -173,6 +259,16 @@ fn fr3_two_apps_open_two_native_windows_titled_and_sized_by_their_tasks() {
     assert_eq!(open[0].task_id, 1);
     assert_eq!(open[1].task_id, 2);
     assert_ne!(open[0].hwnd, open[1].hwnd);
+    // Each app's window belongs to its own window host.
+    let hosts = running.hosts.lock().unwrap().clone();
+    assert_eq!(
+        hosts.keys().cloned().collect::<Vec<_>>(),
+        vec![
+            "com.example.app1".to_string(),
+            "com.example.app2".to_string()
+        ]
+    );
+    assert_ne!(window_thread(open[0].hwnd), window_thread(open[1].hwnd));
     for (window, (label, size)) in open
         .iter()
         .zip([("Clock", (400, 300)), ("Maps", (500, 350))])
@@ -189,6 +285,39 @@ fn fr3_two_apps_open_two_native_windows_titled_and_sized_by_their_tasks() {
     wait_for("the window to be retitled", || {
         (title(open[0].hwnd) == "Alarm").then_some(())
     });
+}
+
+#[test]
+fn fr3_an_apps_window_host_is_made_with_the_apps_name_and_icon() {
+    let running = start(None);
+    let clock = AppInfo {
+        package_name: "com.example.app1".into(),
+        label: "Clock".into(),
+        icon_png: vec![0x89, b'P', b'N', b'G'],
+    };
+    running.android.publish(TaskEvent::App(clock.clone()));
+    running
+        .android
+        .publish(TaskEvent::Updated(task(1, "Alarm", 400, 300)));
+    windows_of(&running, 1);
+    assert_eq!(
+        *running.started.lock().unwrap(),
+        vec![("com.example.app1".to_string(), Some(clock))]
+    );
+}
+
+#[test]
+fn fr3_two_tasks_of_one_app_share_its_window_host() {
+    let running = start(None);
+    let mut second = task(2, "Inbox 2", 400, 300);
+    second.package_name = "com.example.app1".into();
+    running
+        .android
+        .publish(TaskEvent::Updated(task(1, "Inbox", 400, 300)));
+    running.android.publish(TaskEvent::Updated(second));
+    let open = windows_of(&running, 2);
+    assert_eq!(running.started.lock().unwrap().len(), 1);
+    assert_eq!(window_thread(open[0].hwnd), window_thread(open[1].hwnd));
 }
 
 #[test]
@@ -228,7 +357,7 @@ fn fr3_closing_a_task_window_asks_the_guest_to_end_the_task() {
     // The guest ends the task; nothing opens again.
     running.android.publish(TaskEvent::Removed { task_id: 7 });
     thread::sleep(Duration::from_millis(200));
-    assert!(running.windows.lock().unwrap().is_empty());
+    assert!(running.windows().is_empty());
 }
 
 #[test]
@@ -241,7 +370,7 @@ fn fr3_a_close_the_guest_cannot_take_opens_the_window_again() {
     let open = windows_of(&running, 1);
     unsafe { PostMessageW(open[0].hwnd as HWND, WM_CLOSE, 0, 0) };
     let reopened = wait_for("the window to open again", || {
-        let now = running.windows.lock().unwrap().clone();
+        let now = running.windows();
         (now.len() == 1 && now[0].hwnd != open[0].hwnd).then_some(now)
     });
     assert_eq!(title(reopened[0].hwnd), "Clock");
@@ -252,8 +381,8 @@ fn fr3_only_a_tasks_own_display_reaches_its_window_and_the_whole_screen_never_do
     let presenter = Arc::new(CapturingPresenter::default());
     let running = start(Some(Arc::clone(&presenter)));
     let Some(sink) = presenter.sink.lock().unwrap().clone() else {
-        // The compositor could not create its Direct3D devices here, so it showed no frames
-        // and registered no sink. The windows tests above still ran.
+        // The window manager could not create its Direct3D device here, so it showed no
+        // frames and registered no sink. The window tests above still ran.
         eprintln!("skipping: no Direct3D 11 device on this machine");
         return;
     };
@@ -279,12 +408,21 @@ fn fr3_only_a_tasks_own_display_reaches_its_window_and_the_whole_screen_never_do
     });
     let open = windows_of(&running, 1);
 
+    // The window manager makes the texture, places its handle in the window host's process,
+    // and the window host opens it there.
     let handle = wait_for("display 3 to reach task 1's window", || {
         sink.target(3, 400, 300)
     });
     assert_ne!(handle, 0);
-    // Copying the frame into the window's swapchain and presenting it works on this GPU.
+    // The window host copies the frame into its window's swapchain, presents it and says
+    // so; the frame call returns only then.
+    let started = Instant::now();
     sink.frame(3);
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "the window host did not answer the frame: {:?}",
+        started.elapsed()
+    );
     assert_eq!(sink.target(0, 1920, 1080), None, "the whole screen");
     assert_eq!(sink.target(4, 400, 300), None, "a task without a window");
     assert_eq!(sink.target(5, 400, 300), None, "a display no task claimed");
@@ -311,42 +449,47 @@ fn fr3_only_a_tasks_own_display_reaches_its_window_and_the_whole_screen_never_do
     // The task ends: its display reaches nothing.
     running.android.publish(TaskEvent::Removed { task_id: 1 });
     windows_of(&running, 0);
-    assert_eq!(sink.target(3, 640, 480), None);
+    wait_for("display 3 to reach nothing", || {
+        sink.target(3, 640, 480).is_none().then_some(())
+    });
 }
 
 #[test]
 fn nfr5_a_service_that_goes_away_closes_every_task_window() {
-    let (api_listener, api_connector) = local::pair();
-    let androids = Arc::new(FakeAndroids::default());
-    let service = RunningService::start(Box::new(api_listener), androids.clone());
-    let unbound = || -> Result<Box<dyn Listener>, TransportError> {
-        Err(TransportError::Unsupported("no VM in this test".into()))
-    };
-    let compositor = Compositor::with_custom_transport(
-        CompositorConfig::default(),
-        Arc::new(FakeRenderer::new()),
-        Box::new(move || Box::new(AsUser(api_connector.clone())) as Box<dyn Connector>),
-        Box::new(move |_| unbound()),
-        Box::new(move |_| unbound()),
-    );
-    let windows = compositor.open_windows();
-    let stop = Arc::new(AtomicBool::new(false));
-    let flag = Arc::clone(&stop);
-    let thread = thread::spawn(move || compositor.run(flag));
-    let android = wait_for("the compositor to watch the tasks", || androids.of(USER));
-    android.publish(TaskEvent::Updated(task(1, "Clock", 400, 300)));
-    wait_for("the window", || {
-        (windows.lock().unwrap().len() == 1).then_some(())
-    });
+    let mut running = start(None);
+    running
+        .android
+        .publish(TaskEvent::Updated(task(1, "Clock", 400, 300)));
+    windows_of(&running, 1);
 
     // The service stops: no new connection is accepted, and the watch ends.
-    drop(service);
-    android.end_watches();
-    wait_for("every window to close", || {
-        windows.lock().unwrap().is_empty().then_some(())
-    });
-    stop.store(true, Ordering::SeqCst);
-    thread.join().unwrap();
+    drop(running.service.take());
+    running.android.end_watches();
+    windows_of(&running, 0);
+}
+
+#[test]
+fn fr3_a_window_host_names_its_app_by_its_file_or_its_argument() {
+    use std::path::Path;
+    let none: Vec<String> = Vec::new();
+    assert_eq!(
+        app_window::package_of(
+            Path::new(r"C:\Users\u\AppData\Local\DSA\apps\com.android.settings.exe"),
+            &none
+        ),
+        Some("com.android.settings".to_string())
+    );
+    assert_eq!(
+        app_window::package_of(Path::new(r"C:\Program Files\DSA\dsa-app-window.exe"), &none),
+        None
+    );
+    let named = vec!["--package".to_string(), "org.example.notes".to_string()];
+    assert_eq!(
+        app_window::package_of(Path::new("dsa-app-window.exe"), &named),
+        Some("org.example.notes".to_string())
+    );
+    let bad = vec!["--package".to_string(), r"..\evil".to_string()];
+    assert_eq!(app_window::package_of(Path::new("x.y.exe"), &bad), None);
 }
 
 /// The button flags a button message carries in its `wparam` (`MK_LBUTTON`, `MK_RBUTTON`).

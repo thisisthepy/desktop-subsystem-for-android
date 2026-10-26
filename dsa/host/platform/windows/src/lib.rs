@@ -22,6 +22,12 @@
 //! - [`user_disk`]: each user's Android disk (Windows only).
 //! - [`account`]: the Windows account the host runs as (Windows only).
 //! - [`render_gpu`]: which GPU the host renderer runs on, and the setting that chooses it.
+//! - [`compositor`]: the DSA Window Manager, which owns no window and hands each task's
+//!   frames to its app's window host (Windows only).
+//! - [`app_window`]: the app window host, the program that owns an app's task windows
+//!   (Windows only).
+//! - [`app_exe`]: each app's own copy of the window host, named and drawn as the app
+//!   (Windows only).
 
 /// The DSA release this program belongs to. The installer build sets `DSA_VERSION` to the
 /// release's version; a plain `cargo build` falls back to the crate's version.
@@ -34,6 +40,10 @@ pub const VERSION: &str = match option_env!("DSA_VERSION") {
 pub mod account;
 #[cfg(windows)]
 pub mod android_vm;
+#[cfg(windows)]
+pub mod app_exe;
+#[cfg(windows)]
+pub mod app_window;
 #[cfg(windows)]
 pub mod compositor;
 pub mod console_log;

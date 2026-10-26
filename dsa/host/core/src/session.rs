@@ -26,7 +26,7 @@ use dsa_protocol::control::{self, envelope::Body};
 use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 
 use crate::input::PointerEvent;
-use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskTable, TaskWatch};
+use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskTable, TaskWatch};
 
 /// Where the session is in its life.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -791,6 +791,13 @@ impl Worker {
                     task_id: frames.task_id,
                     display_id: frames.display_id,
                 });
+            }
+            Some(Body::AppInfo(app)) => {
+                self.shared.publish_task(TaskEvent::App(AppInfo {
+                    package_name: app.package_name,
+                    label: app.label,
+                    icon_png: app.icon_png,
+                }));
             }
             Some(Body::CloseTask(_)) | Some(Body::LaunchApp(_)) | Some(Body::PointerEvent(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");

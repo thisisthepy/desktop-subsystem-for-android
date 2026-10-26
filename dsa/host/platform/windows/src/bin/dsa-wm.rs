@@ -1,4 +1,4 @@
-//! The Desktop Subsystem for Android user-session compositor for Windows.
+//! The DSA Window Manager (`dsa-wm`), the user-session compositor of Desktop Subsystem for Android.
 //!
 //! Runs in the user session without a console window, accepts guest graphics streams
 //! on Hyper-V sockets (ports 5566 and 5567), shows one window per Android task with that
@@ -7,7 +7,7 @@
 
 #[cfg(not(windows))]
 fn main() -> std::process::ExitCode {
-    eprintln!("dsa-compositor runs on Windows only");
+    eprintln!("dsa-wm runs on Windows only");
     std::process::ExitCode::FAILURE
 }
 
@@ -44,7 +44,7 @@ fn main() {
 
     if let Some(log) = &logger {
         log.log(&format!(
-            "dsa-compositor starting (version {})",
+            "dsa-wm starting (version {})",
             dsa_host_windows::VERSION
         ));
     }

@@ -22,6 +22,7 @@ class AgentApplication : Application() {
             injector = AndroidInputInjector(this),
             scheduler = HandlerScheduler(thread.looper),
             log = log,
+            apps = AndroidAppInfoSource(this, log),
         ).start()
     }
 }
