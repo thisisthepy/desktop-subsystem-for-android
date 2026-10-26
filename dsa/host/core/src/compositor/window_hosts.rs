@@ -145,13 +145,22 @@ pub enum HostAction {
 /// How long a window host may take to connect after it was started.
 pub const START_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long the start of a window host waits for its app's name and icon when the guest has
+/// not given them yet. The window host's program is made with the app's name, which Task
+/// Manager and the taskbar show; started without it, the program would carry the package
+/// name until its windows close.
+pub const APP_INFO_WAIT: Duration = Duration::from_millis(1500);
+
 /// How long a window host the user started may wait for its app's first window.
 pub const LAUNCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 enum Link {
-    /// Started at the instant, not connected yet; these messages wait for it.
+    /// Not connected yet; these messages wait for it. `named` is false while the start
+    /// waits for the app's name and icon, since the instant; true once the window host was
+    /// started, at the instant.
     Starting {
         since: Instant,
+        named: bool,
         pending: Vec<ToHost>,
     },
     /// Connected. `waiting_since` is set while it has no window yet, for a window host the
@@ -182,10 +191,26 @@ impl WindowHosts {
         WindowHosts::default()
     }
 
-    /// Records an app's name and icon, for the next time its window host is made.
-    pub fn app(&mut self, app: &AppInfo) {
-        if is_valid_package(&app.package_name) {
-            self.apps.insert(app.package_name.clone(), app.clone());
+    /// Records an app's name and icon, for the next time its window host is made. A window
+    /// host that waits for them is started now.
+    pub fn app(&mut self, app: &AppInfo, now: Instant) -> Vec<HostAction> {
+        if !is_valid_package(&app.package_name) {
+            return Vec::new();
+        }
+        self.apps.insert(app.package_name.clone(), app.clone());
+        match self.hosts.get_mut(&app.package_name) {
+            Some(AppHost {
+                link: Link::Starting { since, named, .. },
+                ..
+            }) if !*named => {
+                *named = true;
+                *since = now;
+                vec![HostAction::Start {
+                    package: app.package_name.clone(),
+                    app: Some(app.clone()),
+                }]
+            }
+            _ => Vec::new(),
         }
     }
 
@@ -245,13 +270,18 @@ impl WindowHosts {
                 let mut actions = Vec::new();
                 let info = self.apps.get(package_name).cloned();
                 let app = self.hosts.entry(package_name.clone()).or_insert_with(|| {
-                    actions.push(HostAction::Start {
-                        package: package_name.clone(),
-                        app: info,
-                    });
+                    // Without the app's name yet, the start waits for it a little.
+                    let named = info.is_some();
+                    if named {
+                        actions.push(HostAction::Start {
+                            package: package_name.clone(),
+                            app: info,
+                        });
+                    }
                     AppHost {
                         link: Link::Starting {
                             since: now,
+                            named,
                             pending: Vec::new(),
                         },
                         tasks: BTreeSet::new(),
@@ -329,9 +359,13 @@ impl WindowHosts {
         };
         app.tasks.remove(&task_id);
         match &mut app.link {
-            Link::Starting { pending, .. } => {
+            Link::Starting { pending, named, .. } => {
                 // The window was never shown; nothing about it needs to reach the window host.
                 pending.retain(|message| message.task_id() != task_id);
+                if !*named && app.tasks.is_empty() {
+                    // Nothing was started, so nothing is left to wait for.
+                    self.hosts.remove(&package);
+                }
                 Vec::new()
             }
             Link::Attached { host, .. } => {
@@ -482,14 +516,29 @@ impl WindowHosts {
     /// the user started whose app showed no window in [`LAUNCH_TIMEOUT`]. Returns the
     /// packages that did not start, with the tasks that got no window, and the
     /// disconnections to make.
+    /// A window host that waited [`APP_INFO_WAIT`] for its app's name without getting it is
+    /// started without it.
     pub fn tick(&mut self, now: Instant) -> (Vec<(String, Vec<i32>)>, Vec<HostAction>) {
+        let mut actions = Vec::new();
+        for (package, app) in self.hosts.iter_mut() {
+            if let Link::Starting { since, named, .. } = &mut app.link {
+                if !*named && now.duration_since(*since) >= APP_INFO_WAIT {
+                    *named = true;
+                    *since = now;
+                    actions.push(HostAction::Start {
+                        package: package.clone(),
+                        app: self.apps.get(package).cloned(),
+                    });
+                }
+            }
+        }
         let late: Vec<String> = self
             .hosts
             .iter()
             .filter_map(|(package, app)| match app.link {
-                Link::Starting { since, .. } if now.duration_since(since) >= START_TIMEOUT => {
-                    Some(package.clone())
-                }
+                Link::Starting {
+                    since, named: true, ..
+                } if now.duration_since(since) >= START_TIMEOUT => Some(package.clone()),
                 _ => None,
             })
             .collect();
@@ -513,7 +562,6 @@ impl WindowHosts {
                 _ => None,
             })
             .collect();
-        let mut actions = Vec::new();
         for (package, host) in idle {
             self.hosts.remove(&package);
             actions.push(HostAction::Disconnect {
@@ -770,6 +818,22 @@ mod tests {
     const CLOCK: &str = "com.example.clock";
     const MAPS: &str = "com.example.maps";
 
+    fn info(package: &str) -> AppInfo {
+        AppInfo {
+            package_name: package.into(),
+            label: "App".into(),
+            icon_png: Vec::new(),
+        }
+    }
+
+    /// Window hosts that know the name of every app the tests open.
+    fn named_hosts(now: Instant) -> WindowHosts {
+        let mut hosts = WindowHosts::new();
+        hosts.app(&info(CLOCK), now);
+        hosts.app(&info(MAPS), now);
+        hosts
+    }
+
     #[test]
     fn fr3_each_app_gets_its_own_window_host() {
         let now = Instant::now();
@@ -779,7 +843,7 @@ mod tests {
             label: "Clock".into(),
             icon_png: vec![1],
         };
-        hosts.app(&clock);
+        assert!(hosts.app(&clock, now).is_empty());
         assert_eq!(
             hosts.change(&open(1, CLOCK), now),
             vec![HostAction::Start {
@@ -787,11 +851,13 @@ mod tests {
                 app: Some(clock)
             }]
         );
+        // An app whose name is not known yet waits for it.
+        assert!(hosts.change(&open(2, MAPS), now).is_empty());
         assert_eq!(
-            hosts.change(&open(2, MAPS), now),
+            hosts.app(&info(MAPS), now),
             vec![HostAction::Start {
                 package: MAPS.into(),
-                app: None
+                app: Some(info(MAPS))
             }]
         );
         // A second task of the same app goes to the same window host.
@@ -799,9 +865,73 @@ mod tests {
     }
 
     #[test]
-    fn fr3_windows_wait_for_their_window_host_to_connect() {
+    fn fr3_a_window_host_waits_for_its_apps_name_before_it_starts() {
         let now = Instant::now();
         let mut hosts = WindowHosts::new();
+        // The task arrived before the app's name: nothing starts yet.
+        assert!(hosts.change(&open(1, CLOCK), now).is_empty());
+        assert_eq!(
+            hosts.tick(now + APP_INFO_WAIT / 2),
+            (Vec::new(), Vec::new())
+        );
+        // The name arrives in time: the window host starts with it, once.
+        assert_eq!(
+            hosts.app(&info(CLOCK), now + APP_INFO_WAIT / 2),
+            vec![HostAction::Start {
+                package: CLOCK.into(),
+                app: Some(info(CLOCK))
+            }]
+        );
+        assert!(hosts.app(&info(CLOCK), now + APP_INFO_WAIT).is_empty());
+        let (_, actions) = hosts.tick(now + APP_INFO_WAIT * 2);
+        assert!(actions.is_empty());
+        // The window waits for the window host, as any window does.
+        assert_eq!(
+            hosts.attached(HostId(1), CLOCK, false, now),
+            vec![HostAction::Send {
+                host: HostId(1),
+                message: show(1)
+            }]
+        );
+    }
+
+    #[test]
+    fn fr3_a_window_host_whose_apps_name_never_comes_starts_without_it() {
+        let now = Instant::now();
+        let mut hosts = WindowHosts::new();
+        assert!(hosts.change(&open(1, MAPS), now).is_empty());
+        let (failed, actions) = hosts.tick(now + APP_INFO_WAIT);
+        assert!(failed.is_empty());
+        assert_eq!(
+            actions,
+            vec![HostAction::Start {
+                package: MAPS.into(),
+                app: None
+            }]
+        );
+        // The time to connect counts from the start, not from the wait.
+        let (failed, _) = hosts.tick(now + START_TIMEOUT);
+        assert!(failed.is_empty());
+        let (failed, _) = hosts.tick(now + APP_INFO_WAIT + START_TIMEOUT);
+        assert_eq!(failed, vec![(MAPS.to_string(), vec![1])]);
+    }
+
+    #[test]
+    fn fr3_a_window_closed_while_its_host_waits_for_a_name_starts_nothing() {
+        let now = Instant::now();
+        let mut hosts = WindowHosts::new();
+        hosts.change(&open(1, CLOCK), now);
+        assert!(hosts
+            .change(&WindowChange::Close { task_id: 1 }, now)
+            .is_empty());
+        assert!(hosts.app(&info(CLOCK), now).is_empty());
+        assert_eq!(hosts.tick(now + APP_INFO_WAIT), (Vec::new(), Vec::new()));
+    }
+
+    #[test]
+    fn fr3_windows_wait_for_their_window_host_to_connect() {
+        let now = Instant::now();
+        let mut hosts = named_hosts(now);
         hosts.change(&open(1, CLOCK), now);
         hosts.change(
             &WindowChange::Retitle {
@@ -842,7 +972,7 @@ mod tests {
     #[test]
     fn fr3_a_window_host_ends_with_its_apps_last_window() {
         let now = Instant::now();
-        let mut hosts = WindowHosts::new();
+        let mut hosts = named_hosts(now);
         hosts.change(&open(1, CLOCK), now);
         hosts.change(&open(2, CLOCK), now);
         let host = HostId(1);
@@ -873,7 +1003,7 @@ mod tests {
     #[test]
     fn fr3_a_window_closed_before_its_host_connects_is_never_shown() {
         let now = Instant::now();
-        let mut hosts = WindowHosts::new();
+        let mut hosts = named_hosts(now);
         hosts.change(&open(1, CLOCK), now);
         hosts.change(&WindowChange::Close { task_id: 1 }, now);
         let actions = hosts.attached(HostId(1), CLOCK, false, now);
@@ -883,7 +1013,7 @@ mod tests {
     #[test]
     fn fr3_ending_a_window_host_closes_its_windows() {
         let now = Instant::now();
-        let mut hosts = WindowHosts::new();
+        let mut hosts = named_hosts(now);
         hosts.change(&open(1, CLOCK), now);
         hosts.change(&open(2, CLOCK), now);
         hosts.change(&open(3, MAPS), now);
@@ -898,7 +1028,7 @@ mod tests {
     #[test]
     fn fr3_a_window_host_reports_only_on_its_own_windows() {
         let now = Instant::now();
-        let mut hosts = WindowHosts::new();
+        let mut hosts = named_hosts(now);
         hosts.change(&open(1, CLOCK), now);
         hosts.change(&open(2, MAPS), now);
         hosts.attached(HostId(1), CLOCK, false, now);
@@ -967,7 +1097,7 @@ mod tests {
     #[test]
     fn nfr5_a_window_host_that_never_connects_is_given_up_and_tried_again() {
         let now = Instant::now();
-        let mut hosts = WindowHosts::new();
+        let mut hosts = named_hosts(now);
         hosts.change(&open(1, CLOCK), now);
         let (failed, _) = hosts.tick(now + START_TIMEOUT);
         assert_eq!(failed, vec![(CLOCK.to_string(), vec![1])]);

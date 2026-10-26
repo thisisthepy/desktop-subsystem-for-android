@@ -3,13 +3,15 @@
 //!
 //! Task Manager and the taskbar group windows by program, and take the name and icon from
 //! the program file. So each Android app gets its own copy of `dsa-app-window.exe`, at
-//! `%LOCALAPPDATA%\DSA\apps\<package>.exe`, whose version information names the app and
-//! whose icon is the app's launcher icon. Settings then shows as Settings, with its own icon
-//! and its own entry, apart from every other app.
+//! `%LOCALAPPDATA%\DSA\apps\<package>\<Label>.exe`, named after the app, whose version
+//! information names the app and whose icon is the app's launcher icon. Settings then shows
+//! as `Settings.exe` and Settings, with its own icon and its own entry, apart from every other
+//! app. Each package has its own folder, so two apps of the same name never share a file.
 //!
 //! A copy is made again when the installed window host changes (DSA was updated) or the app's
-//! name or icon does. A note beside it (`<package>.json`) records what it was made from. A
-//! copy that is running cannot be replaced; it stays as it is until the app's windows close.
+//! name or icon does. A note beside it (`made.json`) records what it was made from. A copy
+//! under the app's old name is removed once it no longer runs. A copy that is running cannot
+//! be replaced; when its name stays the same, it stays as it is until the app's windows close.
 
 use std::fs;
 use std::io;
@@ -35,6 +37,77 @@ pub const TEMPLATE_NAME: &str = "dsa-app-window.exe";
 
 /// The most icon images a program is looked through for.
 const MAX_ICON_IMAGES: u16 = 64;
+
+/// The note in each app's folder that records what its program was made from.
+pub const NOTE_NAME: &str = "made.json";
+
+/// The longest file name an app's program gets, in characters, before `.exe`. Paths in the
+/// user's profile stay well under the classic 260-character limit with it.
+const MAX_NAME: usize = 64;
+
+/// The file name, without `.exe`, of the program named `label`: the label with what Windows
+/// does not allow in a file name taken out. `package` stands in when nothing usable is left.
+pub fn program_name(package: &str, label: &str) -> String {
+    const DEVICES: [&str; 4] = ["CON", "PRN", "AUX", "NUL"];
+    let cleaned: String = label
+        .chars()
+        .filter(|c| !c.is_control() && !"<>:\"/\\|?*".contains(*c))
+        .collect();
+    let mut name: String = cleaned.trim().chars().take(MAX_NAME).collect();
+    // Windows drops trailing dots and spaces from a file name.
+    name.truncate(name.trim_end_matches(['.', ' ']).len());
+    let name = name.trim_start().to_string();
+    if name.is_empty() {
+        return package.to_string();
+    }
+    // A name whose part before the first dot is a device's (`CON`, `COM1`) opens the device.
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end()
+        .to_uppercase();
+    let numbered = stem.chars().count() == 4
+        && (stem.starts_with("COM") || stem.starts_with("LPT"))
+        && stem
+            .chars()
+            .nth(3)
+            .is_some_and(|c| c.is_ascii_digit() || "\u{b9}\u{b2}\u{b3}".contains(c));
+    if DEVICES.contains(&stem.as_str()) || numbered {
+        return format!("{name}_");
+    }
+    name
+}
+
+/// Where the program of `package` named `label` goes: its own folder, in `apps_dir`.
+pub fn program_path(apps_dir: &Path, package: &str, label: &str) -> PathBuf {
+    apps_dir
+        .join(package)
+        .join(format!("{}.exe", program_name(package, label)))
+}
+
+/// Removes what is left of the app's older programs: the ones under another name in its
+/// folder, unfinished copies, and the program and note of the earlier layout, where every
+/// app's program was `<package>.exe` directly in `apps_dir`. A program that still runs
+/// cannot be removed; it is tried again the next time.
+fn remove_old(apps_dir: &Path, package: &str, keep: &Path) {
+    let _ = fs::remove_file(apps_dir.join(format!("{package}.exe")));
+    let _ = fs::remove_file(apps_dir.join(format!("{package}.exe.new")));
+    let _ = fs::remove_file(apps_dir.join(format!("{package}.json")));
+    let Some(dir) = keep.parent() else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        if path != keep && (name.ends_with(".exe") || name.ends_with(".exe.new")) {
+            let _ = fs::remove_file(&path);
+        }
+    }
+}
 
 /// Where each app's window program goes: `%LOCALAPPDATA%\DSA\apps`.
 pub fn default_apps_dir() -> Option<PathBuf> {
@@ -82,8 +155,9 @@ fn label_of(package: &str, app: Option<&AppInfo>) -> String {
 }
 
 /// Makes sure `apps_dir` holds the window program of `package`, made from `template` with the
-/// app's name and icon, and returns its path. An existing copy that is up to date is used as
-/// it is; an outdated one that is running is used too, and the reason is returned with it.
+/// app's name and icon and named after the app, and returns its path. An existing copy that
+/// is up to date is used as it is; an outdated one of the same name that is running is used
+/// too, and the reason is returned with it.
 pub fn ensure(
     template: &Path,
     apps_dir: &Path,
@@ -93,15 +167,19 @@ pub fn ensure(
     if !is_valid_package(package) {
         return Err(format!("{package:?} is not an Android package name"));
     }
-    let target = apps_dir.join(format!("{package}.exe"));
-    let note = apps_dir.join(format!("{package}.json"));
+    let label = label_of(package, app);
+    let target = program_path(apps_dir, package, &label);
+    let Some(folder) = target.parent().map(Path::to_path_buf) else {
+        return Err(format!("{} has no folder", target.display()));
+    };
+    let note = folder.join(NOTE_NAME);
     let icon = app
         .map(|app| app.icon_png.as_slice())
         .filter(|png| png_icon(png).is_some());
     let made = Made {
         template: template_stamp(template)
             .map_err(|e| format!("the app window host {}: {e}", template.display()))?,
-        label: label_of(package, app),
+        label,
         icon: icon
             .map(|png| hex(&Sha256::digest(png)))
             .unwrap_or_default(),
@@ -110,11 +188,14 @@ pub fn ensure(
         .ok()
         .and_then(|text| serde_json::from_str::<Made>(&text).ok());
     if target.exists() && current.as_ref() == Some(&made) {
+        remove_old(apps_dir, package, &target);
         return Ok((target, None));
     }
-    fs::create_dir_all(apps_dir)
-        .map_err(|e| format!("could not create {}: {e}", apps_dir.display()))?;
-    let fresh = apps_dir.join(format!("{package}.exe.new"));
+    fs::create_dir_all(&folder)
+        .map_err(|e| format!("could not create {}: {e}", folder.display()))?;
+    let mut fresh = target.clone().into_os_string();
+    fresh.push(".new");
+    let fresh = PathBuf::from(fresh);
     fs::copy(template, &fresh).map_err(|e| {
         format!(
             "could not copy {} to {}: {e}",
@@ -130,6 +211,7 @@ pub fn ensure(
         Ok(()) => {
             let text = serde_json::to_string(&made).unwrap_or_default();
             let _ = fs::write(&note, text);
+            remove_old(apps_dir, package, &target);
             Ok((target, None))
         }
         Err(e) if target.exists() => {
@@ -287,21 +369,24 @@ impl crate::compositor::hosts::HostLauncher for ProgramLauncher {
         if let Some(note) = note {
             crate::compositor::log::note(self.logger.as_deref(), &note);
         }
-        spawn(&program)
+        spawn(&program, package)
     }
 }
 
-/// Runs `program` as a window host the window manager started.
-fn spawn(program: &Path) -> Result<(), String> {
+/// Runs `program` as the window host of `package` the window manager started.
+fn spawn(program: &Path, package: &str) -> Result<(), String> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
         CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
     };
     let application = wide(&program.to_string_lossy());
+    // The package is named too, though the program's folder names it, so the window host
+    // never has to tell it from the file's place.
     let mut command_line = wide(&format!(
-        "\"{}\" {}",
+        "\"{}\" {} {} {package}",
         program.display(),
-        crate::app_window::STARTED_BY_WINDOW_MANAGER
+        crate::app_window::STARTED_BY_WINDOW_MANAGER,
+        crate::app_window::PACKAGE_ARGUMENT
     ));
     // SAFETY: plain structures, zero is their documented initial state.
     let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };

@@ -124,7 +124,7 @@
                 <File Id="WindowManagerExe" Source="$(SourceDir)\dsa-wm.exe" KeyPath="yes" />
             </Component>
             <!-- The app window host. The window manager copies it for each Android app into
-                 the user's profile (%LOCALAPPDATA%\DSA\apps), named and drawn as the app. -->
+                 the user's profile (%LOCALAPPDATA%\DSA\apps\<package>\<Label>.exe), named and drawn as the app. -->
             <Component Id="AppWindowExe" Guid="*">
                 <File Id="AppWindowExe" Source="$(SourceDir)\dsa-app-window.exe" KeyPath="yes" />
             </Component>
