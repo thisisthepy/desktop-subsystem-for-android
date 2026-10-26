@@ -48,12 +48,11 @@ focused, or given a new description, and on any change to the task stack. The ag
 reads every running task (`getRunningTasks`, which shows a privileged app every task) and
 sends only what changed. A burst of changes is read once.
 
-A task organizer would report bounds directly, but registering one hands the organizer
-every task's surface and its transitions, which the guest's composer must keep, and only
-one organizer is active at a time. With no SystemUI and no window decorations in the guest,
-only the agent moves or resizes a task: its bounds are set when it starts, which the
-listener reports, and later only by the agent, which reads the tasks again until the
-change lands (below).
+The agent also registers a task organizer, but only to draw starting windows (see
+"Splash screens"); task reports do not come from it. With no SystemUI and no window
+decorations in the guest, only the agent moves or resizes a task: its bounds are set when it
+starts, which the listener reports, and later only by the agent, which reads the tasks again
+until the change lands (below).
 
 ## Where tasks sit on the display
 
@@ -198,6 +197,43 @@ always running and never starts cold, and its main thread does nothing else, bec
 agent's work runs on a thread of its own. So the home answers at once, and no app's process
 holds the home task.
 
+## Splash screens
+
+Since Android 12 the window manager does not draw an app's starting window (its splash
+screen) itself. It asks the registered task organizer, which on a phone is SystemUI's window
+manager shell, and with no organizer it draws none: the task's window stayed black until the
+app drew its first frame. The guest has no SystemUI, so the agent registers the organizer
+(`platform/AndroidStartingWindows.kt`).
+
+- **Which window.** For each launch the window manager describes (a new task, a cold
+  process, a task brought back), the agent picks the style the framework's shell would
+  (`splash/StartingWindowPolicy.kt`): the splash screen, its background alone, the app's
+  window background for an app on the pre-splash theme, or nothing, for home and for a task
+  that is already drawn. Task snapshots are never drawn: such a task still has its surface.
+- **What is in it.** The background is the theme's `windowSplashScreenBackground`, else its
+  `windowBackground` color. The icon is `windowSplashScreenAnimatedIcon`, else the
+  activity's icon, centered: an adaptive icon at 160 dp, any other splash icon at 288 dp
+  (240 dp on a `windowSplashScreenIconBackgroundColor` circle), so its safe zone is the
+  visible circle. `windowSplashScreenBrandingImage` sits at the bottom. An animated icon
+  plays.
+- **How.** The window is a `TYPE_APPLICATION_STARTING` window on the activity's token,
+  added from the agent's process, as the shell does. The window manager asks for its
+  removal when the app has drawn, and the agent removes it at once, without the shell's
+  reveal animation. An app that asks to animate the splash screen away itself is told it
+  gets no copy of it, and goes on.
+- **What registering changes.** The window manager hands every task to the organizer, and
+  then leaves each task's surface position and crop to it. The agent puts each task's
+  surface at the task's position, and moves it when the task moves; the crop is removed,
+  because it would keep the task's size at the moment it was organized
+  (`splash/StartingWindows.kt`). Visibility, bounds, focus and input stay with the window
+  manager. Only the last organizer registered receives starting window requests, and the
+  guest has no other. If the agent's process dies, the window manager takes the tasks back
+  and places their surfaces again.
+
+All of it runs on a thread of its own (`dsa-splash`), not on the main thread of the home
+activity. If the organizer cannot be registered, apps start without a splash screen and
+everything else works as before.
+
 ## Framework interfaces outside the SDK
 
 A platform app may use framework interfaces the SDK does not publish. The agent uses:
@@ -213,6 +249,7 @@ A platform app may use framework interfaces the SDK does not publish. The agent 
 | `Binder.markVintfStability` | Marking the listener the daemon calls as a stable interface (reflection) |
 | `InputManager.injectInputEvent`, `MotionEvent.setActionButton`, `InputEvent.setDisplayId` | Injecting the host's pointer and key input (reflection) |
 | `IActivityTaskManager.setFocusedTask` | Giving a task the input focus before its keys |
+| `TaskOrganizer`, `StartingWindowInfo`, `TaskInfo.positionInParent`, `IActivityTaskManager.onSplashScreenViewCopyFinished` | Drawing starting windows and placing organized tasks' surfaces (reflection for the fields and the copy answer) |
 
 `hidden-api/` declares the classes the agent links against. It is compile-only: at run time
 the classes are the guest's own.
