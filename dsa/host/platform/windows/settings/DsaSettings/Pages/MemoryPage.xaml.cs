@@ -1,40 +1,28 @@
-using System.ComponentModel;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Threading;
 using Dsa.Settings.Core;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
 
 namespace Dsa.Settings.Pages;
 
-public sealed partial class MemoryPage : Page, INotifyPropertyChanged
+public partial class MemoryPage : Page
 {
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(5) };
 
-    public event PropertyChangedEventHandler? PropertyChanged;
-
-    internal MemoryViewModel ViewModel => App.Memory;
-
-    /// <summary>Whether no host process of the user's Android is running.</summary>
-    internal bool HostNotRunning => ViewModel.Report is not null && !ViewModel.HostRunning;
+    private static MemoryViewModel ViewModel => App.Memory;
 
     public MemoryPage()
     {
         InitializeComponent();
-        ViewModel.PropertyChanged += OnViewModelChanged;
+        DataContext = ViewModel;
         _timer.Tick += async (_, _) => await ViewModel.RefreshAsync();
         Loaded += async (_, _) =>
         {
             _timer.Start();
             await ViewModel.RefreshAsync();
         };
-        Unloaded += (_, _) =>
-        {
-            _timer.Stop();
-            ViewModel.PropertyChanged -= OnViewModelChanged;
-        };
+        Unloaded += (_, _) => _timer.Stop();
     }
-
-    private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e) =>
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HostNotRunning)));
 
     private async void OnRefresh(object sender, RoutedEventArgs e) => await ViewModel.RefreshAsync();
 }

@@ -1,16 +1,17 @@
+using System.Windows;
+using System.Windows.Controls;
 using Dsa.Settings.Core;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
 
 namespace Dsa.Settings.Pages;
 
-public sealed partial class DisplayPage : Page
+public partial class DisplayPage : Page
 {
-    internal SettingsViewModel ViewModel => App.Settings;
+    private static SettingsViewModel ViewModel => App.Settings;
 
     public DisplayPage()
     {
         InitializeComponent();
+        DataContext = ViewModel;
         Loaded += async (_, _) => await ViewModel.LoadAsync();
     }
 
@@ -18,7 +19,7 @@ public sealed partial class DisplayPage : Page
     {
         // The list is rebuilt whenever the settings change, which also lands here; only a
         // choice that differs from the setting is sent.
-        if (GpuBox.SelectedItem is GpuChoice choice && ViewModel.Loaded)
+        if (GpuBox.SelectedItem is GpuChoice choice && ViewModel.Loaded && !ViewModel.IsBusy)
         {
             await ViewModel.SetRenderGpuAsync(choice.Value);
         }
@@ -26,7 +27,7 @@ public sealed partial class DisplayPage : Page
 
     private async void OnRestartWindowManager(object sender, RoutedEventArgs e)
     {
-        var confirmed = await Shell.Confirm(XamlRoot, App.Text.Get("RestartWindowManagerTitle"),
+        var confirmed = await Shell.Confirm(App.Text.Get("RestartWindowManagerTitle"),
             App.Text.Get("RestartWindowManagerBody"), App.Text.Get("RestartWindowManagerAction"));
         if (!confirmed)
         {
@@ -35,7 +36,7 @@ public sealed partial class DisplayPage : Page
         var problem = await Shell.RestartWindowManager();
         if (problem is not null)
         {
-            await Shell.Tell(XamlRoot, App.Text.Get("RestartWindowManagerFailed"), problem);
+            await Shell.Tell(App.Text.Get("RestartWindowManagerFailed"), problem);
         }
     }
 }

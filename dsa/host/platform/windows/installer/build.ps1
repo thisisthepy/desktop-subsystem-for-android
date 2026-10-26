@@ -141,12 +141,12 @@ $setupUi = Join-Path $out "setup-ui"
 dotnet build (Join-Path $installer "setup-ui\DsaSetup.csproj") -c Release -o $setupUi -p:Version=$Version
 if ($LASTEXITCODE -ne 0) { throw "building the setup screens failed" }
 
-# The settings app: a self-contained WinUI 3 app (the .NET and Windows App SDK runtimes in
-# its own folder), installed in the program folder's settings\ folder beside dsa.exe.
+# The settings app: a self-contained WPF app (the .NET runtime in its own folder), installed
+# in the program folder's settings\ folder beside dsa.exe.
 $settingsApp = Join-Path $out "settings-app"
 Remove-Item -Recurse -Force $settingsApp -ErrorAction SilentlyContinue
 dotnet publish (Join-Path $installer "..\settings\DsaSettings\DsaSettings.csproj") -c Release -r win-x64 `
-    -p:Platform=x64 -p:Version=$Version -o $settingsApp
+    -p:Version=$Version -o $settingsApp
 if ($LASTEXITCODE -ne 0) { throw "building the settings app failed" }
 if (-not (Test-Path (Join-Path $settingsApp "DsaSettings.exe"))) { throw "the settings app has no DsaSettings.exe" }
 

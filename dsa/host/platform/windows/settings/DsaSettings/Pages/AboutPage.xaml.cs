@@ -1,16 +1,13 @@
 using System.Reflection;
-using Dsa.Settings.Core;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
+using System.Windows;
+using System.Windows.Controls;
 
 namespace Dsa.Settings.Pages;
 
-public sealed partial class AboutPage : Page
+public partial class AboutPage : Page
 {
-    internal SettingsViewModel ViewModel => App.Settings;
-
     /// <summary>This app's version, as the installer build stamps it.</summary>
-    internal string AppVersion =>
+    private static string AppVersion =>
         typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
             .Split('+')[0]
         ?? typeof(App).Assembly.GetName().Version?.ToString()
@@ -19,8 +16,11 @@ public sealed partial class AboutPage : Page
     public AboutPage()
     {
         InitializeComponent();
-        Loaded += async (_, _) => await ViewModel.LoadAsync();
+        DataContext = App.Settings;
+        AppVersionText.Text = AppVersion;
+        HeaderVersion.Text = AppVersion;
+        Loaded += async (_, _) => await App.Settings.LoadAsync();
     }
 
-    private void OnOpenLicenses(object sender, RoutedEventArgs e) => Shell.OpenFolder(Shell.LicenseFolder, XamlRoot);
+    private void OnOpenLicenses(object sender, RoutedEventArgs e) => Shell.OpenFolder(Shell.LicenseFolder);
 }

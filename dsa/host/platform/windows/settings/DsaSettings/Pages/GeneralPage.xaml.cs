@@ -1,18 +1,20 @@
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Threading;
 using Dsa.Settings.Core;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
 
 namespace Dsa.Settings.Pages;
 
-public sealed partial class GeneralPage : Page
+public partial class GeneralPage : Page
 {
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(3) };
 
-    internal GeneralViewModel ViewModel => App.General;
+    private static GeneralViewModel ViewModel => App.General;
 
     public GeneralPage()
     {
         InitializeComponent();
+        DataContext = ViewModel;
         _timer.Tick += async (_, _) => await ViewModel.PollAsync();
         Loaded += async (_, _) =>
         {
@@ -28,5 +30,5 @@ public sealed partial class GeneralPage : Page
 
     private async void OnRefresh(object sender, RoutedEventArgs e) => await ViewModel.RefreshAsync();
 
-    private void OnOpenLogs(object sender, RoutedEventArgs e) => Shell.OpenFolder(Shell.UserLogFolder, XamlRoot);
+    private void OnOpenLogs(object sender, RoutedEventArgs e) => Shell.OpenFolder(Shell.UserLogFolder);
 }

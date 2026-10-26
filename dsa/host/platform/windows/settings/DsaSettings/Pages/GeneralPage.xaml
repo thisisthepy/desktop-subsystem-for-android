@@ -1,49 +1,52 @@
-<?xml version="1.0" encoding="utf-8"?>
 <Page
     x:Class="Dsa.Settings.Pages.GeneralPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:CommunityToolkit.WinUI.Controls">
-    <ScrollViewer Padding="36,0,36,24">
-        <StackPanel MaxWidth="1000" HorizontalAlignment="Stretch" Spacing="{StaticResource SettingsCardSpacing}">
-            <TextBlock x:Uid="GeneralTitle" Style="{StaticResource PageTitleStyle}" />
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:l="clr-namespace:Dsa.Settings">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="36,8,36,24" MaxWidth="1000">
+            <TextBlock Text="{l:Text GeneralTitle.Text}" Style="{StaticResource PageTitle}" />
 
-            <InfoBar x:Uid="GeneralErrorBar" Severity="Error" IsClosable="False"
-                     IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
-                     Message="{x:Bind ViewModel.Error, Mode=OneWay}" />
+            <ui:InfoBar Title="{l:Text GeneralErrorBar.Title}" Severity="Error" IsClosable="False"
+                        IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
 
-            <controls:SettingsCard x:Uid="GeneralStateCard">
-                <controls:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE7F8;" />
-                </controls:SettingsCard.HeaderIcon>
-                <StackPanel Orientation="Horizontal" Spacing="12">
-                    <ProgressRing IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" Width="20" Height="20" />
-                    <TextBlock Text="{x:Bind ViewModel.StateText, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}"
-                               VerticalAlignment="Center" />
-                    <Button x:Uid="StartButton" Style="{StaticResource AccentButtonStyle}" Click="OnStart"
-                            IsEnabled="{x:Bind ViewModel.CanStart, Mode=OneWay}" />
-                    <Button x:Uid="StopButton" Click="OnStop" IsEnabled="{x:Bind ViewModel.CanStop, Mode=OneWay}" />
+            <ui:CardControl Icon="{ui:SymbolIcon Desktop24}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="{l:Text GeneralStateCard.Header}" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{l:Text GeneralStateCard.Description}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <StackPanel Orientation="Horizontal">
+                    <ui:ProgressRing IsIndeterminate="True" Width="20" Height="20" Margin="0,0,12,0"
+                                     Visibility="{Binding IsBusy, Converter={StaticResource Visible}}" />
+                    <TextBlock Text="{Binding StateText, Mode=OneWay}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,12,0"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <ui:Button Content="{l:Text StartButton.Content}" Appearance="Primary" Click="OnStart" Margin="0,0,8,0"
+                               IsEnabled="{Binding CanStart, Mode=OneWay}" />
+                    <ui:Button Content="{l:Text StopButton.Content}" Click="OnStop" IsEnabled="{Binding CanStop, Mode=OneWay}" />
                 </StackPanel>
-            </controls:SettingsCard>
+            </ui:CardControl>
 
-            <InfoBar x:Uid="LastReasonBar" Severity="Warning" IsClosable="False"
-                     IsOpen="{x:Bind ViewModel.HasLastReason, Mode=OneWay}"
-                     Message="{x:Bind ViewModel.LastReason, Mode=OneWay}" />
-            <InfoBar x:Uid="UpdateNoticeBar" Severity="Informational" IsClosable="False"
-                     IsOpen="{x:Bind ViewModel.HasUpdateNotice, Mode=OneWay}"
-                     Message="{x:Bind ViewModel.UpdateNotice, Mode=OneWay}" />
+            <ui:InfoBar Title="{l:Text LastReasonBar.Title}" Severity="Warning" IsClosable="False"
+                        IsOpen="{Binding HasLastReason, Mode=OneWay}" Message="{Binding LastReason, Mode=OneWay}" Margin="0,0,0,4" />
+            <ui:InfoBar Title="{l:Text UpdateNoticeBar.Title}" Severity="Informational" IsClosable="False"
+                        IsOpen="{Binding HasUpdateNotice, Mode=OneWay}" Message="{Binding UpdateNotice, Mode=OneWay}" />
 
-            <TextBlock x:Uid="GeneralMoreHeader" Style="{StaticResource SectionHeaderStyle}" />
-            <controls:SettingsCard x:Uid="OpenLogsCard" IsClickEnabled="True" Click="OnOpenLogs">
-                <controls:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE838;" />
-                </controls:SettingsCard.HeaderIcon>
-            </controls:SettingsCard>
-            <controls:SettingsCard x:Uid="RefreshCard" IsClickEnabled="True" Click="OnRefresh">
-                <controls:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE72C;" />
-                </controls:SettingsCard.HeaderIcon>
-            </controls:SettingsCard>
+            <TextBlock Text="{l:Text GeneralMoreHeader.Text}" Style="{StaticResource SectionHeader}" />
+            <ui:CardAction Icon="{ui:SymbolIcon Folder24}" Click="OnOpenLogs" Margin="0,0,0,4">
+                <StackPanel>
+                    <TextBlock Text="{l:Text OpenLogsCard.Header}" Style="{StaticResource CardTitle}" />
+                    <TextBlock Text="{l:Text OpenLogsCard.Description}" Style="{StaticResource CardDescription}" />
+                </StackPanel>
+            </ui:CardAction>
+            <ui:CardAction Icon="{ui:SymbolIcon ArrowClockwise24}" Click="OnRefresh">
+                <StackPanel>
+                    <TextBlock Text="{l:Text RefreshCard.Header}" Style="{StaticResource CardTitle}" />
+                    <TextBlock Text="{l:Text RefreshCard.Description}" Style="{StaticResource CardDescription}" />
+                </StackPanel>
+            </ui:CardAction>
         </StackPanel>
     </ScrollViewer>
 </Page>

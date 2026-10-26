@@ -565,19 +565,18 @@ It incorporates or links against the following third-party components:
 SETTINGS_APP_NOTICE = """DSA Settings
 
 The settings app (settings\\DsaSettings.exe) is developed as part of Desktop Subsystem for
-Android and is licensed under the Apache License, Version 2.0. It is a self-contained
-WinUI 3 app: its folder carries the runtimes it is built on.
+Android and is licensed under the Apache License, Version 2.0. It is a self-contained WPF
+app: its folder carries the runtime it is built on.
 
 It incorporates the following third-party components:
-- .NET runtime (8.0):
-  Licensed under the MIT License. Source code: https://github.com/dotnet/runtime
-- Windows App SDK and WinUI 3 runtime (1.6, Microsoft.WindowsAppSDK):
-  The Windows App SDK is developed in the open under the MIT License
-  (https://github.com/microsoft/WindowsAppSDK, https://github.com/microsoft/microsoft-ui-xaml).
-  The runtime binaries in the settings folder are redistributed under the license terms of
-  the Microsoft.WindowsAppSDK package, which permit their redistribution with an app.
-- Windows Community Toolkit (CommunityToolkit.WinUI.Controls.SettingsControls 8.1):
-  Licensed under the MIT License. Source code: https://github.com/CommunityToolkit/Windows
+- .NET runtime and WPF (8.0):
+  Licensed under the MIT License. Source code: https://github.com/dotnet/runtime and
+  https://github.com/dotnet/wpf
+- WPF UI (3.0.5), Windows 11 style controls for WPF:
+  Copyright (c) 2021-2024 Leszek Pomianowski and WPF UI Contributors.
+  Licensed under the MIT License. Source code: https://github.com/lepoco/wpfui
+
+The MIT License text is in mit.txt.
 """
 
 GFXSTREAM_NOTICE = """gfxstream Graphics Remoting Transport
@@ -802,8 +801,8 @@ def generate_bundle(workspace_dir: Path, out_dir: Path, master_notice: Path | No
         "   - Detailed attribution notices: carried alongside each image release asset",
         "",
         "5. Settings App (settings\\DsaSettings.exe)",
-        "   - .NET runtime, Windows App SDK and WinUI 3 runtime, Windows Community Toolkit",
-        "   - License: MIT License, and the Microsoft.WindowsAppSDK package's redistribution terms",
+        "   - .NET runtime and WPF, WPF UI (lepoco/wpfui)",
+        "   - License: MIT License",
         "   - Full details: see licenses/settings-app.txt",
         "",
         "6. Rust Host Binaries and Crate Dependencies",

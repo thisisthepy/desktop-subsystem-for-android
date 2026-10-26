@@ -181,9 +181,9 @@ jobs:
       - name: Run the view model tests
         run: dotnet test DsaSettings.Core.Tests/DsaSettings.Core.Tests.csproj -c Release
 
-      # The WinUI 3 app itself, as the installer publishes it.
+      # The WPF app itself, as the installer publishes it.
       - name: Build the app
-        run: dotnet publish DsaSettings/DsaSettings.csproj -c Release -r win-x64 -p:Platform=x64 -o ../../../../target/settings-app
+        run: dotnet publish DsaSettings/DsaSettings.csproj -c Release -r win-x64 -o ../../../../target/settings-app
 
   hwcomposer:
     name: Test the guest hwcomposer's task rules (ubuntu-latest)

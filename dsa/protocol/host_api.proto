@@ -411,7 +411,10 @@ message VmId {
 message GetSettings {}
 
 // Changes the settings of the caller's DSA: each value of `settings` that a client may change
-// replaces the current one. The service answers with the settings as they are now.
+// replaces the current one. The service answers with the settings as they are now. Changing
+// an update setting, which applies to every user, needs a caller acting as an administrator
+// (on Windows, an elevated process); otherwise nothing changes and the answer is
+// ERROR_CODE_NOT_ALLOWED.
 message SetSettings {
   Settings settings = 1;
 }
@@ -455,6 +458,9 @@ enum ErrorCode {
   ERROR_CODE_NOT_RUNNING = 4;
   // A setting has a value the service does not accept. The detail says which and why.
   ERROR_CODE_INVALID_SETTING = 5;
+  // The request changes something that applies to every user of the machine, and the caller
+  // is not acting as an administrator.
+  ERROR_CODE_NOT_ALLOWED = 6;
 }
 
 message Error {

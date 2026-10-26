@@ -1,60 +1,74 @@
-<?xml version="1.0" encoding="utf-8"?>
 <Page
     x:Class="Dsa.Settings.Pages.MemoryPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:CommunityToolkit.WinUI.Controls"
-    xmlns:core="using:Dsa.Settings.Core">
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:l="clr-namespace:Dsa.Settings">
     <Page.Resources>
-        <DataTemplate x:Key="MemoryRowTemplate" x:DataType="core:MemoryRow">
-            <controls:SettingsCard Header="{x:Bind Label}" Description="{x:Bind Detail}" Margin="0,0,0,4">
-                <TextBlock Text="{x:Bind Size}" Style="{StaticResource BodyStrongTextBlockStyle}" />
-            </controls:SettingsCard>
+        <DataTemplate x:Key="MemoryRow">
+            <ui:CardControl>
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="{Binding Label}" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{Binding Detail}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <TextBlock Text="{Binding Size}" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            </ui:CardControl>
         </DataTemplate>
     </Page.Resources>
 
-    <ScrollViewer Padding="36,0,36,24">
-        <StackPanel MaxWidth="1000" HorizontalAlignment="Stretch" Spacing="{StaticResource SettingsCardSpacing}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="36,8,36,24" MaxWidth="1000">
             <Grid>
-                <TextBlock x:Uid="MemoryTitle" Style="{StaticResource PageTitleStyle}" />
-                <Button x:Uid="MemoryRefreshButton" HorizontalAlignment="Right" VerticalAlignment="Top" Click="OnRefresh" />
+                <TextBlock Text="{l:Text MemoryTitle.Text}" Style="{StaticResource PageTitle}" />
+                <ui:Button Content="{l:Text MemoryRefreshButton.Content}" HorizontalAlignment="Right" VerticalAlignment="Top"
+                           Icon="{ui:SymbolIcon ArrowClockwise24}" Click="OnRefresh" />
             </Grid>
 
-            <InfoBar x:Uid="MemoryErrorBar" Severity="Error" IsClosable="False"
-                     IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
-                     Message="{x:Bind ViewModel.Error, Mode=OneWay}" />
+            <ui:InfoBar Title="{l:Text MemoryErrorBar.Title}" Severity="Error" IsClosable="False"
+                        IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
 
-            <TextBlock x:Uid="MemoryHostHeader" Style="{StaticResource SectionHeaderStyle}" />
-            <controls:SettingsCard x:Uid="MemoryHostTotalCard">
-                <controls:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE7F4;" />
-                </controls:SettingsCard.HeaderIcon>
-                <TextBlock Text="{x:Bind ViewModel.HostTotal, Mode=OneWay}" Style="{StaticResource SubtitleTextBlockStyle}" />
-            </controls:SettingsCard>
-            <ItemsControl ItemsSource="{x:Bind ViewModel.HostRows, Mode=OneWay}" ItemTemplate="{StaticResource MemoryRowTemplate}" />
-            <TextBlock x:Uid="MemoryHostNone" Margin="1,4,0,0" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                       Visibility="{x:Bind HostNotRunning, Mode=OneWay}" TextWrapping="Wrap" />
-
-            <TextBlock x:Uid="MemoryGuestHeader" Style="{StaticResource SectionHeaderStyle}" />
-            <InfoBar x:Uid="MemoryGuestNoneBar" Severity="Informational" IsClosable="False"
-                     IsOpen="{x:Bind ViewModel.GuestNotReported, Mode=OneWay}" />
-            <StackPanel Spacing="{StaticResource SettingsCardSpacing}" Visibility="{x:Bind ViewModel.GuestReported, Mode=OneWay}">
-                <controls:SettingsCard x:Uid="MemoryGuestTotalCard" Description="{x:Bind ViewModel.GuestAge, Mode=OneWay}">
-                    <controls:SettingsCard.HeaderIcon>
-                        <FontIcon Glyph="&#xE9D9;" />
-                    </controls:SettingsCard.HeaderIcon>
-                    <StackPanel Spacing="4" MinWidth="220">
-                        <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
-                            <TextBlock Text="{x:Bind ViewModel.GuestAvailable, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                            <TextBlock x:Uid="MemoryAvailableOf" />
-                            <TextBlock Text="{x:Bind ViewModel.GuestTotal, Mode=OneWay}" />
-                        </StackPanel>
-                        <ProgressBar Value="{x:Bind ViewModel.GuestUsedPercent, Mode=OneWay}" Maximum="100" />
+            <TextBlock Text="{l:Text MemoryHostHeader.Text}" Style="{StaticResource SectionHeader}" />
+            <ui:CardControl Icon="{ui:SymbolIcon Desktop24}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="{l:Text MemoryHostTotalCard.Header}" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{l:Text MemoryHostTotalCard.Description}" Style="{StaticResource CardDescription}" />
                     </StackPanel>
-                </controls:SettingsCard>
-                <ItemsControl ItemsSource="{x:Bind ViewModel.GuestRows, Mode=OneWay}" ItemTemplate="{StaticResource MemoryRowTemplate}" />
-                <TextBlock x:Uid="MemoryTopHeader" Style="{StaticResource SectionHeaderStyle}" />
-                <ItemsControl ItemsSource="{x:Bind ViewModel.GuestProcessRows, Mode=OneWay}" ItemTemplate="{StaticResource MemoryRowTemplate}" />
+                </ui:CardControl.Header>
+                <TextBlock Text="{Binding HostTotal, Mode=OneWay}" FontSize="20" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            </ui:CardControl>
+            <ItemsControl ItemsSource="{Binding HostRows, Mode=OneWay}" ItemTemplate="{StaticResource MemoryRow}" />
+            <TextBlock Text="{l:Text MemoryHostNone.Text}" Style="{StaticResource Note}"
+                       Visibility="{Binding HostNotRunning, Converter={StaticResource Visible}}" />
+
+            <TextBlock Text="{l:Text MemoryGuestHeader.Text}" Style="{StaticResource SectionHeader}" />
+            <ui:InfoBar Title="{l:Text MemoryGuestNoneBar.Title}" Message="{l:Text MemoryGuestNoneBar.Message}"
+                        Severity="Informational" IsClosable="False" IsOpen="{Binding GuestNotReported, Mode=OneWay}" />
+            <StackPanel Visibility="{Binding GuestReported, Converter={StaticResource Visible}}">
+                <ui:CardControl Icon="{ui:SymbolIcon DataUsage24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text MemoryGuestTotalCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{Binding GuestAge, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <StackPanel MinWidth="220">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <TextBlock Text="{Binding GuestAvailable, Mode=OneWay}" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <TextBlock Text="{l:Text MemoryAvailableOf.Text}" Margin="6,0"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            <TextBlock Text="{Binding GuestTotal, Mode=OneWay}" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                        </StackPanel>
+                        <ProgressBar Value="{Binding GuestUsedPercent, Mode=OneWay}" Maximum="100" Margin="0,6,0,0" />
+                    </StackPanel>
+                </ui:CardControl>
+                <ItemsControl ItemsSource="{Binding GuestRows, Mode=OneWay}" ItemTemplate="{StaticResource MemoryRow}" />
+                <TextBlock Text="{l:Text MemoryTopHeader.Text}" Style="{StaticResource SectionHeader}" />
+                <ItemsControl ItemsSource="{Binding GuestProcessRows, Mode=OneWay}" ItemTemplate="{StaticResource MemoryRow}" />
             </StackPanel>
         </StackPanel>
     </ScrollViewer>

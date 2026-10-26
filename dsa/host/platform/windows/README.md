@@ -291,11 +291,14 @@ What keeps the number small:
 
 ## DSA Settings
 
-`settings/` is the settings app, a WinUI 3 app in C#: a navigation view with the pages
+`settings/` is the settings app, a WPF app in C# with WPF UI (MIT), an open source
+library of Windows 11 style controls: a navigation view with the pages
 General (start and stop Android, its state and last error), Memory (the VM, the window
 manager and the app windows on the host, and Android's own breakdown), Display & GPU (the
 render GPU), Updates, Advanced (freeze when idle, off by default, and the log folders) and
-About. It follows the system's theme, accent colour and language (English and Korean).
+About, built from cards, with Mica behind the window where Windows has it. It follows the
+system's theme, accent colour and language (English and Korean). The Windows App SDK and
+WinUI 3 are not used, because their runtime's licence is not open source.
 
 It changes nothing itself. It runs `dsa` with `--json` (`dsa status`, `dsa settings`,
 `dsa settings set`, `dsa memory`, `dsa gpus`) and shows what the service answers, so every
@@ -304,7 +307,7 @@ only.
 
 | Path | What it is |
 |---|---|
-| `settings/DsaSettings/` | The app: its window, pages and texts (`Strings/<language>/Resources.resw`) |
+| `settings/DsaSettings/` | The app: its window, pages and texts (`Strings.resx`, `Strings.ko.resx`) |
 | `settings/DsaSettings.Core/` | Reading `dsa`'s JSON, and the view models the pages show |
 | `settings/DsaSettings.Core.Tests/` | The view model tests, against a fake `dsa` |
 
@@ -312,9 +315,8 @@ From `dsa/host/platform/windows/settings`, with the .NET 8 SDK:
 
 ```
 dotnet test DsaSettings.Core.Tests/DsaSettings.Core.Tests.csproj
-dotnet publish DsaSettings/DsaSettings.csproj -c Release -r win-x64 -p:Platform=x64
+dotnet publish DsaSettings/DsaSettings.csproj -c Release -r win-x64
 ```
 
-The installer publishes it self-contained, with the .NET and Windows App SDK runtimes in
-its folder, into `C:\Program Files\DSA\settings\`, and adds the Start menu shortcut
+The installer publishes it self-contained, with the .NET runtime in its folder, into `C:\Program Files\DSA\settings\`, and adds the Start menu shortcut
 "DSA Settings".

@@ -1005,12 +1005,12 @@ pub fn settings_round_trip(make: MakeLocal<'_>) {
     assert!(!report.settings.freeze, "freeze is off by default");
     assert_eq!(report.facts, facts());
 
+    // The caller's own settings: any user may change them.
     let changed = client
         .set_settings(&Settings {
             render_gpu: "Discrete".into(),
             freeze: true,
-            program_updates: false,
-            image_updates: true,
+            ..Settings::default()
         })
         .expect("changing the settings");
     assert_eq!(changed.settings.render_gpu, "discrete");
@@ -1020,7 +1020,7 @@ pub fn settings_round_trip(make: MakeLocal<'_>) {
         "a client cannot change the facts"
     );
     assert_eq!(store.get(&user).unwrap().render_gpu, "discrete");
-    assert!(!store.machine().program_updates);
+    assert!(store.machine().program_updates);
     assert_eq!(client.settings().unwrap().settings, changed.settings);
 }
 

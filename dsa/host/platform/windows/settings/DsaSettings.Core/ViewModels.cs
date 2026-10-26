@@ -292,6 +292,8 @@ public sealed class MemoryViewModel : ObservableObject
     public bool HasError => _error is not null;
     public string HostTotal => Format.Size(_report?.HostTotalKb ?? 0);
     public bool HostRunning => _report is { Host.Count: > 0 };
+    /// <summary>Whether the report says no host process of the user's Android runs.</summary>
+    public bool HostNotRunning => _report is not null && !HostRunning;
     public bool GuestReported => _report?.Guest is not null;
     public bool GuestNotReported => !GuestReported;
     public string GuestTotal => _report?.Guest is { } guest ? Format.Size(guest.TotalKb) : "";

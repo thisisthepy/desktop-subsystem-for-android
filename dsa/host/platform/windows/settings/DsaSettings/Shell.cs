@@ -1,11 +1,11 @@
 using System.Diagnostics;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
+using MessageBox = Wpf.Ui.Controls.MessageBox;
+using MessageBoxResult = Wpf.Ui.Controls.MessageBoxResult;
 
 namespace Dsa.Settings;
 
-/// <summary>What the app does on this machine itself: opening folders and restarting the
-/// user's window manager. None of it changes a setting.</summary>
+/// <summary>What the app does on this machine itself: opening folders, asking the user, and
+/// restarting the user's window manager. None of it changes a setting.</summary>
 internal static class Shell
 {
     /// <summary>This user's DSA logs: the window manager's and the app windows'.</summary>
@@ -14,7 +14,7 @@ internal static class Shell
 
     public static string LicenseFolder => Path.Combine(App.InstallFolder, "licenses");
 
-    public static async void OpenFolder(string path, XamlRoot root)
+    public static async void OpenFolder(string path)
     {
         if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
         {
@@ -25,37 +25,34 @@ internal static class Shell
             }
             catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
             {
-                await Tell(root, App.Text.Get("FolderMissingTitle"), $"{path}\n{e.Message}");
+                await Tell(App.Text.Get("FolderMissingTitle"), $"{path}\n{e.Message}");
                 return;
             }
         }
-        await Tell(root, App.Text.Get("FolderMissingTitle"), string.Format(App.Text.Get("FolderMissingBody"), path));
+        await Tell(App.Text.Get("FolderMissingTitle"), string.Format(App.Text.Get("FolderMissingBody"), path));
     }
 
-    public static async Task Tell(XamlRoot root, string title, string message)
+    public static async Task Tell(string title, string message)
     {
-        var dialog = new ContentDialog
+        var box = new MessageBox
         {
-            XamlRoot = root,
             Title = title,
-            Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true },
+            Content = new System.Windows.Controls.TextBlock { Text = message, TextWrapping = System.Windows.TextWrapping.Wrap },
             CloseButtonText = App.Text.Get("OkButton"),
         };
-        await dialog.ShowAsync();
+        await box.ShowDialogAsync();
     }
 
-    public static async Task<bool> Confirm(XamlRoot root, string title, string message, string action)
+    public static async Task<bool> Confirm(string title, string message, string action)
     {
-        var dialog = new ContentDialog
+        var box = new MessageBox
         {
-            XamlRoot = root,
             Title = title,
-            Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+            Content = new System.Windows.Controls.TextBlock { Text = message, TextWrapping = System.Windows.TextWrapping.Wrap },
             PrimaryButtonText = action,
             CloseButtonText = App.Text.Get("CancelButton"),
-            DefaultButton = ContentDialogButton.Close,
         };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        return await box.ShowDialogAsync() == MessageBoxResult.Primary;
     }
 
     /// <summary>Ends this user's window manager in this session and starts it again, so it

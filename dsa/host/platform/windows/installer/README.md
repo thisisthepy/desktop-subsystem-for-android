@@ -47,9 +47,9 @@ copies only `setup.exe` itself, because the package is embedded in it.)
   `dsa/guest/image/make-image.py`, and the image's version comes from its `image.json`.
   Without an image the service downloads the newest supported one from `-ListUrl`.
 - Installs DSA Settings, the settings app, in `C:\Program Files\DSA\settings\` with a
-  Start menu shortcut named "DSA Settings". It is a self-contained WinUI 3 app (built from
-  `dsa/host/platform/windows/settings/`), so it carries the .NET and Windows App SDK
-  runtimes and needs nothing installed first. It changes settings only through the service,
+  Start menu shortcut named "DSA Settings". It is a self-contained WPF app with WPF UI's Windows 11 style controls
+  (built from `dsa/host/platform/windows/settings/`), so it carries the .NET runtime and
+  needs nothing installed first. It changes settings only through the service,
   which keeps them in `C:\ProgramData\DSA\settings` (`settings_dir` in the configuration).
 - Puts the licence bundle and master notice in `C:\Program Files\DSA\licenses\` and
   `C:\Program Files\DSA\NOTICE.txt`.

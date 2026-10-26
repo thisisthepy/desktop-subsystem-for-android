@@ -1,37 +1,53 @@
-<?xml version="1.0" encoding="utf-8"?>
 <Page
     x:Class="Dsa.Settings.Pages.AboutPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:CommunityToolkit.WinUI.Controls">
-    <ScrollViewer Padding="36,0,36,24">
-        <StackPanel MaxWidth="1000" HorizontalAlignment="Stretch" Spacing="{StaticResource SettingsCardSpacing}">
-            <TextBlock x:Uid="AboutTitle" Style="{StaticResource PageTitleStyle}" />
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:l="clr-namespace:Dsa.Settings">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="36,8,36,24" MaxWidth="1000">
+            <TextBlock Text="{l:Text AboutTitle.Text}" Style="{StaticResource PageTitle}" />
 
-            <controls:SettingsExpander x:Uid="AboutProductCard" IsExpanded="True">
-                <controls:SettingsExpander.HeaderIcon>
-                    <ImageIcon Source="ms-appx:///Assets/logo.png" />
-                </controls:SettingsExpander.HeaderIcon>
-                <TextBlock Text="{x:Bind AppVersion}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <controls:SettingsExpander.Items>
-                    <controls:SettingsCard x:Uid="AboutAppVersionCard">
-                        <TextBlock Text="{x:Bind AppVersion}" IsTextSelectionEnabled="True" />
-                    </controls:SettingsCard>
-                    <controls:SettingsCard x:Uid="AboutServiceVersionCard">
-                        <TextBlock Text="{x:Bind ViewModel.ServiceVersion, Mode=OneWay}" IsTextSelectionEnabled="True" />
-                    </controls:SettingsCard>
-                    <controls:SettingsCard x:Uid="AboutLicenseCard" IsClickEnabled="True" Click="OnOpenLicenses" />
-                    <controls:SettingsCard x:Uid="AboutSourceCard">
-                        <HyperlinkButton Content="github.com/thisisthepy/desktop-subsystem-for-android"
-                                         NavigateUri="https://github.com/thisisthepy/desktop-subsystem-for-android" />
-                    </controls:SettingsCard>
-                </controls:SettingsExpander.Items>
-            </controls:SettingsExpander>
+            <ui:CardControl Margin="0,0,0,4">
+                <ui:CardControl.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <Image Source="pack://application:,,,/Assets/logo.png" Width="32" Height="32" Margin="0,0,16,0" />
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="{l:Text AboutProductCard.Header}" Style="{StaticResource CardTitle}" FontWeight="SemiBold" />
+                            <TextBlock Text="{l:Text AboutProductCard.Description}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <TextBlock x:Name="HeaderVersion" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </ui:CardControl>
+            <ui:CardControl>
+                <ui:CardControl.Header>
+                    <TextBlock Text="{l:Text AboutAppVersionCard.Header}" Style="{StaticResource CardTitle}" />
+                </ui:CardControl.Header>
+                <TextBlock x:Name="AppVersionText" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            </ui:CardControl>
+            <ui:CardControl>
+                <ui:CardControl.Header>
+                    <TextBlock Text="{l:Text AboutServiceVersionCard.Header}" Style="{StaticResource CardTitle}" />
+                </ui:CardControl.Header>
+                <TextBlock Text="{Binding ServiceVersion, Mode=OneWay}" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            </ui:CardControl>
+            <ui:CardAction Click="OnOpenLicenses" Margin="0,0,0,4">
+                <StackPanel>
+                    <TextBlock Text="{l:Text AboutLicenseCard.Header}" Style="{StaticResource CardTitle}" />
+                    <TextBlock Text="{l:Text AboutLicenseCard.Description}" Style="{StaticResource CardDescription}" />
+                </StackPanel>
+            </ui:CardAction>
+            <ui:CardControl>
+                <ui:CardControl.Header>
+                    <TextBlock Text="{l:Text AboutSourceCard.Header}" Style="{StaticResource CardTitle}" />
+                </ui:CardControl.Header>
+                <ui:HyperlinkButton Content="github.com/thisisthepy/desktop-subsystem-for-android"
+                                    NavigateUri="https://github.com/thisisthepy/desktop-subsystem-for-android" />
+            </ui:CardControl>
 
-            <TextBlock x:Uid="AboutIndependent" Margin="1,16,0,0" TextWrapping="Wrap"
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <TextBlock x:Uid="AboutTrademark" Margin="1,4,0,0" TextWrapping="Wrap"
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock Text="{l:Text AboutIndependent.Text}" Style="{StaticResource Note}" Margin="1,16,0,0" />
+            <TextBlock Text="{l:Text AboutTrademark.Text}" Style="{StaticResource Note}" />
         </StackPanel>
     </ScrollViewer>
 </Page>

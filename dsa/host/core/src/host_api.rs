@@ -976,6 +976,29 @@ impl HostApiService {
             program_updates: wanted.program_updates,
             image_updates: wanted.image_updates,
         };
+        // The update settings apply to every user of the machine, so only an administrator
+        // may change them; the caller's own settings are theirs to change.
+        let machine = store.machine();
+        let changed: Vec<&str> = [
+            (
+                "program updates",
+                wanted.program_updates != machine.program_updates,
+            ),
+            ("image updates", wanted.image_updates != machine.image_updates),
+        ]
+        .into_iter()
+        .filter_map(|(name, changed)| changed.then_some(name))
+        .collect();
+        if !changed.is_empty() && !peer.administrator {
+            return error(
+                ErrorCode::NotAllowed,
+                format!(
+                    "only an administrator can change this setting ({}); it applies to every \
+                     user of this computer. Run the command as an administrator.",
+                    changed.join(", ")
+                ),
+            );
+        }
         match store.set(&peer.user, &wanted) {
             Ok(settings) => {
                 eprintln!(

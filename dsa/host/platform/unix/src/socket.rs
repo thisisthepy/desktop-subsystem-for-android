@@ -125,6 +125,7 @@ impl LocalListener for UnixLocalListener {
         let uid = peer_uid(&stream)?;
         let peer = Peer {
             user: format!("uid:{uid}"),
+            administrator: uid == 0,
         };
         Ok((Box::new(FramedConnection::new(Socket(stream))), peer))
     }
