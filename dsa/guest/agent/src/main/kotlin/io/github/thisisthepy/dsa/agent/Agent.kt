@@ -16,6 +16,8 @@ import io.github.thisisthepy.dsa.agent.requests.HostRequests
 import io.github.thisisthepy.dsa.agent.requests.RequestResult
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
 import io.github.thisisthepy.dsa.agent.tasks.AppInfoSource
+import io.github.thisisthepy.dsa.agent.tasks.InstalledAppReporter
+import io.github.thisisthepy.dsa.agent.tasks.LauncherApps
 import io.github.thisisthepy.dsa.agent.tasks.TaskReporter
 import io.github.thisisthepy.dsa.agent.tasks.TaskSource
 import io.github.thisisthepy.dsa.agent.trace.ResizeTrace
@@ -34,8 +36,10 @@ import io.github.thisisthepy.dsa.control.v1.Envelope
  * host is injected into its task as it arrives, and reads nothing; a key first gives its
  * task the input focus if the task does not hold it. Text from the host's input method goes
  * to the focused editor through the agent's own input method, which the agent makes the
- * guest's at boot, and the editor's cursor goes back to the host. With a [MemorySource], it
- * also reports the guest's memory every few minutes and whenever the host asks.
+ * guest's at boot, and the editor's cursor goes back to the host. The apps a launcher lists
+ * go to the host too, on each connection and whenever one is installed, updated or removed,
+ * so the host's start menu can show them. With a [MemorySource], it also reports the guest's
+ * memory every few minutes and whenever the host asks.
  */
 class Agent(
     private val ownPackage: String,
@@ -51,6 +55,7 @@ class Agent(
     textKeys: TextKeys = TextKeys { null },
     private val inputMethods: InputMethodSetup = InputMethodSetup.NONE,
     private val trace: ResizeTrace = ResizeTrace(log),
+    private val launcherApps: LauncherApps = LauncherApps.NONE,
     memory: MemorySource? = null,
 ) {
     private val channel = ChannelClient(
@@ -81,7 +86,9 @@ class Agent(
     }
     private val freeform = FreeformSetup(windowing, scheduler, log)
     private val arranger = TaskArranger(actions, windowing::displaySize, log)
+    private val installed = InstalledAppReporter(ownPackage) { frame -> channel.send(frame) }
     private var refreshPending = false
+    private var appsPending = false
     private var checkPending = false
 
     fun start() {
@@ -93,9 +100,40 @@ class Agent(
                 log.warn("could not make the agent's input method the guest's; typed text may not reach editors", e)
             }
             listen()
+            listenToApps()
             channel.start()
             requestRefresh()
         }
+    }
+
+    private fun listenToApps() {
+        try {
+            launcherApps.listen { scheduler.post(::requestAppsRefresh) }
+        } catch (e: Exception) {
+            log.warn("listening to installed apps failed; trying again", e)
+            scheduler.postDelayed(RETRY_MILLIS, ::listenToApps)
+        }
+    }
+
+    private fun requestAppsRefresh() {
+        if (appsPending) return
+        appsPending = true
+        scheduler.post {
+            appsPending = false
+            refreshApps()
+        }
+    }
+
+    /** Tells the host which apps a launcher lists, when that changed. */
+    private fun refreshApps() {
+        if (!channel.connected) return
+        val apps = try {
+            launcherApps.list()
+        } catch (e: Exception) {
+            log.warn("reading the installed apps failed", e)
+            return
+        } ?: return
+        installed.update(apps)
     }
 
     private fun listen() {
@@ -119,8 +157,10 @@ class Agent(
 
     private fun onConnected() {
         reporter.resend()
+        installed.resend()
         memoryReporter?.connected()
         requestRefresh()
+        requestAppsRefresh()
     }
 
     private fun onFrame(frame: ByteArray) {

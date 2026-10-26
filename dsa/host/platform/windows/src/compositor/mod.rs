@@ -50,7 +50,9 @@ use self::single_instance::DEFAULT_MUTEX_NAME;
 use crate::guid::Guid;
 use crate::hvsocket::RawHvSocketListener;
 use crate::pipe::{current_user_only_sddl, NamedPipeConnector, NamedPipeListener};
+use crate::start_menu::StartMenuSetup;
 use crate::vm_listener::{BindFn, VmBoundListener, VmIdSlot};
+use dsa_host_core::tasks::{AppInfo, TaskEvent};
 
 /// Configuration for the user-session compositor.
 #[derive(Debug, Clone)]
@@ -99,6 +101,20 @@ pub struct Compositor {
     /// Starts each app's window host.
     launcher: Option<Box<dyn HostLauncher>>,
     windows: Arc<Mutex<Vec<i32>>>,
+    /// Where the apps' Start menu shortcuts go, when they are kept.
+    start_menu: Option<StartMenuSetup>,
+}
+
+/// The installed apps an event from the watch of the tasks carries, if it carries them.
+pub fn installed_in(event: &ManagerEvent) -> Option<Vec<AppInfo>> {
+    match event {
+        ManagerEvent::Sync(current) => current.iter().find_map(|event| match event {
+            TaskEvent::Installed(apps) => Some(apps.clone()),
+            _ => None,
+        }),
+        ManagerEvent::Task(TaskEvent::Installed(apps)) => Some(apps.clone()),
+        _ => None,
+    }
 }
 
 /// Opens the listener the app window hosts connect to.
@@ -160,6 +176,7 @@ impl Compositor {
             host_listener: Some(session_host_listener()),
             launcher: None,
             windows: Arc::new(Mutex::new(Vec::new())),
+            start_menu: crate::start_menu::StartMenuSetup::default_for_user(),
         }
     }
 
@@ -184,7 +201,15 @@ impl Compositor {
             host_listener: None,
             launcher: None,
             windows: Arc::new(Mutex::new(Vec::new())),
+            start_menu: None,
         }
+    }
+
+    /// Keeps a Start menu shortcut for each app installed in the user's Android, as `setup`
+    /// says where. [`Compositor::new`] keeps the user's own Start menu.
+    pub fn with_start_menu(mut self, setup: StartMenuSetup) -> Compositor {
+        self.start_menu = Some(setup);
+        self
     }
 
     /// Takes the app window hosts' connections from `listener`, and starts each app's window
@@ -518,6 +543,20 @@ impl Compositor {
             .map_err(|e| log(&format!("could not take the app windows' connections: {e}")))
             .ok();
 
+        // The Start menu follows the installed apps on a thread of its own, since making the
+        // apps' programs and shortcuts takes a while and the windows must not wait on it.
+        let mut start_menu = None;
+        let mut installed_tx = None;
+        if let Some(setup) = self.start_menu.take() {
+            let (tx, rx) = mpsc::channel();
+            let menu_logger = self.logger.clone();
+            start_menu = thread::Builder::new()
+                .name("dsa-wm-start-menu".into())
+                .spawn(move || crate::start_menu::keep(rx, setup, menu_logger))
+                .map_err(|e| log(&format!("could not start the Start menu's thread: {e}")))
+                .ok();
+            installed_tx = Some(tx);
+        }
         let idle = Arc::new(Mutex::new(IdleTrim::new(IDLE_TRIM_DELAY, Instant::now())));
         let trim_idle = Arc::clone(&idle);
         let trim_stop = Arc::clone(&manager_stop);
@@ -538,6 +577,9 @@ impl Compositor {
                 tasks::watch(
                     watch_connector,
                     |event| {
+                        if let (Some(tx), Some(apps)) = (&installed_tx, installed_in(&event)) {
+                            let _ = tx.send(apps);
+                        }
                         note_tasks(&idle, &event);
                         watch_events.send(event).is_ok()
                     },
@@ -566,7 +608,7 @@ impl Compositor {
 
         TaskWindowThreads {
             stop: Some(manager_stop),
-            threads: [manager, acceptor, watcher, requester, trimmer]
+            threads: [manager, acceptor, watcher, requester, trimmer, start_menu]
                 .into_iter()
                 .flatten()
                 .collect(),

@@ -30,6 +30,8 @@
 //!   (Windows only).
 //! - [`app_exe`]: each app's own copy of the window host, named and drawn as the app
 //!   (Windows only).
+//! - [`start_menu`]: a Start menu shortcut for each app installed in the user's Android, which
+//!   Windows search finds (Windows only).
 
 /// The DSA release this program belongs to. The installer build sets `DSA_VERSION` to the
 /// release's version; a plain `cargo build` falls back to the crate's version.
@@ -73,6 +75,8 @@ pub mod scm;
 #[cfg(windows)]
 pub mod service;
 pub mod setup;
+#[cfg(windows)]
+pub mod start_menu;
 pub mod uninstall;
 #[cfg(windows)]
 pub mod user_disk;

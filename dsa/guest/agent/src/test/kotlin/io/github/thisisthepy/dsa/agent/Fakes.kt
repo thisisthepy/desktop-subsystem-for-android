@@ -146,6 +146,22 @@ class FakeTasks : TaskSource {
     }
 }
 
+class FakeLauncherApps : io.github.thisisthepy.dsa.agent.tasks.LauncherApps {
+    var installed = listOf<io.github.thisisthepy.dsa.agent.tasks.LauncherApp>()
+    private var onChange: (() -> Unit)? = null
+
+    override fun list() = installed
+
+    override fun listen(onChange: () -> Unit) {
+        this.onChange = onChange
+    }
+
+    fun change(apps: List<io.github.thisisthepy.dsa.agent.tasks.LauncherApp>) {
+        installed = apps
+        onChange!!.invoke()
+    }
+}
+
 class FakeActions : TaskActions {
     val launched = mutableListOf<String>()
     val closed = mutableListOf<Int>()
