@@ -33,6 +33,9 @@ use super::service::UpdateNotices;
 use super::store::{download_checked, DownloadFailure, Expected, Fetch};
 use super::{from_hex, to_hex};
 use crate::host_api::{ProgramUpdate, UpdateProgram, UserAndroid, UserAndroids};
+use crate::ime::ImeEvent;
+use crate::input::PointerEvent;
+use crate::keys::KeyEvent;
 use crate::session::SessionState;
 use crate::tasks::{TaskRequest, TaskRequestError, TaskWatch};
 
@@ -712,5 +715,14 @@ impl UserAndroid for WithProgramStatus {
     }
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
         self.android.request(request)
+    }
+    fn pointer(&self, event: &PointerEvent) -> Result<(), TaskRequestError> {
+        self.android.pointer(event)
+    }
+    fn key(&self, event: &KeyEvent) -> Result<(), TaskRequestError> {
+        self.android.key(event)
+    }
+    fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError> {
+        self.android.ime(event)
     }
 }

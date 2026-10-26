@@ -15,6 +15,9 @@ use super::store::{Fetch, ImageStore};
 use super::trial::{self, Boot, Outcome};
 use super::UpdateError;
 use crate::host_api::UserAndroid;
+use crate::ime::ImeEvent;
+use crate::input::PointerEvent;
+use crate::keys::KeyEvent;
 use crate::session::{Session, SessionState};
 use crate::tasks::{TaskRequest, TaskRequestError, TaskWatch};
 
@@ -230,6 +233,15 @@ impl UserAndroid for UpdatingAndroid {
     }
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
         UserAndroid::request(&*self.session, request)
+    }
+    fn pointer(&self, event: &PointerEvent) -> Result<(), TaskRequestError> {
+        UserAndroid::pointer(&*self.session, event)
+    }
+    fn key(&self, event: &KeyEvent) -> Result<(), TaskRequestError> {
+        UserAndroid::key(&*self.session, event)
+    }
+    fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError> {
+        UserAndroid::ime(&*self.session, event)
     }
 
     fn start(&self) {
