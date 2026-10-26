@@ -54,18 +54,25 @@ pub fn argument(args: &[String], flag: &str) -> Option<String> {
         .cloned()
 }
 
-/// Which app a window host shows: the package its file is named after, or the one
-/// `--package` names. `None` when neither names a valid package.
+/// Which app a window host shows: the one `--package` names, else the package its folder is
+/// named after (`apps\<package>\<Label>.exe`), else the package its file is named after, as
+/// a program of the earlier layout (`apps\<package>.exe`) is. `None` when none names a valid
+/// package.
 pub fn package_of(program: &std::path::Path, args: &[String]) -> Option<String> {
     use dsa_host_core::compositor::window_hosts::is_valid_package;
-    let named = argument(args, PACKAGE_ARGUMENT);
-    let from_file = program
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .map(str::to_string);
-    named
-        .or(from_file)
-        .filter(|package| is_valid_package(package))
+    if let Some(named) = argument(args, PACKAGE_ARGUMENT) {
+        return is_valid_package(&named).then_some(named);
+    }
+    let folder = program
+        .parent()
+        .and_then(|dir| dir.file_name())
+        .and_then(|name| name.to_str());
+    let stem = program.file_stem().and_then(|stem| stem.to_str());
+    [folder, stem]
+        .into_iter()
+        .flatten()
+        .find(|package| is_valid_package(package))
+        .map(str::to_string)
 }
 
 /// How long connecting and the handshake may take.
