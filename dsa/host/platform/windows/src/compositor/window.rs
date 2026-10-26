@@ -11,6 +11,9 @@
 //! happened (a new client size, a new monitor scale, a drag starting or ending) to the
 //! message window, and the UI thread acts on it there. Live resizes run inside Windows' own
 //! sizing loop, which still delivers those posts.
+//!
+//! Each window hands its mouse, touch and pen messages to its `PointerWindow` (`pointer`),
+//! which sends the task's pointer events on.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -20,6 +23,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
 use dsa_host_core::compositor::task_windows::{fit_within, TaskWindows, WindowChange};
+use dsa_host_core::input::PointerEvent;
 use dsa_host_core::tasks::{TaskEvent, TaskRequest};
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
@@ -46,6 +50,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use super::frames::FrameRouter;
 use super::log::{note, CompositorLogger};
+use super::pointer::PointerWindow;
 use super::present::{Gpu, WindowPresenter};
 
 /// What other threads tell the UI thread.
@@ -156,6 +161,8 @@ impl Drop for UiHandle {
 pub struct UiSetup {
     /// Where the requests to end a task go when the user closes its window.
     pub requests: Sender<TaskRequest>,
+    /// Where the pointer input in every task window goes.
+    pub input: Sender<PointerEvent>,
     /// The routes of each display's frames, which the UI thread keeps up to date.
     pub router: Arc<FrameRouter<WindowPresenter>>,
     /// The GPU devices, or `None` when frames cannot be shown (the windows still open).
@@ -204,6 +211,7 @@ struct WindowData {
     /// The largest client area the guest can draw for the task, kept up to date by the UI
     /// thread, so the window procedure needs nothing else to answer WM_GETMINMAXINFO.
     max_client: Cell<Option<(u32, u32)>>,
+    pointer: PointerWindow,
 }
 
 impl WindowData {
@@ -376,6 +384,11 @@ unsafe extern "system" fn task_window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if let Some(data) = window_data(hwnd) {
+        if let Some(result) = data.pointer.handle(hwnd, message, wparam, lparam) {
+            return result;
+        }
+    }
     match message {
         WM_NCCREATE => {
             let create = &*(lparam as *const CREATESTRUCTW);
@@ -609,12 +622,17 @@ impl Ui {
     }
 
     /// Tells the frame router and the listing which windows are open, and each window how
-    /// large the guest can draw its task.
+    /// large its task is and how large the guest can draw it. The task's size changes with
+    /// every resize the window asks for, without the window itself changing, and pointer
+    /// input is measured in it.
     fn publish(&self) {
         for (task_id, window) in &self.open {
             // SAFETY: a window of this thread, whose data lives until WM_NCDESTROY.
             if let Some(data) = unsafe { window_data(window.hwnd) } {
                 data.max_client.set(self.windows.max_client_size(*task_id));
+                if let Some(size) = self.windows.task_size(*task_id) {
+                    data.pointer.task_resized(size);
+                }
             }
         }
         let routes: Vec<(u32, Arc<WindowPresenter>)> = self
@@ -662,6 +680,9 @@ impl Ui {
                         height,
                     } => {
                         if let Some(window) = self.open.get(&task_id) {
+                            if let Some(data) = window_data(window.hwnd) {
+                                data.pointer.task_resized((width, height));
+                            }
                             let dpi = GetDpiForWindow(window.hwnd).max(96);
                             let client =
                                 fit_within((width, height), usable_client_area(window.hwnd, dpi));
@@ -699,6 +720,7 @@ impl Ui {
             message_window: self.message_window,
             presenter: RefCell::new(None),
             max_client: Cell::new(self.windows.max_client_size(task_id)),
+            pointer: PointerWindow::new(task_id, size, self.setup.input.clone()),
         });
         let data = Box::into_raw(data);
         let class = wide(TASK_CLASS);

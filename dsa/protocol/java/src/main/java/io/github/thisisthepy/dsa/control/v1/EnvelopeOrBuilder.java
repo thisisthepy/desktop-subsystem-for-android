@@ -139,5 +139,16 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.SetTaskDensity getSetTaskDensity();
 
+  /**
+   * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+   * @return Whether the pointerEvent field is set.
+   */
+  boolean hasPointerEvent();
+  /**
+   * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+   * @return The pointerEvent.
+   */
+  io.github.thisisthepy.dsa.control.v1.PointerEvent getPointerEvent();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

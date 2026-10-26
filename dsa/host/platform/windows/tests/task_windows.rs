@@ -12,19 +12,23 @@ use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::window_sizing::{density_for_dpi, rescale};
 use dsa_host_core::compositor::FakeRenderer;
-use dsa_host_core::host_api::UserAndroid;
+use dsa_host_core::host_api::{UserAndroid, UserAndroids};
 use dsa_host_core::host_api_conformance::{FakeAndroid, FakeAndroids, RunningService};
+use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use dsa_host_core::tasks::{Bounds, Task, TaskEvent, TaskRequest};
 use dsa_host_windows::compositor::adapter::{DisplayPresenter, DisplaySink};
+use dsa_host_windows::compositor::tasks::serve_input;
 use dsa_host_windows::compositor::window::OpenWindow;
 use dsa_host_windows::compositor::{Compositor, CompositorConfig};
 use dsa_transport::local::{self, MemoryLocalConnector, Peer};
 use dsa_transport::{Connection, Connector, Listener, TransportError};
-use windows_sys::Win32::Foundation::{HWND, RECT};
+use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
+use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetWindowTextW, IsWindow, IsWindowVisible, PostMessageW, SetWindowPos,
-    SWP_NOMOVE, SWP_NOZORDER, WM_CLOSE,
+    SWP_NOMOVE, SWP_NOZORDER, WM_CLOSE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL,
+    WM_RBUTTONDOWN, WM_RBUTTONUP,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -519,5 +523,172 @@ fn nfr5_a_service_that_goes_away_closes_every_task_window() {
         windows.lock().unwrap().is_empty().then_some(())
     });
     stop.store(true, Ordering::SeqCst);
+    thread.join().unwrap();
+}
+
+/// The button flags a button message carries in its `wparam` (`MK_LBUTTON`, `MK_RBUTTON`).
+const MK_LBUTTON: u32 = 0x0001;
+const MK_RBUTTON: u32 = 0x0002;
+
+fn lparam(x: i32, y: i32) -> isize {
+    ((y as i16 as u16 as usize) << 16 | x as i16 as u16 as usize) as isize
+}
+
+/// Waits until the fake Android has been given `count` pointer events, and returns them.
+fn pointers(running: &Running, count: usize) -> Vec<PointerEvent> {
+    wait_for(&format!("{count} pointer events in Android"), || {
+        let given = running.android.pointers.lock().unwrap().clone();
+        (given.len() >= count).then_some(given)
+    })
+}
+
+#[test]
+fn fr5_a_right_click_in_a_task_window_reaches_its_task_as_a_secondary_click() {
+    let running = start(None);
+    running.android.start();
+    running
+        .android
+        .publish(TaskEvent::Updated(task(7, "Clock", 400, 300)));
+    let open = windows_of(&running, 1);
+    let hwnd = open[0].hwnd as HWND;
+    let (width, height) = client_size(open[0].hwnd);
+    let (x, y) = (width / 2, height / 4);
+    unsafe {
+        PostMessageW(hwnd, WM_RBUTTONDOWN, MK_RBUTTON as usize, lparam(x, y));
+        PostMessageW(hwnd, WM_RBUTTONUP, 0, lparam(x, y));
+    }
+    let given = pointers(&running, 2);
+    let summary: Vec<(i32, PointerAction, PointerTool, u32)> = given
+        .iter()
+        .map(|event| (event.task_id, event.action, event.tool, event.buttons))
+        .collect();
+    assert_eq!(
+        summary,
+        vec![
+            (
+                7,
+                PointerAction::Down,
+                PointerTool::Mouse,
+                buttons::SECONDARY
+            ),
+            (7, PointerAction::Up, PointerTool::Mouse, 0),
+        ]
+    );
+    let expected_x = x as f32 * 400.0 / width as f32;
+    let expected_y = y as f32 * 300.0 / height as f32;
+    assert!((given[0].x - expected_x).abs() <= 2.0, "{:?}", given[0]);
+    assert!((given[0].y - expected_y).abs() <= 2.0, "{:?}", given[0]);
+}
+
+#[test]
+fn fr5_the_four_corners_of_a_task_window_land_on_the_corners_of_its_task() {
+    let running = start(None);
+    running.android.start();
+    running
+        .android
+        .publish(TaskEvent::Updated(task(7, "Clock", 400, 300)));
+    let open = windows_of(&running, 1);
+    let hwnd = open[0].hwnd as HWND;
+    let (width, height) = client_size(open[0].hwnd);
+    let corners = [
+        ((0, 0), (0.0, 0.0)),
+        ((width - 1, 0), (399.0, 0.0)),
+        ((0, height - 1), (0.0, 299.0)),
+        ((width - 1, height - 1), (399.0, 299.0)),
+    ];
+    for ((x, y), _) in corners {
+        unsafe {
+            PostMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON as usize, lparam(x, y));
+            PostMessageW(hwnd, WM_LBUTTONUP, 0, lparam(x, y));
+        }
+    }
+    let given = pointers(&running, 8);
+    for (index, (client, guest)) in corners.iter().enumerate() {
+        let down = given[index * 2];
+        assert_eq!(down.action, PointerAction::Down);
+        assert!(
+            (down.x - guest.0).abs() <= 2.0 && (down.y - guest.1).abs() <= 2.0,
+            "client point {client:?} of a {width}x{height} window landed at ({}, {}), \
+             expected {guest:?}",
+            down.x,
+            down.y
+        );
+    }
+}
+
+#[test]
+fn fr5_the_wheel_in_a_task_window_scrolls_its_task() {
+    let running = start(None);
+    running.android.start();
+    running
+        .android
+        .publish(TaskEvent::Updated(task(7, "Clock", 400, 300)));
+    let open = windows_of(&running, 1);
+    let hwnd = open[0].hwnd as HWND;
+    let mut point = POINT { x: 10, y: 20 };
+    unsafe { ClientToScreen(hwnd, &mut point) };
+    let down_one_notch = ((-120i16) as u16 as usize) << 16;
+    unsafe {
+        PostMessageW(
+            hwnd,
+            WM_MOUSEWHEEL,
+            down_one_notch,
+            lparam(point.x, point.y),
+        )
+    };
+    let scroll = pointers(&running, 1)[0];
+    assert_eq!(scroll.action, PointerAction::Scroll);
+    assert_eq!((scroll.scroll_x, scroll.scroll_y), (0.0, -1.0));
+    let (width, height) = client_size(open[0].hwnd);
+    assert!((scroll.x - 10.0 * 400.0 / width as f32).abs() <= 2.0);
+    assert!((scroll.y - 20.0 * 300.0 / height as f32).abs() <= 2.0);
+}
+
+/// Reaches the in-memory local API only once `up` is set, as a service that is starting.
+struct Starting {
+    up: Arc<AtomicBool>,
+    inner: AsUser,
+}
+
+impl Connector for Starting {
+    fn connect(&mut self, timeout: Duration) -> Result<Box<dyn Connection>, TransportError> {
+        if !self.up.load(Ordering::SeqCst) {
+            return Err(TransportError::Closed);
+        }
+        self.inner.connect(timeout)
+    }
+}
+
+#[test]
+fn fr5_input_while_the_service_is_away_is_dropped_and_input_after_it_returns_arrives() {
+    let (api_listener, api_connector) = local::pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(Box::new(api_listener), androids.clone());
+    let up = Arc::new(AtomicBool::new(false));
+    let (events, received) = std::sync::mpsc::channel();
+    let connector = Starting {
+        up: Arc::clone(&up),
+        inner: AsUser(api_connector),
+    };
+    let thread = thread::spawn(move || serve_input(Box::new(connector), received, None));
+    let event =
+        |x: f32| PointerEvent::new(7, PointerAction::HoverMove, PointerTool::Mouse, (x, 1.0));
+    events.send(event(1.0)).unwrap();
+    thread::sleep(Duration::from_millis(100));
+    up.store(true, Ordering::SeqCst);
+    androids.android(USER).unwrap().start();
+    let android = androids.of(USER).unwrap();
+    // The thread tries the service again after a short wait; input from then on arrives.
+    let delivered = wait_for("input to arrive once the service is back", || {
+        events.send(event(2.0)).unwrap();
+        thread::sleep(Duration::from_millis(50));
+        let given = android.pointers.lock().unwrap().clone();
+        (!given.is_empty()).then_some(given)
+    });
+    assert!(
+        delivered.iter().all(|given| given.x == 2.0),
+        "{delivered:?}"
+    );
+    drop(events);
     thread.join().unwrap();
 }

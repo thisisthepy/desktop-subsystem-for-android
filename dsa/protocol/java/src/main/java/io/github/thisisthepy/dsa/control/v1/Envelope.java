@@ -32,6 +32,7 @@ public  final class Envelope extends
     LAUNCH_APP(10),
     RESIZE_TASK(11),
     SET_TASK_DENSITY(12),
+    POINTER_EVENT(13),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -59,6 +60,7 @@ public  final class Envelope extends
         case 10: return LAUNCH_APP;
         case 11: return RESIZE_TASK;
         case 12: return SET_TASK_DENSITY;
+        case 13: return POINTER_EVENT;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -675,6 +677,56 @@ public  final class Envelope extends
    */
   private void clearSetTaskDensity() {
     if (bodyCase_ == 12) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int POINTER_EVENT_FIELD_NUMBER = 13;
+  /**
+   * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+   */
+  @java.lang.Override
+  public boolean hasPointerEvent() {
+    return bodyCase_ == 13;
+  }
+  /**
+   * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.PointerEvent getPointerEvent() {
+    if (bodyCase_ == 13) {
+       return (io.github.thisisthepy.dsa.control.v1.PointerEvent) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.PointerEvent.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+   */
+  private void setPointerEvent(io.github.thisisthepy.dsa.control.v1.PointerEvent value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 13;
+  }
+  /**
+   * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+   */
+  private void mergePointerEvent(io.github.thisisthepy.dsa.control.v1.PointerEvent value) {
+    value.getClass();
+  if (bodyCase_ == 13 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.PointerEvent.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.PointerEvent.newBuilder((io.github.thisisthepy.dsa.control.v1.PointerEvent) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 13;
+  }
+  /**
+   * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+   */
+  private void clearPointerEvent() {
+    if (bodyCase_ == 13) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -1367,6 +1419,54 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+     */
+    @java.lang.Override
+    public boolean hasPointerEvent() {
+      return instance.hasPointerEvent();
+    }
+    /**
+     * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.PointerEvent getPointerEvent() {
+      return instance.getPointerEvent();
+    }
+    /**
+     * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+     */
+    public Builder setPointerEvent(io.github.thisisthepy.dsa.control.v1.PointerEvent value) {
+      copyOnWrite();
+      instance.setPointerEvent(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+     */
+    public Builder setPointerEvent(
+        io.github.thisisthepy.dsa.control.v1.PointerEvent.Builder builderForValue) {
+      copyOnWrite();
+      instance.setPointerEvent(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+     */
+    public Builder mergePointerEvent(io.github.thisisthepy.dsa.control.v1.PointerEvent value) {
+      copyOnWrite();
+      instance.mergePointerEvent(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+     */
+    public Builder clearPointerEvent() {
+      copyOnWrite();
+      instance.clearPointerEvent();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -1397,11 +1497,12 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.LaunchApp.class,
             io.github.thisisthepy.dsa.control.v1.ResizeTask.class,
             io.github.thisisthepy.dsa.control.v1.SetTaskDensity.class,
+            io.github.thisisthepy.dsa.control.v1.PointerEvent.class,
           };
           java.lang.String info =
-              "\u0000\f\u0001\u0000\u0001\f\f\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003" +
+              "\u0000\r\u0001\u0000\u0001\r\r\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003" +
               "<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<" +
-              "\u0000\u000b<\u0000\f<\u0000";
+              "\u0000\u000b<\u0000\f<\u0000\r<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

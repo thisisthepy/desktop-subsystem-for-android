@@ -30,6 +30,9 @@ class TaskReporter(
 
     fun isReported(taskId: Int): Boolean = taskId in told
 
+    /** Where the host was last told the task is; null for a task it was not told about. */
+    fun reportedBounds(taskId: Int): TaskBounds? = told[taskId]?.bounds
+
     /** Whether the host gets a window for [task]. */
     fun reportable(task: TaskSnapshot): Boolean =
         task.kind == TaskKind.APP && !task.packageName.isNullOrEmpty() && task.packageName != ownPackage

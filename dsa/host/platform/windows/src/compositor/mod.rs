@@ -6,12 +6,14 @@
 //! It shows one native window per guest app task. It watches the guest's tasks through the
 //! service's local API ([`tasks`]), opens and closes a window for each ([`window`]), and
 //! has the renderer copy each task's frames into its window on the GPU ([`frames`],
-//! [`present`]). When the user closes a window, the guest is asked to end its task.
+//! [`present`]). When the user closes a window, the guest is asked to end its task. The
+//! mouse, touch and pen input in a window goes to its task ([`pointer`]).
 
 pub mod adapter;
 pub mod display_gpu;
 pub mod frames;
 pub mod log;
+pub mod pointer;
 pub mod present;
 pub mod shutdown;
 pub mod single_instance;
@@ -405,8 +407,10 @@ impl Compositor {
             }
         };
         let (requests_tx, requests_rx) = mpsc::channel();
+        let (input_tx, input_rx) = mpsc::channel();
         let ui = match window::start(UiSetup {
             requests: requests_tx,
+            input: input_tx,
             router,
             gpu,
             logger: self.logger.clone(),
@@ -452,10 +456,19 @@ impl Compositor {
             .map_err(|e| log(&format!("could not start the task requests: {e}")))
             .ok();
 
+        let input_connector = (self.local_api_connector)();
+        let input_logger = self.logger.clone();
+        let input = thread::Builder::new()
+            .name("dsa-compositor-input".into())
+            .spawn(move || tasks::serve_input(input_connector, input_rx, input_logger))
+            .map_err(|e| log(&format!("could not start the pointer input: {e}")))
+            .ok();
+
         TaskWindowThreads {
             ui: Some(ui),
             watcher,
             requester,
+            input,
         }
     }
 }
@@ -466,6 +479,8 @@ struct TaskWindowThreads {
     ui: Option<window::UiHandle>,
     watcher: Option<thread::JoinHandle<()>>,
     requester: Option<thread::JoinHandle<()>>,
+    /// Passes the windows' pointer input on; it ends with the windows.
+    input: Option<thread::JoinHandle<()>>,
 }
 
 impl TaskWindowThreads {
@@ -478,7 +493,10 @@ impl TaskWindowThreads {
         if let Some(ui) = self.ui {
             ui.stop();
         }
-        for thread in [self.watcher, self.requester].into_iter().flatten() {
+        for thread in [self.watcher, self.requester, self.input]
+            .into_iter()
+            .flatten()
+        {
             let _ = thread.join();
         }
     }

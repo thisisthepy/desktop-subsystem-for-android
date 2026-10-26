@@ -308,6 +308,12 @@ impl TaskWindows {
         }
     }
 
+    /// The task's size as the guest last reported it, which its frames and its pointer
+    /// input are measured in.
+    pub fn task_size(&self, task_id: i32) -> Option<(u32, u32)> {
+        Some(self.sizes.get(&task_id)?.guest_size())
+    }
+
     /// The largest client area the task's window may have, when the guest said.
     pub fn max_client_size(&self, task_id: i32) -> Option<(u32, u32)> {
         self.sizes.get(&task_id)?.max_client_size()

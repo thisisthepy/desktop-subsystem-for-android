@@ -143,6 +143,14 @@ sign-in. One copy runs per session, and it ends at sign-out. It writes its messa
   the log gets a summary (median, 95th percentile, longest, and how many took 100 ms or
   more) every 20 resizes and when the window closes. A window still waiting after 2
   seconds is logged as showing a stretched frame.
+- Mouse, touch and pen input in a window goes to its task. A point in the window becomes
+  the same point of the task in Android's pixels, whatever the window's size and the
+  monitor's scale, and a point inside the window always lands inside the task. The right
+  button is Android's secondary button (a context click, not a long press), the wheel
+  scrolls, a pen brings its pressure, eraser and barrel button, and each finger of a touch
+  is its own pointer. The window holds the mouse while a button is down, so a drag that
+  leaves it still ends in the task. Input goes to the service on a connection of its own,
+  which answers none of it, so a fast pointer is never held back.
 - Without a GPU device, the windows still open and close with their tasks but stay
   empty, and the log says why.
 - The renderer runs on the GPU that drives the primary monitor, so frames never cross

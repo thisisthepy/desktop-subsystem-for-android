@@ -23,8 +23,9 @@ use std::time::{Duration, Instant};
 
 use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{self, envelope::Body};
-use dsa_transport::{Connection, Listener, TransportError};
+use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 
+use crate::input::PointerEvent;
 use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskTable, TaskWatch};
 
 /// Where the session is in its life.
@@ -248,6 +249,11 @@ struct Shared {
     changed: Condvar,
     subscribers: Mutex<Vec<Sender<SessionEvent>>>,
     tasks: Mutex<TaskHub>,
+    /// A second handle that sends on the active connection, when the transport has one.
+    /// Every frame to the guest goes through it while it is set, so a caller's frame goes out
+    /// at once instead of waiting for the worker to stop waiting on the channel, and frames
+    /// from different threads never interleave.
+    sender: Mutex<Option<Box<dyn FrameSender>>>,
 }
 
 /// The guest's tasks and who is watching them, under one lock, so a new watcher's starting
@@ -292,6 +298,22 @@ impl Shared {
             .retain(|watcher| watcher.send(event.clone()).is_ok());
     }
 
+    fn set_sender(&self, sender: Option<Box<dyn FrameSender>>) {
+        *self.sender.lock().unwrap_or_else(|e| e.into_inner()) = sender;
+    }
+
+    /// Sends `frame` through the connection's second handle. `None` when there is none, or
+    /// the session is not active, so the worker must decide.
+    fn send_direct(&self, frame: &[u8]) -> Option<Result<(), SessionError>> {
+        let mut sender = self.sender.lock().unwrap_or_else(|e| e.into_inner());
+        let sender = sender.as_mut()?;
+        let state = self.status.lock().unwrap_or_else(|e| e.into_inner()).0;
+        if state != SessionState::Active {
+            return None;
+        }
+        Some(sender.send(frame).map_err(SessionError::Transport))
+    }
+
     /// Removes every task, as when the guest has gone away.
     fn clear_tasks(&self) {
         let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
@@ -326,6 +348,7 @@ impl Session {
             changed: Condvar::new(),
             subscribers: Mutex::new(Vec::new()),
             tasks: Mutex::new(TaskHub::default()),
+            sender: Mutex::new(None),
         });
         let (commands, command_rx) = mpsc::channel();
         let incoming = Arc::new(Mutex::new(None));
@@ -427,6 +450,9 @@ impl Session {
 
     /// Sends a frame to the agent. Needs an active session.
     pub fn send(&self, frame: Vec<u8>) -> Result<(), SessionError> {
+        if let Some(result) = self.shared.send_direct(&frame) {
+            return result;
+        }
         let (reply_tx, reply_rx) = mpsc::channel();
         self.commands
             .send(Command::Send(frame, reply_tx))
@@ -482,6 +508,13 @@ impl Session {
         };
         self.send(dsa_protocol::encode(&control::Envelope {
             body: Some(body),
+        }))
+    }
+
+    /// Passes pointer input in a task's window to the guest. Needs an active session.
+    pub fn pointer(&self, event: &PointerEvent) -> Result<(), SessionError> {
+        self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::PointerEvent(event.to_control())),
         }))
     }
 }
@@ -575,11 +608,14 @@ impl Worker {
             }
             Command::Send(frame, reply) => {
                 let state = self.state();
-                let result = match (state, self.connection.as_mut()) {
-                    (SessionState::Active, Some(connection)) => {
-                        connection.send(&frame).map_err(SessionError::Transport)
-                    }
-                    _ => Err(SessionError::NotActive(state)),
+                let result = match self.shared.send_direct(&frame) {
+                    Some(result) => result,
+                    None => match (state, self.connection.as_mut()) {
+                        (SessionState::Active, Some(connection)) => {
+                            connection.send(&frame).map_err(SessionError::Transport)
+                        }
+                        _ => Err(SessionError::NotActive(state)),
+                    },
                 };
                 let _ = reply.send(result);
                 true
@@ -651,6 +687,7 @@ impl Worker {
                     };
                     match self.handshake.accept(connection.as_mut(), secret) {
                         Ok(()) => {
+                            self.shared.set_sender(connection.try_clone_sender());
                             self.connection = Some(connection);
                             self.shared.set_vm_id(self.launcher.vm_id());
                             self.shared.set(SessionState::Active, None);
@@ -778,7 +815,8 @@ impl Worker {
             Some(Body::CloseTask(_))
             | Some(Body::LaunchApp(_))
             | Some(Body::ResizeTask(_))
-            | Some(Body::SetTaskDensity(_)) => {
+            | Some(Body::SetTaskDensity(_))
+            | Some(Body::PointerEvent(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
             }
             None => {
@@ -801,6 +839,7 @@ impl Worker {
     fn stop_with(&mut self, reason: impl FnOnce(&mut dyn GuestLauncher) -> StopReason) {
         self.shared.set_vm_id(None);
         self.shared.set(SessionState::Stopping, None);
+        self.shared.set_sender(None);
         if let Some(mut connection) = self.connection.take() {
             connection.close();
         }

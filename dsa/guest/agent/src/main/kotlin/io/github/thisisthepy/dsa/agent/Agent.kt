@@ -1,7 +1,10 @@
 package io.github.thisisthepy.dsa.agent
 
+import com.google.protobuf.InvalidProtocolBufferException
 import io.github.thisisthepy.dsa.agent.channel.ChannelClient
 import io.github.thisisthepy.dsa.agent.channel.ChannelLocator
+import io.github.thisisthepy.dsa.agent.input.InputInjector
+import io.github.thisisthepy.dsa.agent.input.PointerInput
 import io.github.thisisthepy.dsa.agent.requests.HostRequests
 import io.github.thisisthepy.dsa.agent.requests.RequestResult
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
@@ -10,6 +13,7 @@ import io.github.thisisthepy.dsa.agent.tasks.TaskSource
 import io.github.thisisthepy.dsa.agent.windowing.FreeformSetup
 import io.github.thisisthepy.dsa.agent.windowing.TaskArranger
 import io.github.thisisthepy.dsa.agent.windowing.WindowingControl
+import io.github.thisisthepy.dsa.control.v1.Envelope
 
 /**
  * The agent: makes the display freeform, keeps app tasks from overlapping on it, reports
@@ -17,7 +21,8 @@ import io.github.thisisthepy.dsa.agent.windowing.WindowingControl
  * app, ending a task, and giving a task the size and density of its host window.
  *
  * Everything runs on the scheduler's one thread. Task changes are coalesced: however many
- * arrive before the agent gets to them, it reads the tasks once.
+ * arrive before the agent gets to them, it reads the tasks once. Pointer input from the
+ * host is injected into its task as it arrives, and reads nothing.
  */
 class Agent(
     private val ownPackage: String,
@@ -25,6 +30,7 @@ class Agent(
     actions: TaskActions,
     locator: ChannelLocator,
     windowing: WindowingControl,
+    injector: InputInjector,
     private val scheduler: Scheduler,
     private val log: Log,
 ) {
@@ -37,6 +43,7 @@ class Agent(
     )
     private val reporter = TaskReporter(ownPackage) { frame -> channel.send(frame) }
     private val requests = HostRequests(ownPackage, actions, reporter::isReported)
+    private val pointer = PointerInput(injector, reporter::reportedBounds, log)
     private val freeform = FreeformSetup(windowing, scheduler, log)
     private val arranger = TaskArranger(actions, windowing::displaySize, log)
     private var refreshPending = false
@@ -66,6 +73,7 @@ class Agent(
     }
 
     private fun onFrame(frame: ByteArray) {
+        if (pointerInput(frame)) return
         val result = try {
             requests.handle(frame)
         } catch (e: Exception) {
@@ -87,6 +95,22 @@ class Agent(
             is RequestResult.NotForTheAgent -> Unit
         }
         if (result !is RequestResult.NotForTheAgent) requestRefresh()
+    }
+
+    /** Injects the frame if it is pointer input. False for any other frame. */
+    private fun pointerInput(frame: ByteArray): Boolean {
+        val envelope = try {
+            Envelope.parseFrom(frame)
+        } catch (e: InvalidProtocolBufferException) {
+            return false
+        }
+        if (envelope.bodyCase != Envelope.BodyCase.POINTER_EVENT) return false
+        try {
+            pointer.handle(envelope.pointerEvent)
+        } catch (e: Exception) {
+            log.warn("injecting pointer input failed", e)
+        }
+        return true
     }
 
     private fun requestRefresh() {
@@ -121,6 +145,7 @@ class Agent(
             },
             arranger.display,
         )
+        pointer.retainTasks(reporter.reported)
     }
 
     /**

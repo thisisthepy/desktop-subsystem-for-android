@@ -20,6 +20,8 @@
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
     <!-- Making the display a freeform display. -->
     <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" />
+    <!-- Injecting the pointer input of each task's host window into the task. -->
+    <uses-permission android:name="android.permission.INJECT_EVENTS" />
     <!-- Reading the label and launcher activity of any app. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
