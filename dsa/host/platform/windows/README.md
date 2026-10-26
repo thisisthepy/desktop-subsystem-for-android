@@ -140,8 +140,14 @@ writes its messages to `%LOCALAPPDATA%\DSA\logs\dsa-wm.log`. Earlier releases ca
   window shows its last frame stretched over the new size until a frame of that size
   arrives, then shows that frame 1:1. A window cannot grow past what Android's display
   can hold (by default 1920x1080 pixels), because a larger window could only show its
-  frames stretched; maximising stops at that size too. If Android gives the task another
-  size than the window asked for, the window takes the task's size within 2 seconds.
+  frames stretched; maximising stops at that size too, and on a larger monitor the
+  maximised window is centred on the screen. If Android gives the task another size than
+  the window asked for, the window takes the task's size within 2 seconds.
+- Every size is first given to the task live: the app lays itself out again in the new
+  size without being recreated, which takes a frame or two rather than the half second or
+  more that recreating an app can take. The task is then reconfigured for its new size
+  once, at a size it already has: when the user lets go of the window's edge, or, for a
+  maximise, a restore or a snap, as soon as Android has given the task the size.
 - The app window program reports each window's client size, its monitor's scale and the
   start and end of a drag to the window manager over the session's pipe. The window
   manager turns them into the task's size and density and sends those to the service.
@@ -245,6 +251,43 @@ why.
 
 `dsa launch <package>` starts an app in a window of its own, and `dsa tasks` lists the
 tasks that have one.
+
+## Memory
+
+`dsa memory` shows how much memory the user's Android takes. On the host: the VM's `vmmem`
+process (told apart from other VMs by its account, `NT VIRTUAL MACHINE\<VM ID>`), `dsa-wm`
+and each app window, as resident memory (what Task Manager shows) and private memory. Inside
+Android, from the report the agent sends: memory in use, page cache, app memory, zram swap,
+and the processes with the largest proportional set size. The service asks Android for a
+fresh report first, so the command takes a moment.
+
+```text
+Host: 820 MiB in all
+  vm              pid 4       600 MiB resident,    300 MiB private
+  window manager  pid 10      120 MiB resident,     60 MiB private
+  ...
+Android (0 s ago): 2048 of 4096 MiB in use, 3000 MiB available
+  page cache 900 MiB (shared memory 20), buffers 10, reclaimable kernel caches 80
+  ...
+```
+
+The service also logs one line for each running Android every five minutes:
+
+```text
+dsa-hostd 0.1.0: S-1-5-21-...: memory: host 820 MiB (vm 600, window manager 120, 2 app windows 100); guest 2048/4096 MiB used, cache 910, apps 700, swap 100 (zram 30), pss 650 MiB, 42 s ago
+```
+
+What keeps the number small:
+
+- The VM's memory is backed by the pagefile and committed on first touch, and the pages the
+  guest frees and reports go back to the host (`vm.rs`). By default the guest reports free
+  memory in 128 KiB pieces on Windows 11 and later, and in 2 MiB pieces before
+  (`page_reporting_order`, 5 or 9).
+- Inside Android, idle apps are swapped to compressed memory (zram), and the control daemon
+  has the clean caches dropped when no app has been open for a minute, so that memory is
+  free to report.
+- `dsa-wm` empties its working set 30 seconds after the last task window closes, and logs
+  how much it held. Memory it touches again comes back by itself.
 
 ## DSA Settings
 

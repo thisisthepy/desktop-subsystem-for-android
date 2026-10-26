@@ -18,6 +18,7 @@ use crate::host_api::UserAndroid;
 use crate::ime::ImeEvent;
 use crate::input::PointerEvent;
 use crate::keys::KeyEvent;
+use crate::memory::GuestMemoryReport;
 use crate::session::{Session, SessionState};
 use crate::tasks::{TaskRequest, TaskRequestError, TaskWatch};
 
@@ -228,14 +229,17 @@ impl UserAndroid for UpdatingAndroid {
     fn vm_id(&self) -> Option<String> {
         UserAndroid::vm_id(&*self.session)
     }
-    fn guest_memory(&self) -> Option<crate::memory::GuestMemory> {
-        UserAndroid::guest_memory(&*self.session)
-    }
     fn watch_tasks(&self) -> Option<TaskWatch> {
         UserAndroid::watch_tasks(&*self.session)
     }
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
         UserAndroid::request(&*self.session, request)
+    }
+    fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        UserAndroid::guest_memory(&*self.session)
+    }
+    fn request_guest_memory(&self) -> Result<(), TaskRequestError> {
+        UserAndroid::request_guest_memory(&*self.session)
     }
     fn pointer(&self, event: &PointerEvent) -> Result<(), TaskRequestError> {
         UserAndroid::pointer(&*self.session, event)

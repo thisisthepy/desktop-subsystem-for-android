@@ -24,7 +24,6 @@ use crate::host_api::{
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use crate::keys::{keycode, meta, KeyAction, KeyEvent};
-use crate::memory::{HostMemory, HostProcessMemory, HostRole};
 use crate::session::SessionState;
 use crate::settings::{MemorySettings, Settings, SettingsStore};
 use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskTable, TaskWatch};
@@ -243,7 +242,7 @@ impl RunningService {
         Self::start_service(listener, service)
     }
 
-    /// Runs `service` as it is.
+    /// Serves `service`, configured as the test needs.
     pub fn start_service(listener: Box<dyn LocalListener>, service: HostApiService) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let service = Arc::new(service);
@@ -364,10 +363,6 @@ macro_rules! host_api_conformance {
         #[test]
         fn fr17_an_invalid_setting_is_refused_with_its_reason() {
             $crate::host_api_conformance::invalid_setting_is_refused(&mut || $make);
-        }
-        #[test]
-        fn fr17_the_memory_report_names_the_callers_host_processes() {
-            $crate::host_api_conformance::memory_reports_host_processes(&mut || $make);
         }
         #[test]
         fn fr15_an_update_request_reaches_the_program_updater() {
@@ -989,41 +984,6 @@ pub fn input_stream_that_sends_a_request_is_disconnected(make: MakeLocal<'_>) {
     );
 }
 
-/// Reports one process of each role for every user, out of order.
-pub struct FakeHostMemory {
-    /// The users and VM IDs it was asked about, in order.
-    pub asked: Mutex<Vec<(String, Option<String>)>>,
-}
-
-impl HostMemory for FakeHostMemory {
-    fn processes(&self, user: &str, vm_id: Option<&str>) -> Vec<HostProcessMemory> {
-        self.asked
-            .lock()
-            .unwrap()
-            .push((user.to_string(), vm_id.map(str::to_string)));
-        vec![
-            HostProcessMemory {
-                role: HostRole::AppWindow,
-                pid: 30,
-                working_set_kb: 20_000,
-                private_kb: 15_000,
-            },
-            HostProcessMemory {
-                role: HostRole::Vm,
-                pid: 10,
-                working_set_kb: 900_000,
-                private_kb: 880_000,
-            },
-            HostProcessMemory {
-                role: HostRole::WindowManager,
-                pid: 20,
-                working_set_kb: 40_000,
-                private_kb: 30_000,
-            },
-        ]
-    }
-}
-
 fn facts() -> ServiceFacts {
     ServiceFacts {
         version: "0.0.9".into(),
@@ -1081,35 +1041,4 @@ pub fn invalid_setting_is_refused(make: MakeLocal<'_>) {
         other => panic!("expected the service to refuse, got {other:?}"),
     }
     assert_eq!(client.settings().unwrap().settings, Settings::default());
-}
-
-pub fn memory_reports_host_processes(make: MakeLocal<'_>) {
-    let (listener, mut connector, user) = make();
-    let memory = Arc::new(FakeHostMemory {
-        asked: Mutex::new(Vec::new()),
-    });
-    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
-        .with_host_memory(memory.clone());
-    let _service = RunningService::start_service(listener, service);
-    let mut client = connect(&mut *connector);
-    client.start().unwrap();
-    let report = client.memory().expect("the memory report");
-    assert_eq!(
-        report.guest, None,
-        "the fake Android reports no guest memory"
-    );
-    let roles: Vec<(HostRole, u32)> = report.host.iter().map(|p| (p.role, p.pid)).collect();
-    assert_eq!(
-        roles,
-        vec![
-            (HostRole::Vm, 10),
-            (HostRole::WindowManager, 20),
-            (HostRole::AppWindow, 30)
-        ]
-    );
-    assert_eq!(report.host_total_kb(), 960_000);
-    assert_eq!(
-        memory.asked.lock().unwrap().as_slice(),
-        &[(user, Some("fake-vm-id-1234".to_string()))]
-    );
 }

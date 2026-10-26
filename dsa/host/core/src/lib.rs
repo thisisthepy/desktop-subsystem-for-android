@@ -14,7 +14,7 @@
 //! - [`keys`]: key input in a task's window.
 //! - [`ime`]: text input through the host's input method in a task's window.
 //! - [`settings`]: the settings a user changes from the settings app, kept by the service.
-//! - [`memory`]: how much memory a user's Android takes, on the host and in the guest.
+//! - [`memory`]: how much memory a user's Android takes, in the guest and on the host.
 //! - [`compositor`]: platform-neutral graphics stream bookkeeping, renderer interfaces, and
 //!   which window each task and each frame goes to.
 

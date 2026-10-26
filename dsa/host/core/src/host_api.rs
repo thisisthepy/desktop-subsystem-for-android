@@ -34,7 +34,7 @@ use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{InputEvent, PointerEvent};
 use crate::keys::KeyEvent;
 use crate::memory::{
-    sort_host, GuestMemory, GuestProcessMemory, HostMemory, HostProcessMemory, HostRole, Memory,
+    snapshot_from_wire, snapshot_to_wire, GuestMemoryReport, HostMemory, MemorySnapshot,
 };
 use crate::resize_trace::{self, detail_requested, ResizeTrace, DETAIL_ENV};
 use crate::session::{Session, SessionError, SessionState};
@@ -54,11 +54,6 @@ pub trait UserAndroid: Send + Sync {
     }
     /// The runtime ID of the VM (such as a GUID on Windows), if running.
     fn vm_id(&self) -> Option<String> {
-        None
-    }
-    /// How Android uses the guest's memory, as it last reported it. `None` until it has
-    /// reported since it started, or when this Android does not report it.
-    fn guest_memory(&self) -> Option<GuestMemory> {
         None
     }
     /// The app tasks of this Android now, and every change to them from now on. `None` when
@@ -81,6 +76,17 @@ pub trait UserAndroid: Send + Sync {
     fn key(&self, event: &KeyEvent) -> Result<(), TaskRequestError>;
     /// Passes text composed or committed in a task's window to this Android.
     fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError>;
+    /// The last report of how this Android uses its memory, if it has sent one since it
+    /// started.
+    fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        None
+    }
+    /// Asks this Android for a memory report now.
+    fn request_guest_memory(&self) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed(
+            "this Android does not report its memory".into(),
+        ))
+    }
 }
 
 impl UserAndroid for Session {
@@ -120,6 +126,12 @@ impl UserAndroid for Session {
     }
     fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError> {
         Session::ime(self, event).map_err(request_error)
+    }
+    fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        Session::guest_memory(self)
+    }
+    fn request_guest_memory(&self) -> Result<(), TaskRequestError> {
+        Session::request_guest_memory(self).map_err(request_error)
     }
 }
 
@@ -425,17 +437,22 @@ pub struct SettingsReport {
     pub settings: Settings,
     pub facts: ServiceFacts,
 }
+/// How long the service waits for the fresh memory report it asks Android for.
+const MEMORY_WAIT: Duration = Duration::from_secs(3);
 
 /// The service end of the local API.
 pub struct HostApiService {
     androids: Arc<dyn UserAndroids>,
     program: Option<Arc<dyn UpdateProgram>>,
     settings: Option<(Arc<dyn SettingsStore>, ServiceFacts)>,
-    host_memory: Option<Arc<dyn HostMemory>>,
     hello: types::Hello,
     handshake_timeout: Duration,
     /// Logs when each resize was handed to Android, and how long that took.
     resize_trace: Mutex<ResizeTrace>,
+    /// Measures the host processes of each user's Android for `dsa memory`.
+    host_memory: Option<Arc<dyn HostMemory>>,
+    /// How long `dsa memory` waits for the fresh report it asks Android for.
+    memory_wait: Duration,
 }
 
 impl HostApiService {
@@ -444,14 +461,28 @@ impl HostApiService {
             androids,
             program: None,
             settings: None,
-            host_memory: None,
             hello: local_hello(Role::Service, build),
             handshake_timeout: Duration::from_secs(5),
             resize_trace: Mutex::new(ResizeTrace::new(
                 detail_requested(std::env::var(DETAIL_ENV).ok().as_deref(), false),
                 Instant::now(),
             )),
+            host_memory: None,
+            memory_wait: MEMORY_WAIT,
         }
+    }
+
+    /// Measures the host processes of each user's Android with `host_memory`, for
+    /// `dsa memory`.
+    pub fn with_host_memory(mut self, host_memory: Arc<dyn HostMemory>) -> HostApiService {
+        self.host_memory = Some(host_memory);
+        self
+    }
+
+    /// Waits at most `wait` for the fresh memory report `dsa memory` asks Android for.
+    pub fn with_memory_wait(mut self, wait: Duration) -> HostApiService {
+        self.memory_wait = wait;
+        self
     }
 
     /// Turns on the per-stage resize trace lines, as when the file that asks for them is
@@ -477,12 +508,6 @@ impl HostApiService {
         facts: ServiceFacts,
     ) -> HostApiService {
         self.settings = Some((store, facts));
-        self
-    }
-
-    /// The service that measures the host processes of each caller's Android with `memory`.
-    pub fn with_host_memory(mut self, memory: Arc<dyn HostMemory>) -> HostApiService {
-        self.host_memory = Some(memory);
         self
     }
 
@@ -732,7 +757,13 @@ impl HostApiService {
             Some(request::Body::UpdateProgram(_)) => self.update_program(peer),
             Some(request::Body::GetSettings(_)) => self.get_settings(peer),
             Some(request::Body::SetSettings(set)) => self.set_settings(peer, set),
-            Some(request::Body::GetMemory(_)) => self.memory(peer),
+            Some(request::Body::GetMemory(_)) => match self.androids.android(&peer.user) {
+                Err(why) => error(ErrorCode::Unavailable, why),
+                Ok(android) => {
+                    let memory = self.memory_of(&peer.user, &*android);
+                    response::Body::Memory(snapshot_to_wire(&memory))
+                }
+            },
             Some(request::Body::GetVmId(_)) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => response::Body::VmId(types::VmId {
@@ -867,6 +898,32 @@ impl HostApiService {
         }
     }
 
+    /// The memory of `user`'s Android now. A running Android is asked for a fresh report,
+    /// which is waited for a moment; a slow one leaves the last report in its place.
+    pub fn memory_of(&self, user: &str, android: &dyn UserAndroid) -> MemorySnapshot {
+        let before = android.guest_memory().map(|report| report.age);
+        if android.request_guest_memory().is_ok() {
+            let deadline = Instant::now() + self.memory_wait;
+            while Instant::now() < deadline {
+                let now = android.guest_memory().map(|report| report.age);
+                // A report younger than the one before arrived since the request.
+                if now.is_some_and(|age| before.is_none_or(|before| age < before)) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+        let vm_id = android.vm_id();
+        MemorySnapshot {
+            guest: android.guest_memory(),
+            host: self
+                .host_memory
+                .as_ref()
+                .map(|host| host.processes(user, vm_id.as_deref()))
+                .unwrap_or_default(),
+        }
+    }
+
     fn update_program(&self, peer: &Peer) -> response::Body {
         let Some(program) = &self.program else {
             return error(
@@ -935,24 +992,6 @@ impl HostApiService {
             Err(why) => error(ErrorCode::InvalidSetting, why),
         }
     }
-
-    fn memory(&self, peer: &Peer) -> response::Body {
-        let android = match self.androids.android(&peer.user) {
-            Ok(android) => android,
-            Err(why) => return error(ErrorCode::Unavailable, why),
-        };
-        let vm_id = android.vm_id();
-        let mut host = self
-            .host_memory
-            .as_ref()
-            .map(|memory| memory.processes(&peer.user, vm_id.as_deref()))
-            .unwrap_or_default();
-        sort_host(&mut host);
-        response::Body::Memory(memory_to_wire(&Memory {
-            guest: android.guest_memory(),
-            host,
-        }))
-    }
 }
 
 fn on_off(value: bool) -> &'static str {
@@ -991,93 +1030,6 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
             image_updates_available: settings.image_updates_available,
         },
     }
-}
-
-fn memory_to_wire(memory: &Memory) -> types::Memory {
-    types::Memory {
-        guest: memory.guest.as_ref().map(|guest| types::GuestMemory {
-            mem_total_kb: guest.mem_total_kb,
-            mem_free_kb: guest.mem_free_kb,
-            mem_available_kb: guest.mem_available_kb,
-            buffers_kb: guest.buffers_kb,
-            cached_kb: guest.cached_kb,
-            anon_pages_kb: guest.anon_pages_kb,
-            shmem_kb: guest.shmem_kb,
-            slab_reclaimable_kb: guest.slab_reclaimable_kb,
-            swap_total_kb: guest.swap_total_kb,
-            swap_free_kb: guest.swap_free_kb,
-            zram_original_kb: guest.zram_original_kb,
-            zram_used_kb: guest.zram_used_kb,
-            total_pss_kb: guest.total_pss_kb,
-            top_processes: guest
-                .top_processes
-                .iter()
-                .map(|p| types::GuestProcessMemory {
-                    pid: p.pid,
-                    name: p.name.clone(),
-                    pss_kb: p.pss_kb,
-                    swap_pss_kb: p.swap_pss_kb,
-                })
-                .collect(),
-            age_seconds: guest.age_seconds,
-        }),
-        host: memory
-            .host
-            .iter()
-            .map(|p| types::HostProcessMemory {
-                role: p.role.as_str().into(),
-                pid: p.pid,
-                working_set_kb: p.working_set_kb,
-                private_kb: p.private_kb,
-            })
-            .collect(),
-    }
-}
-
-fn memory_from_wire(memory: types::Memory) -> Result<Memory, ClientError> {
-    let host = memory
-        .host
-        .into_iter()
-        .map(|p| {
-            Ok(HostProcessMemory {
-                role: HostRole::parse(&p.role).ok_or_else(|| {
-                    ClientError::Malformed(format!("unknown host process role {:?}", p.role))
-                })?,
-                pid: p.pid,
-                working_set_kb: p.working_set_kb,
-                private_kb: p.private_kb,
-            })
-        })
-        .collect::<Result<Vec<_>, ClientError>>()?;
-    Ok(Memory {
-        guest: memory.guest.map(|guest| GuestMemory {
-            mem_total_kb: guest.mem_total_kb,
-            mem_free_kb: guest.mem_free_kb,
-            mem_available_kb: guest.mem_available_kb,
-            buffers_kb: guest.buffers_kb,
-            cached_kb: guest.cached_kb,
-            anon_pages_kb: guest.anon_pages_kb,
-            shmem_kb: guest.shmem_kb,
-            slab_reclaimable_kb: guest.slab_reclaimable_kb,
-            swap_total_kb: guest.swap_total_kb,
-            swap_free_kb: guest.swap_free_kb,
-            zram_original_kb: guest.zram_original_kb,
-            zram_used_kb: guest.zram_used_kb,
-            total_pss_kb: guest.total_pss_kb,
-            top_processes: guest
-                .top_processes
-                .into_iter()
-                .map(|p| GuestProcessMemory {
-                    pid: p.pid,
-                    name: p.name,
-                    pss_kb: p.pss_kb,
-                    swap_pss_kb: p.swap_pss_kb,
-                })
-                .collect(),
-            age_seconds: guest.age_seconds,
-        }),
-        host,
-    })
 }
 
 fn error(code: ErrorCode, detail: String) -> response::Body {
@@ -1217,6 +1169,18 @@ impl HostApiClient {
         }
     }
 
+    /// How much memory the caller's Android takes, in the guest and on the host. The service
+    /// asks Android for a fresh report first, so this takes a moment.
+    pub fn memory(&mut self) -> Result<MemorySnapshot, ClientError> {
+        let timeout = self.timeout + MEMORY_WAIT;
+        match self.exchange(request::Body::GetMemory(types::GetMemory {}), timeout)? {
+            response::Body::Memory(memory) => Ok(snapshot_from_wire(memory)),
+            _ => Err(ClientError::Malformed(
+                "expected the memory of the caller's Android".into(),
+            )),
+        }
+    }
+
     /// The app tasks of the caller's Android.
     pub fn tasks(&mut self) -> Result<TaskList, ClientError> {
         match self.exchange(request::Body::ListTasks(types::ListTasks {}), self.timeout)? {
@@ -1245,14 +1209,6 @@ impl HostApiClient {
         match self.exchange(body, self.timeout)? {
             response::Body::Settings(settings) => Ok(settings_from_wire(settings)),
             _ => Err(ClientError::Malformed("expected the settings".into())),
-        }
-    }
-
-    /// How much memory the caller's Android takes, on the host and in the guest.
-    pub fn memory(&mut self) -> Result<Memory, ClientError> {
-        match self.exchange(request::Body::GetMemory(types::GetMemory {}), self.timeout)? {
-            response::Body::Memory(memory) => memory_from_wire(memory),
-            _ => Err(ClientError::Malformed("expected the memory report".into())),
         }
     }
 

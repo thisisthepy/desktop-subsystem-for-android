@@ -411,49 +411,6 @@ pub struct VmId {
     #[prost(string, tag = "1")]
     pub vm_id: ::prost::alloc::string::String,
 }
-/// Asks for the settings of the caller's DSA.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetSettings {}
-/// Changes the settings of the caller's DSA: each value of `settings` that a client may change
-/// replaces the current one. The service answers with the settings as they are now.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct SetSettings {
-    #[prost(message, optional, tag = "1")]
-    pub settings: ::core::option::Option<Settings>,
-}
-/// The settings of the caller's DSA. `render_gpu` and `freeze` are the caller's own; the
-/// update settings are the machine's, shared by every user of it.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct Settings {
-    /// The GPU the caller's window manager renders on: "display" (the GPU that drives the
-    /// primary monitor, the default), "integrated", "discrete", or part of a GPU's name. The
-    /// window manager reads it when it starts.
-    #[prost(string, tag = "1")]
-    pub render_gpu: ::prost::alloc::string::String,
-    /// Whether the caller's Android may be frozen when it is idle. Off unless the user turns it
-    /// on.
-    #[prost(bool, tag = "2")]
-    pub freeze: bool,
-    /// Whether the service updates DSA itself from the signed program list.
-    #[prost(bool, tag = "3")]
-    pub program_updates: bool,
-    /// Whether the service downloads new Android images from the signed release list.
-    #[prost(bool, tag = "4")]
-    pub image_updates: bool,
-    /// Whether this installation can update DSA itself, or the Android image, at all. A client
-    /// cannot change these.
-    #[prost(bool, tag = "5")]
-    pub program_updates_available: bool,
-    #[prost(bool, tag = "6")]
-    pub image_updates_available: bool,
-    /// The version of DSA the service runs. A client cannot change it.
-    #[prost(string, tag = "7")]
-    pub version: ::prost::alloc::string::String,
-    /// The folder the service writes its log to. Empty when it keeps none. A client cannot
-    /// change it.
-    #[prost(string, tag = "8")]
-    pub log_dir: ::prost::alloc::string::String,
-}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Error {
     #[prost(enumeration = "ErrorCode", tag = "1")]
@@ -469,7 +426,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -503,17 +460,13 @@ pub mod request {
         SetTaskDensity(super::SetTaskDensity),
         #[prost(message, tag = "14")]
         GetMemory(super::GetMemory),
-        #[prost(message, tag = "15")]
-        GetSettings(super::GetSettings),
-        #[prost(message, tag = "16")]
-        SetSettings(super::SetSettings),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Response {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "response::Body", tags = "2, 3, 4, 5, 6, 7, 8, 9")]
+    #[prost(oneof = "response::Body", tags = "2, 3, 4, 5, 6, 7, 8")]
     pub body: ::core::option::Option<response::Body>,
 }
 /// Nested message and enum types in `Response`.
@@ -534,8 +487,6 @@ pub mod response {
         Done(super::Done),
         #[prost(message, tag = "8")]
         Memory(super::Memory),
-        #[prost(message, tag = "9")]
-        Settings(super::Settings),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.
@@ -842,8 +793,6 @@ pub enum ErrorCode {
     UpdateFailed = 3,
     /// The request needs the caller's Android to be running, and it is not.
     NotRunning = 4,
-    /// A setting has a value the service does not accept. The detail says which and why.
-    InvalidSetting = 5,
 }
 impl ErrorCode {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -857,7 +806,6 @@ impl ErrorCode {
             Self::Unavailable => "ERROR_CODE_UNAVAILABLE",
             Self::UpdateFailed => "ERROR_CODE_UPDATE_FAILED",
             Self::NotRunning => "ERROR_CODE_NOT_RUNNING",
-            Self::InvalidSetting => "ERROR_CODE_INVALID_SETTING",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -868,7 +816,6 @@ impl ErrorCode {
             "ERROR_CODE_UNAVAILABLE" => Some(Self::Unavailable),
             "ERROR_CODE_UPDATE_FAILED" => Some(Self::UpdateFailed),
             "ERROR_CODE_NOT_RUNNING" => Some(Self::NotRunning),
-            "ERROR_CODE_INVALID_SETTING" => Some(Self::InvalidSetting),
             _ => None,
         }
     }

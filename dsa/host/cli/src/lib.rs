@@ -45,7 +45,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::host_api::{ClientError, HostApiClient, SettingsReport, Status, TaskList};
-use dsa_host_core::memory::Memory;
+use dsa_host_core::memory::MemorySnapshot;
 use dsa_host_core::session::SessionState;
 use dsa_transport::Connector;
 use serde_json::{json, Value};
@@ -308,9 +308,11 @@ pub fn describe_settings(report: &SettingsReport) -> String {
     lines.join("\n")
 }
 
-/// The memory report as one JSON object.
-pub fn memory_json(memory: &Memory) -> Value {
-    let guest = memory.guest.as_ref().map(|guest| {
+/// The memory report as one JSON object. Sizes in KiB; `guest` is null until Android has
+/// reported, and `age_seconds` says how old its report is.
+pub fn memory_json(memory: &MemorySnapshot) -> Value {
+    let guest = memory.guest.as_ref().map(|report| {
+        let guest = &report.memory;
         json!({
             "mem_total_kb": guest.mem_total_kb,
             "mem_free_kb": guest.mem_free_kb,
@@ -325,7 +327,7 @@ pub fn memory_json(memory: &Memory) -> Value {
             "zram_original_kb": guest.zram_original_kb,
             "zram_used_kb": guest.zram_used_kb,
             "total_pss_kb": guest.total_pss_kb,
-            "age_seconds": guest.age_seconds,
+            "age_seconds": report.age.as_secs(),
             "top_processes": guest.top_processes.iter().map(|p| json!({
                 "pid": p.pid,
                 "name": p.name,
@@ -337,71 +339,13 @@ pub fn memory_json(memory: &Memory) -> Value {
     json!({
         "guest": guest,
         "host": memory.host.iter().map(|p| json!({
-            "role": p.role.as_str(),
+            "role": p.role.name(),
             "pid": p.pid,
             "working_set_kb": p.working_set_kb,
             "private_kb": p.private_kb,
         })).collect::<Vec<_>>(),
         "host_total_kb": memory.host_total_kb(),
     })
-}
-
-fn megabytes(kb: u64) -> String {
-    format!("{:.1} MB", kb as f64 / 1024.0)
-}
-
-/// The memory report, one line per process and per part of the guest.
-pub fn describe_memory(memory: &Memory) -> String {
-    let mut lines = Vec::new();
-    if memory.host.is_empty() {
-        lines.push("Host: no process of this user's Android is running".to_string());
-    } else {
-        lines.push(format!(
-            "Host: {} in RAM",
-            megabytes(memory.host_total_kb())
-        ));
-        for p in &memory.host {
-            lines.push(format!(
-                "  {} (process {}): {} in RAM, {} private",
-                p.role.as_str(),
-                p.pid,
-                megabytes(p.working_set_kb),
-                megabytes(p.private_kb)
-            ));
-        }
-    }
-    match &memory.guest {
-        None => lines.push("Android: no report yet".to_string()),
-        Some(guest) => {
-            lines.push(format!(
-                "Android: {} of {} available ({} seconds ago)",
-                megabytes(guest.mem_available_kb),
-                megabytes(guest.mem_total_kb),
-                guest.age_seconds
-            ));
-            lines.push(format!(
-                "  apps and system: {}",
-                megabytes(guest.total_pss_kb)
-            ));
-            lines.push(format!(
-                "  cache: {}",
-                megabytes(guest.cached_kb + guest.buffers_kb)
-            ));
-            lines.push(format!(
-                "  kernel caches it can free: {}",
-                megabytes(guest.slab_reclaimable_kb)
-            ));
-            for p in &guest.top_processes {
-                lines.push(format!(
-                    "  {} (process {}): {}",
-                    p.name,
-                    p.pid,
-                    megabytes(p.pss_kb)
-                ));
-            }
-        }
-    }
-    lines.join("\n")
 }
 
 /// This machine's GPUs, and which one drives the primary monitor.
@@ -665,7 +609,7 @@ pub fn run_with_starter(
             return Ok(if invocation.json {
                 memory_json(&memory).to_string()
             } else {
-                describe_memory(&memory)
+                memory.to_string().trim_end().to_string()
             });
         }
         Command::Gpus => unreachable!("answered before connecting"),

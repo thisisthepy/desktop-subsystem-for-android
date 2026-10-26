@@ -561,12 +561,7 @@ fn settings_service(listener: Box<dyn dsa_transport::local::LocalListener>) -> R
                 program_updates_available: true,
                 image_updates_available: true,
             },
-        )
-        .with_host_memory(Arc::new(
-            dsa_host_core::host_api_conformance::FakeHostMemory {
-                asked: std::sync::Mutex::new(Vec::new()),
-            },
-        ));
+        );
     RunningService::start_service(listener, service)
 }
 
@@ -669,57 +664,51 @@ fn fr17_dsa_settings_reports_why_a_value_was_refused() {
 }
 
 #[test]
-fn fr17_dsa_memory_lists_the_host_processes_of_the_users_android() {
+fn fr17_dsa_memory_json_says_what_it_knows_of_the_host_and_android() {
     let ((listener, _, _), endpoint) = local_pair();
     let _service = settings_service(listener);
     let memory = json_of(&dsa(&endpoint, "memory --json"));
-    assert!(memory["guest"].is_null());
-    let roles: Vec<&str> = memory["host"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|p| p["role"].as_str().unwrap())
-        .collect();
-    assert_eq!(roles, ["vm", "window manager", "app window"]);
-    assert_eq!(memory["host_total_kb"], 960_000);
-    let text = dsa(&endpoint, "memory");
-    assert!(
-        stdout(&text).contains("Android: no report yet"),
-        "{}",
-        stdout(&text)
-    );
+    assert!(memory["guest"].is_null(), "{memory}");
+    assert!(memory["host"].as_array().unwrap().is_empty(), "{memory}");
+    assert_eq!(memory["host_total_kb"], 0);
 }
 
 #[test]
-fn fr17_dsa_memory_describes_the_guest_breakdown() {
-    use dsa_host_core::memory::{GuestMemory, GuestProcessMemory, Memory};
-    let text = dsa_cli::describe_memory(&Memory {
-        guest: Some(GuestMemory {
-            mem_total_kb: 4 * 1024 * 1024,
-            mem_available_kb: 3 * 1024 * 1024,
-            cached_kb: 200 * 1024,
-            total_pss_kb: 500 * 1024,
-            top_processes: vec![GuestProcessMemory {
-                pid: 42,
-                name: "system_server".into(),
-                pss_kb: 150 * 1024,
-                swap_pss_kb: 0,
-            }],
-            age_seconds: 12,
-            ..GuestMemory::default()
+fn fr17_dsa_memory_json_carries_the_guest_breakdown_and_the_host_processes() {
+    use dsa_host_core::memory::{
+        GuestMemory, GuestMemoryReport, HostProcessMemory, HostRole, MemorySnapshot,
+        ProcessMemory,
+    };
+    let json = dsa_cli::memory_json(&MemorySnapshot {
+        guest: Some(GuestMemoryReport {
+            memory: GuestMemory {
+                mem_total_kb: 4 * 1024 * 1024,
+                mem_available_kb: 3 * 1024 * 1024,
+                cached_kb: 200 * 1024,
+                total_pss_kb: 500 * 1024,
+                top_processes: vec![ProcessMemory {
+                    pid: 42,
+                    name: "system_server".into(),
+                    pss_kb: 150 * 1024,
+                    swap_pss_kb: 0,
+                }],
+                ..GuestMemory::default()
+            },
+            age: Duration::from_secs(12),
         }),
-        host: Vec::new(),
+        host: vec![HostProcessMemory {
+            role: HostRole::Vm,
+            pid: 10,
+            working_set_kb: 900_000,
+            private_kb: 880_000,
+        }],
     });
-    assert!(
-        text.contains("Android: 3072.0 MB of 4096.0 MB available (12 seconds ago)"),
-        "{text}"
-    );
-    assert!(
-        text.contains("system_server (process 42): 150.0 MB"),
-        "{text}"
-    );
-    let json = dsa_cli::memory_json(&Memory::default());
-    assert_eq!(json["host_total_kb"], 0);
+    assert_eq!(json["guest"]["mem_total_kb"], 4 * 1024 * 1024);
+    assert_eq!(json["guest"]["total_pss_kb"], 500 * 1024);
+    assert_eq!(json["guest"]["age_seconds"], 12);
+    assert_eq!(json["guest"]["top_processes"][0]["name"], "system_server");
+    assert_eq!(json["host"][0]["role"], "vm");
+    assert_eq!(json["host_total_kb"], 900_000);
 }
 
 #[test]
@@ -730,4 +719,28 @@ fn fr17_dsa_gpus_prints_a_list() {
         .unwrap();
     let gpus = json_of(&output);
     assert!(gpus["gpus"].is_array());
+}
+
+#[test]
+fn nfr1_dsa_memory_is_parsed() {
+    assert_eq!(parse(&args("memory")).unwrap().command, Cmd::Memory);
+    assert_eq!(
+        parse(&args("memory --pipe p")).unwrap().endpoint.as_deref(),
+        Some("p")
+    );
+}
+
+#[test]
+fn nfr1_dsa_memory_says_what_it_knows_of_the_host_and_android() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let output = dsa(&endpoint, "memory");
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.starts_with("Host: 0 MiB in all"), "{text}");
+    assert!(
+        text.contains("no process of this Android is running"),
+        "{text}"
+    );
+    assert!(text.contains("Android: no report yet"), "{text}");
 }

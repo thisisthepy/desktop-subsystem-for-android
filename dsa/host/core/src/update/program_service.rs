@@ -36,6 +36,7 @@ use crate::host_api::{ProgramUpdate, UpdateProgram, UserAndroid, UserAndroids};
 use crate::ime::ImeEvent;
 use crate::input::PointerEvent;
 use crate::keys::KeyEvent;
+use crate::memory::GuestMemoryReport;
 use crate::session::SessionState;
 use crate::tasks::{TaskRequest, TaskRequestError, TaskWatch};
 
@@ -732,14 +733,17 @@ impl UserAndroid for WithProgramStatus {
     fn vm_id(&self) -> Option<String> {
         self.android.vm_id()
     }
-    fn guest_memory(&self) -> Option<crate::memory::GuestMemory> {
-        self.android.guest_memory()
-    }
     fn watch_tasks(&self) -> Option<TaskWatch> {
         self.android.watch_tasks()
     }
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
         self.android.request(request)
+    }
+    fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        self.android.guest_memory()
+    }
+    fn request_guest_memory(&self) -> Result<(), TaskRequestError> {
+        self.android.request_guest_memory()
     }
     fn pointer(&self, event: &PointerEvent) -> Result<(), TaskRequestError> {
         self.android.pointer(event)

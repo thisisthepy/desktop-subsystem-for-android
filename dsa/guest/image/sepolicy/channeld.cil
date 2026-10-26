@@ -63,3 +63,12 @@
 (allow dsa_channeld system_app (binder (call transfer)))
 (allow dsa_channeld platform_app (binder (call transfer)))
 (allow dsa_channeld hal_graphics_composer_server (binder (call transfer)))
+
+; Handing idle memory back to the host: the daemon reads how the guest uses its memory and,
+; when it should drop its caches, sets vendor.dsa.memory.reclaim (its type, dsa_memory_prop,
+; is in memory.cil). init's vendor scripts do the rest (dsa-channeld.rc).
+(allow dsa_channeld proc_meminfo (file (read open getattr)))
+(allow dsa_channeld property_socket (sock_file (write)))
+(allow dsa_channeld init (unix_stream_socket (connectto)))
+(allow dsa_channeld dsa_memory_prop (property_service (set)))
+(allow dsa_channeld dsa_memory_prop (file (read open getattr map)))
