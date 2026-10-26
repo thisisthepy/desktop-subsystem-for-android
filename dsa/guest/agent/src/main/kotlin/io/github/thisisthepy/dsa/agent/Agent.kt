@@ -87,7 +87,7 @@ class Agent(
             is RequestResult.LaunchFailed -> log.warn("could not launch ${result.packageName}: ${result.reason}")
             is RequestResult.Closed -> log.info("ended task ${result.taskId}")
             is RequestResult.CloseRefused -> log.warn("did not end task ${result.taskId}: ${result.reason}")
-            is RequestResult.Resize -> arranger.resize(result.taskId, result.size)
+            is RequestResult.Resize -> arranger.resize(result.taskId, result.size, result.live)
             is RequestResult.Density -> {
                 log.info("task ${result.taskId} draws at ${result.densityDpi} dpi")
                 arranger.setDensity(result.taskId, result.densityDpi)

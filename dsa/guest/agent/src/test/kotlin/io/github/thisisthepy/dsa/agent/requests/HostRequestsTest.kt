@@ -25,8 +25,8 @@ class HostRequestsTest {
     private fun close(taskId: Int) =
         Envelope.newBuilder().setCloseTask(CloseTask.newBuilder().setTaskId(taskId)).build().toByteArray()
 
-    private fun resize(taskId: Int, width: Int, height: Int) = Envelope.newBuilder()
-        .setResizeTask(ResizeTask.newBuilder().setTaskId(taskId).setWidth(width).setHeight(height))
+    private fun resize(taskId: Int, width: Int, height: Int, live: Boolean = false) = Envelope.newBuilder()
+        .setResizeTask(ResizeTask.newBuilder().setTaskId(taskId).setWidth(width).setHeight(height).setLive(live))
         .build().toByteArray()
 
     private fun density(taskId: Int, densityDpi: Int) = Envelope.newBuilder()
@@ -39,6 +39,16 @@ class HostRequestsTest {
 
         assertEquals(RequestResult.Resize(3, Size(1280, 720)), requests.handle(resize(3, 1280, 720)))
         assertEquals(RequestResult.Density(3, 320), requests.handle(density(3, 320)))
+    }
+
+    @Test
+    fun fr4_a_resize_says_whether_the_user_is_still_dragging() {
+        reported += 3
+
+        assertEquals(RequestResult.Resize(3, Size(1280, 720), live = true), requests.handle(resize(3, 1280, 720, live = true)))
+        // The end of the drag is handed back even when the size did not change.
+        assertEquals(RequestResult.Resize(3, Size(1280, 720), live = false), requests.handle(resize(3, 1280, 720)))
+        assertTrue(actions.resized.isEmpty())
     }
 
     @Test
