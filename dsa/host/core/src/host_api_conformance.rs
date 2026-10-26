@@ -21,6 +21,7 @@ use crate::host_api::{
     running_of, stop_every, ClientError, HostApiClient, HostApiService, ProgramUpdate,
     UpdateProgram, UserAndroid, UserAndroids,
 };
+use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use crate::keys::{keycode, meta, KeyAction, KeyEvent};
 use crate::session::SessionState;
@@ -44,6 +45,8 @@ pub struct FakeAndroid {
     pub pointers: Mutex<Vec<PointerEvent>>,
     /// The key events it was given, in order.
     pub keys: Mutex<Vec<KeyEvent>>,
+    /// The text input it was given, in order.
+    pub text: Mutex<Vec<ImeEvent>>,
 }
 
 impl FakeAndroid {
@@ -54,6 +57,7 @@ impl FakeAndroid {
             requests: Mutex::new(Vec::new()),
             pointers: Mutex::new(Vec::new()),
             keys: Mutex::new(Vec::new()),
+            text: Mutex::new(Vec::new()),
         }
     }
 
@@ -132,6 +136,16 @@ impl UserAndroid for FakeAndroid {
             )));
         }
         self.keys.lock().unwrap().push(*event);
+        Ok(())
+    }
+    fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError> {
+        if self.state() != SessionState::Active {
+            return Err(TaskRequestError::NotRunning(format!(
+                "Android is {}, not running",
+                self.state()
+            )));
+        }
+        self.text.lock().unwrap().push(event.clone());
         Ok(())
     }
 }
@@ -321,6 +335,18 @@ macro_rules! host_api_conformance {
         #[test]
         fn fr16_a_key_event_that_makes_no_sense_is_dropped_and_the_stream_goes_on() {
             $crate::host_api_conformance::bad_key_event_is_dropped(&mut || $make);
+        }
+        #[test]
+        fn fr6_text_input_reaches_the_callers_android_in_order_with_key_input() {
+            $crate::host_api_conformance::text_input_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr6_text_input_that_makes_no_sense_is_dropped_and_the_stream_goes_on() {
+            $crate::host_api_conformance::bad_text_input_is_dropped(&mut || $make);
+        }
+        #[test]
+        fn fr6_a_watcher_hears_where_the_cursor_of_a_tasks_editor_is() {
+            $crate::host_api_conformance::watcher_receives_cursor(&mut || $make);
         }
         #[test]
         fn nfr5_a_client_that_streams_input_and_sends_a_request_is_disconnected() {
@@ -807,6 +833,120 @@ pub fn bad_key_event_is_dropped(make: MakeLocal<'_>) {
     input.send_key(&good).expect("the event is sent");
     let android = androids.of(&user).unwrap();
     assert_eq!(keys_given(&android, 1), vec![good]);
+}
+
+/// Waits until `android` has been given `count` pieces of text input, and returns them.
+fn text_given(android: &FakeAndroid, count: usize) -> Vec<ImeEvent> {
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let given = android.text.lock().unwrap().clone();
+        if given.len() >= count || std::time::Instant::now() >= deadline {
+            return given;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+pub fn text_input_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let mut input = connect(&mut *connector)
+        .stream_input()
+        .expect("streaming input");
+    let text = [
+        ImeEvent::Composition {
+            task_id: 4,
+            text: "\u{3131}".into(),
+            cursor: 1,
+        },
+        ImeEvent::Composition {
+            task_id: 4,
+            text: "\u{ac00}".into(),
+            cursor: 1,
+        },
+        ImeEvent::Commit {
+            task_id: 4,
+            text: "\u{ac00}".into(),
+        },
+    ];
+    for event in &text {
+        input.send_ime(event).expect("the event is sent");
+    }
+    input
+        .send_input(&crate::input::InputEvent::Key(key(
+            4,
+            KeyAction::Down,
+            keycode::DPAD_LEFT,
+            0,
+        )))
+        .expect("the event is sent");
+    input
+        .send_input(&crate::input::InputEvent::Ime(ImeEvent::Commit {
+            task_id: 4,
+            text: "a".into(),
+        }))
+        .expect("the event is sent");
+    let android = androids.of(&user).unwrap();
+    let given = text_given(&android, 4);
+    assert_eq!(given[..3], text);
+    assert_eq!(keys_given(&android, 1).len(), 1);
+}
+
+pub fn bad_text_input_is_dropped(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let mut input = connect(&mut *connector)
+        .stream_input()
+        .expect("streaming input");
+    // A cursor past the end of its composition, and a commit of nothing.
+    input
+        .send_ime(&ImeEvent::Composition {
+            task_id: 4,
+            text: "a".into(),
+            cursor: 5,
+        })
+        .expect("the event is sent");
+    input
+        .send_ime(&ImeEvent::Commit {
+            task_id: 4,
+            text: String::new(),
+        })
+        .expect("the event is sent");
+    let good = ImeEvent::Commit {
+        task_id: 4,
+        text: "\u{d55c}".into(),
+    };
+    input.send_ime(&good).expect("the event is sent");
+    let android = androids.of(&user).unwrap();
+    assert_eq!(text_given(&android, 1), vec![good]);
+}
+
+pub fn watcher_receives_cursor(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut stream = connect(&mut *connector).watch_tasks().expect("watching");
+    let android = androids.of(&user).unwrap();
+    android.publish(TaskEvent::Updated(sample_task(4, "Notes")));
+    let cursor = TaskEvent::ImeCursor {
+        task_id: 4,
+        cursor: ImeCursor {
+            left: 30,
+            top: 40,
+            right: 32,
+            bottom: 70,
+        },
+    };
+    android.publish(cursor.clone());
+    assert_eq!(
+        next_event(&mut stream),
+        TaskEvent::Updated(sample_task(4, "Notes"))
+    );
+    assert_eq!(next_event(&mut stream), cursor);
 }
 
 pub fn input_stream_that_sends_a_request_is_disconnected(make: MakeLocal<'_>) {

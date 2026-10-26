@@ -53,6 +53,12 @@ pub enum WindowChange {
         height: u32,
         max: Option<(u32, u32)>,
     },
+    /// The cursor of the editor focused in the task is here, in the window's client pixels:
+    /// the window puts its input method's windows beside it.
+    ImeCursor {
+        task_id: i32,
+        cursor: crate::ime::ImeCursor,
+    },
 }
 
 /// The title of a task's window: its label, else its package, else its ID.
@@ -221,6 +227,16 @@ impl TaskWindows {
                     .retain(|other, display| *display != *display_id || other == task_id);
                 self.displays.insert(*task_id, *display_id);
                 Vec::new()
+            }
+            // The task's pixels are its window's, so the cursor passes through as it is.
+            TaskEvent::ImeCursor { task_id, cursor } => {
+                if !self.has_window(*task_id) {
+                    return Vec::new();
+                }
+                vec![WindowChange::ImeCursor {
+                    task_id: *task_id,
+                    cursor: *cursor,
+                }]
             }
         }
     }
@@ -510,6 +526,27 @@ mod tests {
             height: 1280,
             focused: false,
         }
+    }
+
+    #[test]
+    fn fr6_the_cursor_of_a_tasks_editor_goes_to_its_window_unchanged() {
+        let mut windows = TaskWindows::new();
+        let cursor = crate::ime::ImeCursor {
+            left: 12,
+            top: 30,
+            right: 14,
+            bottom: 60,
+        };
+        let moved = |task_id| TaskEvent::ImeCursor { task_id, cursor };
+        assert!(windows.apply(&moved(1)).is_empty(), "no window yet");
+        windows.apply(&updated(1, "Notes"));
+        // The task's pixels are the window's, wherever the task is on the guest's display.
+        assert_eq!(
+            windows.apply(&moved(1)),
+            vec![WindowChange::ImeCursor { task_id: 1, cursor }]
+        );
+        windows.user_closed(1);
+        assert!(windows.apply(&moved(1)).is_empty(), "the window closed");
     }
 
     #[test]

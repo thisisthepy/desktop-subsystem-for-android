@@ -231,12 +231,49 @@ pub struct KeyEvent {
     #[prost(bool, tag = "7")]
     pub canceled: bool,
 }
+/// Host to guest: the text the host's input method is composing in a task's window, while the
+/// window has the keyboard focus. Each message replaces the whole composition: the agent puts
+/// `text` into the focused editor as its composing text (underlined, not yet typed), in place
+/// of the previous composition. An empty `text` removes the composition: the user deleted it
+/// or the input method canceled it.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImeComposition {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(string, tag = "2")]
+    pub text: ::prost::alloc::string::String,
+    /// Where the cursor is in `text`, in UTF-16 code units from its start: 0 before the first
+    /// character, the length of `text` after the last.
+    #[prost(uint32, tag = "3")]
+    pub cursor: u32,
+}
+/// Host to guest: text the user typed in a task's window: what the host's input method
+/// committed, or a character a key typed without one. The agent commits it to the focused
+/// editor, in place of the composition if there is one, and the composition ends.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImeCommit {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(string, tag = "2")]
+    pub text: ::prost::alloc::string::String,
+}
+/// Guest to host, from the agent: where the cursor of the editor focused in a task is, in the
+/// task's own pixels from its top left corner (where a pointer event's place is measured from),
+/// so the host can put its input method's windows (the candidate list, say) beside it. Sent
+/// when the editor gains the focus and when its cursor moves.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImeCursor {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(message, optional, tag = "2")]
+    pub cursor: ::core::option::Option<Rect>,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -274,6 +311,12 @@ pub mod envelope {
         AppInfo(super::AppInfo),
         #[prost(message, tag = "16")]
         KeyEvent(super::KeyEvent),
+        #[prost(message, tag = "17")]
+        ImeComposition(super::ImeComposition),
+        #[prost(message, tag = "18")]
+        ImeCommit(super::ImeCommit),
+        #[prost(message, tag = "19")]
+        ImeCursor(super::ImeCursor),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.

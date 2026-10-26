@@ -35,6 +35,9 @@ public  final class Envelope extends
     POINTER_EVENT(13),
     APP_INFO(15),
     KEY_EVENT(16),
+    IME_COMPOSITION(17),
+    IME_COMMIT(18),
+    IME_CURSOR(19),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -65,6 +68,9 @@ public  final class Envelope extends
         case 13: return POINTER_EVENT;
         case 15: return APP_INFO;
         case 16: return KEY_EVENT;
+        case 17: return IME_COMPOSITION;
+        case 18: return IME_COMMIT;
+        case 19: return IME_CURSOR;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -831,6 +837,156 @@ public  final class Envelope extends
    */
   private void clearKeyEvent() {
     if (bodyCase_ == 16) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int IME_COMPOSITION_FIELD_NUMBER = 17;
+  /**
+   * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+   */
+  @java.lang.Override
+  public boolean hasImeComposition() {
+    return bodyCase_ == 17;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ImeComposition getImeComposition() {
+    if (bodyCase_ == 17) {
+       return (io.github.thisisthepy.dsa.control.v1.ImeComposition) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ImeComposition.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+   */
+  private void setImeComposition(io.github.thisisthepy.dsa.control.v1.ImeComposition value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 17;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+   */
+  private void mergeImeComposition(io.github.thisisthepy.dsa.control.v1.ImeComposition value) {
+    value.getClass();
+  if (bodyCase_ == 17 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ImeComposition.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ImeComposition.newBuilder((io.github.thisisthepy.dsa.control.v1.ImeComposition) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 17;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+   */
+  private void clearImeComposition() {
+    if (bodyCase_ == 17) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int IME_COMMIT_FIELD_NUMBER = 18;
+  /**
+   * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+   */
+  @java.lang.Override
+  public boolean hasImeCommit() {
+    return bodyCase_ == 18;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ImeCommit getImeCommit() {
+    if (bodyCase_ == 18) {
+       return (io.github.thisisthepy.dsa.control.v1.ImeCommit) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ImeCommit.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+   */
+  private void setImeCommit(io.github.thisisthepy.dsa.control.v1.ImeCommit value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 18;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+   */
+  private void mergeImeCommit(io.github.thisisthepy.dsa.control.v1.ImeCommit value) {
+    value.getClass();
+  if (bodyCase_ == 18 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ImeCommit.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ImeCommit.newBuilder((io.github.thisisthepy.dsa.control.v1.ImeCommit) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 18;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+   */
+  private void clearImeCommit() {
+    if (bodyCase_ == 18) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int IME_CURSOR_FIELD_NUMBER = 19;
+  /**
+   * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+   */
+  @java.lang.Override
+  public boolean hasImeCursor() {
+    return bodyCase_ == 19;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ImeCursor getImeCursor() {
+    if (bodyCase_ == 19) {
+       return (io.github.thisisthepy.dsa.control.v1.ImeCursor) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ImeCursor.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+   */
+  private void setImeCursor(io.github.thisisthepy.dsa.control.v1.ImeCursor value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 19;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+   */
+  private void mergeImeCursor(io.github.thisisthepy.dsa.control.v1.ImeCursor value) {
+    value.getClass();
+  if (bodyCase_ == 19 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ImeCursor.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ImeCursor.newBuilder((io.github.thisisthepy.dsa.control.v1.ImeCursor) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 19;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+   */
+  private void clearImeCursor() {
+    if (bodyCase_ == 19) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -1667,6 +1823,150 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+     */
+    @java.lang.Override
+    public boolean hasImeComposition() {
+      return instance.hasImeComposition();
+    }
+    /**
+     * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ImeComposition getImeComposition() {
+      return instance.getImeComposition();
+    }
+    /**
+     * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+     */
+    public Builder setImeComposition(io.github.thisisthepy.dsa.control.v1.ImeComposition value) {
+      copyOnWrite();
+      instance.setImeComposition(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+     */
+    public Builder setImeComposition(
+        io.github.thisisthepy.dsa.control.v1.ImeComposition.Builder builderForValue) {
+      copyOnWrite();
+      instance.setImeComposition(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+     */
+    public Builder mergeImeComposition(io.github.thisisthepy.dsa.control.v1.ImeComposition value) {
+      copyOnWrite();
+      instance.mergeImeComposition(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+     */
+    public Builder clearImeComposition() {
+      copyOnWrite();
+      instance.clearImeComposition();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+     */
+    @java.lang.Override
+    public boolean hasImeCommit() {
+      return instance.hasImeCommit();
+    }
+    /**
+     * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ImeCommit getImeCommit() {
+      return instance.getImeCommit();
+    }
+    /**
+     * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+     */
+    public Builder setImeCommit(io.github.thisisthepy.dsa.control.v1.ImeCommit value) {
+      copyOnWrite();
+      instance.setImeCommit(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+     */
+    public Builder setImeCommit(
+        io.github.thisisthepy.dsa.control.v1.ImeCommit.Builder builderForValue) {
+      copyOnWrite();
+      instance.setImeCommit(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+     */
+    public Builder mergeImeCommit(io.github.thisisthepy.dsa.control.v1.ImeCommit value) {
+      copyOnWrite();
+      instance.mergeImeCommit(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+     */
+    public Builder clearImeCommit() {
+      copyOnWrite();
+      instance.clearImeCommit();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+     */
+    @java.lang.Override
+    public boolean hasImeCursor() {
+      return instance.hasImeCursor();
+    }
+    /**
+     * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ImeCursor getImeCursor() {
+      return instance.getImeCursor();
+    }
+    /**
+     * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+     */
+    public Builder setImeCursor(io.github.thisisthepy.dsa.control.v1.ImeCursor value) {
+      copyOnWrite();
+      instance.setImeCursor(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+     */
+    public Builder setImeCursor(
+        io.github.thisisthepy.dsa.control.v1.ImeCursor.Builder builderForValue) {
+      copyOnWrite();
+      instance.setImeCursor(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+     */
+    public Builder mergeImeCursor(io.github.thisisthepy.dsa.control.v1.ImeCursor value) {
+      copyOnWrite();
+      instance.mergeImeCursor(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+     */
+    public Builder clearImeCursor() {
+      copyOnWrite();
+      instance.clearImeCursor();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -1700,11 +2000,15 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.PointerEvent.class,
             io.github.thisisthepy.dsa.control.v1.AppInfo.class,
             io.github.thisisthepy.dsa.control.v1.KeyEvent.class,
+            io.github.thisisthepy.dsa.control.v1.ImeComposition.class,
+            io.github.thisisthepy.dsa.control.v1.ImeCommit.class,
+            io.github.thisisthepy.dsa.control.v1.ImeCursor.class,
           };
           java.lang.String info =
-              "\u0000\u000f\u0001\u0000\u0001\u0010\u000f\u0000\u0000\u0000\u0001<\u0000\u0002<" +
+              "\u0000\u0012\u0001\u0000\u0001\u0013\u0012\u0000\u0000\u0000\u0001<\u0000\u0002<" +
               "\u0000\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000" +
-              "\t<\u0000\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000";
+              "\t<\u0000\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011" +
+              "<\u0000\u0012<\u0000\u0013<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

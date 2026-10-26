@@ -114,3 +114,21 @@ fn fr16_the_scan_code_and_extended_flag_come_from_the_lparam() {
     assert_eq!(scan_and_extended(0x011d_0001), (0x1d, true));
     assert_eq!(scan_and_extended(0xc036_0001_u32 as isize), (0x36, false));
 }
+
+#[test]
+fn fr6_a_key_that_types_a_character_is_told_by_the_character_queued_for_it() {
+    use dsa_host_windows::app_window::keys::types_text;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{WM_CHAR, WM_DEADCHAR, WM_SYSCHAR};
+    // A letter, a German layout's sharp s, a space: text.
+    for unit in [u16::from(b'a'), 0xdf, u16::from(b' ')] {
+        assert!(types_text(WM_CHAR, unit), "{unit:#x}");
+    }
+    // A dead key types nothing yet; the key after it types the accented letter.
+    assert!(types_text(WM_DEADCHAR, u16::from(b'`')));
+    // Enter, Tab, Backspace, Escape and Ctrl+A type control characters: key events.
+    for unit in [0x0d, 0x09, 0x08, 0x1b, 0x01] {
+        assert!(!types_text(WM_CHAR, unit), "{unit:#x}");
+    }
+    // Alt with a key stays a key event.
+    assert!(!types_text(WM_SYSCHAR, u16::from(b'f')));
+}

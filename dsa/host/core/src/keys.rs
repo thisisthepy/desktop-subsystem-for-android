@@ -8,9 +8,10 @@
 //! when the window loses the keyboard focus. Nothing here names a window system, so the rules
 //! run in tests and in whichever process owns the window.
 //!
-//! Every key travels as a key event, including those that type text. Text input through the
-//! host's input method takes its characters on a path of its own; a window whose input method
-//! has claimed a key simply does not hand it to the mapper.
+//! A key that types a character travels as text instead ([`crate::ime`]), and so does
+//! everything the host's input method composes; a window hands the mapper only the keys that
+//! type nothing or a control character (arrows, Enter, Backspace, Ctrl with a letter), and
+//! never a key its input method has claimed.
 
 use dsa_protocol::control;
 use dsa_protocol::host_api::types as wire;

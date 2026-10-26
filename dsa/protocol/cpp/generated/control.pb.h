@@ -69,6 +69,15 @@ extern HelloAcceptedDefaultTypeInternal _HelloAccepted_default_instance_;
 class HelloRejected;
 struct HelloRejectedDefaultTypeInternal;
 extern HelloRejectedDefaultTypeInternal _HelloRejected_default_instance_;
+class ImeCommit;
+struct ImeCommitDefaultTypeInternal;
+extern ImeCommitDefaultTypeInternal _ImeCommit_default_instance_;
+class ImeComposition;
+struct ImeCompositionDefaultTypeInternal;
+extern ImeCompositionDefaultTypeInternal _ImeComposition_default_instance_;
+class ImeCursor;
+struct ImeCursorDefaultTypeInternal;
+extern ImeCursorDefaultTypeInternal _ImeCursor_default_instance_;
 class KeyEvent;
 struct KeyEventDefaultTypeInternal;
 extern KeyEventDefaultTypeInternal _KeyEvent_default_instance_;
@@ -108,6 +117,9 @@ template<> ::dsa::control::v1::Envelope* Arena::CreateMaybeMessage<::dsa::contro
 template<> ::dsa::control::v1::Hello* Arena::CreateMaybeMessage<::dsa::control::v1::Hello>(Arena*);
 template<> ::dsa::control::v1::HelloAccepted* Arena::CreateMaybeMessage<::dsa::control::v1::HelloAccepted>(Arena*);
 template<> ::dsa::control::v1::HelloRejected* Arena::CreateMaybeMessage<::dsa::control::v1::HelloRejected>(Arena*);
+template<> ::dsa::control::v1::ImeCommit* Arena::CreateMaybeMessage<::dsa::control::v1::ImeCommit>(Arena*);
+template<> ::dsa::control::v1::ImeComposition* Arena::CreateMaybeMessage<::dsa::control::v1::ImeComposition>(Arena*);
+template<> ::dsa::control::v1::ImeCursor* Arena::CreateMaybeMessage<::dsa::control::v1::ImeCursor>(Arena*);
 template<> ::dsa::control::v1::KeyEvent* Arena::CreateMaybeMessage<::dsa::control::v1::KeyEvent>(Arena*);
 template<> ::dsa::control::v1::LaunchApp* Arena::CreateMaybeMessage<::dsa::control::v1::LaunchApp>(Arena*);
 template<> ::dsa::control::v1::PointerEvent* Arena::CreateMaybeMessage<::dsa::control::v1::PointerEvent>(Arena*);
@@ -2834,6 +2846,459 @@ class KeyEvent final :
 };
 // -------------------------------------------------------------------
 
+class ImeComposition final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.ImeComposition) */ {
+ public:
+  inline ImeComposition() : ImeComposition(nullptr) {}
+  ~ImeComposition() override;
+  explicit PROTOBUF_CONSTEXPR ImeComposition(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  ImeComposition(const ImeComposition& from);
+  ImeComposition(ImeComposition&& from) noexcept
+    : ImeComposition() {
+    *this = ::std::move(from);
+  }
+
+  inline ImeComposition& operator=(const ImeComposition& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ImeComposition& operator=(ImeComposition&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ImeComposition& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const ImeComposition* internal_default_instance() {
+    return reinterpret_cast<const ImeComposition*>(
+               &_ImeComposition_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    16;
+
+  friend void swap(ImeComposition& a, ImeComposition& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ImeComposition* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(ImeComposition* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  ImeComposition* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ImeComposition>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const ImeComposition& from);
+  void MergeFrom(const ImeComposition& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(ImeComposition* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.ImeComposition";
+  }
+  protected:
+  explicit ImeComposition(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kTextFieldNumber = 2,
+    kTaskIdFieldNumber = 1,
+    kCursorFieldNumber = 3,
+  };
+  // string text = 2;
+  void clear_text();
+  const std::string& text() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_text(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_text();
+  PROTOBUF_NODISCARD std::string* release_text();
+  void set_allocated_text(std::string* text);
+  private:
+  const std::string& _internal_text() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_text(const std::string& value);
+  std::string* _internal_mutable_text();
+  public:
+
+  // int32 task_id = 1;
+  void clear_task_id();
+  int32_t task_id() const;
+  void set_task_id(int32_t value);
+  private:
+  int32_t _internal_task_id() const;
+  void _internal_set_task_id(int32_t value);
+  public:
+
+  // uint32 cursor = 3;
+  void clear_cursor();
+  uint32_t cursor() const;
+  void set_cursor(uint32_t value);
+  private:
+  uint32_t _internal_cursor() const;
+  void _internal_set_cursor(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.ImeComposition)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr text_;
+    int32_t task_id_;
+    uint32_t cursor_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class ImeCommit final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.ImeCommit) */ {
+ public:
+  inline ImeCommit() : ImeCommit(nullptr) {}
+  ~ImeCommit() override;
+  explicit PROTOBUF_CONSTEXPR ImeCommit(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  ImeCommit(const ImeCommit& from);
+  ImeCommit(ImeCommit&& from) noexcept
+    : ImeCommit() {
+    *this = ::std::move(from);
+  }
+
+  inline ImeCommit& operator=(const ImeCommit& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ImeCommit& operator=(ImeCommit&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ImeCommit& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const ImeCommit* internal_default_instance() {
+    return reinterpret_cast<const ImeCommit*>(
+               &_ImeCommit_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    17;
+
+  friend void swap(ImeCommit& a, ImeCommit& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ImeCommit* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(ImeCommit* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  ImeCommit* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ImeCommit>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const ImeCommit& from);
+  void MergeFrom(const ImeCommit& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(ImeCommit* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.ImeCommit";
+  }
+  protected:
+  explicit ImeCommit(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kTextFieldNumber = 2,
+    kTaskIdFieldNumber = 1,
+  };
+  // string text = 2;
+  void clear_text();
+  const std::string& text() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_text(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_text();
+  PROTOBUF_NODISCARD std::string* release_text();
+  void set_allocated_text(std::string* text);
+  private:
+  const std::string& _internal_text() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_text(const std::string& value);
+  std::string* _internal_mutable_text();
+  public:
+
+  // int32 task_id = 1;
+  void clear_task_id();
+  int32_t task_id() const;
+  void set_task_id(int32_t value);
+  private:
+  int32_t _internal_task_id() const;
+  void _internal_set_task_id(int32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.ImeCommit)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr text_;
+    int32_t task_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class ImeCursor final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.ImeCursor) */ {
+ public:
+  inline ImeCursor() : ImeCursor(nullptr) {}
+  ~ImeCursor() override;
+  explicit PROTOBUF_CONSTEXPR ImeCursor(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  ImeCursor(const ImeCursor& from);
+  ImeCursor(ImeCursor&& from) noexcept
+    : ImeCursor() {
+    *this = ::std::move(from);
+  }
+
+  inline ImeCursor& operator=(const ImeCursor& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ImeCursor& operator=(ImeCursor&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ImeCursor& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const ImeCursor* internal_default_instance() {
+    return reinterpret_cast<const ImeCursor*>(
+               &_ImeCursor_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    18;
+
+  friend void swap(ImeCursor& a, ImeCursor& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ImeCursor* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(ImeCursor* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  ImeCursor* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ImeCursor>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const ImeCursor& from);
+  void MergeFrom(const ImeCursor& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(ImeCursor* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.ImeCursor";
+  }
+  protected:
+  explicit ImeCursor(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kCursorFieldNumber = 2,
+    kTaskIdFieldNumber = 1,
+  };
+  // .dsa.control.v1.Rect cursor = 2;
+  bool has_cursor() const;
+  private:
+  bool _internal_has_cursor() const;
+  public:
+  void clear_cursor();
+  const ::dsa::control::v1::Rect& cursor() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::Rect* release_cursor();
+  ::dsa::control::v1::Rect* mutable_cursor();
+  void set_allocated_cursor(::dsa::control::v1::Rect* cursor);
+  private:
+  const ::dsa::control::v1::Rect& _internal_cursor() const;
+  ::dsa::control::v1::Rect* _internal_mutable_cursor();
+  public:
+  void unsafe_arena_set_allocated_cursor(
+      ::dsa::control::v1::Rect* cursor);
+  ::dsa::control::v1::Rect* unsafe_arena_release_cursor();
+
+  // int32 task_id = 1;
+  void clear_task_id();
+  int32_t task_id() const;
+  void set_task_id(int32_t value);
+  private:
+  int32_t _internal_task_id() const;
+  void _internal_set_task_id(int32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.ImeCursor)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::dsa::control::v1::Rect* cursor_;
+    int32_t task_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class Envelope final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.Envelope) */ {
  public:
@@ -2884,6 +3349,9 @@ class Envelope final :
     kPointerEvent = 13,
     kAppInfo = 15,
     kKeyEvent = 16,
+    kImeComposition = 17,
+    kImeCommit = 18,
+    kImeCursor = 19,
     BODY_NOT_SET = 0,
   };
 
@@ -2892,7 +3360,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    16;
+    19;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -2971,6 +3439,9 @@ class Envelope final :
     kPointerEventFieldNumber = 13,
     kAppInfoFieldNumber = 15,
     kKeyEventFieldNumber = 16,
+    kImeCompositionFieldNumber = 17,
+    kImeCommitFieldNumber = 18,
+    kImeCursorFieldNumber = 19,
   };
   // .dsa.control.v1.Hello hello = 1;
   bool has_hello() const;
@@ -3242,6 +3713,60 @@ class Envelope final :
       ::dsa::control::v1::KeyEvent* key_event);
   ::dsa::control::v1::KeyEvent* unsafe_arena_release_key_event();
 
+  // .dsa.control.v1.ImeComposition ime_composition = 17;
+  bool has_ime_composition() const;
+  private:
+  bool _internal_has_ime_composition() const;
+  public:
+  void clear_ime_composition();
+  const ::dsa::control::v1::ImeComposition& ime_composition() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::ImeComposition* release_ime_composition();
+  ::dsa::control::v1::ImeComposition* mutable_ime_composition();
+  void set_allocated_ime_composition(::dsa::control::v1::ImeComposition* ime_composition);
+  private:
+  const ::dsa::control::v1::ImeComposition& _internal_ime_composition() const;
+  ::dsa::control::v1::ImeComposition* _internal_mutable_ime_composition();
+  public:
+  void unsafe_arena_set_allocated_ime_composition(
+      ::dsa::control::v1::ImeComposition* ime_composition);
+  ::dsa::control::v1::ImeComposition* unsafe_arena_release_ime_composition();
+
+  // .dsa.control.v1.ImeCommit ime_commit = 18;
+  bool has_ime_commit() const;
+  private:
+  bool _internal_has_ime_commit() const;
+  public:
+  void clear_ime_commit();
+  const ::dsa::control::v1::ImeCommit& ime_commit() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::ImeCommit* release_ime_commit();
+  ::dsa::control::v1::ImeCommit* mutable_ime_commit();
+  void set_allocated_ime_commit(::dsa::control::v1::ImeCommit* ime_commit);
+  private:
+  const ::dsa::control::v1::ImeCommit& _internal_ime_commit() const;
+  ::dsa::control::v1::ImeCommit* _internal_mutable_ime_commit();
+  public:
+  void unsafe_arena_set_allocated_ime_commit(
+      ::dsa::control::v1::ImeCommit* ime_commit);
+  ::dsa::control::v1::ImeCommit* unsafe_arena_release_ime_commit();
+
+  // .dsa.control.v1.ImeCursor ime_cursor = 19;
+  bool has_ime_cursor() const;
+  private:
+  bool _internal_has_ime_cursor() const;
+  public:
+  void clear_ime_cursor();
+  const ::dsa::control::v1::ImeCursor& ime_cursor() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::ImeCursor* release_ime_cursor();
+  ::dsa::control::v1::ImeCursor* mutable_ime_cursor();
+  void set_allocated_ime_cursor(::dsa::control::v1::ImeCursor* ime_cursor);
+  private:
+  const ::dsa::control::v1::ImeCursor& _internal_ime_cursor() const;
+  ::dsa::control::v1::ImeCursor* _internal_mutable_ime_cursor();
+  public:
+  void unsafe_arena_set_allocated_ime_cursor(
+      ::dsa::control::v1::ImeCursor* ime_cursor);
+  ::dsa::control::v1::ImeCursor* unsafe_arena_release_ime_cursor();
+
   void clear_body();
   BodyCase body_case() const;
   // @@protoc_insertion_point(class_scope:dsa.control.v1.Envelope)
@@ -3262,6 +3787,9 @@ class Envelope final :
   void set_has_pointer_event();
   void set_has_app_info();
   void set_has_key_event();
+  void set_has_ime_composition();
+  void set_has_ime_commit();
+  void set_has_ime_cursor();
 
   inline bool has_body() const;
   inline void clear_has_body();
@@ -3288,6 +3816,9 @@ class Envelope final :
       ::dsa::control::v1::PointerEvent* pointer_event_;
       ::dsa::control::v1::AppInfo* app_info_;
       ::dsa::control::v1::KeyEvent* key_event_;
+      ::dsa::control::v1::ImeComposition* ime_composition_;
+      ::dsa::control::v1::ImeCommit* ime_commit_;
+      ::dsa::control::v1::ImeCursor* ime_cursor_;
     } body_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -4969,6 +5500,288 @@ inline void KeyEvent::set_canceled(bool value) {
 
 // -------------------------------------------------------------------
 
+// ImeComposition
+
+// int32 task_id = 1;
+inline void ImeComposition::clear_task_id() {
+  _impl_.task_id_ = 0;
+}
+inline int32_t ImeComposition::_internal_task_id() const {
+  return _impl_.task_id_;
+}
+inline int32_t ImeComposition::task_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ImeComposition.task_id)
+  return _internal_task_id();
+}
+inline void ImeComposition::_internal_set_task_id(int32_t value) {
+  
+  _impl_.task_id_ = value;
+}
+inline void ImeComposition::set_task_id(int32_t value) {
+  _internal_set_task_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ImeComposition.task_id)
+}
+
+// string text = 2;
+inline void ImeComposition::clear_text() {
+  _impl_.text_.ClearToEmpty();
+}
+inline const std::string& ImeComposition::text() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ImeComposition.text)
+  return _internal_text();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void ImeComposition::set_text(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.text_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ImeComposition.text)
+}
+inline std::string* ImeComposition::mutable_text() {
+  std::string* _s = _internal_mutable_text();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.ImeComposition.text)
+  return _s;
+}
+inline const std::string& ImeComposition::_internal_text() const {
+  return _impl_.text_.Get();
+}
+inline void ImeComposition::_internal_set_text(const std::string& value) {
+  
+  _impl_.text_.Set(value, GetArenaForAllocation());
+}
+inline std::string* ImeComposition::_internal_mutable_text() {
+  
+  return _impl_.text_.Mutable(GetArenaForAllocation());
+}
+inline std::string* ImeComposition::release_text() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.ImeComposition.text)
+  return _impl_.text_.Release();
+}
+inline void ImeComposition::set_allocated_text(std::string* text) {
+  if (text != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.text_.SetAllocated(text, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.text_.IsDefault()) {
+    _impl_.text_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.ImeComposition.text)
+}
+
+// uint32 cursor = 3;
+inline void ImeComposition::clear_cursor() {
+  _impl_.cursor_ = 0u;
+}
+inline uint32_t ImeComposition::_internal_cursor() const {
+  return _impl_.cursor_;
+}
+inline uint32_t ImeComposition::cursor() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ImeComposition.cursor)
+  return _internal_cursor();
+}
+inline void ImeComposition::_internal_set_cursor(uint32_t value) {
+  
+  _impl_.cursor_ = value;
+}
+inline void ImeComposition::set_cursor(uint32_t value) {
+  _internal_set_cursor(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ImeComposition.cursor)
+}
+
+// -------------------------------------------------------------------
+
+// ImeCommit
+
+// int32 task_id = 1;
+inline void ImeCommit::clear_task_id() {
+  _impl_.task_id_ = 0;
+}
+inline int32_t ImeCommit::_internal_task_id() const {
+  return _impl_.task_id_;
+}
+inline int32_t ImeCommit::task_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ImeCommit.task_id)
+  return _internal_task_id();
+}
+inline void ImeCommit::_internal_set_task_id(int32_t value) {
+  
+  _impl_.task_id_ = value;
+}
+inline void ImeCommit::set_task_id(int32_t value) {
+  _internal_set_task_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ImeCommit.task_id)
+}
+
+// string text = 2;
+inline void ImeCommit::clear_text() {
+  _impl_.text_.ClearToEmpty();
+}
+inline const std::string& ImeCommit::text() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ImeCommit.text)
+  return _internal_text();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void ImeCommit::set_text(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.text_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ImeCommit.text)
+}
+inline std::string* ImeCommit::mutable_text() {
+  std::string* _s = _internal_mutable_text();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.ImeCommit.text)
+  return _s;
+}
+inline const std::string& ImeCommit::_internal_text() const {
+  return _impl_.text_.Get();
+}
+inline void ImeCommit::_internal_set_text(const std::string& value) {
+  
+  _impl_.text_.Set(value, GetArenaForAllocation());
+}
+inline std::string* ImeCommit::_internal_mutable_text() {
+  
+  return _impl_.text_.Mutable(GetArenaForAllocation());
+}
+inline std::string* ImeCommit::release_text() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.ImeCommit.text)
+  return _impl_.text_.Release();
+}
+inline void ImeCommit::set_allocated_text(std::string* text) {
+  if (text != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.text_.SetAllocated(text, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.text_.IsDefault()) {
+    _impl_.text_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.ImeCommit.text)
+}
+
+// -------------------------------------------------------------------
+
+// ImeCursor
+
+// int32 task_id = 1;
+inline void ImeCursor::clear_task_id() {
+  _impl_.task_id_ = 0;
+}
+inline int32_t ImeCursor::_internal_task_id() const {
+  return _impl_.task_id_;
+}
+inline int32_t ImeCursor::task_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ImeCursor.task_id)
+  return _internal_task_id();
+}
+inline void ImeCursor::_internal_set_task_id(int32_t value) {
+  
+  _impl_.task_id_ = value;
+}
+inline void ImeCursor::set_task_id(int32_t value) {
+  _internal_set_task_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ImeCursor.task_id)
+}
+
+// .dsa.control.v1.Rect cursor = 2;
+inline bool ImeCursor::_internal_has_cursor() const {
+  return this != internal_default_instance() && _impl_.cursor_ != nullptr;
+}
+inline bool ImeCursor::has_cursor() const {
+  return _internal_has_cursor();
+}
+inline void ImeCursor::clear_cursor() {
+  if (GetArenaForAllocation() == nullptr && _impl_.cursor_ != nullptr) {
+    delete _impl_.cursor_;
+  }
+  _impl_.cursor_ = nullptr;
+}
+inline const ::dsa::control::v1::Rect& ImeCursor::_internal_cursor() const {
+  const ::dsa::control::v1::Rect* p = _impl_.cursor_;
+  return p != nullptr ? *p : reinterpret_cast<const ::dsa::control::v1::Rect&>(
+      ::dsa::control::v1::_Rect_default_instance_);
+}
+inline const ::dsa::control::v1::Rect& ImeCursor::cursor() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ImeCursor.cursor)
+  return _internal_cursor();
+}
+inline void ImeCursor::unsafe_arena_set_allocated_cursor(
+    ::dsa::control::v1::Rect* cursor) {
+  if (GetArenaForAllocation() == nullptr) {
+    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.cursor_);
+  }
+  _impl_.cursor_ = cursor;
+  if (cursor) {
+    
+  } else {
+    
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.ImeCursor.cursor)
+}
+inline ::dsa::control::v1::Rect* ImeCursor::release_cursor() {
+  
+  ::dsa::control::v1::Rect* temp = _impl_.cursor_;
+  _impl_.cursor_ = nullptr;
+#ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
+  auto* old =  reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(temp);
+  temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  if (GetArenaForAllocation() == nullptr) { delete old; }
+#else  // PROTOBUF_FORCE_COPY_IN_RELEASE
+  if (GetArenaForAllocation() != nullptr) {
+    temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  }
+#endif  // !PROTOBUF_FORCE_COPY_IN_RELEASE
+  return temp;
+}
+inline ::dsa::control::v1::Rect* ImeCursor::unsafe_arena_release_cursor() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.ImeCursor.cursor)
+  
+  ::dsa::control::v1::Rect* temp = _impl_.cursor_;
+  _impl_.cursor_ = nullptr;
+  return temp;
+}
+inline ::dsa::control::v1::Rect* ImeCursor::_internal_mutable_cursor() {
+  
+  if (_impl_.cursor_ == nullptr) {
+    auto* p = CreateMaybeMessage<::dsa::control::v1::Rect>(GetArenaForAllocation());
+    _impl_.cursor_ = p;
+  }
+  return _impl_.cursor_;
+}
+inline ::dsa::control::v1::Rect* ImeCursor::mutable_cursor() {
+  ::dsa::control::v1::Rect* _msg = _internal_mutable_cursor();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.ImeCursor.cursor)
+  return _msg;
+}
+inline void ImeCursor::set_allocated_cursor(::dsa::control::v1::Rect* cursor) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  if (message_arena == nullptr) {
+    delete _impl_.cursor_;
+  }
+  if (cursor) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(cursor);
+    if (message_arena != submessage_arena) {
+      cursor = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, cursor, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  _impl_.cursor_ = cursor;
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.ImeCursor.cursor)
+}
+
+// -------------------------------------------------------------------
+
 // Envelope
 
 // .dsa.control.v1.Hello hello = 1;
@@ -6081,6 +6894,228 @@ inline ::dsa::control::v1::KeyEvent* Envelope::mutable_key_event() {
   return _msg;
 }
 
+// .dsa.control.v1.ImeComposition ime_composition = 17;
+inline bool Envelope::_internal_has_ime_composition() const {
+  return body_case() == kImeComposition;
+}
+inline bool Envelope::has_ime_composition() const {
+  return _internal_has_ime_composition();
+}
+inline void Envelope::set_has_ime_composition() {
+  _impl_._oneof_case_[0] = kImeComposition;
+}
+inline void Envelope::clear_ime_composition() {
+  if (_internal_has_ime_composition()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.ime_composition_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::ImeComposition* Envelope::release_ime_composition() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.ime_composition)
+  if (_internal_has_ime_composition()) {
+    clear_has_body();
+    ::dsa::control::v1::ImeComposition* temp = _impl_.body_.ime_composition_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.ime_composition_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::ImeComposition& Envelope::_internal_ime_composition() const {
+  return _internal_has_ime_composition()
+      ? *_impl_.body_.ime_composition_
+      : reinterpret_cast< ::dsa::control::v1::ImeComposition&>(::dsa::control::v1::_ImeComposition_default_instance_);
+}
+inline const ::dsa::control::v1::ImeComposition& Envelope::ime_composition() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.ime_composition)
+  return _internal_ime_composition();
+}
+inline ::dsa::control::v1::ImeComposition* Envelope::unsafe_arena_release_ime_composition() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.ime_composition)
+  if (_internal_has_ime_composition()) {
+    clear_has_body();
+    ::dsa::control::v1::ImeComposition* temp = _impl_.body_.ime_composition_;
+    _impl_.body_.ime_composition_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_ime_composition(::dsa::control::v1::ImeComposition* ime_composition) {
+  clear_body();
+  if (ime_composition) {
+    set_has_ime_composition();
+    _impl_.body_.ime_composition_ = ime_composition;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.ime_composition)
+}
+inline ::dsa::control::v1::ImeComposition* Envelope::_internal_mutable_ime_composition() {
+  if (!_internal_has_ime_composition()) {
+    clear_body();
+    set_has_ime_composition();
+    _impl_.body_.ime_composition_ = CreateMaybeMessage< ::dsa::control::v1::ImeComposition >(GetArenaForAllocation());
+  }
+  return _impl_.body_.ime_composition_;
+}
+inline ::dsa::control::v1::ImeComposition* Envelope::mutable_ime_composition() {
+  ::dsa::control::v1::ImeComposition* _msg = _internal_mutable_ime_composition();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.ime_composition)
+  return _msg;
+}
+
+// .dsa.control.v1.ImeCommit ime_commit = 18;
+inline bool Envelope::_internal_has_ime_commit() const {
+  return body_case() == kImeCommit;
+}
+inline bool Envelope::has_ime_commit() const {
+  return _internal_has_ime_commit();
+}
+inline void Envelope::set_has_ime_commit() {
+  _impl_._oneof_case_[0] = kImeCommit;
+}
+inline void Envelope::clear_ime_commit() {
+  if (_internal_has_ime_commit()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.ime_commit_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::ImeCommit* Envelope::release_ime_commit() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.ime_commit)
+  if (_internal_has_ime_commit()) {
+    clear_has_body();
+    ::dsa::control::v1::ImeCommit* temp = _impl_.body_.ime_commit_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.ime_commit_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::ImeCommit& Envelope::_internal_ime_commit() const {
+  return _internal_has_ime_commit()
+      ? *_impl_.body_.ime_commit_
+      : reinterpret_cast< ::dsa::control::v1::ImeCommit&>(::dsa::control::v1::_ImeCommit_default_instance_);
+}
+inline const ::dsa::control::v1::ImeCommit& Envelope::ime_commit() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.ime_commit)
+  return _internal_ime_commit();
+}
+inline ::dsa::control::v1::ImeCommit* Envelope::unsafe_arena_release_ime_commit() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.ime_commit)
+  if (_internal_has_ime_commit()) {
+    clear_has_body();
+    ::dsa::control::v1::ImeCommit* temp = _impl_.body_.ime_commit_;
+    _impl_.body_.ime_commit_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_ime_commit(::dsa::control::v1::ImeCommit* ime_commit) {
+  clear_body();
+  if (ime_commit) {
+    set_has_ime_commit();
+    _impl_.body_.ime_commit_ = ime_commit;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.ime_commit)
+}
+inline ::dsa::control::v1::ImeCommit* Envelope::_internal_mutable_ime_commit() {
+  if (!_internal_has_ime_commit()) {
+    clear_body();
+    set_has_ime_commit();
+    _impl_.body_.ime_commit_ = CreateMaybeMessage< ::dsa::control::v1::ImeCommit >(GetArenaForAllocation());
+  }
+  return _impl_.body_.ime_commit_;
+}
+inline ::dsa::control::v1::ImeCommit* Envelope::mutable_ime_commit() {
+  ::dsa::control::v1::ImeCommit* _msg = _internal_mutable_ime_commit();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.ime_commit)
+  return _msg;
+}
+
+// .dsa.control.v1.ImeCursor ime_cursor = 19;
+inline bool Envelope::_internal_has_ime_cursor() const {
+  return body_case() == kImeCursor;
+}
+inline bool Envelope::has_ime_cursor() const {
+  return _internal_has_ime_cursor();
+}
+inline void Envelope::set_has_ime_cursor() {
+  _impl_._oneof_case_[0] = kImeCursor;
+}
+inline void Envelope::clear_ime_cursor() {
+  if (_internal_has_ime_cursor()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.ime_cursor_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::ImeCursor* Envelope::release_ime_cursor() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.ime_cursor)
+  if (_internal_has_ime_cursor()) {
+    clear_has_body();
+    ::dsa::control::v1::ImeCursor* temp = _impl_.body_.ime_cursor_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.ime_cursor_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::ImeCursor& Envelope::_internal_ime_cursor() const {
+  return _internal_has_ime_cursor()
+      ? *_impl_.body_.ime_cursor_
+      : reinterpret_cast< ::dsa::control::v1::ImeCursor&>(::dsa::control::v1::_ImeCursor_default_instance_);
+}
+inline const ::dsa::control::v1::ImeCursor& Envelope::ime_cursor() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.ime_cursor)
+  return _internal_ime_cursor();
+}
+inline ::dsa::control::v1::ImeCursor* Envelope::unsafe_arena_release_ime_cursor() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.ime_cursor)
+  if (_internal_has_ime_cursor()) {
+    clear_has_body();
+    ::dsa::control::v1::ImeCursor* temp = _impl_.body_.ime_cursor_;
+    _impl_.body_.ime_cursor_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_ime_cursor(::dsa::control::v1::ImeCursor* ime_cursor) {
+  clear_body();
+  if (ime_cursor) {
+    set_has_ime_cursor();
+    _impl_.body_.ime_cursor_ = ime_cursor;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.ime_cursor)
+}
+inline ::dsa::control::v1::ImeCursor* Envelope::_internal_mutable_ime_cursor() {
+  if (!_internal_has_ime_cursor()) {
+    clear_body();
+    set_has_ime_cursor();
+    _impl_.body_.ime_cursor_ = CreateMaybeMessage< ::dsa::control::v1::ImeCursor >(GetArenaForAllocation());
+  }
+  return _impl_.body_.ime_cursor_;
+}
+inline ::dsa::control::v1::ImeCursor* Envelope::mutable_ime_cursor() {
+  ::dsa::control::v1::ImeCursor* _msg = _internal_mutable_ime_cursor();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.ime_cursor)
+  return _msg;
+}
+
 inline bool Envelope::has_body() const {
   return body_case() != BODY_NOT_SET;
 }
@@ -6093,6 +7128,12 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

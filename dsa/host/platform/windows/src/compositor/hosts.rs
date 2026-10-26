@@ -665,7 +665,8 @@ impl Manager {
                         ToHost::Close { task_id } => self.drop_remote(*task_id),
                         ToHost::Retitle { .. }
                         | ToHost::Resize { .. }
-                        | ToHost::TaskSize { .. } => {}
+                        | ToHost::TaskSize { .. }
+                        | ToHost::ImeCursor { .. } => {}
                     }
                     link.send(to_wire(&message));
                 }

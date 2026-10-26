@@ -30,6 +30,7 @@ use dsa_protocol::host_api::{
 use dsa_transport::local::{LocalListener, Peer};
 use dsa_transport::{Connection, Connector, TransportError};
 
+use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{InputEvent, PointerEvent};
 use crate::keys::KeyEvent;
 use crate::session::{Session, SessionError, SessionState};
@@ -76,6 +77,13 @@ pub trait UserAndroid: Send + Sync {
             "this Android does not take key input".into(),
         ))
     }
+    /// Passes text composed or committed in a task's window to this Android.
+    fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError> {
+        let _ = event;
+        Err(TaskRequestError::Failed(
+            "this Android does not take text input".into(),
+        ))
+    }
 }
 
 impl UserAndroid for Session {
@@ -112,6 +120,9 @@ impl UserAndroid for Session {
     }
     fn key(&self, event: &KeyEvent) -> Result<(), TaskRequestError> {
         Session::key(self, event).map_err(request_error)
+    }
+    fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError> {
+        Session::ime(self, event).map_err(request_error)
     }
 }
 
@@ -309,6 +320,15 @@ fn event_to_wire(event: TaskEvent) -> types::TaskEvent {
             display_id,
         }),
         TaskEvent::App(app) => Event::App(app_to_wire(app)),
+        TaskEvent::ImeCursor { task_id, cursor } => Event::ImeCursor(types::ImeCursor {
+            task_id,
+            cursor: Some(types::Rect {
+                left: cursor.left,
+                top: cursor.top,
+                right: cursor.right,
+                bottom: cursor.bottom,
+            }),
+        }),
     };
     types::TaskEvent { body: Some(body) }
 }
@@ -325,6 +345,18 @@ fn event_from_wire(event: types::TaskEvent) -> Option<TaskEvent> {
             display_id: frames.display_id,
         },
         Event::App(app) => TaskEvent::App(app_from_wire(app)),
+        Event::ImeCursor(cursor) => {
+            let rect = cursor.cursor.unwrap_or_default();
+            TaskEvent::ImeCursor {
+                task_id: cursor.task_id,
+                cursor: ImeCursor {
+                    left: rect.left,
+                    top: rect.top,
+                    right: rect.right,
+                    bottom: rect.bottom,
+                },
+            }
+        }
     })
 }
 
@@ -343,7 +375,7 @@ fn tasks_to_wire(events: Vec<TaskEvent>) -> types::Tasks {
                 display_id,
             }),
             TaskEvent::App(app) => tasks.apps.push(app_to_wire(app)),
-            TaskEvent::Removed { .. } => {}
+            TaskEvent::Removed { .. } | TaskEvent::ImeCursor { .. } => {}
         }
     }
     tasks
@@ -542,7 +574,7 @@ impl HostApiService {
         }
     }
 
-    /// Answers a StreamInput request, then passes every pointer and key event the client sends to
+    /// Answers a StreamInput request, then passes every pointer, key and text event the client sends to
     /// its Android until the client goes away. Input to an Android that is not running is
     /// dropped: the window that sends it can do nothing better with it.
     fn stream_input(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
@@ -584,6 +616,16 @@ impl HostApiService {
                 }) => KeyEvent::from_wire(&event)
                     .map(InputEvent::Key)
                     .map_err(|why| format!("dropped a key event: {why}")),
+                Ok(Envelope {
+                    body: Some(Body::ImeComposition(composition)),
+                }) => ImeEvent::from_wire_composition(&composition)
+                    .map(InputEvent::Ime)
+                    .map_err(|why| format!("dropped a composition: {why}")),
+                Ok(Envelope {
+                    body: Some(Body::ImeCommit(commit)),
+                }) => ImeEvent::from_wire_commit(&commit)
+                    .map(InputEvent::Ime)
+                    .map_err(|why| format!("dropped committed text: {why}")),
                 Ok(_) => {
                     eprintln!(
                         "local API: a client of {} sent something other than input on a \
@@ -610,6 +652,9 @@ impl HostApiService {
                 InputEvent::Key(event) => android
                     .key(&event)
                     .map_err(|why| format!("key input did not reach Android: {why}")),
+                InputEvent::Ime(event) => android
+                    .ime(&event)
+                    .map_err(|why| format!("text input did not reach Android: {why}")),
             });
             match outcome {
                 Ok(()) => failing = false,
@@ -1097,11 +1142,18 @@ impl InputStream {
         send(&mut *self.connection, Body::KeyEvent(event.to_wire())).map_err(ClientError::Transport)
     }
 
-    /// Sends one event of either kind.
+    /// Sends text composed or committed in a task's window, the same way as
+    /// [`InputStream::send`].
+    pub fn send_ime(&mut self, event: &ImeEvent) -> Result<(), ClientError> {
+        send(&mut *self.connection, event.to_wire()).map_err(ClientError::Transport)
+    }
+
+    /// Sends one event of any kind.
     pub fn send_input(&mut self, event: &InputEvent) -> Result<(), ClientError> {
         match event {
             InputEvent::Pointer(event) => self.send(event),
             InputEvent::Key(event) => self.send_key(event),
+            InputEvent::Ime(event) => self.send_ime(event),
         }
     }
 }
