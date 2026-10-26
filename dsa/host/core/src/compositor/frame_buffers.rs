@@ -47,9 +47,34 @@ pub fn texture_fits(current: (u32, u32), wanted: (u32, u32)) -> bool {
     current == wanted
 }
 
+/// The scale that makes a frame fill a client area of `view` pixels when the swapchain's
+/// buffers are `buffers` pixels. DirectComposition stretches a swapchain's source region
+/// over the whole of its buffers, so a frame of any size first takes the buffers' size, and
+/// the visual scales from there.
+pub fn visual_scale(buffers: (u32, u32), view: (u32, u32)) -> (f32, f32) {
+    let scale = |buffer: u32, view: u32| {
+        if buffer == 0 || view == 0 {
+            1.0
+        } else {
+            view as f32 / buffer as f32
+        }
+    };
+    (scale(buffers.0, view.0), scale(buffers.1, view.1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fr4_a_frame_smaller_than_its_buffers_is_shown_at_the_window_size_not_stretched() {
+        // A 607x1080 frame in 1920x1080 buffers is stretched to 1920 wide first; the visual
+        // brings it back to the 607-pixel client area, so it shows 1:1.
+        let (x, y) = visual_scale((1920, 1080), (607, 1080));
+        assert!((1920.0 * x - 607.0).abs() < 0.01);
+        assert!((y - 1.0).abs() < f32::EPSILON);
+        assert_eq!(visual_scale((0, 0), (607, 1080)), (1.0, 1.0));
+    }
 
     #[test]
     fn fr4_a_frame_shows_only_the_region_its_content_fills() {

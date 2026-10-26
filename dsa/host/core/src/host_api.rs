@@ -64,27 +64,14 @@ pub trait UserAndroid: Send + Sync {
             "this Android does not take requests about its tasks".into(),
         ))
     }
-    /// Passes pointer input in a task's window to this Android.
-    fn pointer(&self, event: &PointerEvent) -> Result<(), TaskRequestError> {
-        let _ = event;
-        Err(TaskRequestError::Failed(
-            "this Android does not take pointer input".into(),
-        ))
-    }
+    /// Passes pointer input in a task's window to this Android. Required, with key and text
+    /// input, so a wrapper around another Android cannot silently drop input by not
+    /// forwarding it.
+    fn pointer(&self, event: &PointerEvent) -> Result<(), TaskRequestError>;
     /// Passes a key pressed or released in a task's window to this Android.
-    fn key(&self, event: &KeyEvent) -> Result<(), TaskRequestError> {
-        let _ = event;
-        Err(TaskRequestError::Failed(
-            "this Android does not take key input".into(),
-        ))
-    }
+    fn key(&self, event: &KeyEvent) -> Result<(), TaskRequestError>;
     /// Passes text composed or committed in a task's window to this Android.
-    fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError> {
-        let _ = event;
-        Err(TaskRequestError::Failed(
-            "this Android does not take text input".into(),
-        ))
-    }
+    fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError>;
 }
 
 impl UserAndroid for Session {
