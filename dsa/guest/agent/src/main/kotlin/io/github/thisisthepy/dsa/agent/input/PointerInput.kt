@@ -38,13 +38,16 @@ data class InjectedMotion(
     val hscroll: Float = 0f,
 )
 
-/** What puts a motion event into the guest's input, as a real device's would be. */
+/** What puts a motion or key event into the guest's input, as a real device's would be. */
 interface InputInjector {
     /** The framework's uptime clock, in milliseconds, which event times are on. */
     fun now(): Long
 
     /** Dispatches [motion] without waiting for an app to handle it. False when refused. */
     fun inject(motion: InjectedMotion): Boolean
+
+    /** Dispatches [key] without waiting for an app to handle it. False when refused. */
+    fun injectKey(key: InjectedKey): Boolean
 }
 
 /**

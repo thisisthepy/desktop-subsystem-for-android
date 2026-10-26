@@ -8,6 +8,8 @@ import io.github.thisisthepy.dsa.agent.tasks.TaskSource
 import io.github.thisisthepy.dsa.agent.windowing.WINDOWING_MODE_FREEFORM
 import io.github.thisisthepy.dsa.control.v1.CloseTask
 import io.github.thisisthepy.dsa.control.v1.Envelope
+import io.github.thisisthepy.dsa.control.v1.KeyAction
+import io.github.thisisthepy.dsa.control.v1.KeyEvent
 import io.github.thisisthepy.dsa.control.v1.LaunchApp
 import io.github.thisisthepy.dsa.control.v1.ResizeTask
 import io.github.thisisthepy.dsa.control.v1.SetTaskDensity
@@ -596,6 +598,40 @@ class AgentTest {
         scheduler.runDue()
 
         assertEquals(listOf(1, 2), daemon.sentMessages().map { it.taskUpdated.taskId })
+    }
+
+    private fun keyFrame(taskId: Int, action: KeyAction, keyCode: Int, meta: Int = 0): ByteArray =
+        Envelope.newBuilder().setKeyEvent(
+            KeyEvent.newBuilder()
+                .setTaskId(taskId)
+                .setAction(action)
+                .setKeyCode(keyCode)
+                .setMetaState(meta),
+        ).build().toByteArray()
+
+    @Test
+    fun fr16_a_key_from_the_host_focuses_its_task_and_reaches_it() {
+        tasks.running = listOf(appTask(4), appTask(5, focused = true))
+        started()
+        val sentBefore = daemon.sent.size
+
+        daemon.deliver(keyFrame(4, KeyAction.KEY_ACTION_DOWN, android.view.KeyEvent.KEYCODE_DPAD_LEFT))
+        daemon.deliver(keyFrame(4, KeyAction.KEY_ACTION_UP, android.view.KeyEvent.KEYCODE_DPAD_LEFT))
+        // A key for the task that holds the focus does not move it.
+        daemon.deliver(keyFrame(5, KeyAction.KEY_ACTION_DOWN, android.view.KeyEvent.KEYCODE_ENTER))
+        scheduler.runDue()
+
+        assertEquals(listOf(4), actions.focused)
+        assertEquals(
+            listOf(
+                android.view.KeyEvent.KEYCODE_DPAD_LEFT to android.view.KeyEvent.ACTION_DOWN,
+                android.view.KeyEvent.KEYCODE_DPAD_LEFT to android.view.KeyEvent.ACTION_UP,
+                android.view.KeyEvent.KEYCODE_ENTER to android.view.KeyEvent.ACTION_DOWN,
+            ),
+            injector.keys.map { it.keyCode to it.action },
+        )
+        // Input is not a request: it reports nothing.
+        assertEquals(sentBefore, daemon.sent.size)
     }
 
     private fun pointerFrame(taskId: Int, action: PointerAction, x: Float, y: Float, buttons: Int = 0): ByteArray =
