@@ -1147,6 +1147,24 @@ class GuestMemoryTests(unittest.TestCase):
             for directory in make_image.FSTAB_DIRS:
                 self.assertIn(b"zramsize=50%", archive.read(directory + "fstab.dsa"))
 
+    def test_nfr1_swapon_all_does_not_stop_at_the_missing_max_comp_streams(self):
+        # fs_mgr opens /sys/block/zram0/max_comp_streams for any value of 0 or more, its
+        # default, and skips the device when the file is missing, as it is on the guest's
+        # kernel. Only -1 lets it go on to the size, mkswap and swapon.
+        fstab = (Path(make_image.__file__).with_name("fstab.dsa")).read_text()
+        entries = [line.split() for line in fstab.splitlines() if line.startswith("/dev/block/zram0")]
+        self.assertEqual(len(entries), 1)
+        self.assertIn("max_comp_streams=-1", entries[0][4].split(","))
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            for directory in make_image.FSTAB_DIRS:
+                self.assertIn(b"max_comp_streams=-1", archive.read(directory + "fstab.dsa"))
+
+    def test_nfr1_the_kernel_has_what_zram_swap_needs(self):
+        config = (make_image.REPO / "dsa/kernel/android.config").read_text().splitlines()
+        for option in ("CONFIG_SWAP", "CONFIG_ZSMALLOC", "CONFIG_ZRAM",
+                       "CONFIG_ZRAM_BACKEND_LZ4", "CONFIG_ZRAM_DEF_COMP_LZ4"):
+            self.assertIn(f"{option}=y", config)
+
     def test_nfr1_lmkd_watches_the_zram_swap(self):
         props = make_image.edit_props("ro.debuggable=1\n")
         for line in [
