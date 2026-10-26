@@ -142,6 +142,17 @@ of their own, because neither holds the other's surface, but a touch in the shar
 goes to the upper task. A bigger guest display holds more tasks
 (`androidboot.dsa.display_width` and `display_height`, in `dsa/guest/hwcomposer/`).
 
+## Installed apps
+
+The host's start menu lists the apps a launcher would list: those with an activity in the
+launcher category. The agent sends each one's name and launcher icon (`InstalledApp`), then
+every package in one list (`InstalledApps`). Each app goes in a frame of its own, so no frame
+carries every icon. It does so when the channel connects, and again whenever the package
+manager says a package was added, replaced, changed or removed, the language changed, or the
+user's storage was unlocked (before that, only the apps that run that early are listed).
+Only an app whose name or icon changed is described again; an app missing from the list has
+been removed. The agent's own package is never listed.
+
 ## Pointer input
 
 The host sends one `PointerEvent` per pointer as it happens, with the position relative to
