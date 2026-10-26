@@ -50,8 +50,12 @@ sealed interface RequestResult {
     data class Closed(val taskId: Int) : RequestResult
     data class CloseRefused(val taskId: Int, val reason: String) : RequestResult
 
-    /** The host resized the task's window; the task takes [size]. */
-    data class Resize(val taskId: Int, val size: Size) : RequestResult
+    /**
+     * The host resized the task's window; the task takes [size]. [live] while the user is
+     * still dragging the window's edge. The first one with [live] false after a drag ends
+     * the drag, even when [size] is the size the task already has.
+     */
+    data class Resize(val taskId: Int, val size: Size, val live: Boolean = false) : RequestResult
 
     /** The host's window for the task is on a monitor of another scale; it draws at [densityDpi]. */
     data class Density(val taskId: Int, val densityDpi: Int) : RequestResult
@@ -90,8 +94,9 @@ class HostRequests(
         return when (envelope.bodyCase) {
             Envelope.BodyCase.LAUNCH_APP -> launch(envelope.launchApp.packageName)
             Envelope.BodyCase.CLOSE_TASK -> close(envelope.closeTask.taskId)
-            Envelope.BodyCase.RESIZE_TASK ->
-                resize(envelope.resizeTask.taskId, envelope.resizeTask.width, envelope.resizeTask.height)
+            Envelope.BodyCase.RESIZE_TASK -> envelope.resizeTask.let {
+                resize(it.taskId, it.width, it.height, it.live)
+            }
             Envelope.BodyCase.SET_TASK_DENSITY ->
                 density(envelope.setTaskDensity.taskId, envelope.setTaskDensity.densityDpi)
             Envelope.BodyCase.BODY_NOT_SET, null -> RequestResult.Malformed("the frame carries no message")
@@ -113,11 +118,11 @@ class HostRequests(
     }
 
     // The sizes are unsigned on the wire; a value past Int.MAX_VALUE reads as negative here.
-    private fun resize(taskId: Int, width: Int, height: Int): RequestResult = when {
+    private fun resize(taskId: Int, width: Int, height: Int, live: Boolean): RequestResult = when {
         width <= 0 || height <= 0 || width > MAX_LENGTH || height > MAX_LENGTH ->
             RequestResult.Malformed("ResizeTask asks for a size of ${Integer.toUnsignedString(width)}x${Integer.toUnsignedString(height)}")
         !reported(taskId) -> RequestResult.SizeRefused(taskId, "the host was never told about this task")
-        else -> RequestResult.Resize(taskId, Size(width, height))
+        else -> RequestResult.Resize(taskId, Size(width, height), live)
     }
 
     private fun density(taskId: Int, densityDpi: Int): RequestResult = when {
