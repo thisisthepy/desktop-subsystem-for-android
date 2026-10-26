@@ -1,5 +1,9 @@
 //! `dsa` against a running service, over the platform's real local transport.
 
+use dsa_host_core::ime::ImeEvent;
+use dsa_host_core::input::PointerEvent;
+use dsa_host_core::keys::KeyEvent;
+use dsa_host_core::tasks::TaskRequestError;
 use std::process::{Command, Output};
 use std::sync::Arc;
 use std::time::Duration;
@@ -278,6 +282,15 @@ impl UserAndroid for Updated {
     fn stop(&self) {}
     fn update_notice(&self) -> Option<String> {
         Some("DSA was updated to 0.1.1".into())
+    }
+    fn pointer(&self, _: &PointerEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn key(&self, _: &KeyEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn ime(&self, _: &ImeEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
     }
 }
 

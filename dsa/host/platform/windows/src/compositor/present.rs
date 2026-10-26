@@ -13,8 +13,8 @@
 //! and each frame fills its top-left region. The swapchain's buffers take the texture's
 //! size once, and each frame sets only the swapchain's source size
 //! (`IDXGISwapChain2::SetSourceSize`) to the region it fills, so a window resize never
-//! resizes the swapchain's buffers. DirectComposition shows only the source region, at its
-//! own size, before the visual's scale.
+//! resizes the swapchain's buffers. DirectComposition stretches the source region over the
+//! whole of the buffers, so the visual scales from the buffers' size to the client area.
 //!
 //! Each presenter measures how long its window waited for a frame of its new size
 //! (`ResizeLatency`) and logs a summary every 20 resizes and when the window closes, and a
@@ -24,7 +24,9 @@ use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use dsa_host_core::compositor::frame_buffers::{content_region, swapchain_change, SwapchainChange};
+use dsa_host_core::compositor::frame_buffers::{
+    content_region, swapchain_change, visual_scale, SwapchainChange,
+};
 use dsa_host_core::compositor::resize_latency::ResizeLatency;
 use dsa_host_core::compositor::task_windows::fill_scale;
 use windows::core::{Interface, BOOL, PCWSTR};
@@ -476,7 +478,10 @@ impl WindowPresenter {
     /// until the compositor has taken the change, so a live resize shows it with the new
     /// window size.
     fn scale(&self, state: &State, wait: bool) {
-        let (x, y) = fill_scale(state.frame, state.view);
+        let (x, y) = match state.buffers {
+            Some(buffers) => visual_scale(buffers, state.view),
+            None => fill_scale(state.frame, state.view),
+        };
         let matrix = Matrix3x2 {
             M11: x,
             M12: 0.0,
