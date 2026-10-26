@@ -25,6 +25,7 @@ pub mod host_api_conformance;
 pub mod ime;
 pub mod input;
 pub mod keys;
+pub mod resize_trace;
 pub mod session;
 pub mod tasks;
 pub mod update;

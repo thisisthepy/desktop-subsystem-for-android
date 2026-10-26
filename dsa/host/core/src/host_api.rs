@@ -33,6 +33,7 @@ use dsa_transport::{Connection, Connector, TransportError};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{InputEvent, PointerEvent};
 use crate::keys::KeyEvent;
+use crate::resize_trace::{self, detail_requested, ResizeTrace, DETAIL_ENV};
 use crate::session::{Session, SessionError, SessionState};
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskWatch};
 
@@ -415,6 +416,8 @@ pub struct HostApiService {
     program: Option<Arc<dyn UpdateProgram>>,
     hello: types::Hello,
     handshake_timeout: Duration,
+    /// Logs when each resize was handed to Android, and how long that took.
+    resize_trace: Mutex<ResizeTrace>,
 }
 
 impl HostApiService {
@@ -424,7 +427,21 @@ impl HostApiService {
             program: None,
             hello: local_hello(Role::Service, build),
             handshake_timeout: Duration::from_secs(5),
+            resize_trace: Mutex::new(ResizeTrace::new(
+                detail_requested(std::env::var(DETAIL_ENV).ok().as_deref(), false),
+                Instant::now(),
+            )),
         }
+    }
+
+    /// Turns on the per-stage resize trace lines, as when the file that asks for them is
+    /// present.
+    pub fn with_resize_trace_detail(self, detailed: bool) -> HostApiService {
+        if detailed {
+            *self.resize_trace.lock().unwrap_or_else(|e| e.into_inner()) =
+                ResizeTrace::new(true, Instant::now());
+        }
+        self
     }
 
     /// The service that answers `dsa update` with `program`.
@@ -704,15 +721,20 @@ impl HostApiService {
                     package_name: launch.package_name,
                 },
             ),
-            Some(request::Body::ResizeTask(resize)) => self.request(
-                peer,
-                TaskRequest::Resize {
-                    task_id: resize.task_id,
-                    width: resize.width,
-                    height: resize.height,
-                    live: resize.live,
-                },
-            ),
+            Some(request::Body::ResizeTask(resize)) => {
+                let started = Instant::now();
+                let answer = self.request(
+                    peer,
+                    TaskRequest::Resize {
+                        task_id: resize.task_id,
+                        width: resize.width,
+                        height: resize.height,
+                        live: resize.live,
+                    },
+                );
+                self.trace_resize(&resize, started);
+                answer
+            }
             Some(request::Body::SetTaskDensity(density)) => self.request(
                 peer,
                 TaskRequest::SetDensity {
@@ -753,6 +775,44 @@ impl HostApiService {
 }
 
 impl HostApiService {
+    /// Logs that the resize went to Android: each size when detail is on, and otherwise the
+    /// end of a drag, at most a few times a second.
+    fn trace_resize(&self, resize: &types::ResizeTask, started: Instant) {
+        let now = Instant::now();
+        let size = (resize.width, resize.height);
+        let detail = format!(
+            "live={} took={}",
+            resize.live,
+            resize_trace::millis(now.saturating_duration_since(started))
+        );
+        let wall = resize_trace::wall_now();
+        let mut trace = self.resize_trace.lock().unwrap_or_else(|e| e.into_inner());
+        let line = if trace.detailed() {
+            trace.stage(
+                resize.task_id,
+                "service.forwarded",
+                size,
+                &detail,
+                now,
+                wall,
+            )
+        } else if !resize.live {
+            trace.summary(
+                resize.task_id,
+                "service.forwarded",
+                size,
+                &detail,
+                now,
+                wall,
+            )
+        } else {
+            None
+        };
+        if let Some(line) = line {
+            eprintln!("local API: {line}");
+        }
+    }
+
     fn request(&self, peer: &Peer, request: TaskRequest) -> response::Body {
         let android = match self.androids.android(&peer.user) {
             Ok(android) => android,

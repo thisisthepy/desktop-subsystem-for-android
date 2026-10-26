@@ -32,8 +32,11 @@ use windows_sys::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAM
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcess, PROCESS_DUP_HANDLE};
 
 use super::frames::{FrameRouter, FrameTarget};
-use super::log::{note, CompositorLogger};
+use super::log::{
+    note, trace_detailed, trace_forget, trace_stage, trace_summary, CompositorLogger,
+};
 use super::present::{Gpu, SharedTexture};
+use dsa_host_core::resize_trace::millis;
 
 /// The build the window manager names itself by to the window hosts.
 const BUILD: &str = "dsa-wm";
@@ -244,6 +247,7 @@ impl RemoteWindow {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.closed = true;
         state.texture = None;
+        trace_forget(self.task_id);
     }
 }
 
@@ -261,6 +265,8 @@ impl FrameTarget for RemoteWindow {
             }
         }
         state.texture = None;
+        // The renderer has the first frame of a new size for this window.
+        let started = Instant::now();
         let shared = match self.gpu.shared_texture(width, height) {
             Ok(shared) => shared,
             Err(why) => {
@@ -268,7 +274,10 @@ impl FrameTarget for RemoteWindow {
                 return None;
             }
         };
-        let Some(handle) = self.link.place(shared.handle()) else {
+        let created = Instant::now();
+        let placed = self.link.place(shared.handle());
+        let duplicated = Instant::now();
+        let Some(handle) = placed else {
             note(
                 self.logger.as_deref(),
                 &format!(
@@ -287,6 +296,28 @@ impl FrameTarget for RemoteWindow {
             width,
             height,
         }));
+        trace_stage(
+            self.logger.as_deref(),
+            self.task_id,
+            "wm.texture",
+            (width, height),
+            &format!(
+                "texture={id} create={} duplicate={} announced={announced}",
+                millis(created.saturating_duration_since(started)),
+                millis(duplicated.saturating_duration_since(created))
+            ),
+        );
+        trace_summary(
+            self.logger.as_deref(),
+            self.task_id,
+            "wm.summary",
+            (width, height),
+            &format!(
+                "texture={id} create={} duplicate={}",
+                millis(created.saturating_duration_since(started)),
+                millis(duplicated.saturating_duration_since(created))
+            ),
+        );
         if !announced {
             return None;
         }
@@ -308,6 +339,7 @@ impl FrameTarget for RemoteWindow {
             state.sequence += 1;
             state.sequence
         };
+        let started = Instant::now();
         let sent = self.link.send(Body::Frame(Frame {
             task_id: self.task_id,
             texture_id: texture.id,
@@ -315,11 +347,24 @@ impl FrameTarget for RemoteWindow {
         }));
         // The renderer writes the texture again once this returns, so the window host must
         // have copied the frame out by then.
-        if sent
-            && !self
+        let shown = sent
+            && self
                 .link
-                .wait_presented(self.task_id, sequence, PRESENT_WAIT)
-        {
+                .wait_presented(self.task_id, sequence, PRESENT_WAIT);
+        if trace_detailed() {
+            trace_stage(
+                self.logger.as_deref(),
+                self.task_id,
+                "wm.frame",
+                texture.shared.size(),
+                &format!(
+                    "texture={} sequence={sequence} shown={shown} round_trip={}",
+                    texture.id,
+                    millis(started.elapsed())
+                ),
+            );
+        }
+        if sent && !shown {
             note(
                 self.logger.as_deref(),
                 &format!(
@@ -504,7 +549,8 @@ impl Manager {
             ManagerEvent::Sync(current) => {
                 for event in &current {
                     if let TaskEvent::App(app) = event {
-                        self.hosts.app(app);
+                        let actions = self.hosts.app(app, now);
+                        self.carry_out(actions);
                     }
                 }
                 let changes = self.windows.sync(&current);
@@ -512,7 +558,8 @@ impl Manager {
             }
             ManagerEvent::Task(event) => {
                 if let TaskEvent::App(app) = &event {
-                    self.hosts.app(app);
+                    let actions = self.hosts.app(app, now);
+                    self.carry_out(actions);
                 }
                 let changes = self.windows.apply(&event);
                 self.change(changes, now);
@@ -567,6 +614,13 @@ impl Manager {
                 width,
                 height,
             } => {
+                trace_stage(
+                    self.setup.logger.as_deref(),
+                    task_id,
+                    "wm.window_resized",
+                    (width, height),
+                    "",
+                );
                 let requests = self.windows.window_resized(task_id, (width, height), now);
                 self.request(requests);
             }

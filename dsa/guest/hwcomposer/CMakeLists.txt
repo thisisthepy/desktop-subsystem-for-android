@@ -80,6 +80,7 @@ add_executable(dsa-hwcomposer
     src/display.cpp
     src/host_renderer.cpp
     src/host_stream.cpp
+    src/resize_trace.cpp
     src/task_composer.cpp
     src/task_layout.cpp
     src/vsync_thread.cpp

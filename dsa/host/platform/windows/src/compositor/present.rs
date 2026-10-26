@@ -45,7 +45,8 @@ use windows::Win32::Graphics::Dxgi::{
 };
 use windows_numerics::Matrix3x2;
 
-use super::log::{note, CompositorLogger};
+use super::log::{note, trace_stage, trace_summary, CompositorLogger};
+use dsa_host_core::resize_trace::millis;
 
 /// How long a present waits for the GPU to finish reading the shared texture.
 const COPY_WAIT: Duration = Duration::from_millis(500);
@@ -288,6 +289,7 @@ const SUMMARY_EVERY: usize = 20;
 
 /// Shows one task's frames in its window.
 pub struct WindowPresenter {
+    task_id: i32,
     gpu: Arc<Gpu>,
     state: Mutex<State>,
     logger: Option<Arc<CompositorLogger>>,
@@ -299,9 +301,10 @@ unsafe impl Send for WindowPresenter {}
 unsafe impl Sync for WindowPresenter {}
 
 impl WindowPresenter {
-    /// Puts a visual on the window `hwnd`, whose client area is `view` pixels. Called on the
-    /// thread that owns the window.
+    /// Puts a visual on the window `hwnd` of task `task_id`, whose client area is `view`
+    /// pixels. Called on the thread that owns the window.
     pub fn new(
+        task_id: i32,
         gpu: Arc<Gpu>,
         hwnd: isize,
         view: (u32, u32),
@@ -326,6 +329,7 @@ impl WindowPresenter {
         };
         drop(dcomp);
         Ok(Arc::new(WindowPresenter {
+            task_id,
             gpu,
             state: Mutex::new(State {
                 target,
@@ -349,6 +353,14 @@ impl WindowPresenter {
         }
         state.view = view;
         state.latency.view_changed(view, Instant::now());
+        // Where a resize's wait starts: the client area took the size.
+        trace_stage(
+            self.logger.as_deref(),
+            self.task_id,
+            "app.view",
+            view,
+            &format!("frame={}x{}", state.frame.0, state.frame.1),
+        );
         if state.swapchain.is_some() {
             self.scale(&state, true);
         }
@@ -402,15 +414,41 @@ impl WindowPresenter {
         if state.closed {
             return Ok(());
         }
-        self.present_locked(&mut state, &texture.texture, texture.size)?;
-        if state
-            .latency
-            .frame_shown(texture.size, Instant::now())
-            .is_some()
-            && state.latency.count() % SUMMARY_EVERY == 0
-        {
-            if let Some(summary) = state.latency.summary() {
-                note(self.logger.as_deref(), &format!("task window: {summary}"));
+        let started = Instant::now();
+        let resized = self.present_locked(&mut state, &texture.texture, texture.size)?;
+        let presented = Instant::now();
+        if let Some(resize_buffers) = resized {
+            trace_stage(
+                self.logger.as_deref(),
+                self.task_id,
+                "app.present",
+                texture.size,
+                &format!(
+                    "resize_buffers={} present={}",
+                    millis(resize_buffers),
+                    millis(presented.saturating_duration_since(started))
+                ),
+            );
+        }
+        if let Some(waited) = state.latency.frame_shown(texture.size, presented) {
+            // One line per resize that ended in a frame of the window's size, a few a
+            // second at most during a drag.
+            trace_summary(
+                self.logger.as_deref(),
+                self.task_id,
+                "app.summary",
+                texture.size,
+                &format!(
+                    "waited={} resize_buffers={} present={}",
+                    millis(waited),
+                    resized.map(millis).unwrap_or_else(|| "0.0".into()),
+                    millis(presented.saturating_duration_since(started))
+                ),
+            );
+            if state.latency.count() % SUMMARY_EVERY == 0 {
+                if let Some(summary) = state.latency.summary() {
+                    note(self.logger.as_deref(), &format!("task window: {summary}"));
+                }
             }
         }
         Ok(())
@@ -448,10 +486,11 @@ impl WindowPresenter {
         state: &mut State,
         texture: &ID3D11Texture2D,
         (width, height): (u32, u32),
-    ) -> Result<(), String> {
+    ) -> Result<Option<Duration>, String> {
         // SAFETY: plain COM calls on objects this presenter owns, and the immediate context
         // under its lock.
         unsafe {
+            let started = Instant::now();
             let resized = match &state.swapchain {
                 None => {
                     let desc = DXGI_SWAP_CHAIN_DESC1 {
@@ -499,6 +538,8 @@ impl WindowPresenter {
                 }
                 Some(_) => false,
             };
+            // How long making or resizing the swapchain took, when it changed size.
+            let resize_took = resized.then(|| started.elapsed());
             state.frame = (width, height);
             let Some(swapchain) = &state.swapchain else {
                 unreachable!("the swapchain was made above");
@@ -546,7 +587,7 @@ impl WindowPresenter {
             if resized {
                 self.scale(state, false);
             }
+            Ok(resize_took)
         }
-        Ok(())
     }
 }

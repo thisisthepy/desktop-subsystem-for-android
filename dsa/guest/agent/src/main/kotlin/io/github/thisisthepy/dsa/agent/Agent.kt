@@ -16,6 +16,7 @@ import io.github.thisisthepy.dsa.agent.requests.TaskActions
 import io.github.thisisthepy.dsa.agent.tasks.AppInfoSource
 import io.github.thisisthepy.dsa.agent.tasks.TaskReporter
 import io.github.thisisthepy.dsa.agent.tasks.TaskSource
+import io.github.thisisthepy.dsa.agent.trace.ResizeTrace
 import io.github.thisisthepy.dsa.agent.windowing.FreeformSetup
 import io.github.thisisthepy.dsa.agent.windowing.TaskArranger
 import io.github.thisisthepy.dsa.agent.windowing.WindowingControl
@@ -46,6 +47,7 @@ class Agent(
     editor: () -> EditorConnection = { EditorConnection.NONE },
     textKeys: TextKeys = TextKeys { null },
     private val inputMethods: InputMethodSetup = InputMethodSetup.NONE,
+    private val trace: ResizeTrace = ResizeTrace(log),
 ) {
     private val channel = ChannelClient(
         locator = locator,
@@ -126,7 +128,10 @@ class Agent(
             is RequestResult.LaunchFailed -> log.warn("could not launch ${result.packageName}: ${result.reason}")
             is RequestResult.Closed -> log.info("ended task ${result.taskId}")
             is RequestResult.CloseRefused -> log.warn("did not end task ${result.taskId}: ${result.reason}")
-            is RequestResult.Resize -> arranger.resize(result.taskId, result.size, result.live)
+            is RequestResult.Resize -> {
+                trace.received(result.taskId, result.size, result.live)
+                arranger.resize(result.taskId, result.size, result.live)
+            }
             is RequestResult.Density -> {
                 log.info("task ${result.taskId} draws at ${result.densityDpi} dpi")
                 arranger.setDensity(result.taskId, result.densityDpi)
@@ -193,7 +198,10 @@ class Agent(
             log.warn("reading the running tasks failed", e)
             return
         }
+        for (task in running) trace.boundsRead(task.taskId, task.bounds.right - task.bounds.left, task.bounds.bottom - task.bounds.top)
+        val arranging = System.nanoTime()
         val bounds = arranger.arrange(running.filter(reporter::reportable))
+        trace.applied((System.nanoTime() - arranging) / 1_000_000.0)
         if (arranger.waiting) checkMoves()
         if (!channel.connected) return
         reporter.update(

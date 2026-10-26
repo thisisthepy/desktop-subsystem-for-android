@@ -1,8 +1,9 @@
 //! The app window host of Desktop Subsystem for Android.
 //!
-//! Each Android app runs its own copy of this program, `%LOCALAPPDATA%\DSA\apps\<package>.exe`,
-//! which carries the app's name and icon, so Task Manager and the taskbar show the app as
-//! itself. It connects to the DSA Window Manager in the same session, opens the app's task
+//! Each Android app runs its own copy of this program,
+//! `%LOCALAPPDATA%\DSA\apps\<package>\<Label>.exe`, which carries the app's name and icon, so
+//! Task Manager and the taskbar show the app as itself. It connects to the DSA Window Manager
+//! in the same session, opens the app's task
 //! windows and shows their frames, and ends when the app's last window closes. Started by the
 //! user rather than the window manager, it asks for the app to be started.
 #![windows_subsystem = "windows"]
