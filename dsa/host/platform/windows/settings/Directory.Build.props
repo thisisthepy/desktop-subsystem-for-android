@@ -1,0 +1,14 @@
+<Project>
+  <!-- Build outputs go to dsa\target\settings\<project>, beside the other build outputs, not
+       into this folder. (The intermediate folder must be set before the SDK is imported.) -->
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)..\..\..\..\target\settings\$(MSBuildProjectName)\obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)..\..\..\..\target\settings\$(MSBuildProjectName)\bin\</BaseOutputPath>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Product>Desktop Subsystem for Android</Product>
+    <Company>Thisisthepy</Company>
+    <Copyright>Copyright thisisthepy. Licensed under the Apache License 2.0.</Copyright>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="Dsa.Settings.Pages.MemoryPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:CommunityToolkit.WinUI.Controls"
+    xmlns:core="using:Dsa.Settings.Core">
+    <Page.Resources>
+        <DataTemplate x:Key="MemoryRowTemplate" x:DataType="core:MemoryRow">
+            <controls:SettingsCard Header="{x:Bind Label}" Description="{x:Bind Detail}" Margin="0,0,0,4">
+                <TextBlock Text="{x:Bind Size}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+            </controls:SettingsCard>
+        </DataTemplate>
+    </Page.Resources>
+
+    <ScrollViewer Padding="36,0,36,24">
+        <StackPanel MaxWidth="1000" HorizontalAlignment="Stretch" Spacing="{StaticResource SettingsCardSpacing}">
+            <Grid>
+                <TextBlock x:Uid="MemoryTitle" Style="{StaticResource PageTitleStyle}" />
+                <Button x:Uid="MemoryRefreshButton" HorizontalAlignment="Right" VerticalAlignment="Top" Click="OnRefresh" />
+            </Grid>
+
+            <InfoBar x:Uid="MemoryErrorBar" Severity="Error" IsClosable="False"
+                     IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
+                     Message="{x:Bind ViewModel.Error, Mode=OneWay}" />
+
+            <TextBlock x:Uid="MemoryHostHeader" Style="{StaticResource SectionHeaderStyle}" />
+            <controls:SettingsCard x:Uid="MemoryHostTotalCard">
+                <controls:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE7F4;" />
+                </controls:SettingsCard.HeaderIcon>
+                <TextBlock Text="{x:Bind ViewModel.HostTotal, Mode=OneWay}" Style="{StaticResource SubtitleTextBlockStyle}" />
+            </controls:SettingsCard>
+            <ItemsControl ItemsSource="{x:Bind ViewModel.HostRows, Mode=OneWay}" ItemTemplate="{StaticResource MemoryRowTemplate}" />
+            <TextBlock x:Uid="MemoryHostNone" Margin="1,4,0,0" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       Visibility="{x:Bind HostNotRunning, Mode=OneWay}" TextWrapping="Wrap" />
+
+            <TextBlock x:Uid="MemoryGuestHeader" Style="{StaticResource SectionHeaderStyle}" />
+            <InfoBar x:Uid="MemoryGuestNoneBar" Severity="Informational" IsClosable="False"
+                     IsOpen="{x:Bind ViewModel.GuestNotReported, Mode=OneWay}" />
+            <StackPanel Spacing="{StaticResource SettingsCardSpacing}" Visibility="{x:Bind ViewModel.GuestReported, Mode=OneWay}">
+                <controls:SettingsCard x:Uid="MemoryGuestTotalCard" Description="{x:Bind ViewModel.GuestAge, Mode=OneWay}">
+                    <controls:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE9D9;" />
+                    </controls:SettingsCard.HeaderIcon>
+                    <StackPanel Spacing="4" MinWidth="220">
+                        <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                            <TextBlock Text="{x:Bind ViewModel.GuestAvailable, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            <TextBlock x:Uid="MemoryAvailableOf" />
+                            <TextBlock Text="{x:Bind ViewModel.GuestTotal, Mode=OneWay}" />
+                        </StackPanel>
+                        <ProgressBar Value="{x:Bind ViewModel.GuestUsedPercent, Mode=OneWay}" Maximum="100" />
+                    </StackPanel>
+                </controls:SettingsCard>
+                <ItemsControl ItemsSource="{x:Bind ViewModel.GuestRows, Mode=OneWay}" ItemTemplate="{StaticResource MemoryRowTemplate}" />
+                <TextBlock x:Uid="MemoryTopHeader" Style="{StaticResource SectionHeaderStyle}" />
+                <ItemsControl ItemsSource="{x:Bind ViewModel.GuestProcessRows, Mode=OneWay}" ItemTemplate="{StaticResource MemoryRowTemplate}" />
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

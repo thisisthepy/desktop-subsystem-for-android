@@ -1,0 +1,364 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The texts of DSA Settings in English. Each key has the same meaning in every language. -->
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="WindowTitle" xml:space="preserve">
+    <value>DSA Settings</value>
+  </data>
+  <data name="AppTitle.Text" xml:space="preserve">
+    <value>DSA Settings</value>
+  </data>
+  <data name="NavGeneral.Content" xml:space="preserve">
+    <value>General</value>
+  </data>
+  <data name="NavMemory.Content" xml:space="preserve">
+    <value>Memory</value>
+  </data>
+  <data name="NavDisplay.Content" xml:space="preserve">
+    <value>Display &amp; GPU</value>
+  </data>
+  <data name="NavUpdates.Content" xml:space="preserve">
+    <value>Updates</value>
+  </data>
+  <data name="NavAdvanced.Content" xml:space="preserve">
+    <value>Advanced</value>
+  </data>
+  <data name="NavAbout.Content" xml:space="preserve">
+    <value>About</value>
+  </data>
+  <data name="GeneralTitle.Text" xml:space="preserve">
+    <value>General</value>
+  </data>
+  <data name="GeneralErrorBar.Title" xml:space="preserve">
+    <value>Something went wrong</value>
+  </data>
+  <data name="GeneralStateCard.Header" xml:space="preserve">
+    <value>State</value>
+  </data>
+  <data name="GeneralStateCard.Description" xml:space="preserve">
+    <value>Desktop Subsystem for Android™ runs Android in its own lightweight virtual machine and shows each app in its own window.</value>
+  </data>
+  <data name="StartButton.Content" xml:space="preserve">
+    <value>Start</value>
+  </data>
+  <data name="StopButton.Content" xml:space="preserve">
+    <value>Stop</value>
+  </data>
+  <data name="LastReasonBar.Title" xml:space="preserve">
+    <value>Last stopped</value>
+  </data>
+  <data name="UpdateNoticeBar.Title" xml:space="preserve">
+    <value>Update</value>
+  </data>
+  <data name="GeneralMoreHeader.Text" xml:space="preserve">
+    <value>More</value>
+  </data>
+  <data name="OpenLogsCard.Header" xml:space="preserve">
+    <value>Open the log folder</value>
+  </data>
+  <data name="OpenLogsCard.Description" xml:space="preserve">
+    <value>The logs of the window manager and the app windows, for reporting a problem.</value>
+  </data>
+  <data name="RefreshCard.Header" xml:space="preserve">
+    <value>Refresh</value>
+  </data>
+  <data name="RefreshCard.Description" xml:space="preserve">
+    <value>Ask the DSA service for the state again.</value>
+  </data>
+  <data name="State_Unknown" xml:space="preserve">
+    <value>Unknown</value>
+  </data>
+  <data name="State_Stopped" xml:space="preserve">
+    <value>Stopped</value>
+  </data>
+  <data name="State_Starting" xml:space="preserve">
+    <value>Starting</value>
+  </data>
+  <data name="State_Active" xml:space="preserve">
+    <value>Running</value>
+  </data>
+  <data name="State_Dozing" xml:space="preserve">
+    <value>Dozing (idle)</value>
+  </data>
+  <data name="State_Frozen" xml:space="preserve">
+    <value>Frozen</value>
+  </data>
+  <data name="State_Stopping" xml:space="preserve">
+    <value>Stopping</value>
+  </data>
+  <data name="Problem_CliMissing" xml:space="preserve">
+    <value>The dsa command could not be started. Reinstall DSA.</value>
+  </data>
+  <data name="Problem_ServiceUnreachable" xml:space="preserve">
+    <value>The DSA service is not running.</value>
+  </data>
+  <data name="Problem_Refused" xml:space="preserve">
+    <value>The DSA service could not do this.</value>
+  </data>
+  <data name="Problem_Unreadable" xml:space="preserve">
+    <value>The answer of the dsa command could not be read. Reinstall DSA.</value>
+  </data>
+  <data name="MemoryTitle.Text" xml:space="preserve">
+    <value>Memory</value>
+  </data>
+  <data name="MemoryRefreshButton.Content" xml:space="preserve">
+    <value>Refresh</value>
+  </data>
+  <data name="MemoryErrorBar.Title" xml:space="preserve">
+    <value>The memory could not be measured</value>
+  </data>
+  <data name="MemoryHostHeader.Text" xml:space="preserve">
+    <value>On this PC</value>
+  </data>
+  <data name="MemoryHostTotalCard.Header" xml:space="preserve">
+    <value>In use on this PC</value>
+  </data>
+  <data name="MemoryHostTotalCard.Description" xml:space="preserve">
+    <value>The RAM the virtual machine, the window manager and the app windows hold now.</value>
+  </data>
+  <data name="MemoryHostNone.Text" xml:space="preserve">
+    <value>Android is not running, so it takes no memory on this PC.</value>
+  </data>
+  <data name="MemoryGuestHeader.Text" xml:space="preserve">
+    <value>Inside Android</value>
+  </data>
+  <data name="MemoryGuestNoneBar.Title" xml:space="preserve">
+    <value>No report yet</value>
+  </data>
+  <data name="MemoryGuestNoneBar.Message" xml:space="preserve">
+    <value>Android reports how it uses its memory a few minutes after it starts.</value>
+  </data>
+  <data name="MemoryGuestTotalCard.Header" xml:space="preserve">
+    <value>Available to Android</value>
+  </data>
+  <data name="MemoryAvailableOf.Text" xml:space="preserve">
+    <value>available of</value>
+  </data>
+  <data name="MemoryTopHeader.Text" xml:space="preserve">
+    <value>Largest processes</value>
+  </data>
+  <data name="Role_Vm" xml:space="preserve">
+    <value>Virtual machine (vmmem)</value>
+  </data>
+  <data name="Role_WindowManager" xml:space="preserve">
+    <value>Window manager</value>
+  </data>
+  <data name="Role_AppWindow" xml:space="preserve">
+    <value>App window</value>
+  </data>
+  <data name="Memory_ProcessDetail" xml:space="preserve">
+    <value>Process {0}, {1} private</value>
+  </data>
+  <data name="Memory_ReportAge" xml:space="preserve">
+    <value>Reported {0} seconds ago</value>
+  </data>
+  <data name="Memory_Apps" xml:space="preserve">
+    <value>Apps and system</value>
+  </data>
+  <data name="Memory_AppsDetail" xml:space="preserve">
+    <value>The apps and the system server, counted by their share (PSS).</value>
+  </data>
+  <data name="Memory_Cache" xml:space="preserve">
+    <value>Cache</value>
+  </data>
+  <data name="Memory_CacheDetail" xml:space="preserve">
+    <value>File contents kept in memory. Android drops them when it needs the memory.</value>
+  </data>
+  <data name="Memory_Kernel" xml:space="preserve">
+    <value>Kernel caches</value>
+  </data>
+  <data name="Memory_KernelDetail" xml:space="preserve">
+    <value>Kernel caches the kernel can free on demand.</value>
+  </data>
+  <data name="Memory_Shared" xml:space="preserve">
+    <value>Shared memory</value>
+  </data>
+  <data name="Memory_Zram" xml:space="preserve">
+    <value>Compressed memory</value>
+  </data>
+  <data name="Memory_ZramDetail" xml:space="preserve">
+    <value>Holds {0} of pages, compressed</value>
+  </data>
+  <data name="Memory_Free" xml:space="preserve">
+    <value>Free</value>
+  </data>
+  <data name="Memory_GuestProcessDetail" xml:space="preserve">
+    <value>Process {0}</value>
+  </data>
+  <data name="DisplayTitle.Text" xml:space="preserve">
+    <value>Display &amp; GPU</value>
+  </data>
+  <data name="SettingsErrorBar.Title" xml:space="preserve">
+    <value>The setting was not changed</value>
+  </data>
+  <data name="RenderGpuCard.Header" xml:space="preserve">
+    <value>Render GPU</value>
+  </data>
+  <data name="RenderGpuCard.Description" xml:space="preserve">
+    <value>The GPU that draws Android apps. By default it is the one that drives the primary monitor, so frames never cross between GPUs and a laptop's discrete GPU can sleep.</value>
+  </data>
+  <data name="Gpu_Display" xml:space="preserve">
+    <value>The GPU of the primary monitor (recommended)</value>
+  </data>
+  <data name="Gpu_Integrated" xml:space="preserve">
+    <value>Integrated GPU</value>
+  </data>
+  <data name="Gpu_Discrete" xml:space="preserve">
+    <value>Discrete GPU (for example, for games)</value>
+  </data>
+  <data name="DisplayGpuCard.Header" xml:space="preserve">
+    <value>GPU of the primary monitor</value>
+  </data>
+  <data name="DisplayGpuCard.Description" xml:space="preserve">
+    <value>What the default choice renders on now.</value>
+  </data>
+  <data name="RenderGpuAppliesBar.Message" xml:space="preserve">
+    <value>A new render GPU takes effect when the window manager starts again: at the next sign-in, or when you restart it below.</value>
+  </data>
+  <data name="RestartWindowManagerCard.Header" xml:space="preserve">
+    <value>Restart the window manager</value>
+  </data>
+  <data name="RestartWindowManagerCard.Description" xml:space="preserve">
+    <value>Open Android app windows close and come back.</value>
+  </data>
+  <data name="RestartWindowManagerButton.Content" xml:space="preserve">
+    <value>Restart</value>
+  </data>
+  <data name="RestartWindowManagerTitle" xml:space="preserve">
+    <value>Restart the window manager?</value>
+  </data>
+  <data name="RestartWindowManagerBody" xml:space="preserve">
+    <value>The windows of Android apps close for a moment. Android and its apps keep running.</value>
+  </data>
+  <data name="RestartWindowManagerAction" xml:space="preserve">
+    <value>Restart</value>
+  </data>
+  <data name="RestartWindowManagerFailed" xml:space="preserve">
+    <value>The window manager could not be restarted</value>
+  </data>
+  <data name="UpdatesTitle.Text" xml:space="preserve">
+    <value>Updates</value>
+  </data>
+  <data name="ProgramUpdatesCard.Header" xml:space="preserve">
+    <value>Update DSA automatically</value>
+  </data>
+  <data name="ProgramUpdatesCard.Description" xml:space="preserve">
+    <value>Download signed new versions of DSA and install them when no Android is running.</value>
+  </data>
+  <data name="ImageUpdatesCard.Header" xml:space="preserve">
+    <value>Update the Android image automatically</value>
+  </data>
+  <data name="ImageUpdatesCard.Description" xml:space="preserve">
+    <value>Download signed security updates and new versions of Android. They apply at the next start of Android.</value>
+  </data>
+  <data name="UpdatesMachineNote.Text" xml:space="preserve">
+    <value>These settings apply to every user of this PC. A switch that cannot be changed is not offered by this installation.</value>
+  </data>
+  <data name="UpdateNowHeader.Text" xml:space="preserve">
+    <value>Install now</value>
+  </data>
+  <data name="UpdateNowCard.Header" xml:space="preserve">
+    <value>Install the newest version of DSA now</value>
+  </data>
+  <data name="UpdateNowCard.Description" xml:space="preserve">
+    <value>Every user's Android stops while setup runs.</value>
+  </data>
+  <data name="UpdateNowButton.Content" xml:space="preserve">
+    <value>Install now</value>
+  </data>
+  <data name="UpdateNowTitle" xml:space="preserve">
+    <value>Install the newest version now?</value>
+  </data>
+  <data name="UpdateNowBody" xml:space="preserve">
+    <value>DSA stops every user's Android and installs the newest version. The DSA service restarts when setup is done.</value>
+  </data>
+  <data name="UpdateNowAction" xml:space="preserve">
+    <value>Install</value>
+  </data>
+  <data name="UpdateNowFailed" xml:space="preserve">
+    <value>DSA was not updated</value>
+  </data>
+  <data name="AdvancedTitle.Text" xml:space="preserve">
+    <value>Advanced</value>
+  </data>
+  <data name="FreezeCard.Header" xml:space="preserve">
+    <value>Freeze Android when idle</value>
+  </data>
+  <data name="FreezeCard.Description" xml:space="preserve">
+    <value>Off by default: an idle Android dozes and still receives notifications. Frozen, it uses no CPU but receives nothing until you open an app.</value>
+  </data>
+  <data name="LogsHeader.Text" xml:space="preserve">
+    <value>Logs</value>
+  </data>
+  <data name="UserLogsCard.Header" xml:space="preserve">
+    <value>Open my log folder</value>
+  </data>
+  <data name="UserLogsCard.Description" xml:space="preserve">
+    <value>The logs of your window manager and app windows.</value>
+  </data>
+  <data name="ServiceLogsCard.Header" xml:space="preserve">
+    <value>Open the service's log folder (administrators)</value>
+  </data>
+  <data name="CommandLineHeader.Text" xml:space="preserve">
+    <value>Command line</value>
+  </data>
+  <data name="CommandLineCard.Header" xml:space="preserve">
+    <value>The dsa command</value>
+  </data>
+  <data name="CommandLineCard.Description" xml:space="preserve">
+    <value>Everything on these pages is also available from a terminal.</value>
+  </data>
+  <data name="AboutTitle.Text" xml:space="preserve">
+    <value>About</value>
+  </data>
+  <data name="AboutProductCard.Header" xml:space="preserve">
+    <value>Desktop Subsystem for Android™</value>
+  </data>
+  <data name="AboutProductCard.Description" xml:space="preserve">
+    <value>Thisisthepy</value>
+  </data>
+  <data name="AboutAppVersionCard.Header" xml:space="preserve">
+    <value>DSA Settings version</value>
+  </data>
+  <data name="AboutServiceVersionCard.Header" xml:space="preserve">
+    <value>DSA service version</value>
+  </data>
+  <data name="AboutLicenseCard.Header" xml:space="preserve">
+    <value>Licences</value>
+  </data>
+  <data name="AboutLicenseCard.Description" xml:space="preserve">
+    <value>DSA is licensed under the Apache License 2.0. Open the licences of every component it ships.</value>
+  </data>
+  <data name="AboutSourceCard.Header" xml:space="preserve">
+    <value>Source code</value>
+  </data>
+  <data name="AboutIndependent.Text" xml:space="preserve">
+    <value>Desktop Subsystem for Android is an independent open source project. It is not affiliated with, endorsed by or sponsored by Microsoft or Google.</value>
+  </data>
+  <data name="AboutTrademark.Text" xml:space="preserve">
+    <value>Android is a trademark of Google LLC.</value>
+  </data>
+  <data name="FolderMissingTitle" xml:space="preserve">
+    <value>The folder could not be opened</value>
+  </data>
+  <data name="FolderMissingBody" xml:space="preserve">
+    <value>{0} does not exist yet, or you may not open it.</value>
+  </data>
+  <data name="OkButton" xml:space="preserve">
+    <value>OK</value>
+  </data>
+  <data name="CancelButton" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+</root>

@@ -209,14 +209,19 @@ installed beside the window manager:
 
 ### Choosing the render GPU
 
-`%LOCALAPPDATA%\DSA\compositor.json` holds the window manager's settings for each user. It
-is optional; without it every setting has its default.
+The render GPU is chosen in DSA Settings (Display & GPU) or with
+`dsa settings set render-gpu <value>`. The service keeps it for each user, and `dsa-wm`
+asks the service for it when it starts.
+
+`%LOCALAPPDATA%\DSA\compositor.json`, where the choice was made before, still counts: the
+service starts a user who has never saved settings from it, and `dsa-wm` reads it when it
+cannot reach the service. It is optional; without it every setting has its default.
 
 ```json
 { "render_gpu": "discrete" }
 ```
 
-`render_gpu` is one of:
+The value is one of:
 
 - `display` (the default): the GPU that drives the primary monitor;
 - `integrated`: the first integrated GPU;
@@ -225,7 +230,7 @@ is optional; without it every setting has its default.
   or `"Arc"`.
 
 The renderer chooses its GPU when it starts, so a change takes effect the next time
-`dsa-wm` starts (sign out and back in). A setting that cannot be read is logged
+`dsa-wm` starts (sign out and back in, or restart it from DSA Settings). A setting that cannot be read is logged
 and the default is used. Unknown keys are an error, so a misspelt setting is reported.
 
 The log says what was asked for and what the renderer chose:
@@ -240,3 +245,33 @@ why.
 
 `dsa launch <package>` starts an app in a window of its own, and `dsa tasks` lists the
 tasks that have one.
+
+## DSA Settings
+
+`settings/` is the settings app, a WinUI 3 app in C#: a navigation view with the pages
+General (start and stop Android, its state and last error), Memory (the VM, the window
+manager and the app windows on the host, and Android's own breakdown), Display & GPU (the
+render GPU), Updates, Advanced (freeze when idle, off by default, and the log folders) and
+About. It follows the system's theme, accent colour and language (English and Korean).
+
+It changes nothing itself. It runs `dsa` with `--json` (`dsa status`, `dsa settings`,
+`dsa settings set`, `dsa memory`, `dsa gpus`) and shows what the service answers, so every
+setting goes through the service's local API, and the local API stays generated for Rust
+only.
+
+| Path | What it is |
+|---|---|
+| `settings/DsaSettings/` | The app: its window, pages and texts (`Strings/<language>/Resources.resw`) |
+| `settings/DsaSettings.Core/` | Reading `dsa`'s JSON, and the view models the pages show |
+| `settings/DsaSettings.Core.Tests/` | The view model tests, against a fake `dsa` |
+
+From `dsa/host/platform/windows/settings`, with the .NET 8 SDK:
+
+```
+dotnet test DsaSettings.Core.Tests/DsaSettings.Core.Tests.csproj
+dotnet publish DsaSettings/DsaSettings.csproj -c Release -r win-x64 -p:Platform=x64
+```
+
+The installer publishes it self-contained, with the .NET and Windows App SDK runtimes in
+its folder, into `C:\Program Files\DSA\settings\`, and adds the Start menu shortcut
+"DSA Settings".
