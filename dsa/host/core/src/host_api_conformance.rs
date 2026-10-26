@@ -19,12 +19,13 @@ use dsa_transport::Connector;
 
 use crate::host_api::{
     running_of, stop_every, ClientError, HostApiClient, HostApiService, ProgramUpdate,
-    UpdateProgram, UserAndroid, UserAndroids,
+    ServiceFacts, UpdateProgram, UserAndroid, UserAndroids,
 };
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use crate::keys::{keycode, meta, KeyAction, KeyEvent};
 use crate::session::SessionState;
+use crate::settings::{MemorySettings, Settings, SettingsStore};
 use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskTable, TaskWatch};
 
 /// A fresh listener, a connector that reaches it, and the user it reports for this process.
@@ -354,6 +355,14 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::input_stream_that_sends_a_request_is_disconnected(
                 &mut || $make,
             );
+        }
+        #[test]
+        fn fr17_settings_are_read_and_changed_through_the_service() {
+            $crate::host_api_conformance::settings_round_trip(&mut || $make);
+        }
+        #[test]
+        fn fr17_an_invalid_setting_is_refused_with_its_reason() {
+            $crate::host_api_conformance::invalid_setting_is_refused(&mut || $make);
         }
         #[test]
         fn fr15_an_update_request_reaches_the_program_updater() {
@@ -753,6 +762,9 @@ pub fn pointer_input_to_stopped_android_is_dropped(make: MakeLocal<'_>) {
     input
         .send(&pointer(4, PointerAction::Down, 1.0))
         .expect("the event is sent");
+    // The service reads the stream on a thread of its own, and nothing answers an input
+    // event, so the test gives it time to drop the first event before Android starts.
+    thread::sleep(Duration::from_millis(300));
     // Once Android runs, the same stream carries input to it.
     connect(&mut *connector).start().unwrap();
     let up = pointer(4, PointerAction::Up, 2.0);
@@ -973,4 +985,63 @@ pub fn input_stream_that_sends_a_request_is_disconnected(make: MakeLocal<'_>) {
         connect(&mut *connector).status().unwrap().state,
         SessionState::Stopped
     );
+}
+
+fn facts() -> ServiceFacts {
+    ServiceFacts {
+        version: "0.0.9".into(),
+        log_dir: Some("C:\\ProgramData\\DSA\\logs".into()),
+        program_updates_available: true,
+        image_updates_available: false,
+    }
+}
+
+pub fn settings_round_trip(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+        .with_settings(store.clone(), facts());
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    let report = client.settings().expect("the settings");
+    assert_eq!(report.settings, Settings::default());
+    assert!(!report.settings.freeze, "freeze is off by default");
+    assert_eq!(report.facts, facts());
+
+    // The caller's own settings: any user may change them.
+    let changed = client
+        .set_settings(&Settings {
+            render_gpu: "Discrete".into(),
+            freeze: true,
+            ..Settings::default()
+        })
+        .expect("changing the settings");
+    assert_eq!(changed.settings.render_gpu, "discrete");
+    assert!(changed.settings.freeze);
+    assert_eq!(
+        changed.facts.version, "0.0.9",
+        "a client cannot change the facts"
+    );
+    assert_eq!(store.get(&user).unwrap().render_gpu, "discrete");
+    assert!(store.machine().program_updates);
+    assert_eq!(client.settings().unwrap().settings, changed.settings);
+}
+
+pub fn invalid_setting_is_refused(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+        .with_settings(Arc::new(MemorySettings::default()), facts());
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    match client.set_settings(&Settings {
+        render_gpu: "  ".into(),
+        ..Settings::default()
+    }) {
+        Err(ClientError::Service { code, detail }) => {
+            assert_eq!(code, ErrorCode::InvalidSetting);
+            assert!(detail.contains("render GPU"), "{detail}");
+        }
+        other => panic!("expected the service to refuse, got {other:?}"),
+    }
+    assert_eq!(client.settings().unwrap().settings, Settings::default());
 }

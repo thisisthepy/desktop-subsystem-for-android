@@ -425,6 +425,43 @@ message VmId {
   string vm_id = 1;
 }
 
+// Asks for the settings of the caller's DSA.
+message GetSettings {}
+
+// Changes the settings of the caller's DSA: each value of `settings` that a client may change
+// replaces the current one. The service answers with the settings as they are now. Changing
+// an update setting, which applies to every user, needs a caller acting as an administrator
+// (on Windows, an elevated process); otherwise nothing changes and the answer is
+// ERROR_CODE_NOT_ALLOWED.
+message SetSettings {
+  Settings settings = 1;
+}
+
+// The settings of the caller's DSA. `render_gpu` and `freeze` are the caller's own; the
+// update settings are the machine's, shared by every user of it.
+message Settings {
+  // The GPU the caller's window manager renders on: "display" (the GPU that drives the
+  // primary monitor, the default), "integrated", "discrete", or part of a GPU's name. The
+  // window manager reads it when it starts.
+  string render_gpu = 1;
+  // Whether the caller's Android may be frozen when it is idle. Off unless the user turns it
+  // on.
+  bool freeze = 2;
+  // Whether the service updates DSA itself from the signed program list.
+  bool program_updates = 3;
+  // Whether the service downloads new Android images from the signed release list.
+  bool image_updates = 4;
+  // Whether this installation can update DSA itself, or the Android image, at all. A client
+  // cannot change these.
+  bool program_updates_available = 5;
+  bool image_updates_available = 6;
+  // The version of DSA the service runs. A client cannot change it.
+  string version = 7;
+  // The folder the service writes its log to. Empty when it keeps none. A client cannot
+  // change it.
+  string log_dir = 8;
+}
+
 // What went wrong with a request.
 enum ErrorCode {
   ERROR_CODE_UNSPECIFIED = 0;
@@ -437,6 +474,11 @@ enum ErrorCode {
   ERROR_CODE_UPDATE_FAILED = 3;
   // The request needs the caller's Android to be running, and it is not.
   ERROR_CODE_NOT_RUNNING = 4;
+  // A setting has a value the service does not accept. The detail says which and why.
+  ERROR_CODE_INVALID_SETTING = 5;
+  // The request changes something that applies to every user of the machine, and the caller
+  // is not acting as an administrator.
+  ERROR_CODE_NOT_ALLOWED = 6;
 }
 
 message Error {
@@ -463,6 +505,8 @@ message Request {
     SetTaskDensity set_task_density = 13;
     GetMemory get_memory = 14;
     ListApps list_apps = 15;
+    GetSettings get_settings = 16;
+    SetSettings set_settings = 17;
   }
 }
 
@@ -477,6 +521,7 @@ message Response {
     Done done = 7;
     Memory memory = 8;
     InstalledApps installed_apps = 9;
+    Settings settings = 10;
   }
 }
 
