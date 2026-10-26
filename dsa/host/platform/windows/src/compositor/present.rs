@@ -9,6 +9,13 @@
 //! user resizes it, the last frame is stretched over the new size until a frame of that size
 //! arrives, which is then shown 1:1. No frame passes through the CPU.
 //!
+//! The texture has the size of the guest's buffers, the largest a frame of the task can be,
+//! and each frame fills its top-left region. The swapchain's buffers take the texture's
+//! size once, and each frame sets only the swapchain's source size
+//! (`IDXGISwapChain2::SetSourceSize`) to the region it fills, so a window resize never
+//! resizes the swapchain's buffers. DirectComposition shows only the source region, at its
+//! own size, before the visual's scale.
+//!
 //! Each presenter measures how long its window waited for a frame of its new size
 //! (`ResizeLatency`) and logs a summary every 20 resizes and when the window closes, and a
 //! warning when a window is left showing a stretched frame.
@@ -17,6 +24,7 @@ use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use dsa_host_core::compositor::frame_buffers::{content_region, swapchain_change, SwapchainChange};
 use dsa_host_core::compositor::resize_latency::ResizeLatency;
 use dsa_host_core::compositor::task_windows::fill_scale;
 use windows::core::{Interface, BOOL, PCWSTR};
@@ -26,7 +34,7 @@ use windows::Win32::Graphics::Direct3D::{
 };
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11Device1, ID3D11DeviceContext, ID3D11Query,
-    ID3D11Texture2D, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE,
+    ID3D11Texture2D, D3D11_BIND_RENDER_TARGET, D3D11_BOX, D3D11_BIND_SHADER_RESOURCE,
     D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
     D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION,
     D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
@@ -39,7 +47,7 @@ use windows::Win32::Graphics::Dxgi::Common::{
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory2, IDXGIAdapter, IDXGIDevice, IDXGIFactory2, IDXGIFactory4, IDXGIResource1,
-    IDXGISwapChain1, DXGI_CREATE_FACTORY_FLAGS, DXGI_PRESENT, DXGI_SCALING_STRETCH,
+    IDXGISwapChain2, DXGI_CREATE_FACTORY_FLAGS, DXGI_PRESENT, DXGI_SCALING_STRETCH,
     DXGI_SHARED_RESOURCE_READ, DXGI_SHARED_RESOURCE_WRITE, DXGI_SWAP_CHAIN_DESC1,
     DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
 };
@@ -273,8 +281,10 @@ impl Drop for SharedTexture {
 struct State {
     target: IDCompositionTarget,
     visual: IDCompositionVisual,
-    swapchain: Option<IDXGISwapChain1>,
-    /// The size of the swapchain's buffers: the last frame's size.
+    swapchain: Option<IDXGISwapChain2>,
+    /// The size of the swapchain's buffers: the texture's, not a frame's.
+    buffers: Option<(u32, u32)>,
+    /// The size of the last frame shown: the swapchain's source size.
     frame: (u32, u32),
     /// The size of the window's client area.
     view: (u32, u32),
@@ -335,6 +345,7 @@ impl WindowPresenter {
                 target,
                 visual,
                 swapchain: None,
+                buffers: None,
                 frame: (0, 0),
                 view,
                 query: None,
@@ -407,37 +418,44 @@ impl WindowPresenter {
         }
     }
 
-    /// Shows the frame in `texture`, and returns once it has been copied out, so the texture
-    /// may be written again.
-    pub fn present(&self, texture: &OpenedTexture) -> Result<(), String> {
+    /// Shows the frame in `texture`, which fills its top-left `content` pixels (0 when the
+    /// frame fills the whole texture), and returns once it has been copied out, so the
+    /// texture may be written again.
+    pub fn present(&self, texture: &OpenedTexture, content: (u32, u32)) -> Result<(), String> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.closed {
             return Ok(());
         }
+        let region = content_region(content, texture.size);
         let started = Instant::now();
-        let resized = self.present_locked(&mut state, &texture.texture, texture.size)?;
+        let shown = self.present_locked(&mut state, &texture.texture, texture.size, region)?;
         let presented = Instant::now();
-        if let Some(resize_buffers) = resized {
+        if shown.new_size {
+            // Once per size: what showing a frame of a new size cost. `resize_buffers` is 0
+            // unless the texture itself changed size.
             trace_stage(
                 self.logger.as_deref(),
                 self.task_id,
                 "app.present",
-                texture.size,
+                region,
                 &format!(
-                    "resize_buffers={} present={}",
-                    millis(resize_buffers),
+                    "buffers={}x{} resize_buffers={} present={}",
+                    texture.size.0,
+                    texture.size.1,
+                    millis(shown.resize_buffers.unwrap_or_default()),
                     millis(presented.saturating_duration_since(started))
                 ),
             );
         }
-        if let Some(waited) = state.latency.frame_shown(texture.size, presented) {
+        let resized = shown.resize_buffers;
+        if let Some(waited) = state.latency.frame_shown(region, presented) {
             // One line per resize that ended in a frame of the window's size, a few a
             // second at most during a drag.
             trace_summary(
                 self.logger.as_deref(),
                 self.task_id,
                 "app.summary",
-                texture.size,
+                region,
                 &format!(
                     "waited={} resize_buffers={} present={}",
                     millis(waited),
@@ -485,17 +503,21 @@ impl WindowPresenter {
         &self,
         state: &mut State,
         texture: &ID3D11Texture2D,
+        texture_size: (u32, u32),
         (width, height): (u32, u32),
-    ) -> Result<Option<Duration>, String> {
+    ) -> Result<Shown, String> {
         // SAFETY: plain COM calls on objects this presenter owns, and the immediate context
         // under its lock.
         unsafe {
             let started = Instant::now();
-            let resized = match &state.swapchain {
-                None => {
+            // The buffers follow the texture, which keeps its size while the window is
+            // resized; only the source size follows the frame.
+            let change = swapchain_change(state.buffers, texture_size);
+            match change {
+                SwapchainChange::Create((buffer_width, buffer_height)) => {
                     let desc = DXGI_SWAP_CHAIN_DESC1 {
-                        Width: width,
-                        Height: height,
+                        Width: buffer_width,
+                        Height: buffer_height,
                         Format: DXGI_FORMAT_R8G8B8A8_UNORM,
                         Stereo: BOOL(0),
                         SampleDesc: DXGI_SAMPLE_DESC {
@@ -504,6 +526,8 @@ impl WindowPresenter {
                         },
                         BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
                         BufferCount: 2,
+                        // The only scaling a composition swapchain takes; the visual's
+                        // transform does the scaling.
                         Scaling: DXGI_SCALING_STRETCH,
                         SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
                         AlphaMode: DXGI_ALPHA_MODE_IGNORE,
@@ -514,6 +538,9 @@ impl WindowPresenter {
                         .factory
                         .CreateSwapChainForComposition(&self.gpu.device, &desc, None)
                         .map_err(|e| failed("creating a task window's swapchain", e))?;
+                    let swapchain: IDXGISwapChain2 = swapchain
+                        .cast()
+                        .map_err(|e| failed("reaching a task window's IDXGISwapChain2", e))?;
                     {
                         let _dcomp = self.gpu.dcomp()?.lock().unwrap_or_else(|e| e.into_inner());
                         state
@@ -522,34 +549,52 @@ impl WindowPresenter {
                             .map_err(|e| failed("showing a task window's swapchain", e))?;
                     }
                     state.swapchain = Some(swapchain);
-                    true
                 }
-                Some(swapchain) if state.frame != (width, height) => {
-                    swapchain
-                        .ResizeBuffers(
-                            0,
-                            width,
-                            height,
-                            DXGI_FORMAT_UNKNOWN,
-                            DXGI_SWAP_CHAIN_FLAG(0),
-                        )
-                        .map_err(|e| failed("resizing a task window's swapchain", e))?;
-                    true
+                SwapchainChange::Resize((buffer_width, buffer_height)) => {
+                    if let Some(swapchain) = &state.swapchain {
+                        swapchain
+                            .ResizeBuffers(
+                                0,
+                                buffer_width,
+                                buffer_height,
+                                DXGI_FORMAT_UNKNOWN,
+                                DXGI_SWAP_CHAIN_FLAG(0),
+                            )
+                            .map_err(|e| failed("resizing a task window's swapchain", e))?;
+                    }
                 }
-                Some(_) => false,
-            };
-            // How long making or resizing the swapchain took, when it changed size.
-            let resize_took = resized.then(|| started.elapsed());
-            state.frame = (width, height);
+                SwapchainChange::Keep => {}
+            }
+            let remade = change != SwapchainChange::Keep;
+            state.buffers = Some(texture_size);
+            // How long making or resizing the swapchain took, when it happened.
+            let resize_buffers = remade.then(|| started.elapsed());
+            let new_size = remade || state.frame != (width, height);
             let Some(swapchain) = &state.swapchain else {
                 unreachable!("the swapchain was made above");
             };
+            if new_size {
+                // Made or resized buffers show all of themselves until told otherwise.
+                swapchain
+                    .SetSourceSize(width, height)
+                    .map_err(|e| failed("setting the size a task window shows", e))?;
+            }
+            state.frame = (width, height);
             let back: ID3D11Texture2D = swapchain
                 .GetBuffer(0)
                 .map_err(|e| failed("reaching a task window's back buffer", e))?;
             let context = self.gpu.context.lock().unwrap_or_else(|e| e.into_inner());
-            context.CopyResource(&back, texture);
+            let region = D3D11_BOX {
+                left: 0,
+                top: 0,
+                front: 0,
+                right: width,
+                bottom: height,
+                back: 1,
+            };
+            context.CopySubresourceRegion(&back, 0, 0, 0, 0, texture, 0, Some(&region as *const _));
             drop(back);
+            // Sync interval 0: the present is queued without waiting for a vertical blank.
             swapchain
                 .Present(0, DXGI_PRESENT(0))
                 .ok()
@@ -584,10 +629,21 @@ impl WindowPresenter {
                 }
             }
             drop(context);
-            if resized {
+            if new_size {
                 self.scale(state, false);
             }
-            Ok(resize_took)
+            Ok(Shown {
+                new_size,
+                resize_buffers,
+            })
         }
     }
+}
+
+/// What showing one frame changed.
+struct Shown {
+    /// The frame's size differs from the last one's, or the swapchain was made or resized.
+    new_size: bool,
+    /// How long making or resizing the swapchain took, when it was.
+    resize_buffers: Option<Duration>,
 }

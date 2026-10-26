@@ -5,9 +5,11 @@
 //! to a [`GraphicsRenderer`]. [`task_windows`] decides which window each task has and
 //! which window each display's frames go to, [`window_hosts`] which app window host
 //! shows each window, [`window_sizing`] how a window's size and scale reach its task,
-//! and [`resize_latency`] measures how long a resized window waits for a frame of its
-//! new size; the platform only carries it out.
+//! [`resize_latency`] measures how long a resized window waits for a frame of its new
+//! size, and [`frame_buffers`] keeps a window's buffers at one size while it is resized;
+//! the platform only carries it out.
 
+pub mod frame_buffers;
 pub mod resize_latency;
 pub mod task_windows;
 pub mod window_hosts;

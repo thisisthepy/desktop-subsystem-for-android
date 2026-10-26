@@ -412,6 +412,8 @@ fn fr3_an_apps_window_program_shows_a_frame_made_in_another_process() {
                     task_id: 1,
                     texture_id: 1,
                     sequence: 1,
+                    width: 400,
+                    height: 300,
                 }),
             )
             .unwrap();
@@ -424,6 +426,30 @@ fn fr3_an_apps_window_program_shows_a_frame_made_in_another_process() {
                 }
             };
             assert_eq!((presented.task_id, presented.sequence), (1, 1));
+            // Frames that fill only part of the texture, as a resizing task's do, and one
+            // that says no size, are each shown from the same texture.
+            for (sequence, (width, height)) in [(2, (320, 240)), (3, (360, 280)), (4, (0, 0))] {
+                send(
+                    &mut *connection,
+                    Body::Frame(Frame {
+                        task_id: 1,
+                        texture_id: 1,
+                        sequence,
+                        width,
+                        height,
+                    }),
+                )
+                .unwrap();
+                let presented = loop {
+                    let frame = connection
+                        .recv(Some(WAIT))
+                        .expect("the window host answers");
+                    if let Some(Body::FramePresented(presented)) = decode(&frame).unwrap().body {
+                        break presented;
+                    }
+                };
+                assert_eq!((presented.task_id, presented.sequence), (1, sequence));
+            }
         }
     }
 

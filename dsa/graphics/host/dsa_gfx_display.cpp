@@ -6,6 +6,10 @@
 /* Per-display presentation: copies each display's newest color buffer into the Direct3D 11
  * texture the embedder (the compositor) names for it, on the renderer's own Vulkan queue.
  *
+ * The color buffer stays at the largest size the task can have while its window is resized,
+ * and the frame fills its top-left region, as large as the display's size (rcSetDisplayPose)
+ * says. Only that region is copied, and the embedder is told its size.
+ *
  * The guest sets a display's color buffer through the multi-display operations; this file
  * wraps that one operation so it also queues the frame for the presentation thread. The
  * thread keeps only the newest frame of each display, so a slow window never makes the
@@ -14,6 +18,7 @@
 #include "dsa_gfx_backend.h"
 #include "dsa_gfx_display.h"
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -51,11 +56,19 @@ struct Target {
     VkDeviceMemory memory = VK_NULL_HANDLE;
 };
 
+/* A frame waiting to be shown: its color buffer, and the display's size when it was set
+ * (0 when the display has none). */
+struct PendingFrame {
+    uint32_t color_buffer = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
+};
+
 struct Presenter {
     std::mutex mutex;
     std::condition_variable wake;
-    /* The newest color buffer set for each display, waiting to be shown. */
-    std::map<uint32_t, uint32_t> pending;
+    /* The newest frame set for each display, waiting to be shown. */
+    std::map<uint32_t, PendingFrame> pending;
     bool stopping = false;
     std::thread thread;
 
@@ -73,6 +86,7 @@ struct Presenter {
 std::mutex s_presenter_mutex;
 Presenter* s_presenter = nullptr;
 int (*s_original_set_display_color_buffer)(uint32_t, uint32_t) = nullptr;
+int (*s_get_display_pose)(uint32_t, int32_t*, int32_t*, uint32_t*, uint32_t*) = nullptr;
 bool s_hook_installed = false;
 
 void log_once(const char* what) {
@@ -103,10 +117,24 @@ int hooked_set_display_color_buffer(uint32_t display_id, uint32_t color_buffer) 
     if (color_buffer == 0) {
         return result;
     }
+    /* Read here, on the thread that decodes the guest's commands, so the size is the one the
+     * guest set just before this frame. */
+    PendingFrame frame;
+    frame.color_buffer = color_buffer;
+    if (s_get_display_pose) {
+        int32_t x = 0;
+        int32_t y = 0;
+        uint32_t w = 0;
+        uint32_t h = 0;
+        if (s_get_display_pose(display_id, &x, &y, &w, &h) == 0) {
+            frame.width = w;
+            frame.height = h;
+        }
+    }
     std::lock_guard<std::mutex> lock(s_presenter_mutex);
     if (s_presenter) {
         std::lock_guard<std::mutex> pending_lock(s_presenter->mutex);
-        s_presenter->pending[display_id] = color_buffer;
+        s_presenter->pending[display_id] = frame;
         s_presenter->wake.notify_one();
     }
     return result;
@@ -119,6 +147,7 @@ bool install_hook() {
     }
     QAndroidMultiDisplayAgent operations = emugl::get_emugl_multi_display_operations();
     s_original_set_display_color_buffer = operations.setDisplayColorBuffer;
+    s_get_display_pose = operations.getDisplayPose;
     operations.setDisplayColorBuffer = hooked_set_display_color_buffer;
     emugl::set_emugl_multi_display_operations(operations);
     s_hook_installed = true;
@@ -284,8 +313,10 @@ void cmd_barriers(VulkanDispatch* vk, VkCommandBuffer commands, VkPipelineStageF
                              static_cast<uint32_t>(barriers.size()), barriers.data());
 }
 
-/* Copies `color_buffer` into the display's texture and tells the embedder. */
-void present(Presenter& presenter, uint32_t display_id, uint32_t color_buffer) {
+/* Copies the part of `frame`'s color buffer the frame fills into the display's texture and
+ * tells the embedder. */
+void present(Presenter& presenter, uint32_t display_id, const PendingFrame& frame) {
+    const uint32_t color_buffer = frame.color_buffer;
     VkEmulation* emu = emulation();
     FrameBuffer* fb = FrameBuffer::getFB();
     if (!emu || !fb) {
@@ -325,8 +356,19 @@ void present(Presenter& presenter, uint32_t display_id, uint32_t color_buffer) {
     if (!source) {
         return;
     }
-    const int32_t source_width = static_cast<int32_t>(source->imageCreateInfo.extent.width);
-    const int32_t source_height = static_cast<int32_t>(source->imageCreateInfo.extent.height);
+    const uint32_t image_width = source->imageCreateInfo.extent.width;
+    const uint32_t image_height = source->imageCreateInfo.extent.height;
+    /* The region the frame fills: the display's size, clipped to the buffer, the texture and
+     * the image. A display without a size fills the whole buffer. */
+    uint32_t content_width = frame.width ? frame.width : width;
+    uint32_t content_height = frame.height ? frame.height : height;
+    content_width = std::min(std::min(content_width, width), image_width);
+    content_height = std::min(std::min(content_height, height), image_height);
+    if (content_width == 0 || content_height == 0) {
+        return;
+    }
+    const int32_t copy_width = static_cast<int32_t>(content_width);
+    const int32_t copy_height = static_cast<int32_t>(content_height);
 
     VulkanDispatch* vk = emu->getDeviceDispatch();
     VkDevice device = emu->getDevice();
@@ -362,9 +404,9 @@ void present(Presenter& presenter, uint32_t display_id, uint32_t color_buffer) {
 
     VkImageBlit region = {};
     region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    region.srcOffsets[1] = {source_width, source_height, 1};
+    region.srcOffsets[1] = {copy_width, copy_height, 1};
     region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    region.dstOffsets[1] = {static_cast<int32_t>(width), static_cast<int32_t>(height), 1};
+    region.dstOffsets[1] = {copy_width, copy_height, 1};
     vk->vkCmdBlitImage(presenter.commands, source->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                        target.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
                        VK_FILTER_NEAREST);
@@ -397,12 +439,12 @@ void present(Presenter& presenter, uint32_t display_id, uint32_t color_buffer) {
         return;
     }
     vk->vkResetFences(device, 1, &presenter.fence);
-    presenter.frame_cb(presenter.context, display_id);
+    presenter.frame_cb(presenter.context, display_id, content_width, content_height);
 }
 
 void run(Presenter* presenter) {
     for (;;) {
-        std::map<uint32_t, uint32_t> frames;
+        std::map<uint32_t, PendingFrame> frames;
         {
             std::unique_lock<std::mutex> lock(presenter->mutex);
             presenter->wake.wait(lock, [presenter] {
@@ -413,8 +455,8 @@ void run(Presenter* presenter) {
             }
             frames.swap(presenter->pending);
         }
-        for (const auto& [display_id, color_buffer] : frames) {
-            present(*presenter, display_id, color_buffer);
+        for (const auto& [display_id, frame] : frames) {
+            present(*presenter, display_id, frame);
         }
     }
     VkEmulation* emu = emulation();
@@ -457,9 +499,9 @@ void stop_presenter() {
 
 }  // namespace
 
-extern "C" DSA_GFX_EXPORT int dsa_gfx_set_display_callbacks(dsa_display_target_fn target,
-                                                            dsa_display_frame_fn frame,
-                                                            void* context) {
+extern "C" DSA_GFX_EXPORT int dsa_gfx_set_display_callbacks2(dsa_display_target_fn target,
+                                                             dsa_display_frame_fn frame,
+                                                             void* context) {
     stop_presenter();
     if (!target || !frame) {
         return 0;
@@ -509,8 +551,8 @@ void dsa_gfx_display_shutdown(void) { stop_presenter(); }
 
 #else /* !_WIN32 */
 
-extern "C" DSA_GFX_EXPORT int dsa_gfx_set_display_callbacks(dsa_display_target_fn, dsa_display_frame_fn,
-                                                            void*) {
+extern "C" DSA_GFX_EXPORT int dsa_gfx_set_display_callbacks2(dsa_display_target_fn,
+                                                             dsa_display_frame_fn, void*) {
     return -1;
 }
 

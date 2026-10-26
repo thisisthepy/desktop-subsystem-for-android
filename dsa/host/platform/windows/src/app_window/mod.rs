@@ -5,8 +5,10 @@
 //! the window manager in the same session, says which app it shows, opens the windows the
 //! window manager asks for ([`window`]), and shows the frames the window manager hands it:
 //! for each task, a Direct3D 11 texture shared by an NT handle that the window manager has
-//! placed in this process. Each frame is copied from that texture into the window's swapchain
-//! on the GPU, and the window manager is told once the texture may be written again. It ends
+//! placed in this process. The texture stays at the largest size the task can have, and each
+//! frame says which top-left region of it the frame fills. That region is copied from the
+//! texture into the window's swapchain on the GPU, and the window manager is told once the
+//! texture may be written again. It ends
 //! when the window manager closes the connection, which it does when the app's last window
 //! closes.
 
@@ -249,7 +251,7 @@ pub fn run(mut setup: HostSetup) -> Result<(), String> {
                     (presenter, textures.get(&frame.task_id))
                 {
                     if *id == frame.texture_id {
-                        if let Err(why) = presenter.present(texture) {
+                        if let Err(why) = presenter.present(texture, (frame.width, frame.height)) {
                             note(log.as_deref(), &why);
                         }
                     }
