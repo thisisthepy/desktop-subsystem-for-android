@@ -8,6 +8,7 @@ import io.github.thisisthepy.dsa.agent.input.PointerInput
 import io.github.thisisthepy.dsa.agent.requests.HostRequests
 import io.github.thisisthepy.dsa.agent.requests.RequestResult
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
+import io.github.thisisthepy.dsa.agent.tasks.AppInfoSource
 import io.github.thisisthepy.dsa.agent.tasks.TaskReporter
 import io.github.thisisthepy.dsa.agent.tasks.TaskSource
 import io.github.thisisthepy.dsa.agent.windowing.FreeformSetup
@@ -33,6 +34,7 @@ class Agent(
     injector: InputInjector,
     private val scheduler: Scheduler,
     private val log: Log,
+    apps: AppInfoSource = AppInfoSource.NONE,
 ) {
     private val channel = ChannelClient(
         locator = locator,
@@ -41,7 +43,7 @@ class Agent(
         onFrame = ::onFrame,
         onConnected = ::onConnected,
     )
-    private val reporter = TaskReporter(ownPackage) { frame -> channel.send(frame) }
+    private val reporter = TaskReporter(ownPackage, apps) { frame -> channel.send(frame) }
     private val requests = HostRequests(ownPackage, actions, reporter::isReported)
     private val pointer = PointerInput(injector, reporter::reportedBounds, log)
     private val freeform = FreeformSetup(windowing, scheduler, log)

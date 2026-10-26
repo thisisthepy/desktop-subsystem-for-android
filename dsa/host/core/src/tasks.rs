@@ -1,8 +1,9 @@
 //! The guest's app tasks as the host knows them.
 //!
 //! The agent in the guest reports each app task the host shows as a window (`TaskUpdated`,
-//! `TaskRemoved`), and the hwcomposer reports where each task's frames arrive on the
-//! graphics stream (`TaskFrames`). The session keeps the latest of these in a [`TaskTable`]
+//! `TaskRemoved`) and the name and icon of each app it has a task of (`AppInfo`), and the
+//! hwcomposer reports where each task's frames arrive on the graphics stream
+//! (`TaskFrames`). The session keeps the latest of these in a [`TaskTable`]
 //! and hands every change on as a [`TaskEvent`], so a compositor that connects late starts
 //! from the tasks that exist now rather than from nothing.
 
@@ -59,6 +60,16 @@ impl Task {
     }
 }
 
+/// The name and launcher icon of an app the guest has a task of.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AppInfo {
+    pub package_name: String,
+    /// The app's own name, as a launcher shows it.
+    pub label: String,
+    /// The app's launcher icon as a PNG image; empty when the guest gave none.
+    pub icon_png: Vec<u8>,
+}
+
 /// A change to the guest's tasks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskEvent {
@@ -68,14 +79,17 @@ pub enum TaskEvent {
     Removed { task_id: i32 },
     /// The task's frames now arrive on the graphics stream as posts to `display_id`.
     Frames { task_id: i32, display_id: u32 },
+    /// The name or icon of an app changed, or the app is about to have its first task.
+    App(AppInfo),
 }
 
 impl TaskEvent {
-    /// The task the event is about.
-    pub fn task_id(&self) -> i32 {
+    /// The task the event is about; `None` for an event about an app.
+    pub fn task_id(&self) -> Option<i32> {
         match self {
-            TaskEvent::Updated(task) => task.task_id,
-            TaskEvent::Removed { task_id } | TaskEvent::Frames { task_id, .. } => *task_id,
+            TaskEvent::Updated(task) => Some(task.task_id),
+            TaskEvent::Removed { task_id } | TaskEvent::Frames { task_id, .. } => Some(*task_id),
+            TaskEvent::App(_) => None,
         }
     }
 }
@@ -180,11 +194,21 @@ impl std::error::Error for TaskRequestError {}
 /// tasks past this are dropped rather than allowed to grow the host's memory without end.
 pub const MAX_TASKS: usize = 1024;
 
+/// The most apps the table keeps a name and icon for, for the same reason.
+pub const MAX_APPS: usize = MAX_TASKS;
+
+/// The largest icon the table keeps, in bytes. A launcher icon of 256 pixels on a side is far
+/// smaller; a larger one is dropped and the app keeps its name.
+pub const MAX_ICON_BYTES: usize = 1024 * 1024;
+
 /// The latest state of each task.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TaskTable {
     tasks: BTreeMap<i32, Task>,
     frames: BTreeMap<i32, u32>,
+    /// The name and icon of each app, by package. An app is forgotten when its last task
+    /// ends; the guest describes it again before its next task.
+    apps: BTreeMap<String, AppInfo>,
 }
 
 impl TaskTable {
@@ -207,9 +231,29 @@ impl TaskTable {
                 true
             }
             TaskEvent::Removed { task_id } => {
-                let had_task = self.tasks.remove(task_id).is_some();
+                let removed = self.tasks.remove(task_id);
                 let had_frames = self.frames.remove(task_id).is_some();
-                had_task || had_frames
+                if let Some(task) = &removed {
+                    let package = &task.package_name;
+                    if !self.tasks.values().any(|t| &t.package_name == package) {
+                        self.apps.remove(package);
+                    }
+                }
+                removed.is_some() || had_frames
+            }
+            TaskEvent::App(app) => {
+                let mut app = app.clone();
+                if app.icon_png.len() > MAX_ICON_BYTES {
+                    app.icon_png.clear();
+                }
+                if self.apps.get(&app.package_name) == Some(&app) {
+                    return false;
+                }
+                if !self.apps.contains_key(&app.package_name) && self.apps.len() >= MAX_APPS {
+                    return false;
+                }
+                self.apps.insert(app.package_name.clone(), app);
+                true
             }
             TaskEvent::Frames {
                 task_id,
@@ -259,9 +303,15 @@ impl TaskTable {
             .collect()
     }
 
-    /// The events that bring an empty table to this one: every task, then every pairing of
-    /// a task with its display.
+    /// The name and icon of each app the table knows, in package order.
+    pub fn apps(&self) -> Vec<AppInfo> {
+        self.apps.values().cloned().collect()
+    }
+
+    /// The events that bring an empty table to this one: every app, then every task, then
+    /// every pairing of a task with its display.
     pub fn snapshot(&self) -> Vec<TaskEvent> {
+        let apps = self.apps.values().cloned().map(TaskEvent::App);
         let tasks = self.tasks.values().cloned().map(TaskEvent::Updated);
         let frames = self
             .frames
@@ -270,7 +320,7 @@ impl TaskTable {
                 task_id: *task_id,
                 display_id: *display_id,
             });
-        tasks.chain(frames).collect()
+        apps.chain(tasks).chain(frames).collect()
     }
 
     /// Forgets every task, and returns the removals that say so.
@@ -285,6 +335,7 @@ impl TaskTable {
         ids.dedup();
         self.tasks.clear();
         self.frames.clear();
+        self.apps.clear();
         ids.into_iter()
             .map(|task_id| TaskEvent::Removed { task_id })
             .collect()
@@ -445,6 +496,46 @@ mod tests {
         // A task it already knows still changes.
         assert!(table.apply(&TaskEvent::Updated(task(0, "renamed"))));
         assert_eq!(table.len(), MAX_TASKS);
+    }
+
+    fn app(package: &str, label: &str) -> AppInfo {
+        AppInfo {
+            package_name: package.into(),
+            label: label.into(),
+            icon_png: vec![0x89, b'P', b'N', b'G'],
+        }
+    }
+
+    #[test]
+    fn fr3_an_apps_name_and_icon_come_before_its_tasks_and_go_with_the_last_one() {
+        let mut table = TaskTable::new();
+        assert!(table.apply(&TaskEvent::App(app("com.example", "Example"))));
+        assert!(!table.apply(&TaskEvent::App(app("com.example", "Example"))));
+        table.apply(&TaskEvent::Updated(task(1, "a")));
+        table.apply(&TaskEvent::Updated(task(2, "b")));
+        assert_eq!(
+            table.snapshot()[0],
+            TaskEvent::App(app("com.example", "Example"))
+        );
+        table.apply(&TaskEvent::Removed { task_id: 1 });
+        assert_eq!(table.apps(), vec![app("com.example", "Example")]);
+        table.apply(&TaskEvent::Removed { task_id: 2 });
+        assert!(table.apps().is_empty());
+    }
+
+    #[test]
+    fn nfr5_a_guest_cannot_grow_the_apps_without_end() {
+        let mut table = TaskTable::new();
+        let mut huge = app("com.huge", "Huge");
+        huge.icon_png = vec![0; MAX_ICON_BYTES + 1];
+        assert!(table.apply(&TaskEvent::App(huge)));
+        assert_eq!(table.apps()[0].label, "Huge");
+        assert!(table.apps()[0].icon_png.is_empty());
+        for n in 1..MAX_APPS {
+            assert!(table.apply(&TaskEvent::App(app(&format!("p{n}"), "p"))));
+        }
+        assert!(!table.apply(&TaskEvent::App(app("one.too.many", "x"))));
+        assert!(table.apply(&TaskEvent::App(app("p1", "renamed"))));
     }
 
     #[test]

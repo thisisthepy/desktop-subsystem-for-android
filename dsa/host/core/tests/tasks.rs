@@ -10,7 +10,7 @@ use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{ClientError, HostApiClient, PerUser, UserAndroid};
 use dsa_host_core::host_api_conformance::RunningService;
 use dsa_host_core::session::{GuestLauncher, Session, SessionConfig, SessionState};
-use dsa_host_core::tasks::{Bounds, Task, TaskEvent};
+use dsa_host_core::tasks::{AppInfo, Bounds, Task, TaskEvent};
 use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{self, envelope::Body, Envelope, Role};
 use dsa_protocol::handshake::{guest_connect, local_hello};
@@ -242,4 +242,41 @@ fn nfr5_a_guest_that_dies_closes_every_task_a_client_watches() {
         }
         other => panic!("expected the service to refuse, got {other:?}"),
     }
+}
+
+#[test]
+fn fr3_an_apps_name_and_icon_reach_a_watching_client_before_its_task() {
+    let mut setup = setup();
+    let mut stream = client(&mut setup.api).watch_tasks().expect("watching");
+    let icon = vec![0x89, b'P', b'N', b'G', 1, 2, 3];
+    send(
+        &mut setup.agent,
+        Body::AppInfo(control::AppInfo {
+            package_name: "com.example.app1".into(),
+            label: "Clock".into(),
+            icon_png: icon.clone(),
+        }),
+    );
+    send(&mut setup.agent, updated(1, "Alarm"));
+    let app = AppInfo {
+        package_name: "com.example.app1".into(),
+        label: "Clock".into(),
+        icon_png: icon,
+    };
+    assert_eq!(
+        stream.next(WAIT).unwrap(),
+        Some(TaskEvent::App(app.clone()))
+    );
+    assert_eq!(
+        stream.next(WAIT).unwrap(),
+        Some(TaskEvent::Updated(task(1, "Alarm")))
+    );
+
+    // A client that watches later is told the app before its task.
+    let late = client(&mut setup.api).watch_tasks().expect("watching");
+    assert_eq!(late.current().apps, vec![app.clone()]);
+    assert_eq!(
+        late.current().events()[..2],
+        [TaskEvent::App(app), TaskEvent::Updated(task(1, "Alarm"))]
+    );
 }

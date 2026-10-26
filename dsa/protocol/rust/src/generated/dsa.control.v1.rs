@@ -143,6 +143,23 @@ pub struct SetTaskDensity {
     #[prost(uint32, tag = "2")]
     pub density_dpi: u32,
 }
+/// Guest to host, from the agent: the name and launcher icon of an app the host shows a task
+/// of. The host's window for the app carries them, in the taskbar and the task list. The
+/// agent sends it before the first TaskUpdated of the app's package on each connection, and
+/// again before the next one once the app has had no task, which is how an updated app's new
+/// name and icon arrive.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AppInfo {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+    /// The app's own name, as a launcher shows it.
+    #[prost(string, tag = "2")]
+    pub label: ::prost::alloc::string::String,
+    /// The app's launcher icon, as a square PNG image of at most 256 pixels on a side. Empty
+    /// when the app has no icon the agent could draw.
+    #[prost(bytes = "vec", tag = "3")]
+    pub icon_png: ::prost::alloc::vec::Vec<u8>,
+}
 /// Host to guest: pointer input in a task's window. One message per event, sent as it
 /// happens; the agent injects it into the task at once.
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -180,7 +197,7 @@ pub struct PointerEvent {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -214,6 +231,8 @@ pub mod envelope {
         SetTaskDensity(super::SetTaskDensity),
         #[prost(message, tag = "13")]
         PointerEvent(super::PointerEvent),
+        #[prost(message, tag = "15")]
+        AppInfo(super::AppInfo),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.

@@ -80,6 +80,8 @@ pub struct WindowSizing {
     asked_density: Option<u32>,
     /// Whether the user is dragging the window's edge or moving it.
     dragging: bool,
+    /// Whether the window has said which monitor scale it opened on.
+    placed: bool,
 }
 
 impl WindowSizing {
@@ -95,6 +97,7 @@ impl WindowSizing {
             asked: None,
             asked_density: None,
             dragging: false,
+            placed: false,
         }
     }
 
@@ -127,6 +130,29 @@ impl WindowSizing {
             None => size,
         };
         (size, request)
+    }
+
+    /// The window reports the scale of its monitor. The first report is the monitor it
+    /// opened on ([`opened`](Self::opened)): it returns the client size the window takes,
+    /// when that differs from the size it has, and the density request. Every later report
+    /// is a move to another monitor ([`dpi_changed`](Self::dpi_changed)).
+    pub fn dpi_reported(&mut self, dpi: u32) -> (Option<(u32, u32)>, Option<TaskRequest>) {
+        if self.placed {
+            return (None, self.dpi_changed(dpi));
+        }
+        self.placed = true;
+        let (size, request) = self.opened(dpi);
+        if size == self.view {
+            return (None, request);
+        }
+        self.view = size;
+        (Some(size), request)
+    }
+
+    /// The task's size as the guest has it and the largest client area the window may have,
+    /// which the window measures its pointer input in and keeps to.
+    pub fn task_size(&self) -> ((u32, u32), Option<(u32, u32)>) {
+        (self.guest, self.max)
     }
 
     /// The window is now on a monitor of `dpi`. Returns the request that has the task draw
@@ -381,6 +407,22 @@ mod tests {
         assert_eq!(sizing.view_resized((1096, 1948), now), resize(1096, 1080));
         // And back.
         assert_eq!(sizing.dpi_changed(96), density(160));
+    }
+
+    #[test]
+    fn fr4_the_first_scale_a_window_reports_is_where_it_opened() {
+        let mut sizing = WindowSizing::new(&task(400, 300, 160));
+        assert_eq!(sizing.dpi_reported(192), (Some((800, 600)), density(320)));
+        // The window reports its new size; the task is asked for it.
+        assert_eq!(
+            sizing.view_resized((800, 600), Instant::now()),
+            resize(800, 600)
+        );
+        // A later report is a move.
+        assert_eq!(sizing.dpi_reported(96), (None, density(160)));
+        let mut at_100 = WindowSizing::new(&task(400, 300, 160));
+        assert_eq!(at_100.dpi_reported(96), (None, None));
+        assert_eq!(at_100.task_size(), ((400, 300), Some((1920, 1080))));
     }
 
     #[test]

@@ -15,11 +15,11 @@ use dsa_host_core::input::PointerEvent;
 use dsa_host_core::tasks::{coalesce, TaskRequest};
 use dsa_transport::Connector;
 
+use super::hosts::ManagerEvent;
 use super::log::{note, CompositorLogger};
-use super::window::UiEvent;
 
 /// The build the compositor names itself by on the local API.
-const BUILD: &str = "dsa-compositor";
+const BUILD: &str = "dsa-wm";
 
 /// How long the compositor waits for the service to answer.
 const ANSWER: Duration = Duration::from_secs(2);
@@ -36,12 +36,12 @@ const INPUT_RETRY: Duration = Duration::from_millis(500);
 
 /// Watches the guest's tasks until `stop` is set, handing every change to `deliver`.
 ///
-/// Each new watch begins with [`UiEvent::Sync`], so the windows match the tasks there are
-/// then. When the service cannot be reached, [`UiEvent::Lost`] is delivered once, and the
+/// Each new watch begins with [`ManagerEvent::Sync`], so the windows match the tasks there are
+/// then. When the service cannot be reached, [`ManagerEvent::Lost`] is delivered once, and the
 /// watch tries again. It ends early when `deliver` returns false.
 pub fn watch(
     mut connector: Box<dyn Connector>,
-    mut deliver: impl FnMut(UiEvent) -> bool,
+    mut deliver: impl FnMut(ManagerEvent) -> bool,
     stop: Arc<AtomicBool>,
     logger: Option<Arc<CompositorLogger>>,
 ) {
@@ -63,7 +63,7 @@ pub fn watch(
                 }
                 if watching {
                     watching = false;
-                    if !deliver(UiEvent::Lost) {
+                    if !deliver(ManagerEvent::Lost) {
                         return;
                     }
                 }
@@ -73,13 +73,13 @@ pub fn watch(
         };
         last_error.clear();
         watching = true;
-        if !deliver(UiEvent::Sync(stream.current().events())) {
+        if !deliver(ManagerEvent::Sync(stream.current().events())) {
             return;
         }
         while !stop.load(Ordering::Relaxed) {
             match stream.next(POLL) {
                 Ok(Some(event)) => {
-                    if !deliver(UiEvent::Task(event)) {
+                    if !deliver(ManagerEvent::Task(event)) {
                         return;
                     }
                 }
@@ -99,7 +99,7 @@ pub fn watch(
 }
 
 /// Sends each request to the guest until `requests` closes. A close that does not reach
-/// the guest is handed to `deliver` as [`UiEvent::CloseFailed`], so its window opens again.
+/// the guest is handed to `deliver` as [`ManagerEvent::CloseFailed`], so its window opens again.
 ///
 /// Requests that queued up while the last one was on its way are folded together first
 /// ([`coalesce`]): during a live resize only each task's latest size is sent, never the
@@ -107,7 +107,7 @@ pub fn watch(
 pub fn serve_requests(
     mut connector: Box<dyn Connector>,
     requests: Receiver<TaskRequest>,
-    mut deliver: impl FnMut(UiEvent) -> bool,
+    mut deliver: impl FnMut(ManagerEvent) -> bool,
     logger: Option<Arc<CompositorLogger>>,
 ) {
     let mut client: Option<HostApiClient> = None;
@@ -140,7 +140,7 @@ pub fn serve_requests(
                     &format!("could not ask Android to {}: {why}", request.describe()),
                 );
                 if let TaskRequest::Close { task_id } = request {
-                    if !deliver(UiEvent::CloseFailed(task_id)) {
+                    if !deliver(ManagerEvent::CloseFailed(task_id)) {
                         return;
                     }
                 }

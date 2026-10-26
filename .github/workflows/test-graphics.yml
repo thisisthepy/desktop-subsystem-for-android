@@ -116,7 +116,7 @@ jobs:
         run: |
           uv run dsa/graphics/host/test_host_renderer.py
 
-      - name: Run compositor graphics renderer integration test on software Vulkan
+      - name: Run the window manager graphics renderer integration test on software Vulkan
         shell: pwsh
         working-directory: dsa
         env:
@@ -125,7 +125,7 @@ jobs:
           VK_LOADER_DEBUG: all
           GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
         run: |
-          cargo test -p dsa-host-windows --test compositor -- pr3_compositor_serves_a_gfxstream_client --nocapture
+          cargo test -p dsa-host-windows --test window_manager -- pr3_compositor_serves_a_gfxstream_client --nocapture
 
       - name: Check the host renderer survives unknown Vulkan handles on software Vulkan
         shell: pwsh
@@ -135,7 +135,7 @@ jobs:
           VK_DRIVER_FILES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
           GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
         run: |
-          cargo test -p dsa-host-windows --test compositor -- nfr5_unknown_vulkan_image_is_rejected_without_reaching_the_driver --nocapture
+          cargo test -p dsa-host-windows --test window_manager -- nfr5_unknown_vulkan_image_is_rejected_without_reaching_the_driver --nocapture
 
       - name: Keep the host renderer library and headers
         uses: actions/upload-artifact@v4
@@ -179,14 +179,14 @@ jobs:
           dsa/host/platform/windows/installer/build.ps1 -Version 0.1.0 -PlaceholderKernel `
             -GfxstreamBackend $dll
 
-      - name: Verify gfxstream_backend.dll is packaged beside dsa-compositor.exe
+      - name: Verify gfxstream_backend.dll is packaged beside dsa-wm.exe
         shell: pwsh
         run: |
           $msi = (Resolve-Path "dsa/target/installer/dsa-0.1.0.msi").Path
           Start-Process msiexec -Wait -ArgumentList "/a", "`"$msi`"", "/qn", "TARGETDIR=`"$PWD\msi-extracted`""
           $dll = Get-ChildItem -Recurse msi-extracted -Filter "gfxstream_backend.dll"
           if (-not $dll) {
-            throw "gfxstream_backend.dll was not found beside dsa-compositor.exe in the MSI"
+            throw "gfxstream_backend.dll was not found beside dsa-wm.exe in the MSI"
           }
           $lic = Get-ChildItem -Recurse msi-extracted -Filter "gfxstream.txt"
           if (-not $lic) {

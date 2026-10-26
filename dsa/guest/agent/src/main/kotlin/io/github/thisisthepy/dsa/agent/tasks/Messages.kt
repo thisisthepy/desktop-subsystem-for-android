@@ -1,6 +1,8 @@
 package io.github.thisisthepy.dsa.agent.tasks
 
+import com.google.protobuf.ByteString
 import io.github.thisisthepy.dsa.agent.windowing.Size
+import io.github.thisisthepy.dsa.control.v1.AppInfo
 import io.github.thisisthepy.dsa.control.v1.Envelope
 import io.github.thisisthepy.dsa.control.v1.Rect
 import io.github.thisisthepy.dsa.control.v1.TaskRemoved
@@ -26,6 +28,14 @@ object Messages {
             update.setMaxWidth(display.width).setMaxHeight(display.height)
         }
         return Envelope.newBuilder().setTaskUpdated(update).build().toByteArray()
+    }
+
+    fun appInfo(packageName: String, details: AppDetails): ByteArray {
+        val info = AppInfo.newBuilder()
+            .setPackageName(packageName)
+            .setLabel(details.label)
+            .setIconPng(ByteString.copyFrom(details.iconPng))
+        return Envelope.newBuilder().setAppInfo(info).build().toByteArray()
     }
 
     fun taskRemoved(taskId: Int): ByteArray =

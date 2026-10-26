@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use dsa_protocol::control::{
-    envelope::Body, AuthChallenge, AuthProof, CloseTask, Envelope, Hello, HelloAccepted,
+    envelope::Body, AppInfo, AuthChallenge, AuthProof, CloseTask, Envelope, Hello, HelloAccepted,
     HelloRejected, LaunchApp, PointerAction, PointerEvent, PointerTool, Rect, RejectReason,
     ResizeTask, Role, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
@@ -158,6 +158,14 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
             "launch_app",
             wrap(Body::LaunchApp(LaunchApp {
                 package_name: "com.example.notes".into(),
+            })),
+        ),
+        (
+            "app_info",
+            wrap(Body::AppInfo(AppInfo {
+                package_name: "com.example.notes".into(),
+                label: "Notes".into(),
+                icon_png: vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
             })),
         ),
         (

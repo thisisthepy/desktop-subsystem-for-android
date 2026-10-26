@@ -1,8 +1,8 @@
 # host/platform/windows
 
 The Windows host: the Android VM, its control channel over Hyper-V sockets,
-`dsa-hostd`, which runs both, and `dsa-compositor`, which shows each Android task in a
-window of its own.
+`dsa-hostd`, which runs both, `dsa-wm`, the DSA Window Manager, and `dsa-app-window`, the
+program each Android app's windows belong to.
 
 ## dsa-hostd
 
@@ -109,20 +109,23 @@ up to date, from a second signed list that the same `trusted_keys` sign:
   A path instead of a URL reads the lists from a folder, such as a mirror on a network
   drive.
 
-## dsa-compositor
+## dsa-wm
 
-`dsa-compositor.exe` runs in each signed-in user's session; the installer starts it at
-sign-in. One copy runs per session, and it ends at sign-out. It writes its messages to
-`%LOCALAPPDATA%\DSA\logs\dsa-compositor.log`.
+`dsa-wm.exe`, the DSA Window Manager, runs in each signed-in user's session; the
+installer starts it at sign-in. One copy runs per session, and it ends at sign-out. It
+writes its messages to `%LOCALAPPDATA%\DSA\logs\dsa-wm.log`. Earlier releases called it
+`dsa-compositor`.
 
-- It shows one window per Android app task, and nothing else. It watches the user's
-  tasks through the service's local API, opens a window for each task, titled by the
-  task's label and sized by the task's size in Android, and closes it when the task
-  ends. Closing a window asks Android to end its task.
+- It owns no window. Each Android app task shows in a window of the app's own window
+  program (below). The window manager watches the user's tasks through the service's
+  local API, starts each app's window program, and tells it to open a window for each
+  task, titled by the task's label and sized by the task's size in Android, and to close
+  it when the task ends. Closing a window asks Android to end its task.
 - It accepts the guest's graphics streams on Hyper-V sockets, ports 5566 and 5567, and
   hands them to `gfxstream_backend.dll`, which is installed beside it. The renderer
-  copies each task's frames into that task's window on the GPU, through Direct3D 11 and
-  DirectComposition; no frame passes through the CPU.
+  copies each task's frames on the GPU into a Direct3D 11 texture the window manager
+  shares with the app's window program, which shows it through DirectComposition; no
+  frame passes through the CPU.
 - Frames reach a window only for a display that Android named as a task's. Frames for any
   other display, such as Android's whole screen, are dropped, so no window shows more
   than one app.
@@ -139,6 +142,11 @@ sign-in. One copy runs per session, and it ends at sign-out. It writes its messa
   can hold (by default 1920x1080 pixels), because a larger window could only show its
   frames stretched; maximising stops at that size too. If Android gives the task another
   size than the window asked for, the window takes the task's size within 2 seconds.
+- The app window program reports each window's client size, its monitor's scale and the
+  start and end of a drag to the window manager over the session's pipe. The window
+  manager turns them into the task's size and density and sends those to the service.
+  It tells the window the task's size, which pointer input is measured in, and the largest
+  size the window may have.
 - Each window measures how long it waits for a frame of its new size after a resize, and
   the log gets a summary (median, 95th percentile, longest, and how many took 100 ms or
   more) every 20 resizes and when the window closes. A window still waiting after 2
@@ -153,6 +161,32 @@ sign-in. One copy runs per session, and it ends at sign-out. It writes its messa
   which answers none of it, so a fast pointer is never held back.
 - Without a GPU device, the windows still open and close with their tasks but stay
   empty, and the log says why.
+
+### Each app's window program
+
+Task Manager and the taskbar group windows by program, and take the program's name and
+icon from its file. So each Android app gets its own copy of `dsa-app-window.exe`, which is
+installed beside the window manager:
+
+- The copy is `%LOCALAPPDATA%\DSA\apps\<package>.exe`, for example
+  `com.android.settings.exe`. Its version information names the app and its icon is the
+  app's launcher icon, both as Android gives them, so Settings shows as Settings, with its
+  own icon and its own taskbar button. `<package>.json` beside it records what it was made
+  from; a copy is made again when DSA is updated or the app's name or icon changes, once
+  its windows are closed.
+- The window manager starts it when the app's first task appears. It connects to the
+  window manager over the pipe `\\.\pipe\dsa-wm-<session>`, which only the signed-in user
+  may open, and checks the window manager runs as the same user before it says anything.
+  It ends when the app's last window closes. Ending it, from Task Manager say, closes the
+  app's windows and Android ends their tasks.
+- The window manager places each task's frame texture in the program's process by its NT
+  handle. For each frame it tells the program, which copies the frame into the window's
+  swapchain on the GPU and says when it is done; the renderer writes the texture again only
+  then.
+- Started by the user rather than the window manager, the program asks Android to start
+  its app; a copy that runs already only asks again. It writes its messages to
+  `%LOCALAPPDATA%\DSA\logs\dsa-app-window.log`.
+- Uninstalling DSA leaves the copies in the user's profile, like the user's Android disk.
 - The renderer runs on the GPU that drives the primary monitor, so frames never cross
   from one GPU to another and a laptop's discrete GPU stays asleep. The renderer uses one
   GPU, so a window on a monitor that another GPU drives is still rendered there, and
@@ -161,7 +195,7 @@ sign-in. One copy runs per session, and it ends at sign-out. It writes its messa
 
 ### Choosing the render GPU
 
-`%LOCALAPPDATA%\DSA\compositor.json` holds the compositor's settings for each user. It
+`%LOCALAPPDATA%\DSA\compositor.json` holds the window manager's settings for each user. It
 is optional; without it every setting has its default.
 
 ```json
@@ -177,7 +211,7 @@ is optional; without it every setting has its default.
   or `"Arc"`.
 
 The renderer chooses its GPU when it starts, so a change takes effect the next time
-`dsa-compositor` starts (sign out and back in). A setting that cannot be read is logged
+`dsa-wm` starts (sign out and back in). A setting that cannot be read is logged
 and the default is used. Unknown keys are an error, so a misspelt setting is reported.
 
 The log says what was asked for and what the renderer chose:

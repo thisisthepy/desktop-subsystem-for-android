@@ -3,7 +3,7 @@
 #![cfg(windows)]
 
 use dsa_host_core::input::{buttons, ContactPhase, MouseButton, PointerTool};
-use dsa_host_windows::compositor::pointer::{
+use dsa_host_windows::app_window::pointer::{
     contact_phase, made_from_touch_or_pen, message_point, mouse_button, pen_tool_and_buttons,
     pressure, wheel_notches,
 };
