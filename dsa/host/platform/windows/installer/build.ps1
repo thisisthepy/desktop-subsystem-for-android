@@ -1,6 +1,6 @@
 # Builds the DSA package (dsa-<version>.msi) and setup.exe (setup-<version>.exe) into
-# dsa\target\installer. Needs Rust, the .NET SDK (for the setup screens in setup-ui\), and
-# WiX 5:
+# dsa\target\installer. Needs Rust, the .NET 8 SDK (for the setup screens in setup-ui\ and
+# the settings app in ..\settings\), and WiX 5:
 #
 #   dotnet tool install --global wix --version 5.0.2
 #
@@ -120,6 +120,7 @@ $config = [ordered]@{
     images_dir    = "{data}\images"
     first_image   = $first
     log_file      = "{data}\logs\dsa-hostd.log"
+    settings_dir  = "{data}\settings"
 }
 if ($PipeSddl) { $config.pipe_sddl = $PipeSddl }
 if ($ListUrl) {
@@ -139,6 +140,15 @@ $config | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM (Join-Path $
 $setupUi = Join-Path $out "setup-ui"
 dotnet build (Join-Path $installer "setup-ui\DsaSetup.csproj") -c Release -o $setupUi -p:Version=$Version
 if ($LASTEXITCODE -ne 0) { throw "building the setup screens failed" }
+
+# The settings app: a self-contained WPF app (the .NET runtime in its own folder), installed
+# in the program folder's settings\ folder beside dsa.exe.
+$settingsApp = Join-Path $out "settings-app"
+Remove-Item -Recurse -Force $settingsApp -ErrorAction SilentlyContinue
+dotnet publish (Join-Path $installer "..\settings\DsaSettings\DsaSettings.csproj") -c Release -r win-x64 `
+    -p:Version=$Version -o $settingsApp
+if ($LASTEXITCODE -ne 0) { throw "building the settings app failed" }
+if (-not (Test-Path (Join-Path $settingsApp "DsaSettings.exe"))) { throw "the settings app has no DsaSettings.exe" }
 
 $balVersion = "5.0.2"
 $balDir = Join-Path $out "ext\bal-$balVersion"
@@ -164,7 +174,7 @@ if (-not (Test-Path $utilDll)) {
 
 $msi = Join-Path $out "dsa-$Version.msi"
 $setup = Join-Path $out "setup-$Version.exe"
-$defines = @("-d", "Version=$Version", "-d", "SourceDir=$stage")
+$defines = @("-d", "Version=$Version", "-d", "SourceDir=$stage", "-d", "SettingsDir=$settingsApp")
 if ($ImageDir) { $defines += @("-d", "ImageDir=$ImageDir", "-d", "ImageVersion=$ImageVersion") }
 if ($imageManifest) {
     $defines += @("-d", "ImageManifest=1")

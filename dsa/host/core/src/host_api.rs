@@ -38,6 +38,7 @@ use crate::memory::{
 };
 use crate::resize_trace::{self, detail_requested, ResizeTrace, DETAIL_ENV};
 use crate::session::{Session, SessionError, SessionState};
+use crate::settings::{Settings, SettingsStore};
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskWatch};
 
 /// One user's Android, as the service drives it.
@@ -447,6 +448,25 @@ fn from_wire(state: i32) -> Option<SessionState> {
     }
 }
 
+/// What the service tells a client about itself with the settings, which no client changes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServiceFacts {
+    /// The version of DSA the service runs.
+    pub version: String,
+    /// The folder the service writes its log to, if it keeps one.
+    pub log_dir: Option<String>,
+    /// Whether this installation can update DSA itself.
+    pub program_updates_available: bool,
+    /// Whether this installation can download new Android images.
+    pub image_updates_available: bool,
+}
+
+/// The settings as the service reported them, with what it says about itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingsReport {
+    pub settings: Settings,
+    pub facts: ServiceFacts,
+}
 /// How long the service waits for the fresh memory report it asks Android for.
 const MEMORY_WAIT: Duration = Duration::from_secs(3);
 
@@ -454,6 +474,7 @@ const MEMORY_WAIT: Duration = Duration::from_secs(3);
 pub struct HostApiService {
     androids: Arc<dyn UserAndroids>,
     program: Option<Arc<dyn UpdateProgram>>,
+    settings: Option<(Arc<dyn SettingsStore>, ServiceFacts)>,
     hello: types::Hello,
     handshake_timeout: Duration,
     /// Logs when each resize was handed to Android, and how long that took.
@@ -469,6 +490,7 @@ impl HostApiService {
         HostApiService {
             androids,
             program: None,
+            settings: None,
             hello: local_hello(Role::Service, build),
             handshake_timeout: Duration::from_secs(5),
             resize_trace: Mutex::new(ResizeTrace::new(
@@ -506,6 +528,16 @@ impl HostApiService {
     /// The service that answers `dsa update` with `program`.
     pub fn with_program_updates(mut self, program: Arc<dyn UpdateProgram>) -> HostApiService {
         self.program = Some(program);
+        self
+    }
+
+    /// The service that keeps the settings in `store` and reports `facts` with them.
+    pub fn with_settings(
+        mut self,
+        store: Arc<dyn SettingsStore>,
+        facts: ServiceFacts,
+    ) -> HostApiService {
+        self.settings = Some((store, facts));
         self
     }
 
@@ -753,6 +785,8 @@ impl HostApiService {
                     .into(),
             ),
             Some(request::Body::UpdateProgram(_)) => self.update_program(peer),
+            Some(request::Body::GetSettings(_)) => self.get_settings(peer),
+            Some(request::Body::SetSettings(set)) => self.set_settings(peer, set),
             Some(request::Body::GetMemory(_)) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => {
@@ -832,6 +866,8 @@ impl HostApiService {
                         | request::Body::LaunchApp(_)
                         | request::Body::ResizeTask(_)
                         | request::Body::SetTaskDensity(_)
+                        | request::Body::GetSettings(_)
+                        | request::Body::SetSettings(_)
                         | request::Body::GetMemory(_)
                         | request::Body::StreamInput(_) => unreachable!("answered above"),
                     }
@@ -942,6 +978,122 @@ impl HostApiService {
             }),
             Err(why) => error(ErrorCode::UpdateFailed, why),
         }
+    }
+}
+
+impl HostApiService {
+    fn no_settings() -> response::Body {
+        error(
+            ErrorCode::Unavailable,
+            "this service keeps no settings; update the service".into(),
+        )
+    }
+
+    fn get_settings(&self, peer: &Peer) -> response::Body {
+        let Some((store, facts)) = &self.settings else {
+            return Self::no_settings();
+        };
+        match store.get(&peer.user) {
+            Ok(settings) => response::Body::Settings(settings_to_wire(&settings, facts)),
+            Err(why) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
+    fn set_settings(&self, peer: &Peer, set: types::SetSettings) -> response::Body {
+        let Some((store, facts)) = &self.settings else {
+            return Self::no_settings();
+        };
+        let Some(wanted) = set.settings else {
+            return error(
+                ErrorCode::InvalidSetting,
+                "the request carries no settings".into(),
+            );
+        };
+        let wanted = Settings {
+            render_gpu: wanted.render_gpu,
+            freeze: wanted.freeze,
+            program_updates: wanted.program_updates,
+            image_updates: wanted.image_updates,
+        };
+        // The update settings apply to every user of the machine, so only an administrator
+        // may change them; the caller's own settings are theirs to change.
+        let machine = store.machine();
+        let changed: Vec<&str> = [
+            (
+                "program updates",
+                wanted.program_updates != machine.program_updates,
+            ),
+            (
+                "image updates",
+                wanted.image_updates != machine.image_updates,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(name, changed)| changed.then_some(name))
+        .collect();
+        if !changed.is_empty() && !peer.administrator {
+            return error(
+                ErrorCode::NotAllowed,
+                format!(
+                    "only an administrator can change this setting ({}); it applies to every \
+                     user of this computer. Run the command as an administrator.",
+                    changed.join(", ")
+                ),
+            );
+        }
+        match store.set(&peer.user, &wanted) {
+            Ok(settings) => {
+                eprintln!(
+                    "local API: {} changed the settings: render GPU {}, freeze {}, program \
+                     updates {}, image updates {}",
+                    peer.user,
+                    settings.render_gpu,
+                    on_off(settings.freeze),
+                    on_off(settings.program_updates),
+                    on_off(settings.image_updates)
+                );
+                response::Body::Settings(settings_to_wire(&settings, facts))
+            }
+            Err(why) => error(ErrorCode::InvalidSetting, why),
+        }
+    }
+}
+
+fn on_off(value: bool) -> &'static str {
+    if value {
+        "on"
+    } else {
+        "off"
+    }
+}
+
+fn settings_to_wire(settings: &Settings, facts: &ServiceFacts) -> types::Settings {
+    types::Settings {
+        render_gpu: settings.render_gpu.clone(),
+        freeze: settings.freeze,
+        program_updates: settings.program_updates,
+        image_updates: settings.image_updates,
+        program_updates_available: facts.program_updates_available,
+        image_updates_available: facts.image_updates_available,
+        version: facts.version.clone(),
+        log_dir: facts.log_dir.clone().unwrap_or_default(),
+    }
+}
+
+fn settings_from_wire(settings: types::Settings) -> SettingsReport {
+    SettingsReport {
+        settings: Settings {
+            render_gpu: settings.render_gpu,
+            freeze: settings.freeze,
+            program_updates: settings.program_updates,
+            image_updates: settings.image_updates,
+        },
+        facts: ServiceFacts {
+            version: settings.version,
+            log_dir: Some(settings.log_dir).filter(|dir| !dir.is_empty()),
+            program_updates_available: settings.program_updates_available,
+            image_updates_available: settings.image_updates_available,
+        },
     }
 }
 
@@ -1105,6 +1257,29 @@ impl HostApiClient {
         match self.exchange(request::Body::ListTasks(types::ListTasks {}), self.timeout)? {
             response::Body::Tasks(tasks) => Ok(tasks_from_wire(tasks)),
             _ => Err(ClientError::Malformed("expected the list of tasks".into())),
+        }
+    }
+
+    /// The settings of the caller's DSA, with what the service says about itself.
+    pub fn settings(&mut self) -> Result<SettingsReport, ClientError> {
+        match self.exchange(
+            request::Body::GetSettings(types::GetSettings {}),
+            self.timeout,
+        )? {
+            response::Body::Settings(settings) => Ok(settings_from_wire(settings)),
+            _ => Err(ClientError::Malformed("expected the settings".into())),
+        }
+    }
+
+    /// Replaces the settings of the caller's DSA, and returns them as the service now keeps
+    /// them.
+    pub fn set_settings(&mut self, settings: &Settings) -> Result<SettingsReport, ClientError> {
+        let body = request::Body::SetSettings(types::SetSettings {
+            settings: Some(settings_to_wire(settings, &ServiceFacts::default())),
+        });
+        match self.exchange(body, self.timeout)? {
+            response::Body::Settings(settings) => Ok(settings_from_wire(settings)),
+            _ => Err(ClientError::Malformed("expected the settings".into())),
         }
     }
 

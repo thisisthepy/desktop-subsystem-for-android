@@ -25,6 +25,10 @@
 //! `update.program_list_url` and `update.program_dir` let the service update DSA itself
 //! from the signed program list, downloading setup files into that folder;
 //! `"program": false` turns that off.
+//!
+//! `settings_dir` is where the service keeps the settings users change from the settings
+//! app (`%ProgramData%\DSA\settings` when absent). The settings can turn either kind of
+//! update off; they cannot turn on what this file leaves out.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -247,6 +251,9 @@ pub struct HostConfig {
     /// messages are lost.
     #[serde(default)]
     pub log_file: Option<PathBuf>,
+    /// Where the service keeps the settings users change from the settings app.
+    #[serde(default)]
+    pub settings_dir: Option<PathBuf>,
     /// The user allowed to use the VM's Hyper-V sockets besides SYSTEM. When absent, the
     /// user running `dsa-hostd`.
     #[serde(default)]
@@ -384,9 +391,21 @@ impl HostConfig {
         }))
     }
 
+    /// Whether this installation downloads new Android images at all.
+    pub fn image_updates_available(&self) -> bool {
+        self.update.is_some() && self.images_dir.is_some()
+    }
+
+    /// Whether this installation updates DSA itself at all.
+    pub fn program_updates_available(&self) -> bool {
+        self.update.as_ref().is_some_and(|update| {
+            update.program && update.program_list_url.is_some() && update.program_dir.is_some()
+        })
+    }
+
     /// The service's log folder: the folder of `log_file`, when there is one. Split as
     /// text, so it is a Windows path on every platform the tests run on.
-    fn log_dir(&self) -> Option<PathBuf> {
+    pub fn log_dir(&self) -> Option<PathBuf> {
         self.log_file.as_ref().and_then(|log| {
             let log = log.to_string_lossy();
             log.rfind(['\\', '/']).map(|end| PathBuf::from(&log[..end]))

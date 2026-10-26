@@ -241,7 +241,10 @@ struct AsUser(MemoryLocalConnector);
 
 impl Connector for AsUser {
     fn connect(&mut self, _: Duration) -> Result<Box<dyn Connection>, TransportError> {
-        self.0.connect_as(Peer { user: USER.into() })
+        self.0.connect_as(Peer {
+            user: USER.into(),
+            administrator: false,
+        })
     }
 }
 

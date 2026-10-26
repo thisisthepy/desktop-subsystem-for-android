@@ -8,14 +8,16 @@
   build has one, the first Android image. Uninstalling removes all of that, the Android
   images the service downloaded since, and the setup files it downloaded to update DSA.
   Each user's Android disk is in their own profile (%LOCALAPPDATA%\DSA), so it is not
-  part of the package and stays.
+  part of the package and stays. The settings app (DSA Settings) goes in the program folder's
+  settings folder, with a Start menu shortcut.
 
   INSTALLFOLDER (the program) and DATAFOLDER (configuration, logs and images) can be set
   on the command line or from setup.exe's Options. The configuration names them as
   {program} and {data}, which the service fills in. The package records both, and a later
   version installed over it (as the service does when it updates DSA) keeps them.
 
-  Build variables (-d): Version, SourceDir (the built binaries and dsa-hostd.json), and,
+  Build variables (-d): Version, SourceDir (the built binaries and dsa-hostd.json),
+  SettingsDir (the published settings app), and,
   when an image is bundled, ImageDir and ImageVersion, plus ImageManifest when the image
   is one make-image.py made (image.json, initrd.img, disk.vhdx) and ImageKernel when it
   carries its own bzImage.
@@ -66,6 +68,7 @@
             <Directory Id="INSTALLFOLDER" Name="DSA">
                 <Directory Id="VMFOLDER" Name="vm" />
                 <Directory Id="LICENSESFOLDER" Name="licenses" />
+                <Directory Id="SETTINGSFOLDER" Name="settings" />
             </Directory>
         </StandardDirectory>
         <StandardDirectory Id="CommonAppDataFolder">
@@ -93,6 +96,29 @@
                                CloseMessage="yes"
                                PromptToContinue="no"
                                RebootPrompt="no" />
+
+        <util:CloseApplication Id="CloseSettingsApp"
+                               Target="DsaSettings.exe"
+                               CloseMessage="yes"
+                               PromptToContinue="no"
+                               RebootPrompt="no" />
+
+        <!-- The settings app and the runtimes it carries. Its shortcut is named so that
+             searching the Start menu for DSA or for settings finds it. -->
+        <ComponentGroup Id="SettingsApp" Directory="SETTINGSFOLDER">
+            <Files Include="$(SettingsDir)\**">
+                <Exclude Files="$(SettingsDir)\DsaSettings.exe" />
+            </Files>
+            <Component Id="SettingsExe" Guid="*">
+                <File Id="SettingsExe" Source="$(SettingsDir)\DsaSettings.exe" KeyPath="yes">
+                    <Shortcut Id="SettingsShortcut"
+                              Directory="ProgramMenuFolder"
+                              Name="DSA Settings"
+                              Description="Settings and state of Desktop Subsystem for Android"
+                              WorkingDirectory="SETTINGSFOLDER" />
+                </File>
+            </Component>
+        </ComponentGroup>
 
         <ComponentGroup Id="Service" Directory="INSTALLFOLDER">
             <Component Id="HostdExe" Guid="*">
@@ -208,6 +234,9 @@
             <Component Id="LicSetupUi" Guid="*">
                 <File Id="LicSetupUi" Source="$(SourceDir)\licenses\setup-ui.txt" KeyPath="yes" />
             </Component>
+            <Component Id="LicSettingsApp" Guid="*">
+                <File Id="LicSettingsApp" Source="$(SourceDir)\licenses\settings-app.txt" KeyPath="yes" />
+            </Component>
             <Component Id="LicGfxstream" Guid="*">
                 <File Id="LicGfxstream" Source="$(SourceDir)\licenses\gfxstream.txt" KeyPath="yes" />
             </Component>
@@ -295,6 +324,7 @@
 
         <Feature Id="Main" Title="Desktop Subsystem for Android" Level="1">
             <ComponentGroupRef Id="Service" />
+            <ComponentGroupRef Id="SettingsApp" />
             <ComponentGroupRef Id="Licenses" />
             <ComponentGroupRef Id="Data" />
             <ComponentGroupRef Id="Kernel" />

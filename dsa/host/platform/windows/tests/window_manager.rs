@@ -163,6 +163,7 @@ fn accepts_graphics_streams_while(state: SessionState) {
             ) -> Result<Box<dyn Connection>, dsa_transport::TransportError> {
                 self.0.connect_as(Peer {
                     user: "test-user".into(),
+                    administrator: false,
                 })
             }
         }
@@ -272,6 +273,7 @@ fn fr3_compositor_reconnects_when_vm_restarts() {
             ) -> Result<Box<dyn Connection>, dsa_transport::TransportError> {
                 self.0.connect_as(Peer {
                     user: "test-user".into(),
+                    administrator: false,
                 })
             }
         }

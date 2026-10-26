@@ -393,6 +393,54 @@ fn fr15_turned_off_the_program_list_is_never_fetched() {
 }
 
 #[test]
+fn fr17_turned_off_in_the_settings_the_program_list_is_not_fetched_until_turned_on() {
+    let root = fresh_dir();
+    let installer = FakeInstaller::default();
+    let updates = ProgramUpdates::new(
+        settings(&root, "0.1.0"),
+        Box::new(NeverFetch),
+        Box::new(installer.clone()),
+        Arc::new(FakeAndroids::default()),
+        Arc::new(ProgramStatus::default()),
+        "test",
+    );
+    let on = Arc::new(AtomicBool::new(false));
+    let switch = Arc::clone(&on);
+    updates.follow_switch(Box::new(move || switch.load(Ordering::Relaxed)));
+    let why = updates.check().unwrap_err();
+    assert!(
+        why.to_string().contains("turned off in the settings"),
+        "{why}"
+    );
+    assert_eq!(updates.install_when_idle().unwrap(), None);
+    assert!(updates.install_now().is_err());
+
+    // The loop keeps running while the settings have updates off, and fetches nothing.
+    let stop = Arc::new(AtomicBool::new(false));
+    let worker = {
+        let (updates, stop) = (Arc::clone(&updates), Arc::clone(&stop));
+        thread::spawn(move || {
+            updates.run(
+                &stop,
+                Timing {
+                    first_check: Duration::ZERO,
+                    check_interval: Duration::from_millis(10),
+                    retry: Duration::from_millis(10),
+                },
+            )
+        })
+    };
+    thread::sleep(Duration::from_millis(100));
+    assert!(
+        !worker.is_finished(),
+        "the loop waits for the settings to turn updates on"
+    );
+    stop.store(true, Ordering::Relaxed);
+    worker.join().unwrap();
+    assert_eq!(installer.runs(), 0);
+}
+
+#[test]
 fn fr15_an_update_waits_while_an_android_runs_and_installs_when_all_stop() {
     let h = Harness::new();
     h.fetch.publish(

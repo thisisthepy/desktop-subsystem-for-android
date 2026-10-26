@@ -7,7 +7,9 @@
 //! dsa update [--wait]
 //! dsa launch <package>
 //! dsa tasks
+//! dsa settings [set <name> <value>]
 //! dsa memory
+//! dsa gpus
 //! ```
 //!
 //! It acts on the Android of the user who runs it: the service learns that user from the
@@ -16,8 +18,17 @@
 //! `dsa launch` starts an app in a window of its own, named by its package (such as
 //! `com.android.settings`). `dsa tasks` lists the app tasks Android shows as windows.
 //!
-//! `dsa memory` shows how much memory the user's Android takes: on the host, its VM and the
-//! window processes, and inside Android, where its memory goes, as Android reports it.
+//! `dsa settings` shows the settings the service keeps: the GPU the window manager renders on
+//! (`render-gpu`: `display`, `integrated`, `discrete` or part of a GPU's name), whether
+//! Android may be frozen when idle (`freeze`), and whether DSA (`program-updates`) and the
+//! Android image (`image-updates`) are updated. `dsa settings set <name> <value>` changes one;
+//! the switches take `on` or `off`. `dsa memory` shows how much memory the user's Android
+//! takes, on the host and inside Android. `dsa gpus` lists the GPUs of this machine, for
+//! choosing the render GPU.
+//!
+//! `--json` prints what `status`, `start`, `stop`, `settings`, `memory` and `gpus` report as
+//! one JSON object, for programs such as the settings app. Errors still go to standard error,
+//! with exit code 1.
 //!
 //! `dsa update` installs the newest version of DSA now instead of when no Android is
 //! running. It stops every user's Android, since the service restarts. With `--wait` it
@@ -33,13 +44,15 @@ use std::fmt::Write as _;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dsa_host_core::host_api::{ClientError, HostApiClient, Status, TaskList};
+use dsa_host_core::host_api::{ClientError, HostApiClient, SettingsReport, Status, TaskList};
+use dsa_host_core::memory::MemorySnapshot;
 use dsa_host_core::session::SessionState;
 use dsa_transport::Connector;
+use serde_json::{json, Value};
 
-pub const USAGE: &str =
-    "usage: dsa <status | start | stop | update | launch <package> | tasks | memory> [--wait] \
-                         [--timeout <seconds>] [--pipe <name> | --socket <path>]";
+pub const USAGE: &str = "usage: dsa <status | start | stop | update | launch <package> | tasks | \
+     settings [set <name> <value>] | memory | gpus> [--wait] [--timeout <seconds>] [--json] \
+     [--pipe <name> | --socket <path>]";
 
 /// What to ask the service.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,8 +65,41 @@ pub enum Command {
     Launch,
     /// List the app tasks Android shows as windows.
     Tasks,
-    /// Show how much memory the Android takes, in the guest and on the host.
+    /// Show the settings, or change one ([`Invocation::change`]).
+    Settings,
+    /// Show how much memory the user's Android takes.
     Memory,
+    /// List this machine's GPUs.
+    Gpus,
+}
+
+/// A setting `dsa settings set` changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Change {
+    RenderGpu(String),
+    Freeze(bool),
+    ProgramUpdates(bool),
+    ImageUpdates(bool),
+}
+
+impl Change {
+    fn parse(name: &str, value: &str) -> Result<Change, String> {
+        let switch = || match value.to_ascii_lowercase().as_str() {
+            "on" | "true" | "yes" | "1" => Ok(true),
+            "off" | "false" | "no" | "0" => Ok(false),
+            _ => Err(format!("{name} is on or off, not {value:?}")),
+        };
+        match name {
+            "render-gpu" => Ok(Change::RenderGpu(value.to_string())),
+            "freeze" => switch().map(Change::Freeze),
+            "program-updates" => switch().map(Change::ProgramUpdates),
+            "image-updates" => switch().map(Change::ImageUpdates),
+            _ => Err(format!(
+                "there is no setting {name:?}; the settings are render-gpu, freeze, \
+                 program-updates and image-updates"
+            )),
+        }
+    }
 }
 
 /// What can start a host service or ensure it is running.
@@ -103,6 +149,10 @@ pub struct Invocation {
     pub endpoint: Option<String>,
     /// The app to launch, for `dsa launch`.
     pub package: Option<String>,
+    /// The setting to change, for `dsa settings set`.
+    pub change: Option<Change>,
+    /// Print the answer as JSON.
+    pub json: bool,
 }
 
 /// Whether `name` can be an Android package name: dot-separated parts of letters, digits
@@ -121,10 +171,13 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut timeout = Duration::from_secs(120);
     let mut endpoint = None;
     let mut package = None;
+    let mut change = None;
+    let mut json = false;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "status" | "start" | "stop" | "update" | "launch" | "tasks" | "memory"
+            "status" | "start" | "stop" | "update" | "launch" | "tasks" | "settings" | "memory"
+            | "gpus"
                 if command.is_none() =>
             {
                 command = Some(match arg.as_str() {
@@ -133,10 +186,22 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                     "update" => Command::Update,
                     "launch" => Command::Launch,
                     "tasks" => Command::Tasks,
+                    "settings" => Command::Settings,
                     "memory" => Command::Memory,
+                    "gpus" => Command::Gpus,
                     _ => Command::Stop,
                 });
             }
+            "set" if command == Some(Command::Settings) && change.is_none() => {
+                let name = args
+                    .next()
+                    .ok_or("dsa settings set needs a setting and a value")?;
+                let value = args
+                    .next()
+                    .ok_or_else(|| format!("dsa settings set {name} needs a value"))?;
+                change = Some(Change::parse(name, value)?);
+            }
+            "--json" => json = true,
             name if command == Some(Command::Launch)
                 && package.is_none()
                 && !name.starts_with('-') =>
@@ -177,6 +242,172 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         timeout,
         endpoint,
         package,
+        change,
+        json,
+    })
+}
+
+/// `status` as one JSON object.
+pub fn status_json(status: &Status) -> Value {
+    json!({
+        "state": status.state.to_string(),
+        "last_reason": status.last_reason,
+        "update_notice": status.update_notice,
+    })
+}
+
+/// The settings as one JSON object.
+pub fn settings_json(report: &SettingsReport) -> Value {
+    json!({
+        "render_gpu": report.settings.render_gpu,
+        "freeze": report.settings.freeze,
+        "program_updates": report.settings.program_updates,
+        "image_updates": report.settings.image_updates,
+        "program_updates_available": report.facts.program_updates_available,
+        "image_updates_available": report.facts.image_updates_available,
+        "version": report.facts.version,
+        "log_dir": report.facts.log_dir,
+    })
+}
+
+fn on_off(value: bool) -> &'static str {
+    if value {
+        "on"
+    } else {
+        "off"
+    }
+}
+
+/// The settings, one per line.
+pub fn describe_settings(report: &SettingsReport) -> String {
+    let settings = &report.settings;
+    let facts = &report.facts;
+    let available = |value: bool, available: bool| {
+        if available {
+            on_off(value).to_string()
+        } else {
+            format!("{} (this installation does not update it)", on_off(value))
+        }
+    };
+    let mut lines = vec![
+        format!("Render GPU: {}", settings.render_gpu),
+        format!("Freeze when idle: {}", on_off(settings.freeze)),
+        format!(
+            "Program updates: {}",
+            available(settings.program_updates, facts.program_updates_available)
+        ),
+        format!(
+            "Image updates: {}",
+            available(settings.image_updates, facts.image_updates_available)
+        ),
+        format!("Service version: {}", facts.version),
+    ];
+    if let Some(dir) = &facts.log_dir {
+        lines.push(format!("Service log folder: {dir}"));
+    }
+    lines.join("\n")
+}
+
+/// The memory report as one JSON object. Sizes in KiB; `guest` is null until Android has
+/// reported, and `age_seconds` says how old its report is.
+pub fn memory_json(memory: &MemorySnapshot) -> Value {
+    let guest = memory.guest.as_ref().map(|report| {
+        let guest = &report.memory;
+        json!({
+            "mem_total_kb": guest.mem_total_kb,
+            "mem_free_kb": guest.mem_free_kb,
+            "mem_available_kb": guest.mem_available_kb,
+            "buffers_kb": guest.buffers_kb,
+            "cached_kb": guest.cached_kb,
+            "anon_pages_kb": guest.anon_pages_kb,
+            "shmem_kb": guest.shmem_kb,
+            "slab_reclaimable_kb": guest.slab_reclaimable_kb,
+            "swap_total_kb": guest.swap_total_kb,
+            "swap_free_kb": guest.swap_free_kb,
+            "zram_original_kb": guest.zram_original_kb,
+            "zram_used_kb": guest.zram_used_kb,
+            "total_pss_kb": guest.total_pss_kb,
+            "age_seconds": report.age.as_secs(),
+            "top_processes": guest.top_processes.iter().map(|p| json!({
+                "pid": p.pid,
+                "name": p.name,
+                "pss_kb": p.pss_kb,
+                "swap_pss_kb": p.swap_pss_kb,
+            })).collect::<Vec<_>>(),
+        })
+    });
+    json!({
+        "guest": guest,
+        "host": memory.host.iter().map(|p| json!({
+            "role": p.role.name(),
+            "pid": p.pid,
+            "working_set_kb": p.working_set_kb,
+            "private_kb": p.private_kb,
+        })).collect::<Vec<_>>(),
+        "host_total_kb": memory.host_total_kb(),
+    })
+}
+
+/// This machine's GPUs, and which one drives the primary monitor.
+pub fn gpus_json() -> Value {
+    #[cfg(windows)]
+    {
+        use dsa_host_windows::compositor::display_gpu::{adapter_names, display_sources};
+        let adapters = adapter_names();
+        let primary = display_sources().ok().and_then(|sources| {
+            sources
+                .into_iter()
+                .find(|source| source.x == 0 && source.y == 0)
+                .map(|source| source.adapter)
+        });
+        json!({
+            "gpus": adapters.iter().map(|adapter| json!({
+                "name": adapter.name,
+                "luid": adapter.luid.to_string(),
+                "primary_display": Some(adapter.luid) == primary,
+            })).collect::<Vec<_>>(),
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        json!({ "gpus": [] })
+    }
+}
+
+fn describe_gpus(gpus: &Value) -> String {
+    let list = gpus["gpus"].as_array().cloned().unwrap_or_default();
+    if list.is_empty() {
+        return "no GPU found".into();
+    }
+    list.iter()
+        .map(|gpu| {
+            let mut line = gpu["name"].as_str().unwrap_or_default().to_string();
+            if gpu["primary_display"].as_bool() == Some(true) {
+                line.push_str(" (drives the primary monitor)");
+            }
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `dsa settings`, and `dsa settings set`.
+fn settings(invocation: &Invocation, client: &mut HostApiClient) -> Result<String, String> {
+    let mut report = client.settings().map_err(|e| e.to_string())?;
+    if let Some(change) = &invocation.change {
+        let mut wanted = report.settings.clone();
+        match change {
+            Change::RenderGpu(value) => wanted.render_gpu = value.clone(),
+            Change::Freeze(on) => wanted.freeze = *on,
+            Change::ProgramUpdates(on) => wanted.program_updates = *on,
+            Change::ImageUpdates(on) => wanted.image_updates = *on,
+        }
+        report = client.set_settings(&wanted).map_err(|e| e.to_string())?;
+    }
+    Ok(if invocation.json {
+        settings_json(&report).to_string()
+    } else {
+        describe_settings(&report)
     })
 }
 
@@ -341,8 +572,23 @@ pub fn run_with_starter(
     connector: &mut dyn Connector,
     starter: Option<&dyn ServiceStarter>,
 ) -> Result<String, String> {
+    if invocation.command == Command::Gpus {
+        let gpus = gpus_json();
+        return Ok(if invocation.json {
+            gpus.to_string()
+        } else {
+            describe_gpus(&gpus)
+        });
+    }
     let can_start = invocation.command != Command::Stop;
     let mut client = connect(connector, starter, can_start, Duration::from_secs(10))?;
+    let show = |status: &Status| {
+        if invocation.json {
+            status_json(status).to_string()
+        } else {
+            describe(status)
+        }
+    };
     let status = match invocation.command {
         Command::Status => client.status(),
         Command::Start => client.start(),
@@ -357,14 +603,20 @@ pub fn run_with_starter(
             let list = client.tasks().map_err(|e| e.to_string())?;
             return Ok(describe_tasks(&list));
         }
+        Command::Settings => return settings(invocation, &mut client),
         Command::Memory => {
             let memory = client.memory().map_err(|e| e.to_string())?;
-            return Ok(memory.to_string().trim_end().to_string());
+            return Ok(if invocation.json {
+                memory_json(&memory).to_string()
+            } else {
+                memory.to_string().trim_end().to_string()
+            });
         }
+        Command::Gpus => unreachable!("answered before connecting"),
     }
     .map_err(|e| e.to_string())?;
     if !invocation.wait || invocation.command == Command::Status {
-        return Ok(describe(&status));
+        return Ok(show(&status));
     }
     let deadline = Instant::now() + invocation.timeout;
     // The service answers a start once the session has moved on, so a Stopped answer
@@ -384,7 +636,7 @@ pub fn run_with_starter(
     let mut status = status;
     loop {
         if done.contains(&status.state) {
-            return Ok(describe(&status));
+            return Ok(show(&status));
         }
         if failed.contains(&status.state) {
             return Err(format!("Android did not start: {}", describe(&status)));

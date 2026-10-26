@@ -29,8 +29,75 @@ impl Connector for As {
     fn connect(&mut self, _: Duration) -> Result<Box<dyn Connection>, TransportError> {
         self.0.connect_as(Peer {
             user: self.1.into(),
+            administrator: false,
         })
     }
+}
+
+/// Connects as a chosen user acting as an administrator, or not.
+struct AsAdmin(MemoryLocalConnector, &'static str, bool);
+
+impl Connector for AsAdmin {
+    fn connect(&mut self, _: Duration) -> Result<Box<dyn Connection>, TransportError> {
+        self.0.connect_as(Peer {
+            user: self.1.into(),
+            administrator: self.2,
+        })
+    }
+}
+
+fn settings_service(
+    listener: local::MemoryLocalListener,
+) -> (RunningService, Arc<dsa_host_core::settings::MemorySettings>) {
+    use dsa_host_core::host_api::{HostApiService, ServiceFacts};
+    let store = Arc::new(dsa_host_core::settings::MemorySettings::default());
+    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+        .with_settings(store.clone(), ServiceFacts::default());
+    (
+        RunningService::start_service(Box::new(listener), service),
+        store,
+    )
+}
+
+#[test]
+fn fr17_only_an_administrator_changes_the_machines_update_settings() {
+    use dsa_host_core::host_api::ClientError;
+    use dsa_host_core::settings::{Settings, SettingsStore};
+    use dsa_protocol::host_api::types::ErrorCode;
+    let (listener, connector) = local::pair();
+    let (_service, store) = settings_service(listener);
+    let mut user =
+        HostApiClient::connect(&mut AsAdmin(connector.clone(), "alice", false), "a", WAIT).unwrap();
+    let off = Settings {
+        program_updates: false,
+        ..Settings::default()
+    };
+    match user.set_settings(&off) {
+        Err(ClientError::Service { code, detail }) => {
+            assert_eq!(code, ErrorCode::NotAllowed);
+            assert!(detail.contains("only an administrator"), "{detail}");
+            assert!(detail.contains("program updates"), "{detail}");
+        }
+        other => panic!("expected the service to refuse, got {other:?}"),
+    }
+    assert!(store.machine().program_updates, "nothing changed");
+    assert_eq!(store.get("alice").unwrap(), Settings::default());
+
+    // The user's own settings stay theirs to change, with the machine's left as they are.
+    let mine = user
+        .set_settings(&Settings {
+            render_gpu: "integrated".into(),
+            freeze: true,
+            ..Settings::default()
+        })
+        .unwrap();
+    assert_eq!(mine.settings.render_gpu, "integrated");
+
+    let mut admin =
+        HostApiClient::connect(&mut AsAdmin(connector, "bob", true), "b", WAIT).unwrap();
+    let changed = admin.set_settings(&off).unwrap();
+    assert!(!changed.settings.program_updates);
+    assert!(!store.machine().program_updates);
 }
 
 #[test]

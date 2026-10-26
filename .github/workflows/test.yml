@@ -162,6 +162,29 @@ jobs:
       - name: Check the C++ codec against the vectors
         run: dsa/protocol/cpp/test.sh
 
+  settings-app:
+    name: Test and build the settings app (windows-latest)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: dsa/host/platform/windows/settings
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # The view models and the reading of dsa's JSON, against a fake dsa.
+      - name: Run the view model tests
+        run: dotnet test DsaSettings.Core.Tests/DsaSettings.Core.Tests.csproj -c Release
+
+      # The WPF app itself, as the installer publishes it.
+      - name: Build the app
+        run: dotnet publish DsaSettings/DsaSettings.csproj -c Release -r win-x64 -o ../../../../target/settings-app
+
   hwcomposer:
     name: Test the guest hwcomposer's task rules (ubuntu-latest)
     runs-on: ubuntu-latest

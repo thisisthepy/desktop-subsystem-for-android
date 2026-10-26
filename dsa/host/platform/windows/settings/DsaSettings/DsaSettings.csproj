@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    DSA Settings: the app that shows and changes DSA's settings and state.
+
+    It is a WPF app with WPF UI (MIT), an open source library of Windows 11 style controls,
+    and is published self-contained (the .NET runtime, MIT, ships in its folder), so the
+    installer copies a folder and needs no runtime installer. It asks the dsa command,
+    installed beside it, for everything it shows.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>Dsa.Settings</RootNamespace>
+    <AssemblyName>DsaSettings</AssemblyName>
+    <AssemblyTitle>DSA Settings</AssemblyTitle>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\logo.ico</ApplicationIcon>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NeutralLanguage>en</NeutralLanguage>
+    <SatelliteResourceLanguages>en;ko</SatelliteResourceLanguages>
+    <DebugType>embedded</DebugType>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="3.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DsaSettings.Core\DsaSettings.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\logo.png" />
+    <Resource Include="Assets\logo.ico" />
+  </ItemGroup>
+</Project>

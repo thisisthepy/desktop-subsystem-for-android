@@ -20,9 +20,11 @@ fn pr5_each_connection_comes_with_the_peer_that_made_it() {
     let (mut listener, mut connector) = local::pair();
     let alice = Peer {
         user: "S-1-5-21-1-2-3-1001".into(),
+        administrator: false,
     };
     let bob = Peer {
         user: "uid:1002".into(),
+        administrator: false,
     };
     let mut from_alice = connector.connect_as(alice.clone()).unwrap();
     let _from_bob = connector.connect_as(bob.clone()).unwrap();
