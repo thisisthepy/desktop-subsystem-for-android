@@ -69,6 +69,9 @@ extern HelloAcceptedDefaultTypeInternal _HelloAccepted_default_instance_;
 class HelloRejected;
 struct HelloRejectedDefaultTypeInternal;
 extern HelloRejectedDefaultTypeInternal _HelloRejected_default_instance_;
+class KeyEvent;
+struct KeyEventDefaultTypeInternal;
+extern KeyEventDefaultTypeInternal _KeyEvent_default_instance_;
 class LaunchApp;
 struct LaunchAppDefaultTypeInternal;
 extern LaunchAppDefaultTypeInternal _LaunchApp_default_instance_;
@@ -105,6 +108,7 @@ template<> ::dsa::control::v1::Envelope* Arena::CreateMaybeMessage<::dsa::contro
 template<> ::dsa::control::v1::Hello* Arena::CreateMaybeMessage<::dsa::control::v1::Hello>(Arena*);
 template<> ::dsa::control::v1::HelloAccepted* Arena::CreateMaybeMessage<::dsa::control::v1::HelloAccepted>(Arena*);
 template<> ::dsa::control::v1::HelloRejected* Arena::CreateMaybeMessage<::dsa::control::v1::HelloRejected>(Arena*);
+template<> ::dsa::control::v1::KeyEvent* Arena::CreateMaybeMessage<::dsa::control::v1::KeyEvent>(Arena*);
 template<> ::dsa::control::v1::LaunchApp* Arena::CreateMaybeMessage<::dsa::control::v1::LaunchApp>(Arena*);
 template<> ::dsa::control::v1::PointerEvent* Arena::CreateMaybeMessage<::dsa::control::v1::PointerEvent>(Arena*);
 template<> ::dsa::control::v1::Rect* Arena::CreateMaybeMessage<::dsa::control::v1::Rect>(Arena*);
@@ -237,6 +241,28 @@ inline const std::string& PointerTool_Name(T enum_t_value) {
 }
 bool PointerTool_Parse(
     ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, PointerTool* value);
+enum KeyAction : int {
+  KEY_ACTION_UNSPECIFIED = 0,
+  KEY_ACTION_DOWN = 1,
+  KEY_ACTION_UP = 2,
+  KeyAction_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
+  KeyAction_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
+};
+bool KeyAction_IsValid(int value);
+constexpr KeyAction KeyAction_MIN = KEY_ACTION_UNSPECIFIED;
+constexpr KeyAction KeyAction_MAX = KEY_ACTION_UP;
+constexpr int KeyAction_ARRAYSIZE = KeyAction_MAX + 1;
+
+const std::string& KeyAction_Name(KeyAction value);
+template<typename T>
+inline const std::string& KeyAction_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, KeyAction>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function KeyAction_Name.");
+  return KeyAction_Name(static_cast<KeyAction>(enum_t_value));
+}
+bool KeyAction_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, KeyAction* value);
 // ===================================================================
 
 class Hello final :
@@ -2612,6 +2638,202 @@ class PointerEvent final :
 };
 // -------------------------------------------------------------------
 
+class KeyEvent final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.KeyEvent) */ {
+ public:
+  inline KeyEvent() : KeyEvent(nullptr) {}
+  ~KeyEvent() override;
+  explicit PROTOBUF_CONSTEXPR KeyEvent(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  KeyEvent(const KeyEvent& from);
+  KeyEvent(KeyEvent&& from) noexcept
+    : KeyEvent() {
+    *this = ::std::move(from);
+  }
+
+  inline KeyEvent& operator=(const KeyEvent& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline KeyEvent& operator=(KeyEvent&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const KeyEvent& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const KeyEvent* internal_default_instance() {
+    return reinterpret_cast<const KeyEvent*>(
+               &_KeyEvent_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    15;
+
+  friend void swap(KeyEvent& a, KeyEvent& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(KeyEvent* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(KeyEvent* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  KeyEvent* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<KeyEvent>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const KeyEvent& from);
+  void MergeFrom(const KeyEvent& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(KeyEvent* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.KeyEvent";
+  }
+  protected:
+  explicit KeyEvent(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kTaskIdFieldNumber = 1,
+    kActionFieldNumber = 2,
+    kKeyCodeFieldNumber = 3,
+    kRepeatCountFieldNumber = 4,
+    kMetaStateFieldNumber = 5,
+    kEventTimeMsFieldNumber = 6,
+    kCanceledFieldNumber = 7,
+  };
+  // int32 task_id = 1;
+  void clear_task_id();
+  int32_t task_id() const;
+  void set_task_id(int32_t value);
+  private:
+  int32_t _internal_task_id() const;
+  void _internal_set_task_id(int32_t value);
+  public:
+
+  // .dsa.control.v1.KeyAction action = 2;
+  void clear_action();
+  ::dsa::control::v1::KeyAction action() const;
+  void set_action(::dsa::control::v1::KeyAction value);
+  private:
+  ::dsa::control::v1::KeyAction _internal_action() const;
+  void _internal_set_action(::dsa::control::v1::KeyAction value);
+  public:
+
+  // uint32 key_code = 3;
+  void clear_key_code();
+  uint32_t key_code() const;
+  void set_key_code(uint32_t value);
+  private:
+  uint32_t _internal_key_code() const;
+  void _internal_set_key_code(uint32_t value);
+  public:
+
+  // uint32 repeat_count = 4;
+  void clear_repeat_count();
+  uint32_t repeat_count() const;
+  void set_repeat_count(uint32_t value);
+  private:
+  uint32_t _internal_repeat_count() const;
+  void _internal_set_repeat_count(uint32_t value);
+  public:
+
+  // uint32 meta_state = 5;
+  void clear_meta_state();
+  uint32_t meta_state() const;
+  void set_meta_state(uint32_t value);
+  private:
+  uint32_t _internal_meta_state() const;
+  void _internal_set_meta_state(uint32_t value);
+  public:
+
+  // uint32 event_time_ms = 6;
+  void clear_event_time_ms();
+  uint32_t event_time_ms() const;
+  void set_event_time_ms(uint32_t value);
+  private:
+  uint32_t _internal_event_time_ms() const;
+  void _internal_set_event_time_ms(uint32_t value);
+  public:
+
+  // bool canceled = 7;
+  void clear_canceled();
+  bool canceled() const;
+  void set_canceled(bool value);
+  private:
+  bool _internal_canceled() const;
+  void _internal_set_canceled(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.KeyEvent)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    int32_t task_id_;
+    int action_;
+    uint32_t key_code_;
+    uint32_t repeat_count_;
+    uint32_t meta_state_;
+    uint32_t event_time_ms_;
+    bool canceled_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class Envelope final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.Envelope) */ {
  public:
@@ -2661,6 +2883,7 @@ class Envelope final :
     kSetTaskDensity = 12,
     kPointerEvent = 13,
     kAppInfo = 15,
+    kKeyEvent = 16,
     BODY_NOT_SET = 0,
   };
 
@@ -2669,7 +2892,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    15;
+    16;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -2747,6 +2970,7 @@ class Envelope final :
     kSetTaskDensityFieldNumber = 12,
     kPointerEventFieldNumber = 13,
     kAppInfoFieldNumber = 15,
+    kKeyEventFieldNumber = 16,
   };
   // .dsa.control.v1.Hello hello = 1;
   bool has_hello() const;
@@ -3000,6 +3224,24 @@ class Envelope final :
       ::dsa::control::v1::AppInfo* app_info);
   ::dsa::control::v1::AppInfo* unsafe_arena_release_app_info();
 
+  // .dsa.control.v1.KeyEvent key_event = 16;
+  bool has_key_event() const;
+  private:
+  bool _internal_has_key_event() const;
+  public:
+  void clear_key_event();
+  const ::dsa::control::v1::KeyEvent& key_event() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::KeyEvent* release_key_event();
+  ::dsa::control::v1::KeyEvent* mutable_key_event();
+  void set_allocated_key_event(::dsa::control::v1::KeyEvent* key_event);
+  private:
+  const ::dsa::control::v1::KeyEvent& _internal_key_event() const;
+  ::dsa::control::v1::KeyEvent* _internal_mutable_key_event();
+  public:
+  void unsafe_arena_set_allocated_key_event(
+      ::dsa::control::v1::KeyEvent* key_event);
+  ::dsa::control::v1::KeyEvent* unsafe_arena_release_key_event();
+
   void clear_body();
   BodyCase body_case() const;
   // @@protoc_insertion_point(class_scope:dsa.control.v1.Envelope)
@@ -3019,6 +3261,7 @@ class Envelope final :
   void set_has_set_task_density();
   void set_has_pointer_event();
   void set_has_app_info();
+  void set_has_key_event();
 
   inline bool has_body() const;
   inline void clear_has_body();
@@ -3044,6 +3287,7 @@ class Envelope final :
       ::dsa::control::v1::SetTaskDensity* set_task_density_;
       ::dsa::control::v1::PointerEvent* pointer_event_;
       ::dsa::control::v1::AppInfo* app_info_;
+      ::dsa::control::v1::KeyEvent* key_event_;
     } body_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -4581,6 +4825,150 @@ inline void PointerEvent::set_scroll_y(float value) {
 
 // -------------------------------------------------------------------
 
+// KeyEvent
+
+// int32 task_id = 1;
+inline void KeyEvent::clear_task_id() {
+  _impl_.task_id_ = 0;
+}
+inline int32_t KeyEvent::_internal_task_id() const {
+  return _impl_.task_id_;
+}
+inline int32_t KeyEvent::task_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.KeyEvent.task_id)
+  return _internal_task_id();
+}
+inline void KeyEvent::_internal_set_task_id(int32_t value) {
+  
+  _impl_.task_id_ = value;
+}
+inline void KeyEvent::set_task_id(int32_t value) {
+  _internal_set_task_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.KeyEvent.task_id)
+}
+
+// .dsa.control.v1.KeyAction action = 2;
+inline void KeyEvent::clear_action() {
+  _impl_.action_ = 0;
+}
+inline ::dsa::control::v1::KeyAction KeyEvent::_internal_action() const {
+  return static_cast< ::dsa::control::v1::KeyAction >(_impl_.action_);
+}
+inline ::dsa::control::v1::KeyAction KeyEvent::action() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.KeyEvent.action)
+  return _internal_action();
+}
+inline void KeyEvent::_internal_set_action(::dsa::control::v1::KeyAction value) {
+  
+  _impl_.action_ = value;
+}
+inline void KeyEvent::set_action(::dsa::control::v1::KeyAction value) {
+  _internal_set_action(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.KeyEvent.action)
+}
+
+// uint32 key_code = 3;
+inline void KeyEvent::clear_key_code() {
+  _impl_.key_code_ = 0u;
+}
+inline uint32_t KeyEvent::_internal_key_code() const {
+  return _impl_.key_code_;
+}
+inline uint32_t KeyEvent::key_code() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.KeyEvent.key_code)
+  return _internal_key_code();
+}
+inline void KeyEvent::_internal_set_key_code(uint32_t value) {
+  
+  _impl_.key_code_ = value;
+}
+inline void KeyEvent::set_key_code(uint32_t value) {
+  _internal_set_key_code(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.KeyEvent.key_code)
+}
+
+// uint32 repeat_count = 4;
+inline void KeyEvent::clear_repeat_count() {
+  _impl_.repeat_count_ = 0u;
+}
+inline uint32_t KeyEvent::_internal_repeat_count() const {
+  return _impl_.repeat_count_;
+}
+inline uint32_t KeyEvent::repeat_count() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.KeyEvent.repeat_count)
+  return _internal_repeat_count();
+}
+inline void KeyEvent::_internal_set_repeat_count(uint32_t value) {
+  
+  _impl_.repeat_count_ = value;
+}
+inline void KeyEvent::set_repeat_count(uint32_t value) {
+  _internal_set_repeat_count(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.KeyEvent.repeat_count)
+}
+
+// uint32 meta_state = 5;
+inline void KeyEvent::clear_meta_state() {
+  _impl_.meta_state_ = 0u;
+}
+inline uint32_t KeyEvent::_internal_meta_state() const {
+  return _impl_.meta_state_;
+}
+inline uint32_t KeyEvent::meta_state() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.KeyEvent.meta_state)
+  return _internal_meta_state();
+}
+inline void KeyEvent::_internal_set_meta_state(uint32_t value) {
+  
+  _impl_.meta_state_ = value;
+}
+inline void KeyEvent::set_meta_state(uint32_t value) {
+  _internal_set_meta_state(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.KeyEvent.meta_state)
+}
+
+// uint32 event_time_ms = 6;
+inline void KeyEvent::clear_event_time_ms() {
+  _impl_.event_time_ms_ = 0u;
+}
+inline uint32_t KeyEvent::_internal_event_time_ms() const {
+  return _impl_.event_time_ms_;
+}
+inline uint32_t KeyEvent::event_time_ms() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.KeyEvent.event_time_ms)
+  return _internal_event_time_ms();
+}
+inline void KeyEvent::_internal_set_event_time_ms(uint32_t value) {
+  
+  _impl_.event_time_ms_ = value;
+}
+inline void KeyEvent::set_event_time_ms(uint32_t value) {
+  _internal_set_event_time_ms(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.KeyEvent.event_time_ms)
+}
+
+// bool canceled = 7;
+inline void KeyEvent::clear_canceled() {
+  _impl_.canceled_ = false;
+}
+inline bool KeyEvent::_internal_canceled() const {
+  return _impl_.canceled_;
+}
+inline bool KeyEvent::canceled() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.KeyEvent.canceled)
+  return _internal_canceled();
+}
+inline void KeyEvent::_internal_set_canceled(bool value) {
+  
+  _impl_.canceled_ = value;
+}
+inline void KeyEvent::set_canceled(bool value) {
+  _internal_set_canceled(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.KeyEvent.canceled)
+}
+
+// -------------------------------------------------------------------
+
 // Envelope
 
 // .dsa.control.v1.Hello hello = 1;
@@ -5619,6 +6007,80 @@ inline ::dsa::control::v1::AppInfo* Envelope::mutable_app_info() {
   return _msg;
 }
 
+// .dsa.control.v1.KeyEvent key_event = 16;
+inline bool Envelope::_internal_has_key_event() const {
+  return body_case() == kKeyEvent;
+}
+inline bool Envelope::has_key_event() const {
+  return _internal_has_key_event();
+}
+inline void Envelope::set_has_key_event() {
+  _impl_._oneof_case_[0] = kKeyEvent;
+}
+inline void Envelope::clear_key_event() {
+  if (_internal_has_key_event()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.key_event_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::KeyEvent* Envelope::release_key_event() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.key_event)
+  if (_internal_has_key_event()) {
+    clear_has_body();
+    ::dsa::control::v1::KeyEvent* temp = _impl_.body_.key_event_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.key_event_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::KeyEvent& Envelope::_internal_key_event() const {
+  return _internal_has_key_event()
+      ? *_impl_.body_.key_event_
+      : reinterpret_cast< ::dsa::control::v1::KeyEvent&>(::dsa::control::v1::_KeyEvent_default_instance_);
+}
+inline const ::dsa::control::v1::KeyEvent& Envelope::key_event() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.key_event)
+  return _internal_key_event();
+}
+inline ::dsa::control::v1::KeyEvent* Envelope::unsafe_arena_release_key_event() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.key_event)
+  if (_internal_has_key_event()) {
+    clear_has_body();
+    ::dsa::control::v1::KeyEvent* temp = _impl_.body_.key_event_;
+    _impl_.body_.key_event_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_key_event(::dsa::control::v1::KeyEvent* key_event) {
+  clear_body();
+  if (key_event) {
+    set_has_key_event();
+    _impl_.body_.key_event_ = key_event;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.key_event)
+}
+inline ::dsa::control::v1::KeyEvent* Envelope::_internal_mutable_key_event() {
+  if (!_internal_has_key_event()) {
+    clear_body();
+    set_has_key_event();
+    _impl_.body_.key_event_ = CreateMaybeMessage< ::dsa::control::v1::KeyEvent >(GetArenaForAllocation());
+  }
+  return _impl_.body_.key_event_;
+}
+inline ::dsa::control::v1::KeyEvent* Envelope::mutable_key_event() {
+  ::dsa::control::v1::KeyEvent* _msg = _internal_mutable_key_event();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.key_event)
+  return _msg;
+}
+
 inline bool Envelope::has_body() const {
   return body_case() != BODY_NOT_SET;
 }
@@ -5631,6 +6093,8 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
@@ -5675,6 +6139,7 @@ template <> struct is_proto_enum< ::dsa::control::v1::Role> : ::std::true_type {
 template <> struct is_proto_enum< ::dsa::control::v1::RejectReason> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::PointerAction> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::PointerTool> : ::std::true_type {};
+template <> struct is_proto_enum< ::dsa::control::v1::KeyAction> : ::std::true_type {};
 
 PROTOBUF_NAMESPACE_CLOSE
 

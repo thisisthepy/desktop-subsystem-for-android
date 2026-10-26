@@ -21,6 +21,7 @@ pub mod host_api;
 #[cfg(feature = "conformance")]
 pub mod host_api_conformance;
 pub mod input;
+pub mod keys;
 pub mod session;
 pub mod tasks;
 pub mod update;

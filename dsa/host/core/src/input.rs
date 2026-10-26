@@ -204,6 +204,25 @@ impl PointerEvent {
     }
 }
 
+/// One event of a task window's input, of either kind, in the order the window saw them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InputEvent {
+    Pointer(PointerEvent),
+    Key(crate::keys::KeyEvent),
+}
+
+impl From<PointerEvent> for InputEvent {
+    fn from(event: PointerEvent) -> InputEvent {
+        InputEvent::Pointer(event)
+    }
+}
+
+impl From<crate::keys::KeyEvent> for InputEvent {
+    fn from(event: crate::keys::KeyEvent) -> InputEvent {
+        InputEvent::Key(event)
+    }
+}
+
 /// The sizes a window's input is converted between: its client area, in the window
 /// system's pixels, and the task it shows, in guest display pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

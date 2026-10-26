@@ -246,6 +246,25 @@ struct PointerEventDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 PointerEventDefaultTypeInternal _PointerEvent_default_instance_;
+PROTOBUF_CONSTEXPR KeyEvent::KeyEvent(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.task_id_)*/0
+  , /*decltype(_impl_.action_)*/0
+  , /*decltype(_impl_.key_code_)*/0u
+  , /*decltype(_impl_.repeat_count_)*/0u
+  , /*decltype(_impl_.meta_state_)*/0u
+  , /*decltype(_impl_.event_time_ms_)*/0u
+  , /*decltype(_impl_.canceled_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct KeyEventDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR KeyEventDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~KeyEventDefaultTypeInternal() {}
+  union {
+    KeyEvent _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 KeyEventDefaultTypeInternal _KeyEvent_default_instance_;
 PROTOBUF_CONSTEXPR Envelope::Envelope(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.body_)*/{}
@@ -574,6 +593,61 @@ bool PointerTool_Parse(
       PointerTool_entries, 5, name, &int_value);
   if (success) {
     *value = static_cast<PointerTool>(int_value);
+  }
+  return success;
+}
+bool KeyAction_IsValid(int value) {
+  switch (value) {
+    case 0:
+    case 1:
+    case 2:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> KeyAction_strings[3] = {};
+
+static const char KeyAction_names[] =
+  "KEY_ACTION_DOWN"
+  "KEY_ACTION_UNSPECIFIED"
+  "KEY_ACTION_UP";
+
+static const ::PROTOBUF_NAMESPACE_ID::internal::EnumEntry KeyAction_entries[] = {
+  { {KeyAction_names + 0, 15}, 1 },
+  { {KeyAction_names + 15, 22}, 0 },
+  { {KeyAction_names + 37, 13}, 2 },
+};
+
+static const int KeyAction_entries_by_number[] = {
+  1, // 0 -> KEY_ACTION_UNSPECIFIED
+  0, // 1 -> KEY_ACTION_DOWN
+  2, // 2 -> KEY_ACTION_UP
+};
+
+const std::string& KeyAction_Name(
+    KeyAction value) {
+  static const bool dummy =
+      ::PROTOBUF_NAMESPACE_ID::internal::InitializeEnumStrings(
+          KeyAction_entries,
+          KeyAction_entries_by_number,
+          3, KeyAction_strings);
+  (void) dummy;
+  int idx = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumName(
+      KeyAction_entries,
+      KeyAction_entries_by_number,
+      3, value);
+  return idx == -1 ? ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString() :
+                     KeyAction_strings[idx].get();
+}
+bool KeyAction_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, KeyAction* value) {
+  int int_value;
+  bool success = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumValue(
+      KeyAction_entries, 3, name, &int_value);
+  if (success) {
+    *value = static_cast<KeyAction>(int_value);
   }
   return success;
 }
@@ -4481,6 +4555,342 @@ std::string PointerEvent::GetTypeName() const {
 
 // ===================================================================
 
+class KeyEvent::_Internal {
+ public:
+};
+
+KeyEvent::KeyEvent(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.KeyEvent)
+}
+KeyEvent::KeyEvent(const KeyEvent& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  KeyEvent* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){}
+    , decltype(_impl_.action_){}
+    , decltype(_impl_.key_code_){}
+    , decltype(_impl_.repeat_count_){}
+    , decltype(_impl_.meta_state_){}
+    , decltype(_impl_.event_time_ms_){}
+    , decltype(_impl_.canceled_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.task_id_, &from._impl_.task_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.canceled_) -
+    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.canceled_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.KeyEvent)
+}
+
+inline void KeyEvent::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){0}
+    , decltype(_impl_.action_){0}
+    , decltype(_impl_.key_code_){0u}
+    , decltype(_impl_.repeat_count_){0u}
+    , decltype(_impl_.meta_state_){0u}
+    , decltype(_impl_.event_time_ms_){0u}
+    , decltype(_impl_.canceled_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+KeyEvent::~KeyEvent() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.KeyEvent)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void KeyEvent::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void KeyEvent::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void KeyEvent::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.KeyEvent)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&_impl_.task_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.canceled_) -
+      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.canceled_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* KeyEvent::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 task_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.task_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.KeyAction action = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          _internal_set_action(static_cast<::dsa::control::v1::KeyAction>(val));
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 key_code = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.key_code_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 repeat_count = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.repeat_count_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 meta_state = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 40)) {
+          _impl_.meta_state_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 event_time_ms = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 48)) {
+          _impl_.event_time_ms_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool canceled = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 56)) {
+          _impl_.canceled_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* KeyEvent::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.KeyEvent)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_task_id(), target);
+  }
+
+  // .dsa.control.v1.KeyAction action = 2;
+  if (this->_internal_action() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteEnumToArray(
+      2, this->_internal_action(), target);
+  }
+
+  // uint32 key_code = 3;
+  if (this->_internal_key_code() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(3, this->_internal_key_code(), target);
+  }
+
+  // uint32 repeat_count = 4;
+  if (this->_internal_repeat_count() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(4, this->_internal_repeat_count(), target);
+  }
+
+  // uint32 meta_state = 5;
+  if (this->_internal_meta_state() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(5, this->_internal_meta_state(), target);
+  }
+
+  // uint32 event_time_ms = 6;
+  if (this->_internal_event_time_ms() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(6, this->_internal_event_time_ms(), target);
+  }
+
+  // bool canceled = 7;
+  if (this->_internal_canceled() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(7, this->_internal_canceled(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.KeyEvent)
+  return target;
+}
+
+size_t KeyEvent::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.KeyEvent)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_task_id());
+  }
+
+  // .dsa.control.v1.KeyAction action = 2;
+  if (this->_internal_action() != 0) {
+    total_size += 1 +
+      ::_pbi::WireFormatLite::EnumSize(this->_internal_action());
+  }
+
+  // uint32 key_code = 3;
+  if (this->_internal_key_code() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_key_code());
+  }
+
+  // uint32 repeat_count = 4;
+  if (this->_internal_repeat_count() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_repeat_count());
+  }
+
+  // uint32 meta_state = 5;
+  if (this->_internal_meta_state() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_meta_state());
+  }
+
+  // uint32 event_time_ms = 6;
+  if (this->_internal_event_time_ms() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_event_time_ms());
+  }
+
+  // bool canceled = 7;
+  if (this->_internal_canceled() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void KeyEvent::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const KeyEvent*>(
+      &from));
+}
+
+void KeyEvent::MergeFrom(const KeyEvent& from) {
+  KeyEvent* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.KeyEvent)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_task_id() != 0) {
+    _this->_internal_set_task_id(from._internal_task_id());
+  }
+  if (from._internal_action() != 0) {
+    _this->_internal_set_action(from._internal_action());
+  }
+  if (from._internal_key_code() != 0) {
+    _this->_internal_set_key_code(from._internal_key_code());
+  }
+  if (from._internal_repeat_count() != 0) {
+    _this->_internal_set_repeat_count(from._internal_repeat_count());
+  }
+  if (from._internal_meta_state() != 0) {
+    _this->_internal_set_meta_state(from._internal_meta_state());
+  }
+  if (from._internal_event_time_ms() != 0) {
+    _this->_internal_set_event_time_ms(from._internal_event_time_ms());
+  }
+  if (from._internal_canceled() != 0) {
+    _this->_internal_set_canceled(from._internal_canceled());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void KeyEvent::CopyFrom(const KeyEvent& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.KeyEvent)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool KeyEvent::IsInitialized() const {
+  return true;
+}
+
+void KeyEvent::InternalSwap(KeyEvent* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(KeyEvent, _impl_.canceled_)
+      + sizeof(KeyEvent::_impl_.canceled_)
+      - PROTOBUF_FIELD_OFFSET(KeyEvent, _impl_.task_id_)>(
+          reinterpret_cast<char*>(&_impl_.task_id_),
+          reinterpret_cast<char*>(&other->_impl_.task_id_));
+}
+
+std::string KeyEvent::GetTypeName() const {
+  return "dsa.control.v1.KeyEvent";
+}
+
+
+// ===================================================================
+
 class Envelope::_Internal {
  public:
   static const ::dsa::control::v1::Hello& hello(const Envelope* msg);
@@ -4497,6 +4907,7 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::SetTaskDensity& set_task_density(const Envelope* msg);
   static const ::dsa::control::v1::PointerEvent& pointer_event(const Envelope* msg);
   static const ::dsa::control::v1::AppInfo& app_info(const Envelope* msg);
+  static const ::dsa::control::v1::KeyEvent& key_event(const Envelope* msg);
 };
 
 const ::dsa::control::v1::Hello&
@@ -4554,6 +4965,10 @@ Envelope::_Internal::pointer_event(const Envelope* msg) {
 const ::dsa::control::v1::AppInfo&
 Envelope::_Internal::app_info(const Envelope* msg) {
   return *msg->_impl_.body_.app_info_;
+}
+const ::dsa::control::v1::KeyEvent&
+Envelope::_Internal::key_event(const Envelope* msg) {
+  return *msg->_impl_.body_.key_event_;
 }
 void Envelope::set_allocated_hello(::dsa::control::v1::Hello* hello) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -4765,6 +5180,21 @@ void Envelope::set_allocated_app_info(::dsa::control::v1::AppInfo* app_info) {
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.app_info)
 }
+void Envelope::set_allocated_key_event(::dsa::control::v1::KeyEvent* key_event) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (key_event) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(key_event);
+    if (message_arena != submessage_arena) {
+      key_event = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, key_event, submessage_arena);
+    }
+    set_has_key_event();
+    _impl_.body_.key_event_ = key_event;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.key_event)
+}
 Envelope::Envelope(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
@@ -4850,6 +5280,11 @@ Envelope::Envelope(const Envelope& from)
     case kAppInfo: {
       _this->_internal_mutable_app_info()->::dsa::control::v1::AppInfo::MergeFrom(
           from._internal_app_info());
+      break;
+    }
+    case kKeyEvent: {
+      _this->_internal_mutable_key_event()->::dsa::control::v1::KeyEvent::MergeFrom(
+          from._internal_key_event());
       break;
     }
     case BODY_NOT_SET: {
@@ -4975,6 +5410,12 @@ void Envelope::clear_body() {
     case kAppInfo: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.app_info_;
+      }
+      break;
+    }
+    case kKeyEvent: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.key_event_;
       }
       break;
     }
@@ -5114,6 +5555,14 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.KeyEvent key_event = 16;
+      case 16:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 130)) {
+          ptr = ctx->ParseMessage(_internal_mutable_key_event(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -5241,6 +5690,13 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::app_info(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.KeyEvent key_event = 16;
+  if (_internal_has_key_event()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(16, _Internal::key_event(this),
+        _Internal::key_event(this).GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -5356,6 +5812,13 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.app_info_);
       break;
     }
+    // .dsa.control.v1.KeyEvent key_event = 16;
+    case kKeyEvent: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.key_event_);
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -5452,6 +5915,11 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_app_info());
       break;
     }
+    case kKeyEvent: {
+      _this->_internal_mutable_key_event()->::dsa::control::v1::KeyEvent::MergeFrom(
+          from._internal_key_event());
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -5546,6 +6014,10 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::AppInfo >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::PointerEvent*
 Arena::CreateMaybeMessage< ::dsa::control::v1::PointerEvent >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::PointerEvent >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::KeyEvent*
+Arena::CreateMaybeMessage< ::dsa::control::v1::KeyEvent >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::KeyEvent >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::Envelope*
 Arena::CreateMaybeMessage< ::dsa::control::v1::Envelope >(Arena* arena) {

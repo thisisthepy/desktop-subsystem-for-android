@@ -10,8 +10,8 @@ use std::path::PathBuf;
 
 use dsa_protocol::control::{
     envelope::Body, AppInfo, AuthChallenge, AuthProof, CloseTask, Envelope, Hello, HelloAccepted,
-    HelloRejected, LaunchApp, PointerAction, PointerEvent, PointerTool, Rect, RejectReason,
-    ResizeTask, Role, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
+    HelloRejected, KeyAction, KeyEvent, LaunchApp, PointerAction, PointerEvent, PointerTool, Rect,
+    RejectReason, ResizeTask, Role, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
 
@@ -220,6 +220,40 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                 y: 599.0,
                 buttons: 32,
                 ..PointerEvent::default()
+            })),
+        ),
+        (
+            "key_event_ctrl_a_down",
+            wrap(Body::KeyEvent(KeyEvent {
+                task_id: 42,
+                action: KeyAction::Down as i32,
+                key_code: 29,
+                meta_state: 0x3000,
+                event_time_ms: 123_456,
+                ..KeyEvent::default()
+            })),
+        ),
+        (
+            "key_event_backspace_repeat",
+            wrap(Body::KeyEvent(KeyEvent {
+                task_id: 42,
+                action: KeyAction::Down as i32,
+                key_code: 67,
+                repeat_count: 3,
+                event_time_ms: 500,
+                ..KeyEvent::default()
+            })),
+        ),
+        (
+            "key_event_canceled_up",
+            wrap(Body::KeyEvent(KeyEvent {
+                task_id: 7,
+                action: KeyAction::Up as i32,
+                key_code: 66,
+                meta_state: 0x10_0000,
+                event_time_ms: 4_294_967_000,
+                canceled: true,
+                ..KeyEvent::default()
             })),
         ),
         (

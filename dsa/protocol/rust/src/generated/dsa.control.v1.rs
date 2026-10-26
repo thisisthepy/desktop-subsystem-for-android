@@ -201,12 +201,42 @@ pub struct PointerEvent {
     #[prost(float, tag = "10")]
     pub scroll_y: f32,
 }
+/// Host to guest: a key pressed or released in a task's window while the window has the
+/// keyboard focus. One message per event, sent as it happens; the agent injects it into the
+/// task at once.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct KeyEvent {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(enumeration = "KeyAction", tag = "2")]
+    pub action: i32,
+    /// The guest's key code (android.view.KeyEvent.KEYCODE_*), which the host maps its own keys
+    /// to, so the guest passes it through unchanged.
+    #[prost(uint32, tag = "3")]
+    pub key_code: u32,
+    /// How many times the host has repeated the key since it went down: 0 for the press itself.
+    #[prost(uint32, tag = "4")]
+    pub repeat_count: u32,
+    /// The modifiers and locks in effect after this event, as the guest's meta state bits
+    /// (android.view.KeyEvent.META_*): Shift, Ctrl, Alt and Meta, each with its left or right
+    /// side, and Caps Lock, Num Lock and Scroll Lock.
+    #[prost(uint32, tag = "5")]
+    pub meta_state: u32,
+    /// When the host saw the event, in milliseconds of the host's own clock, which wraps around.
+    /// Only the difference between two events means anything.
+    #[prost(uint32, tag = "6")]
+    pub event_time_ms: u32,
+    /// Set on an UP the user did not make: the window lost the keyboard focus while the key was
+    /// held. The guest releases the key without acting on it.
+    #[prost(bool, tag = "7")]
+    pub canceled: bool,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -242,6 +272,8 @@ pub mod envelope {
         PointerEvent(super::PointerEvent),
         #[prost(message, tag = "15")]
         AppInfo(super::AppInfo),
+        #[prost(message, tag = "16")]
+        KeyEvent(super::KeyEvent),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -431,6 +463,38 @@ impl PointerTool {
             "POINTER_TOOL_TOUCH" => Some(Self::Touch),
             "POINTER_TOOL_PEN" => Some(Self::Pen),
             "POINTER_TOOL_ERASER" => Some(Self::Eraser),
+            _ => None,
+        }
+    }
+}
+/// What a key did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum KeyAction {
+    Unspecified = 0,
+    /// The key went down, or, with a `repeat_count` above 0, the host repeats it while it is held.
+    Down = 1,
+    /// The key came up.
+    Up = 2,
+}
+impl KeyAction {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "KEY_ACTION_UNSPECIFIED",
+            Self::Down => "KEY_ACTION_DOWN",
+            Self::Up => "KEY_ACTION_UP",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "KEY_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
+            "KEY_ACTION_DOWN" => Some(Self::Down),
+            "KEY_ACTION_UP" => Some(Self::Up),
             _ => None,
         }
     }

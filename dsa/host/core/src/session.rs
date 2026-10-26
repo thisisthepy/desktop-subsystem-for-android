@@ -26,6 +26,7 @@ use dsa_protocol::control::{self, envelope::Body};
 use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 
 use crate::input::PointerEvent;
+use crate::keys::KeyEvent;
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskTable, TaskWatch};
 
 /// Where the session is in its life.
@@ -519,6 +520,14 @@ impl Session {
             body: Some(Body::PointerEvent(event.to_control())),
         }))
     }
+
+    /// Passes a key pressed or released in a task's window to the guest. Needs an active
+    /// session.
+    pub fn key(&self, event: &KeyEvent) -> Result<(), SessionError> {
+        self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::KeyEvent(event.to_control())),
+        }))
+    }
 }
 
 impl Drop for Session {
@@ -825,7 +834,8 @@ impl Worker {
             | Some(Body::LaunchApp(_))
             | Some(Body::ResizeTask(_))
             | Some(Body::SetTaskDensity(_))
-            | Some(Body::PointerEvent(_)) => {
+            | Some(Body::PointerEvent(_))
+            | Some(Body::KeyEvent(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
             }
             None => {

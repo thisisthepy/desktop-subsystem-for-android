@@ -30,7 +30,8 @@ use dsa_protocol::host_api::{
 use dsa_transport::local::{LocalListener, Peer};
 use dsa_transport::{Connection, Connector, TransportError};
 
-use crate::input::PointerEvent;
+use crate::input::{InputEvent, PointerEvent};
+use crate::keys::KeyEvent;
 use crate::session::{Session, SessionError, SessionState};
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskWatch};
 
@@ -68,6 +69,13 @@ pub trait UserAndroid: Send + Sync {
             "this Android does not take pointer input".into(),
         ))
     }
+    /// Passes a key pressed or released in a task's window to this Android.
+    fn key(&self, event: &KeyEvent) -> Result<(), TaskRequestError> {
+        let _ = event;
+        Err(TaskRequestError::Failed(
+            "this Android does not take key input".into(),
+        ))
+    }
 }
 
 impl UserAndroid for Session {
@@ -101,6 +109,9 @@ impl UserAndroid for Session {
     }
     fn pointer(&self, event: &PointerEvent) -> Result<(), TaskRequestError> {
         Session::pointer(self, event).map_err(request_error)
+    }
+    fn key(&self, event: &KeyEvent) -> Result<(), TaskRequestError> {
+        Session::key(self, event).map_err(request_error)
     }
 }
 
@@ -531,7 +542,7 @@ impl HostApiService {
         }
     }
 
-    /// Answers a StreamInput request, then passes every pointer event the client sends to
+    /// Answers a StreamInput request, then passes every pointer and key event the client sends to
     /// its Android until the client goes away. Input to an Android that is not running is
     /// dropped: the window that sends it can do nothing better with it.
     fn stream_input(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
@@ -565,7 +576,14 @@ impl HostApiService {
             let event = match decode(&frame) {
                 Ok(Envelope {
                     body: Some(Body::PointerEvent(event)),
-                }) => PointerEvent::from_wire(&event),
+                }) => PointerEvent::from_wire(&event)
+                    .map(InputEvent::Pointer)
+                    .map_err(|why| format!("dropped a pointer event: {why}")),
+                Ok(Envelope {
+                    body: Some(Body::KeyEvent(event)),
+                }) => KeyEvent::from_wire(&event)
+                    .map(InputEvent::Key)
+                    .map_err(|why| format!("dropped a key event: {why}")),
                 Ok(_) => {
                     eprintln!(
                         "local API: a client of {} sent something other than input on a \
@@ -585,13 +603,14 @@ impl HostApiService {
                     return;
                 }
             };
-            let outcome = event
-                .map_err(|why| format!("dropped a pointer event: {why}"))
-                .and_then(|event| {
-                    android
-                        .pointer(&event)
-                        .map_err(|why| format!("pointer input did not reach Android: {why}"))
-                });
+            let outcome = event.and_then(|event| match event {
+                InputEvent::Pointer(event) => android
+                    .pointer(&event)
+                    .map_err(|why| format!("pointer input did not reach Android: {why}")),
+                InputEvent::Key(event) => android
+                    .key(&event)
+                    .map_err(|why| format!("key input did not reach Android: {why}")),
+            });
             match outcome {
                 Ok(()) => failing = false,
                 Err(why) => {
@@ -1071,5 +1090,18 @@ impl InputStream {
     pub fn send(&mut self, event: &PointerEvent) -> Result<(), ClientError> {
         send(&mut *self.connection, Body::PointerEvent(event.to_wire()))
             .map_err(ClientError::Transport)
+    }
+
+    /// Sends one key event, the same way as [`InputStream::send`].
+    pub fn send_key(&mut self, event: &KeyEvent) -> Result<(), ClientError> {
+        send(&mut *self.connection, Body::KeyEvent(event.to_wire())).map_err(ClientError::Transport)
+    }
+
+    /// Sends one event of either kind.
+    pub fn send_input(&mut self, event: &InputEvent) -> Result<(), ClientError> {
+        match event {
+            InputEvent::Pointer(event) => self.send(event),
+            InputEvent::Key(event) => self.send_key(event),
+        }
     }
 }
