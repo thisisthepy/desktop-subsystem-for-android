@@ -118,6 +118,17 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.LaunchApp getLaunchApp();
 
   /**
+   * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+   * @return Whether the pointerEvent field is set.
+   */
+  boolean hasPointerEvent();
+  /**
+   * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+   * @return The pointerEvent.
+   */
+  io.github.thisisthepy.dsa.control.v1.PointerEvent getPointerEvent();
+
+  /**
    * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
    * @return Whether the appInfo field is set.
    */

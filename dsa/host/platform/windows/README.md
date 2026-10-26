@@ -131,6 +131,14 @@ writes its messages to `%LOCALAPPDATA%\DSA\logs\dsa-wm.log`. Earlier releases ca
   than one app.
 - The windows are per-monitor DPI aware. While a window is resized, its last frame is
   stretched to fill it until Android draws one at the new size.
+- Mouse, touch and pen input in a window goes to its task. A point in the window becomes
+  the same point of the task in Android's pixels, whatever the window's size and the
+  monitor's scale, and a point inside the window always lands inside the task. The right
+  button is Android's secondary button (a context click, not a long press), the wheel
+  scrolls, a pen brings its pressure, eraser and barrel button, and each finger of a touch
+  is its own pointer. The window holds the mouse while a button is down, so a drag that
+  leaves it still ends in the task. Input goes to the service on a connection of its own,
+  which answers none of it, so a fast pointer is never held back.
 - Without a GPU device, the windows still open and close with their tasks but stay
   empty, and the log says why.
 

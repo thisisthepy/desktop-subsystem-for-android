@@ -97,9 +97,48 @@ std::map<std::string, v1::Envelope> Cases() {
     v1::AppInfo* app = cases["app_info"].mutable_app_info();
     app->set_package_name("com.example.notes");
     app->set_label("Notes");
-    app->set_icon_png(std::string("PNG
-
-", 8));
+    app->set_icon_png(std::string("\x89PNG\r\n\x1a\n", 8));
+  }
+  {
+    v1::PointerEvent* event = cases["pointer_event_mouse_secondary_down"].mutable_pointer_event();
+    event->set_task_id(42);
+    event->set_action(v1::POINTER_ACTION_DOWN);
+    event->set_tool(v1::POINTER_TOOL_MOUSE);
+    event->set_pointer_id(0);
+    event->set_x(120.5f);
+    event->set_y(64.25f);
+    event->set_buttons(2);
+    event->set_pressure(1.0f);
+  }
+  {
+    v1::PointerEvent* event = cases["pointer_event_touch_move"].mutable_pointer_event();
+    event->set_task_id(7);
+    event->set_action(v1::POINTER_ACTION_MOVE);
+    event->set_tool(v1::POINTER_TOOL_TOUCH);
+    event->set_pointer_id(3);
+    event->set_x(10.0f);
+    event->set_y(1023.75f);
+    event->set_pressure(0.5f);
+  }
+  {
+    v1::PointerEvent* event = cases["pointer_event_scroll"].mutable_pointer_event();
+    event->set_task_id(42);
+    event->set_action(v1::POINTER_ACTION_SCROLL);
+    event->set_tool(v1::POINTER_TOOL_MOUSE);
+    event->set_x(300.0f);
+    event->set_y(200.0f);
+    event->set_scroll_x(0.5f);
+    event->set_scroll_y(-1.0f);
+  }
+  {
+    v1::PointerEvent* event = cases["pointer_event_pen_hover"].mutable_pointer_event();
+    event->set_task_id(42);
+    event->set_action(v1::POINTER_ACTION_HOVER_MOVE);
+    event->set_tool(v1::POINTER_TOOL_PEN);
+    event->set_pointer_id(1);
+    event->set_x(0.0f);
+    event->set_y(599.0f);
+    event->set_buttons(32);
   }
   {
     v1::HelloRejected* rejected = cases["hello_rejected_authentication"].mutable_hello_rejected();

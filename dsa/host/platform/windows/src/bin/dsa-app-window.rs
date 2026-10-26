@@ -24,7 +24,7 @@ fn main() -> std::process::ExitCode {
     use dsa_host_windows::compositor::current_session;
     use dsa_host_windows::compositor::hosts::pipe_name;
     use dsa_host_windows::compositor::log::{default_log_dir, note, CompositorLogger};
-    use dsa_host_windows::pipe::SameUserPipeConnector;
+    use dsa_host_windows::pipe::{NamedPipeConnector, SameUserPipeConnector};
 
     let logger = CompositorLogger::open(default_log_dir().join("dsa-app-window.log"))
         .ok()
@@ -46,6 +46,9 @@ fn main() -> std::process::ExitCode {
         launch: !args.iter().any(|arg| arg == STARTED_BY_WINDOW_MANAGER),
         connector: Box::new(SameUserPipeConnector {
             name: argument(&args, PIPE_ARGUMENT).unwrap_or_else(|| pipe_name(current_session())),
+        }),
+        input: Box::new(NamedPipeConnector {
+            name: dsa_host_windows::host_config::DEFAULT_PIPE_NAME.into(),
         }),
         process_id: std::process::id(),
         logger: logger.clone(),

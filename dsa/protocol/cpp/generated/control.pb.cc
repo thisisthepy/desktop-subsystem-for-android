@@ -191,6 +191,28 @@ struct AppInfoDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 AppInfoDefaultTypeInternal _AppInfo_default_instance_;
+PROTOBUF_CONSTEXPR PointerEvent::PointerEvent(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.task_id_)*/0
+  , /*decltype(_impl_.action_)*/0
+  , /*decltype(_impl_.tool_)*/0
+  , /*decltype(_impl_.pointer_id_)*/0u
+  , /*decltype(_impl_.x_)*/0
+  , /*decltype(_impl_.y_)*/0
+  , /*decltype(_impl_.buttons_)*/0u
+  , /*decltype(_impl_.pressure_)*/0
+  , /*decltype(_impl_.scroll_x_)*/0
+  , /*decltype(_impl_.scroll_y_)*/0
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct PointerEventDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR PointerEventDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~PointerEventDefaultTypeInternal() {}
+  union {
+    PointerEvent _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 PointerEventDefaultTypeInternal _PointerEvent_default_instance_;
 PROTOBUF_CONSTEXPR Envelope::Envelope(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.body_)*/{}
@@ -381,6 +403,144 @@ bool RejectReason_Parse(
       RejectReason_entries, 6, name, &int_value);
   if (success) {
     *value = static_cast<RejectReason>(int_value);
+  }
+  return success;
+}
+bool PointerAction_IsValid(int value) {
+  switch (value) {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+    case 7:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> PointerAction_strings[8] = {};
+
+static const char PointerAction_names[] =
+  "POINTER_ACTION_CANCEL"
+  "POINTER_ACTION_DOWN"
+  "POINTER_ACTION_HOVER_EXIT"
+  "POINTER_ACTION_HOVER_MOVE"
+  "POINTER_ACTION_MOVE"
+  "POINTER_ACTION_SCROLL"
+  "POINTER_ACTION_UNSPECIFIED"
+  "POINTER_ACTION_UP";
+
+static const ::PROTOBUF_NAMESPACE_ID::internal::EnumEntry PointerAction_entries[] = {
+  { {PointerAction_names + 0, 21}, 4 },
+  { {PointerAction_names + 21, 19}, 1 },
+  { {PointerAction_names + 40, 25}, 7 },
+  { {PointerAction_names + 65, 25}, 6 },
+  { {PointerAction_names + 90, 19}, 2 },
+  { {PointerAction_names + 109, 21}, 5 },
+  { {PointerAction_names + 130, 26}, 0 },
+  { {PointerAction_names + 156, 17}, 3 },
+};
+
+static const int PointerAction_entries_by_number[] = {
+  6, // 0 -> POINTER_ACTION_UNSPECIFIED
+  1, // 1 -> POINTER_ACTION_DOWN
+  4, // 2 -> POINTER_ACTION_MOVE
+  7, // 3 -> POINTER_ACTION_UP
+  0, // 4 -> POINTER_ACTION_CANCEL
+  5, // 5 -> POINTER_ACTION_SCROLL
+  3, // 6 -> POINTER_ACTION_HOVER_MOVE
+  2, // 7 -> POINTER_ACTION_HOVER_EXIT
+};
+
+const std::string& PointerAction_Name(
+    PointerAction value) {
+  static const bool dummy =
+      ::PROTOBUF_NAMESPACE_ID::internal::InitializeEnumStrings(
+          PointerAction_entries,
+          PointerAction_entries_by_number,
+          8, PointerAction_strings);
+  (void) dummy;
+  int idx = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumName(
+      PointerAction_entries,
+      PointerAction_entries_by_number,
+      8, value);
+  return idx == -1 ? ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString() :
+                     PointerAction_strings[idx].get();
+}
+bool PointerAction_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, PointerAction* value) {
+  int int_value;
+  bool success = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumValue(
+      PointerAction_entries, 8, name, &int_value);
+  if (success) {
+    *value = static_cast<PointerAction>(int_value);
+  }
+  return success;
+}
+bool PointerTool_IsValid(int value) {
+  switch (value) {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> PointerTool_strings[5] = {};
+
+static const char PointerTool_names[] =
+  "POINTER_TOOL_ERASER"
+  "POINTER_TOOL_MOUSE"
+  "POINTER_TOOL_PEN"
+  "POINTER_TOOL_TOUCH"
+  "POINTER_TOOL_UNSPECIFIED";
+
+static const ::PROTOBUF_NAMESPACE_ID::internal::EnumEntry PointerTool_entries[] = {
+  { {PointerTool_names + 0, 19}, 4 },
+  { {PointerTool_names + 19, 18}, 1 },
+  { {PointerTool_names + 37, 16}, 3 },
+  { {PointerTool_names + 53, 18}, 2 },
+  { {PointerTool_names + 71, 24}, 0 },
+};
+
+static const int PointerTool_entries_by_number[] = {
+  4, // 0 -> POINTER_TOOL_UNSPECIFIED
+  1, // 1 -> POINTER_TOOL_MOUSE
+  3, // 2 -> POINTER_TOOL_TOUCH
+  2, // 3 -> POINTER_TOOL_PEN
+  0, // 4 -> POINTER_TOOL_ERASER
+};
+
+const std::string& PointerTool_Name(
+    PointerTool value) {
+  static const bool dummy =
+      ::PROTOBUF_NAMESPACE_ID::internal::InitializeEnumStrings(
+          PointerTool_entries,
+          PointerTool_entries_by_number,
+          5, PointerTool_strings);
+  (void) dummy;
+  int idx = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumName(
+      PointerTool_entries,
+      PointerTool_entries_by_number,
+      5, value);
+  return idx == -1 ? ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString() :
+                     PointerTool_strings[idx].get();
+}
+bool PointerTool_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, PointerTool* value) {
+  int int_value;
+  bool success = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumValue(
+      PointerTool_entries, 5, name, &int_value);
+  if (success) {
+    *value = static_cast<PointerTool>(int_value);
   }
   return success;
 }
@@ -3271,6 +3431,477 @@ std::string AppInfo::GetTypeName() const {
 
 // ===================================================================
 
+class PointerEvent::_Internal {
+ public:
+};
+
+PointerEvent::PointerEvent(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.PointerEvent)
+}
+PointerEvent::PointerEvent(const PointerEvent& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  PointerEvent* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){}
+    , decltype(_impl_.action_){}
+    , decltype(_impl_.tool_){}
+    , decltype(_impl_.pointer_id_){}
+    , decltype(_impl_.x_){}
+    , decltype(_impl_.y_){}
+    , decltype(_impl_.buttons_){}
+    , decltype(_impl_.pressure_){}
+    , decltype(_impl_.scroll_x_){}
+    , decltype(_impl_.scroll_y_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.task_id_, &from._impl_.task_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.scroll_y_) -
+    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.scroll_y_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.PointerEvent)
+}
+
+inline void PointerEvent::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){0}
+    , decltype(_impl_.action_){0}
+    , decltype(_impl_.tool_){0}
+    , decltype(_impl_.pointer_id_){0u}
+    , decltype(_impl_.x_){0}
+    , decltype(_impl_.y_){0}
+    , decltype(_impl_.buttons_){0u}
+    , decltype(_impl_.pressure_){0}
+    , decltype(_impl_.scroll_x_){0}
+    , decltype(_impl_.scroll_y_){0}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+PointerEvent::~PointerEvent() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.PointerEvent)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void PointerEvent::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void PointerEvent::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void PointerEvent::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.PointerEvent)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&_impl_.task_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.scroll_y_) -
+      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.scroll_y_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* PointerEvent::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 task_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.task_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.PointerAction action = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          _internal_set_action(static_cast<::dsa::control::v1::PointerAction>(val));
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.PointerTool tool = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          _internal_set_tool(static_cast<::dsa::control::v1::PointerTool>(val));
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 pointer_id = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.pointer_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // float x = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 45)) {
+          _impl_.x_ = ::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<float>(ptr);
+          ptr += sizeof(float);
+        } else
+          goto handle_unusual;
+        continue;
+      // float y = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 53)) {
+          _impl_.y_ = ::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<float>(ptr);
+          ptr += sizeof(float);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 buttons = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 56)) {
+          _impl_.buttons_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // float pressure = 8;
+      case 8:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 69)) {
+          _impl_.pressure_ = ::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<float>(ptr);
+          ptr += sizeof(float);
+        } else
+          goto handle_unusual;
+        continue;
+      // float scroll_x = 9;
+      case 9:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 77)) {
+          _impl_.scroll_x_ = ::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<float>(ptr);
+          ptr += sizeof(float);
+        } else
+          goto handle_unusual;
+        continue;
+      // float scroll_y = 10;
+      case 10:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 85)) {
+          _impl_.scroll_y_ = ::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<float>(ptr);
+          ptr += sizeof(float);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* PointerEvent::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.PointerEvent)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_task_id(), target);
+  }
+
+  // .dsa.control.v1.PointerAction action = 2;
+  if (this->_internal_action() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteEnumToArray(
+      2, this->_internal_action(), target);
+  }
+
+  // .dsa.control.v1.PointerTool tool = 3;
+  if (this->_internal_tool() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteEnumToArray(
+      3, this->_internal_tool(), target);
+  }
+
+  // uint32 pointer_id = 4;
+  if (this->_internal_pointer_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(4, this->_internal_pointer_id(), target);
+  }
+
+  // float x = 5;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_x = this->_internal_x();
+  uint32_t raw_x;
+  memcpy(&raw_x, &tmp_x, sizeof(tmp_x));
+  if (raw_x != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteFloatToArray(5, this->_internal_x(), target);
+  }
+
+  // float y = 6;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_y = this->_internal_y();
+  uint32_t raw_y;
+  memcpy(&raw_y, &tmp_y, sizeof(tmp_y));
+  if (raw_y != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteFloatToArray(6, this->_internal_y(), target);
+  }
+
+  // uint32 buttons = 7;
+  if (this->_internal_buttons() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(7, this->_internal_buttons(), target);
+  }
+
+  // float pressure = 8;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_pressure = this->_internal_pressure();
+  uint32_t raw_pressure;
+  memcpy(&raw_pressure, &tmp_pressure, sizeof(tmp_pressure));
+  if (raw_pressure != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteFloatToArray(8, this->_internal_pressure(), target);
+  }
+
+  // float scroll_x = 9;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_scroll_x = this->_internal_scroll_x();
+  uint32_t raw_scroll_x;
+  memcpy(&raw_scroll_x, &tmp_scroll_x, sizeof(tmp_scroll_x));
+  if (raw_scroll_x != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteFloatToArray(9, this->_internal_scroll_x(), target);
+  }
+
+  // float scroll_y = 10;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_scroll_y = this->_internal_scroll_y();
+  uint32_t raw_scroll_y;
+  memcpy(&raw_scroll_y, &tmp_scroll_y, sizeof(tmp_scroll_y));
+  if (raw_scroll_y != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteFloatToArray(10, this->_internal_scroll_y(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.PointerEvent)
+  return target;
+}
+
+size_t PointerEvent::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.PointerEvent)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_task_id());
+  }
+
+  // .dsa.control.v1.PointerAction action = 2;
+  if (this->_internal_action() != 0) {
+    total_size += 1 +
+      ::_pbi::WireFormatLite::EnumSize(this->_internal_action());
+  }
+
+  // .dsa.control.v1.PointerTool tool = 3;
+  if (this->_internal_tool() != 0) {
+    total_size += 1 +
+      ::_pbi::WireFormatLite::EnumSize(this->_internal_tool());
+  }
+
+  // uint32 pointer_id = 4;
+  if (this->_internal_pointer_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_pointer_id());
+  }
+
+  // float x = 5;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_x = this->_internal_x();
+  uint32_t raw_x;
+  memcpy(&raw_x, &tmp_x, sizeof(tmp_x));
+  if (raw_x != 0) {
+    total_size += 1 + 4;
+  }
+
+  // float y = 6;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_y = this->_internal_y();
+  uint32_t raw_y;
+  memcpy(&raw_y, &tmp_y, sizeof(tmp_y));
+  if (raw_y != 0) {
+    total_size += 1 + 4;
+  }
+
+  // uint32 buttons = 7;
+  if (this->_internal_buttons() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_buttons());
+  }
+
+  // float pressure = 8;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_pressure = this->_internal_pressure();
+  uint32_t raw_pressure;
+  memcpy(&raw_pressure, &tmp_pressure, sizeof(tmp_pressure));
+  if (raw_pressure != 0) {
+    total_size += 1 + 4;
+  }
+
+  // float scroll_x = 9;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_scroll_x = this->_internal_scroll_x();
+  uint32_t raw_scroll_x;
+  memcpy(&raw_scroll_x, &tmp_scroll_x, sizeof(tmp_scroll_x));
+  if (raw_scroll_x != 0) {
+    total_size += 1 + 4;
+  }
+
+  // float scroll_y = 10;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_scroll_y = this->_internal_scroll_y();
+  uint32_t raw_scroll_y;
+  memcpy(&raw_scroll_y, &tmp_scroll_y, sizeof(tmp_scroll_y));
+  if (raw_scroll_y != 0) {
+    total_size += 1 + 4;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void PointerEvent::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const PointerEvent*>(
+      &from));
+}
+
+void PointerEvent::MergeFrom(const PointerEvent& from) {
+  PointerEvent* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.PointerEvent)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_task_id() != 0) {
+    _this->_internal_set_task_id(from._internal_task_id());
+  }
+  if (from._internal_action() != 0) {
+    _this->_internal_set_action(from._internal_action());
+  }
+  if (from._internal_tool() != 0) {
+    _this->_internal_set_tool(from._internal_tool());
+  }
+  if (from._internal_pointer_id() != 0) {
+    _this->_internal_set_pointer_id(from._internal_pointer_id());
+  }
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_x = from._internal_x();
+  uint32_t raw_x;
+  memcpy(&raw_x, &tmp_x, sizeof(tmp_x));
+  if (raw_x != 0) {
+    _this->_internal_set_x(from._internal_x());
+  }
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_y = from._internal_y();
+  uint32_t raw_y;
+  memcpy(&raw_y, &tmp_y, sizeof(tmp_y));
+  if (raw_y != 0) {
+    _this->_internal_set_y(from._internal_y());
+  }
+  if (from._internal_buttons() != 0) {
+    _this->_internal_set_buttons(from._internal_buttons());
+  }
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_pressure = from._internal_pressure();
+  uint32_t raw_pressure;
+  memcpy(&raw_pressure, &tmp_pressure, sizeof(tmp_pressure));
+  if (raw_pressure != 0) {
+    _this->_internal_set_pressure(from._internal_pressure());
+  }
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_scroll_x = from._internal_scroll_x();
+  uint32_t raw_scroll_x;
+  memcpy(&raw_scroll_x, &tmp_scroll_x, sizeof(tmp_scroll_x));
+  if (raw_scroll_x != 0) {
+    _this->_internal_set_scroll_x(from._internal_scroll_x());
+  }
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_scroll_y = from._internal_scroll_y();
+  uint32_t raw_scroll_y;
+  memcpy(&raw_scroll_y, &tmp_scroll_y, sizeof(tmp_scroll_y));
+  if (raw_scroll_y != 0) {
+    _this->_internal_set_scroll_y(from._internal_scroll_y());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void PointerEvent::CopyFrom(const PointerEvent& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.PointerEvent)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool PointerEvent::IsInitialized() const {
+  return true;
+}
+
+void PointerEvent::InternalSwap(PointerEvent* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(PointerEvent, _impl_.scroll_y_)
+      + sizeof(PointerEvent::_impl_.scroll_y_)
+      - PROTOBUF_FIELD_OFFSET(PointerEvent, _impl_.task_id_)>(
+          reinterpret_cast<char*>(&_impl_.task_id_),
+          reinterpret_cast<char*>(&other->_impl_.task_id_));
+}
+
+std::string PointerEvent::GetTypeName() const {
+  return "dsa.control.v1.PointerEvent";
+}
+
+
+// ===================================================================
+
 class Envelope::_Internal {
  public:
   static const ::dsa::control::v1::Hello& hello(const Envelope* msg);
@@ -3283,6 +3914,7 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::TaskFrames& task_frames(const Envelope* msg);
   static const ::dsa::control::v1::CloseTask& close_task(const Envelope* msg);
   static const ::dsa::control::v1::LaunchApp& launch_app(const Envelope* msg);
+  static const ::dsa::control::v1::PointerEvent& pointer_event(const Envelope* msg);
   static const ::dsa::control::v1::AppInfo& app_info(const Envelope* msg);
 };
 
@@ -3325,6 +3957,10 @@ Envelope::_Internal::close_task(const Envelope* msg) {
 const ::dsa::control::v1::LaunchApp&
 Envelope::_Internal::launch_app(const Envelope* msg) {
   return *msg->_impl_.body_.launch_app_;
+}
+const ::dsa::control::v1::PointerEvent&
+Envelope::_Internal::pointer_event(const Envelope* msg) {
+  return *msg->_impl_.body_.pointer_event_;
 }
 const ::dsa::control::v1::AppInfo&
 Envelope::_Internal::app_info(const Envelope* msg) {
@@ -3480,6 +4116,21 @@ void Envelope::set_allocated_launch_app(::dsa::control::v1::LaunchApp* launch_ap
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.launch_app)
 }
+void Envelope::set_allocated_pointer_event(::dsa::control::v1::PointerEvent* pointer_event) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (pointer_event) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(pointer_event);
+    if (message_arena != submessage_arena) {
+      pointer_event = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, pointer_event, submessage_arena);
+    }
+    set_has_pointer_event();
+    _impl_.body_.pointer_event_ = pointer_event;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.pointer_event)
+}
 void Envelope::set_allocated_app_info(::dsa::control::v1::AppInfo* app_info) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
   clear_body();
@@ -3560,6 +4211,11 @@ Envelope::Envelope(const Envelope& from)
     case kLaunchApp: {
       _this->_internal_mutable_launch_app()->::dsa::control::v1::LaunchApp::MergeFrom(
           from._internal_launch_app());
+      break;
+    }
+    case kPointerEvent: {
+      _this->_internal_mutable_pointer_event()->::dsa::control::v1::PointerEvent::MergeFrom(
+          from._internal_pointer_event());
       break;
     }
     case kAppInfo: {
@@ -3666,6 +4322,12 @@ void Envelope::clear_body() {
     case kLaunchApp: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.launch_app_;
+      }
+      break;
+    }
+    case kPointerEvent: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.pointer_event_;
       }
       break;
     }
@@ -3779,6 +4441,14 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.PointerEvent pointer_event = 13;
+      case 13:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 106)) {
+          ptr = ctx->ParseMessage(_internal_mutable_pointer_event(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       // .dsa.control.v1.AppInfo app_info = 15;
       case 15:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 122)) {
@@ -3886,6 +4556,13 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::launch_app(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.PointerEvent pointer_event = 13;
+  if (_internal_has_pointer_event()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(13, _Internal::pointer_event(this),
+        _Internal::pointer_event(this).GetCachedSize(), target, stream);
+  }
+
   // .dsa.control.v1.AppInfo app_info = 15;
   if (_internal_has_app_info()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
@@ -3980,6 +4657,13 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.launch_app_);
       break;
     }
+    // .dsa.control.v1.PointerEvent pointer_event = 13;
+    case kPointerEvent: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.pointer_event_);
+      break;
+    }
     // .dsa.control.v1.AppInfo app_info = 15;
     case kAppInfo: {
       total_size += 1 +
@@ -4061,6 +4745,11 @@ void Envelope::MergeFrom(const Envelope& from) {
     case kLaunchApp: {
       _this->_internal_mutable_launch_app()->::dsa::control::v1::LaunchApp::MergeFrom(
           from._internal_launch_app());
+      break;
+    }
+    case kPointerEvent: {
+      _this->_internal_mutable_pointer_event()->::dsa::control::v1::PointerEvent::MergeFrom(
+          from._internal_pointer_event());
       break;
     }
     case kAppInfo: {
@@ -4150,6 +4839,10 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::LaunchApp >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::AppInfo*
 Arena::CreateMaybeMessage< ::dsa::control::v1::AppInfo >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::AppInfo >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::PointerEvent*
+Arena::CreateMaybeMessage< ::dsa::control::v1::PointerEvent >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::PointerEvent >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::Envelope*
 Arena::CreateMaybeMessage< ::dsa::control::v1::Envelope >(Arena* arena) {

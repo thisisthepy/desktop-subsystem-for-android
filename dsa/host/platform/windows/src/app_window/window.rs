@@ -5,7 +5,8 @@
 //! window receives the wake-ups, so they arrive even while Windows runs its own loop for a
 //! live resize. What the user does to a window goes back to the window manager as a
 //! [`FromHost`] report; even a close only reports, and the window closes when the window
-//! manager says so.
+//! manager says so. Each window hands its mouse, touch and pen messages to its
+//! `PointerWindow` ([`super::pointer`]), which sends the task's pointer events on.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -15,6 +16,7 @@ use std::thread::{self, JoinHandle};
 
 use dsa_host_core::compositor::task_windows::fit_within;
 use dsa_host_core::compositor::window_hosts::{FromHost, ToHost};
+use dsa_host_core::input::PointerEvent;
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, RECT, WPARAM,
 };
@@ -40,6 +42,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::compositor::log::{note, CompositorLogger};
 use crate::compositor::present::{Gpu, WindowPresenter};
+
+use super::pointer::PointerWindow;
 
 /// A task window that is open, as tests and logs see it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,6 +121,8 @@ impl Drop for UiHandle {
 pub struct UiSetup {
     /// Where reports about the windows go.
     pub report: Report,
+    /// Where the pointer input in every task window goes.
+    pub input: Sender<PointerEvent>,
     /// The GPU devices, or `None` when frames cannot be shown (the windows still open).
     pub gpu: Option<Arc<Gpu>>,
     /// Where the UI thread keeps each window's presenter.
@@ -156,6 +162,7 @@ struct WindowData {
     task_id: i32,
     report: Report,
     presenter: RefCell<Option<Arc<WindowPresenter>>>,
+    pointer: PointerWindow,
 }
 
 /// The UI thread's state, reached from the message window's procedure.
@@ -306,6 +313,11 @@ unsafe extern "system" fn task_window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if let Some(data) = window_data(hwnd) {
+        if let Some(result) = data.pointer.handle(hwnd, message, wparam, lparam) {
+            return result;
+        }
+    }
     match message {
         WM_NCCREATE => {
             let create = &*(lparam as *const CREATESTRUCTW);
@@ -464,6 +476,9 @@ impl Ui {
                         height,
                     } => {
                         if let Some(hwnd) = self.open.get(&task_id) {
+                            if let Some(data) = window_data(*hwnd) {
+                                data.pointer.task_resized((width, height));
+                            }
                             apply_size(*hwnd, (width, height));
                         }
                     }
@@ -512,6 +527,7 @@ impl Ui {
             task_id,
             report: Arc::clone(&self.setup.report),
             presenter: RefCell::new(None),
+            pointer: PointerWindow::new(task_id, size, self.setup.input.clone()),
         }));
         let class = wide(TASK_CLASS);
         let hwnd = CreateWindowExW(

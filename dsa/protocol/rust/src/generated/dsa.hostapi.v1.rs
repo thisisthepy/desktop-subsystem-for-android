@@ -70,6 +70,43 @@ pub struct LaunchApp {
     #[prost(string, tag = "1")]
     pub package_name: ::prost::alloc::string::String,
 }
+/// Turns the connection into a stream of input for the caller's Android: after the answer
+/// (Done), the client sends only PointerEvent frames, which the service passes on as they
+/// come, without answering them. Input is never waited on, so a pointer that moves fast is
+/// not held back by the answers.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct StreamInput {}
+/// Pointer input in a task's window, sent on a connection that streams input.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct PointerEvent {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(enumeration = "PointerAction", tag = "2")]
+    pub action: i32,
+    #[prost(enumeration = "PointerTool", tag = "3")]
+    pub tool: i32,
+    /// Tells the fingers of one touch apart. Stays the same from DOWN to UP.
+    #[prost(uint32, tag = "4")]
+    pub pointer_id: u32,
+    /// The position relative to the task's top left corner, in Android display pixels.
+    #[prost(float, tag = "5")]
+    pub x: f32,
+    #[prost(float, tag = "6")]
+    pub y: f32,
+    /// The buttons held down after this event, as a set of bits: 1 primary, 2 secondary,
+    /// 4 tertiary (middle), 8 back, 16 forward, 32 a pen's first barrel button, 64 its second.
+    #[prost(uint32, tag = "7")]
+    pub buttons: u32,
+    /// From 0 to 1.
+    #[prost(float, tag = "8")]
+    pub pressure: f32,
+    /// For SCROLL: how far the wheel turned, in notches. Positive `scroll_y` scrolls up,
+    /// positive `scroll_x` scrolls right.
+    #[prost(float, tag = "9")]
+    pub scroll_x: f32,
+    #[prost(float, tag = "10")]
+    pub scroll_y: f32,
+}
 /// A rectangle in Android display pixels: left and top inclusive, right and bottom
 /// exclusive.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -213,7 +250,7 @@ pub struct Error {
 pub struct Request {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "request::Body", tags = "2, 3, 4, 5, 6, 7, 8, 9, 10")]
+    #[prost(oneof = "request::Body", tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11")]
     pub body: ::core::option::Option<request::Body>,
 }
 /// Nested message and enum types in `Request`.
@@ -238,6 +275,8 @@ pub mod request {
         CloseTask(super::CloseTask),
         #[prost(message, tag = "10")]
         LaunchApp(super::LaunchApp),
+        #[prost(message, tag = "11")]
+        StreamInput(super::StreamInput),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -268,7 +307,7 @@ pub mod response {
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
-    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5, 6")]
+    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5, 6, 7")]
     pub body: ::core::option::Option<envelope::Body>,
 }
 /// Nested message and enum types in `Envelope`.
@@ -287,6 +326,8 @@ pub mod envelope {
         Response(super::Response),
         #[prost(message, tag = "6")]
         TaskEvent(super::TaskEvent),
+        #[prost(message, tag = "7")]
+        PointerEvent(super::PointerEvent),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -422,6 +463,95 @@ impl SessionState {
             "SESSION_STATE_DOZING" => Some(Self::Dozing),
             "SESSION_STATE_FROZEN" => Some(Self::Frozen),
             "SESSION_STATE_STOPPING" => Some(Self::Stopping),
+            _ => None,
+        }
+    }
+}
+/// What a pointer did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum PointerAction {
+    Unspecified = 0,
+    /// The pointer touched down, or a mouse's first button went down.
+    Down = 1,
+    /// The pointer moved while down, or a mouse's buttons changed while one stays down.
+    Move = 2,
+    /// The pointer lifted, or a mouse's last button went up.
+    Up = 3,
+    /// The gesture ended without completing, as when the window lost the pointer.
+    Cancel = 4,
+    /// The wheel turned; `scroll_x` and `scroll_y` say how far.
+    Scroll = 5,
+    /// The pointer moved over the window without touching it.
+    HoverMove = 6,
+    /// The pointer left the window, or a pen went out of range.
+    HoverExit = 7,
+}
+impl PointerAction {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "POINTER_ACTION_UNSPECIFIED",
+            Self::Down => "POINTER_ACTION_DOWN",
+            Self::Move => "POINTER_ACTION_MOVE",
+            Self::Up => "POINTER_ACTION_UP",
+            Self::Cancel => "POINTER_ACTION_CANCEL",
+            Self::Scroll => "POINTER_ACTION_SCROLL",
+            Self::HoverMove => "POINTER_ACTION_HOVER_MOVE",
+            Self::HoverExit => "POINTER_ACTION_HOVER_EXIT",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "POINTER_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
+            "POINTER_ACTION_DOWN" => Some(Self::Down),
+            "POINTER_ACTION_MOVE" => Some(Self::Move),
+            "POINTER_ACTION_UP" => Some(Self::Up),
+            "POINTER_ACTION_CANCEL" => Some(Self::Cancel),
+            "POINTER_ACTION_SCROLL" => Some(Self::Scroll),
+            "POINTER_ACTION_HOVER_MOVE" => Some(Self::HoverMove),
+            "POINTER_ACTION_HOVER_EXIT" => Some(Self::HoverExit),
+            _ => None,
+        }
+    }
+}
+/// What kind of pointer it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum PointerTool {
+    Unspecified = 0,
+    Mouse = 1,
+    Touch = 2,
+    Pen = 3,
+    /// A pen's eraser end.
+    Eraser = 4,
+}
+impl PointerTool {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "POINTER_TOOL_UNSPECIFIED",
+            Self::Mouse => "POINTER_TOOL_MOUSE",
+            Self::Touch => "POINTER_TOOL_TOUCH",
+            Self::Pen => "POINTER_TOOL_PEN",
+            Self::Eraser => "POINTER_TOOL_ERASER",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "POINTER_TOOL_UNSPECIFIED" => Some(Self::Unspecified),
+            "POINTER_TOOL_MOUSE" => Some(Self::Mouse),
+            "POINTER_TOOL_TOUCH" => Some(Self::Touch),
+            "POINTER_TOOL_PEN" => Some(Self::Pen),
+            "POINTER_TOOL_ERASER" => Some(Self::Eraser),
             _ => None,
         }
     }

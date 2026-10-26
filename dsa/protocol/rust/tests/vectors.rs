@@ -10,7 +10,8 @@ use std::path::PathBuf;
 
 use dsa_protocol::control::{
     envelope::Body, AppInfo, AuthChallenge, AuthProof, CloseTask, Envelope, Hello, HelloAccepted,
-    HelloRejected, LaunchApp, Rect, RejectReason, Role, TaskFrames, TaskRemoved, TaskUpdated,
+    HelloRejected, LaunchApp, PointerAction, PointerEvent, PointerTool, Rect, RejectReason, Role,
+    TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
 
@@ -132,6 +133,59 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                 package_name: "com.example.notes".into(),
                 label: "Notes".into(),
                 icon_png: vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
+            })),
+        ),
+        (
+            "pointer_event_mouse_secondary_down",
+            wrap(Body::PointerEvent(PointerEvent {
+                task_id: 42,
+                action: PointerAction::Down as i32,
+                tool: PointerTool::Mouse as i32,
+                pointer_id: 0,
+                x: 120.5,
+                y: 64.25,
+                buttons: 2,
+                pressure: 1.0,
+                ..PointerEvent::default()
+            })),
+        ),
+        (
+            "pointer_event_touch_move",
+            wrap(Body::PointerEvent(PointerEvent {
+                task_id: 7,
+                action: PointerAction::Move as i32,
+                tool: PointerTool::Touch as i32,
+                pointer_id: 3,
+                x: 10.0,
+                y: 1023.75,
+                pressure: 0.5,
+                ..PointerEvent::default()
+            })),
+        ),
+        (
+            "pointer_event_scroll",
+            wrap(Body::PointerEvent(PointerEvent {
+                task_id: 42,
+                action: PointerAction::Scroll as i32,
+                tool: PointerTool::Mouse as i32,
+                x: 300.0,
+                y: 200.0,
+                scroll_x: 0.5,
+                scroll_y: -1.0,
+                ..PointerEvent::default()
+            })),
+        ),
+        (
+            "pointer_event_pen_hover",
+            wrap(Body::PointerEvent(PointerEvent {
+                task_id: 42,
+                action: PointerAction::HoverMove as i32,
+                tool: PointerTool::Pen as i32,
+                pointer_id: 1,
+                x: 0.0,
+                y: 599.0,
+                buttons: 32,
+                ..PointerEvent::default()
             })),
         ),
         (

@@ -10,6 +10,7 @@
 //! when the window manager closes the connection, which it does when the app's last window
 //! closes.
 
+pub mod pointer;
 pub mod window;
 
 use std::collections::HashMap;
@@ -27,6 +28,7 @@ use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use self::window::{OpenWindow, Presenters, UiSetup};
 use crate::compositor::log::{note, CompositorLogger};
 use crate::compositor::present::{Gpu, OpenedTexture};
+use crate::compositor::tasks::serve_input;
 
 /// The build the window host names itself by to the window manager.
 const BUILD: &str = "dsa-app-window";
@@ -76,6 +78,9 @@ pub struct HostSetup {
     pub launch: bool,
     /// Dials the window manager.
     pub connector: Box<dyn Connector>,
+    /// Dials the service's local API, which the windows' pointer input goes to directly, so
+    /// it never waits on the window manager.
+    pub input: Box<dyn Connector>,
     /// The process the window manager places the frames' textures in: this one.
     pub process_id: u32,
     pub logger: Option<Arc<CompositorLogger>>,
@@ -134,9 +139,17 @@ pub fn run(mut setup: HostSetup) -> Result<(), String> {
             .unwrap_or_else(|e| e.into_inner())
             .send(&frame);
     });
+    let (input_tx, input_rx) = std::sync::mpsc::channel();
+    let input_connector = std::mem::replace(&mut setup.input, Box::new(NoConnector));
+    let input_logger = log.clone();
+    let input = std::thread::Builder::new()
+        .name("dsa-app-window-input".into())
+        .spawn(move || serve_input(input_connector, input_rx, input_logger))
+        .map_err(|e| format!("could not start the pointer input: {e}"))?;
     let presenters: Presenters = Arc::default();
     let ui = window::start(UiSetup {
         report,
+        input: input_tx,
         gpu: gpu.clone(),
         presenters: Arc::clone(&presenters),
         logger: log.clone(),
@@ -233,6 +246,20 @@ pub fn run(mut setup: HostSetup) -> Result<(), String> {
             _ => {}
         }
     }
+    // The windows close first; the pointer input ends with them.
     ui.stop();
+    let _ = input.join();
     Ok(())
+}
+
+/// Stands in for the input connector once it has been handed to its thread.
+struct NoConnector;
+
+impl Connector for NoConnector {
+    fn connect(
+        &mut self,
+        _: Duration,
+    ) -> Result<Box<dyn dsa_transport::Connection>, TransportError> {
+        Err(TransportError::Closed)
+    }
 }

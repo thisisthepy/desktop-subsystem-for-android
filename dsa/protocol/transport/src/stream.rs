@@ -48,6 +48,13 @@ impl<S: StreamSocket> FramedConnection<S> {
         }
     }
 
+    fn shut_down(&mut self) {
+        if !self.broken {
+            self.socket.shutdown();
+            self.broken = true;
+        }
+    }
+
     /// Returns a complete frame from `pending`, if there is one.
     fn take_frame(&mut self) -> Result<Option<Vec<u8>>, TransportError> {
         if self.pending.len() < HEADER_LEN {
@@ -70,25 +77,22 @@ impl<S: StreamSocket> FramedConnection<S> {
     }
 }
 
-/// One frame as it goes on the wire: its length, then its bytes.
-fn wire_frame(frame: &[u8]) -> Result<Vec<u8>, TransportError> {
-    check_frame_len(frame.len())?;
+/// One frame as it goes on the wire: its length, then its bytes, written in one piece so a
+/// second handle's frames never land in the middle of it.
+fn write_frame(socket: &mut impl Write, frame: &[u8]) -> io::Result<()> {
     let mut wire = Vec::with_capacity(HEADER_LEN + frame.len());
     wire.extend_from_slice(&(frame.len() as u32).to_le_bytes());
     wire.extend_from_slice(frame);
-    Ok(wire)
+    socket.write_all(&wire).and_then(|()| socket.flush())
 }
 
 impl<S: StreamSocket + 'static> Connection for FramedConnection<S> {
     fn send(&mut self, frame: &[u8]) -> Result<(), TransportError> {
-        let wire = wire_frame(frame)?;
+        check_frame_len(frame.len())?;
         if self.broken {
             return Err(TransportError::Closed);
         }
-        let result = self
-            .socket
-            .write_all(&wire)
-            .and_then(|()| self.socket.flush());
+        let result = write_frame(&mut self.socket, frame);
         result.map_err(|error| {
             let error = TransportError::from(error);
             if error == TransportError::Closed {
@@ -158,15 +162,12 @@ impl<S: StreamSocket + 'static> Connection for FramedConnection<S> {
     }
 
     fn close(&mut self) {
-        if !self.broken {
-            self.socket.shutdown();
-            self.broken = true;
-        }
+        self.shut_down();
     }
 
-    /// A sender on a second handle to the socket. Frames from it and from the connection
-    /// itself must not be sent at the same time, or their bytes could interleave: once a
-    /// sender is cloned, send through one of them at a time.
+    /// A sender on a second handle to the socket. Whoever holds both must not send on
+    /// both at once from different threads: each sends whole frames, but two writers could
+    /// still interleave theirs.
     fn try_clone_sender(&self) -> Option<Box<dyn FrameSender>> {
         if self.broken {
             return None;
@@ -176,28 +177,22 @@ impl<S: StreamSocket + 'static> Connection for FramedConnection<S> {
     }
 }
 
-/// The sending half of a [`FramedConnection`], on a second handle to its socket. Dropping it
-/// leaves the connection open; the peer sees the connection end once both are gone.
+/// The sending half of a [`FramedConnection`], on a second handle to its socket. Dropping
+/// it leaves the connection open.
 pub struct FramedSender<S: StreamSocket> {
     socket: S,
 }
 
 impl<S: StreamSocket> FrameSender for FramedSender<S> {
     fn send(&mut self, frame: &[u8]) -> Result<(), TransportError> {
-        let wire = wire_frame(frame)?;
-        self.socket
-            .write_all(&wire)
-            .and_then(|()| self.socket.flush())
-            .map_err(TransportError::from)
+        check_frame_len(frame.len())?;
+        write_frame(&mut self.socket, frame).map_err(TransportError::from)
     }
 }
 
 impl<S: StreamSocket> Drop for FramedConnection<S> {
     fn drop(&mut self) {
-        if !self.broken {
-            self.socket.shutdown();
-            self.broken = true;
-        }
+        self.shut_down();
     }
 }
 

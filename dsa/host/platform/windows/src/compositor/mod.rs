@@ -9,7 +9,8 @@
 //! each app's window host and tells it which windows to open ([`hosts`]), and has the
 //! renderer copy each task's frames, on the GPU, into a texture the window host shows
 //! ([`frames`], [`present`]). When the user closes a window, the guest is asked to end its
-//! task.
+//! task. The mouse, touch and pen input in a window goes from the window host to the service
+//! itself, without passing through the window manager.
 
 pub mod adapter;
 pub mod display_gpu;

@@ -72,6 +72,9 @@ extern HelloRejectedDefaultTypeInternal _HelloRejected_default_instance_;
 class LaunchApp;
 struct LaunchAppDefaultTypeInternal;
 extern LaunchAppDefaultTypeInternal _LaunchApp_default_instance_;
+class PointerEvent;
+struct PointerEventDefaultTypeInternal;
+extern PointerEventDefaultTypeInternal _PointerEvent_default_instance_;
 class Rect;
 struct RectDefaultTypeInternal;
 extern RectDefaultTypeInternal _Rect_default_instance_;
@@ -97,6 +100,7 @@ template<> ::dsa::control::v1::Hello* Arena::CreateMaybeMessage<::dsa::control::
 template<> ::dsa::control::v1::HelloAccepted* Arena::CreateMaybeMessage<::dsa::control::v1::HelloAccepted>(Arena*);
 template<> ::dsa::control::v1::HelloRejected* Arena::CreateMaybeMessage<::dsa::control::v1::HelloRejected>(Arena*);
 template<> ::dsa::control::v1::LaunchApp* Arena::CreateMaybeMessage<::dsa::control::v1::LaunchApp>(Arena*);
+template<> ::dsa::control::v1::PointerEvent* Arena::CreateMaybeMessage<::dsa::control::v1::PointerEvent>(Arena*);
 template<> ::dsa::control::v1::Rect* Arena::CreateMaybeMessage<::dsa::control::v1::Rect>(Arena*);
 template<> ::dsa::control::v1::TaskFrames* Arena::CreateMaybeMessage<::dsa::control::v1::TaskFrames>(Arena*);
 template<> ::dsa::control::v1::TaskRemoved* Arena::CreateMaybeMessage<::dsa::control::v1::TaskRemoved>(Arena*);
@@ -174,6 +178,57 @@ inline const std::string& RejectReason_Name(T enum_t_value) {
 }
 bool RejectReason_Parse(
     ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, RejectReason* value);
+enum PointerAction : int {
+  POINTER_ACTION_UNSPECIFIED = 0,
+  POINTER_ACTION_DOWN = 1,
+  POINTER_ACTION_MOVE = 2,
+  POINTER_ACTION_UP = 3,
+  POINTER_ACTION_CANCEL = 4,
+  POINTER_ACTION_SCROLL = 5,
+  POINTER_ACTION_HOVER_MOVE = 6,
+  POINTER_ACTION_HOVER_EXIT = 7,
+  PointerAction_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
+  PointerAction_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
+};
+bool PointerAction_IsValid(int value);
+constexpr PointerAction PointerAction_MIN = POINTER_ACTION_UNSPECIFIED;
+constexpr PointerAction PointerAction_MAX = POINTER_ACTION_HOVER_EXIT;
+constexpr int PointerAction_ARRAYSIZE = PointerAction_MAX + 1;
+
+const std::string& PointerAction_Name(PointerAction value);
+template<typename T>
+inline const std::string& PointerAction_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, PointerAction>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function PointerAction_Name.");
+  return PointerAction_Name(static_cast<PointerAction>(enum_t_value));
+}
+bool PointerAction_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, PointerAction* value);
+enum PointerTool : int {
+  POINTER_TOOL_UNSPECIFIED = 0,
+  POINTER_TOOL_MOUSE = 1,
+  POINTER_TOOL_TOUCH = 2,
+  POINTER_TOOL_PEN = 3,
+  POINTER_TOOL_ERASER = 4,
+  PointerTool_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
+  PointerTool_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
+};
+bool PointerTool_IsValid(int value);
+constexpr PointerTool PointerTool_MIN = POINTER_TOOL_UNSPECIFIED;
+constexpr PointerTool PointerTool_MAX = POINTER_TOOL_ERASER;
+constexpr int PointerTool_ARRAYSIZE = PointerTool_MAX + 1;
+
+const std::string& PointerTool_Name(PointerTool value);
+template<typename T>
+inline const std::string& PointerTool_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, PointerTool>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function PointerTool_Name.");
+  return PointerTool_Name(static_cast<PointerTool>(enum_t_value));
+}
+bool PointerTool_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, PointerTool* value);
 // ===================================================================
 
 class Hello final :
@@ -1983,6 +2038,235 @@ class AppInfo final :
 };
 // -------------------------------------------------------------------
 
+class PointerEvent final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.PointerEvent) */ {
+ public:
+  inline PointerEvent() : PointerEvent(nullptr) {}
+  ~PointerEvent() override;
+  explicit PROTOBUF_CONSTEXPR PointerEvent(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  PointerEvent(const PointerEvent& from);
+  PointerEvent(PointerEvent&& from) noexcept
+    : PointerEvent() {
+    *this = ::std::move(from);
+  }
+
+  inline PointerEvent& operator=(const PointerEvent& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline PointerEvent& operator=(PointerEvent&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const PointerEvent& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const PointerEvent* internal_default_instance() {
+    return reinterpret_cast<const PointerEvent*>(
+               &_PointerEvent_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    12;
+
+  friend void swap(PointerEvent& a, PointerEvent& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(PointerEvent* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(PointerEvent* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  PointerEvent* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<PointerEvent>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const PointerEvent& from);
+  void MergeFrom(const PointerEvent& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(PointerEvent* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.PointerEvent";
+  }
+  protected:
+  explicit PointerEvent(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kTaskIdFieldNumber = 1,
+    kActionFieldNumber = 2,
+    kToolFieldNumber = 3,
+    kPointerIdFieldNumber = 4,
+    kXFieldNumber = 5,
+    kYFieldNumber = 6,
+    kButtonsFieldNumber = 7,
+    kPressureFieldNumber = 8,
+    kScrollXFieldNumber = 9,
+    kScrollYFieldNumber = 10,
+  };
+  // int32 task_id = 1;
+  void clear_task_id();
+  int32_t task_id() const;
+  void set_task_id(int32_t value);
+  private:
+  int32_t _internal_task_id() const;
+  void _internal_set_task_id(int32_t value);
+  public:
+
+  // .dsa.control.v1.PointerAction action = 2;
+  void clear_action();
+  ::dsa::control::v1::PointerAction action() const;
+  void set_action(::dsa::control::v1::PointerAction value);
+  private:
+  ::dsa::control::v1::PointerAction _internal_action() const;
+  void _internal_set_action(::dsa::control::v1::PointerAction value);
+  public:
+
+  // .dsa.control.v1.PointerTool tool = 3;
+  void clear_tool();
+  ::dsa::control::v1::PointerTool tool() const;
+  void set_tool(::dsa::control::v1::PointerTool value);
+  private:
+  ::dsa::control::v1::PointerTool _internal_tool() const;
+  void _internal_set_tool(::dsa::control::v1::PointerTool value);
+  public:
+
+  // uint32 pointer_id = 4;
+  void clear_pointer_id();
+  uint32_t pointer_id() const;
+  void set_pointer_id(uint32_t value);
+  private:
+  uint32_t _internal_pointer_id() const;
+  void _internal_set_pointer_id(uint32_t value);
+  public:
+
+  // float x = 5;
+  void clear_x();
+  float x() const;
+  void set_x(float value);
+  private:
+  float _internal_x() const;
+  void _internal_set_x(float value);
+  public:
+
+  // float y = 6;
+  void clear_y();
+  float y() const;
+  void set_y(float value);
+  private:
+  float _internal_y() const;
+  void _internal_set_y(float value);
+  public:
+
+  // uint32 buttons = 7;
+  void clear_buttons();
+  uint32_t buttons() const;
+  void set_buttons(uint32_t value);
+  private:
+  uint32_t _internal_buttons() const;
+  void _internal_set_buttons(uint32_t value);
+  public:
+
+  // float pressure = 8;
+  void clear_pressure();
+  float pressure() const;
+  void set_pressure(float value);
+  private:
+  float _internal_pressure() const;
+  void _internal_set_pressure(float value);
+  public:
+
+  // float scroll_x = 9;
+  void clear_scroll_x();
+  float scroll_x() const;
+  void set_scroll_x(float value);
+  private:
+  float _internal_scroll_x() const;
+  void _internal_set_scroll_x(float value);
+  public:
+
+  // float scroll_y = 10;
+  void clear_scroll_y();
+  float scroll_y() const;
+  void set_scroll_y(float value);
+  private:
+  float _internal_scroll_y() const;
+  void _internal_set_scroll_y(float value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.PointerEvent)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    int32_t task_id_;
+    int action_;
+    int tool_;
+    uint32_t pointer_id_;
+    float x_;
+    float y_;
+    uint32_t buttons_;
+    float pressure_;
+    float scroll_x_;
+    float scroll_y_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class Envelope final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.Envelope) */ {
  public:
@@ -2028,6 +2312,7 @@ class Envelope final :
     kTaskFrames = 8,
     kCloseTask = 9,
     kLaunchApp = 10,
+    kPointerEvent = 13,
     kAppInfo = 15,
     BODY_NOT_SET = 0,
   };
@@ -2037,7 +2322,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    12;
+    13;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -2111,6 +2396,7 @@ class Envelope final :
     kTaskFramesFieldNumber = 8,
     kCloseTaskFieldNumber = 9,
     kLaunchAppFieldNumber = 10,
+    kPointerEventFieldNumber = 13,
     kAppInfoFieldNumber = 15,
   };
   // .dsa.control.v1.Hello hello = 1;
@@ -2293,6 +2579,24 @@ class Envelope final :
       ::dsa::control::v1::LaunchApp* launch_app);
   ::dsa::control::v1::LaunchApp* unsafe_arena_release_launch_app();
 
+  // .dsa.control.v1.PointerEvent pointer_event = 13;
+  bool has_pointer_event() const;
+  private:
+  bool _internal_has_pointer_event() const;
+  public:
+  void clear_pointer_event();
+  const ::dsa::control::v1::PointerEvent& pointer_event() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::PointerEvent* release_pointer_event();
+  ::dsa::control::v1::PointerEvent* mutable_pointer_event();
+  void set_allocated_pointer_event(::dsa::control::v1::PointerEvent* pointer_event);
+  private:
+  const ::dsa::control::v1::PointerEvent& _internal_pointer_event() const;
+  ::dsa::control::v1::PointerEvent* _internal_mutable_pointer_event();
+  public:
+  void unsafe_arena_set_allocated_pointer_event(
+      ::dsa::control::v1::PointerEvent* pointer_event);
+  ::dsa::control::v1::PointerEvent* unsafe_arena_release_pointer_event();
+
   // .dsa.control.v1.AppInfo app_info = 15;
   bool has_app_info() const;
   private:
@@ -2326,6 +2630,7 @@ class Envelope final :
   void set_has_task_frames();
   void set_has_close_task();
   void set_has_launch_app();
+  void set_has_pointer_event();
   void set_has_app_info();
 
   inline bool has_body() const;
@@ -2348,6 +2653,7 @@ class Envelope final :
       ::dsa::control::v1::TaskFrames* task_frames_;
       ::dsa::control::v1::CloseTask* close_task_;
       ::dsa::control::v1::LaunchApp* launch_app_;
+      ::dsa::control::v1::PointerEvent* pointer_event_;
       ::dsa::control::v1::AppInfo* app_info_;
     } body_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
@@ -3494,6 +3800,210 @@ inline void AppInfo::set_allocated_icon_png(std::string* icon_png) {
 
 // -------------------------------------------------------------------
 
+// PointerEvent
+
+// int32 task_id = 1;
+inline void PointerEvent::clear_task_id() {
+  _impl_.task_id_ = 0;
+}
+inline int32_t PointerEvent::_internal_task_id() const {
+  return _impl_.task_id_;
+}
+inline int32_t PointerEvent::task_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PointerEvent.task_id)
+  return _internal_task_id();
+}
+inline void PointerEvent::_internal_set_task_id(int32_t value) {
+  
+  _impl_.task_id_ = value;
+}
+inline void PointerEvent::set_task_id(int32_t value) {
+  _internal_set_task_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PointerEvent.task_id)
+}
+
+// .dsa.control.v1.PointerAction action = 2;
+inline void PointerEvent::clear_action() {
+  _impl_.action_ = 0;
+}
+inline ::dsa::control::v1::PointerAction PointerEvent::_internal_action() const {
+  return static_cast< ::dsa::control::v1::PointerAction >(_impl_.action_);
+}
+inline ::dsa::control::v1::PointerAction PointerEvent::action() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PointerEvent.action)
+  return _internal_action();
+}
+inline void PointerEvent::_internal_set_action(::dsa::control::v1::PointerAction value) {
+  
+  _impl_.action_ = value;
+}
+inline void PointerEvent::set_action(::dsa::control::v1::PointerAction value) {
+  _internal_set_action(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PointerEvent.action)
+}
+
+// .dsa.control.v1.PointerTool tool = 3;
+inline void PointerEvent::clear_tool() {
+  _impl_.tool_ = 0;
+}
+inline ::dsa::control::v1::PointerTool PointerEvent::_internal_tool() const {
+  return static_cast< ::dsa::control::v1::PointerTool >(_impl_.tool_);
+}
+inline ::dsa::control::v1::PointerTool PointerEvent::tool() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PointerEvent.tool)
+  return _internal_tool();
+}
+inline void PointerEvent::_internal_set_tool(::dsa::control::v1::PointerTool value) {
+  
+  _impl_.tool_ = value;
+}
+inline void PointerEvent::set_tool(::dsa::control::v1::PointerTool value) {
+  _internal_set_tool(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PointerEvent.tool)
+}
+
+// uint32 pointer_id = 4;
+inline void PointerEvent::clear_pointer_id() {
+  _impl_.pointer_id_ = 0u;
+}
+inline uint32_t PointerEvent::_internal_pointer_id() const {
+  return _impl_.pointer_id_;
+}
+inline uint32_t PointerEvent::pointer_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PointerEvent.pointer_id)
+  return _internal_pointer_id();
+}
+inline void PointerEvent::_internal_set_pointer_id(uint32_t value) {
+  
+  _impl_.pointer_id_ = value;
+}
+inline void PointerEvent::set_pointer_id(uint32_t value) {
+  _internal_set_pointer_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PointerEvent.pointer_id)
+}
+
+// float x = 5;
+inline void PointerEvent::clear_x() {
+  _impl_.x_ = 0;
+}
+inline float PointerEvent::_internal_x() const {
+  return _impl_.x_;
+}
+inline float PointerEvent::x() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PointerEvent.x)
+  return _internal_x();
+}
+inline void PointerEvent::_internal_set_x(float value) {
+  
+  _impl_.x_ = value;
+}
+inline void PointerEvent::set_x(float value) {
+  _internal_set_x(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PointerEvent.x)
+}
+
+// float y = 6;
+inline void PointerEvent::clear_y() {
+  _impl_.y_ = 0;
+}
+inline float PointerEvent::_internal_y() const {
+  return _impl_.y_;
+}
+inline float PointerEvent::y() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PointerEvent.y)
+  return _internal_y();
+}
+inline void PointerEvent::_internal_set_y(float value) {
+  
+  _impl_.y_ = value;
+}
+inline void PointerEvent::set_y(float value) {
+  _internal_set_y(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PointerEvent.y)
+}
+
+// uint32 buttons = 7;
+inline void PointerEvent::clear_buttons() {
+  _impl_.buttons_ = 0u;
+}
+inline uint32_t PointerEvent::_internal_buttons() const {
+  return _impl_.buttons_;
+}
+inline uint32_t PointerEvent::buttons() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PointerEvent.buttons)
+  return _internal_buttons();
+}
+inline void PointerEvent::_internal_set_buttons(uint32_t value) {
+  
+  _impl_.buttons_ = value;
+}
+inline void PointerEvent::set_buttons(uint32_t value) {
+  _internal_set_buttons(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PointerEvent.buttons)
+}
+
+// float pressure = 8;
+inline void PointerEvent::clear_pressure() {
+  _impl_.pressure_ = 0;
+}
+inline float PointerEvent::_internal_pressure() const {
+  return _impl_.pressure_;
+}
+inline float PointerEvent::pressure() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PointerEvent.pressure)
+  return _internal_pressure();
+}
+inline void PointerEvent::_internal_set_pressure(float value) {
+  
+  _impl_.pressure_ = value;
+}
+inline void PointerEvent::set_pressure(float value) {
+  _internal_set_pressure(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PointerEvent.pressure)
+}
+
+// float scroll_x = 9;
+inline void PointerEvent::clear_scroll_x() {
+  _impl_.scroll_x_ = 0;
+}
+inline float PointerEvent::_internal_scroll_x() const {
+  return _impl_.scroll_x_;
+}
+inline float PointerEvent::scroll_x() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PointerEvent.scroll_x)
+  return _internal_scroll_x();
+}
+inline void PointerEvent::_internal_set_scroll_x(float value) {
+  
+  _impl_.scroll_x_ = value;
+}
+inline void PointerEvent::set_scroll_x(float value) {
+  _internal_set_scroll_x(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PointerEvent.scroll_x)
+}
+
+// float scroll_y = 10;
+inline void PointerEvent::clear_scroll_y() {
+  _impl_.scroll_y_ = 0;
+}
+inline float PointerEvent::_internal_scroll_y() const {
+  return _impl_.scroll_y_;
+}
+inline float PointerEvent::scroll_y() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PointerEvent.scroll_y)
+  return _internal_scroll_y();
+}
+inline void PointerEvent::_internal_set_scroll_y(float value) {
+  
+  _impl_.scroll_y_ = value;
+}
+inline void PointerEvent::set_scroll_y(float value) {
+  _internal_set_scroll_y(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PointerEvent.scroll_y)
+}
+
+// -------------------------------------------------------------------
+
 // Envelope
 
 // .dsa.control.v1.Hello hello = 1;
@@ -4236,6 +4746,80 @@ inline ::dsa::control::v1::LaunchApp* Envelope::mutable_launch_app() {
   return _msg;
 }
 
+// .dsa.control.v1.PointerEvent pointer_event = 13;
+inline bool Envelope::_internal_has_pointer_event() const {
+  return body_case() == kPointerEvent;
+}
+inline bool Envelope::has_pointer_event() const {
+  return _internal_has_pointer_event();
+}
+inline void Envelope::set_has_pointer_event() {
+  _impl_._oneof_case_[0] = kPointerEvent;
+}
+inline void Envelope::clear_pointer_event() {
+  if (_internal_has_pointer_event()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.pointer_event_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::PointerEvent* Envelope::release_pointer_event() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.pointer_event)
+  if (_internal_has_pointer_event()) {
+    clear_has_body();
+    ::dsa::control::v1::PointerEvent* temp = _impl_.body_.pointer_event_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.pointer_event_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::PointerEvent& Envelope::_internal_pointer_event() const {
+  return _internal_has_pointer_event()
+      ? *_impl_.body_.pointer_event_
+      : reinterpret_cast< ::dsa::control::v1::PointerEvent&>(::dsa::control::v1::_PointerEvent_default_instance_);
+}
+inline const ::dsa::control::v1::PointerEvent& Envelope::pointer_event() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.pointer_event)
+  return _internal_pointer_event();
+}
+inline ::dsa::control::v1::PointerEvent* Envelope::unsafe_arena_release_pointer_event() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.pointer_event)
+  if (_internal_has_pointer_event()) {
+    clear_has_body();
+    ::dsa::control::v1::PointerEvent* temp = _impl_.body_.pointer_event_;
+    _impl_.body_.pointer_event_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_pointer_event(::dsa::control::v1::PointerEvent* pointer_event) {
+  clear_body();
+  if (pointer_event) {
+    set_has_pointer_event();
+    _impl_.body_.pointer_event_ = pointer_event;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.pointer_event)
+}
+inline ::dsa::control::v1::PointerEvent* Envelope::_internal_mutable_pointer_event() {
+  if (!_internal_has_pointer_event()) {
+    clear_body();
+    set_has_pointer_event();
+    _impl_.body_.pointer_event_ = CreateMaybeMessage< ::dsa::control::v1::PointerEvent >(GetArenaForAllocation());
+  }
+  return _impl_.body_.pointer_event_;
+}
+inline ::dsa::control::v1::PointerEvent* Envelope::mutable_pointer_event() {
+  ::dsa::control::v1::PointerEvent* _msg = _internal_mutable_pointer_event();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.pointer_event)
+  return _msg;
+}
+
 // .dsa.control.v1.AppInfo app_info = 15;
 inline bool Envelope::_internal_has_app_info() const {
   return body_case() == kAppInfo;
@@ -4346,6 +4930,8 @@ inline Envelope::BodyCase Envelope::body_case() const {
 
 // -------------------------------------------------------------------
 
+// -------------------------------------------------------------------
+
 
 // @@protoc_insertion_point(namespace_scope)
 
@@ -4358,6 +4944,8 @@ PROTOBUF_NAMESPACE_OPEN
 template <> struct is_proto_enum< ::dsa::control::v1::ProtocolVersion> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::Role> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::RejectReason> : ::std::true_type {};
+template <> struct is_proto_enum< ::dsa::control::v1::PointerAction> : ::std::true_type {};
+template <> struct is_proto_enum< ::dsa::control::v1::PointerTool> : ::std::true_type {};
 
 PROTOBUF_NAMESPACE_CLOSE
 
