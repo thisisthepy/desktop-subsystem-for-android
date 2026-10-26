@@ -48,7 +48,7 @@ class Lifecycle(
     fun handle(envelope: Envelope): Boolean {
         when (envelope.bodyCase) {
             Envelope.BodyCase.SCREEN_STATE -> screen(envelope.screenState.on)
-            Envelope.BodyCase.POWER_STATE -> power(envelope.powerState)
+            Envelope.BodyCase.POWER_STATE -> follow(envelope.powerState)
             else -> return false
         }
         return true
@@ -68,7 +68,7 @@ class Lifecycle(
         report()
     }
 
-    private fun power(state: PowerState) {
+    private fun follow(state: PowerState) {
         val battery = if (state.batteryPresent) {
             Battery(
                 acOnline = state.acOnline,

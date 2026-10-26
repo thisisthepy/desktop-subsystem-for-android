@@ -6,7 +6,8 @@ package io.github.thisisthepy.dsa.control.v1;
 /**
  * <pre>
  * Guest to host, from the agent: whether the guest's device is in Doze (the device idle
- * controller's deep idle state). Sent once after the connection opens and on each change.
+ * controller's deep idle state). The host takes the device not to be in Doze when the agent
+ * connects; the agent sends this on each change after that.
  * </pre>
  *
  * Protobuf type {@code dsa.control.v1.DeviceIdle}
@@ -128,7 +129,8 @@ public  final class DeviceIdle extends
   /**
    * <pre>
    * Guest to host, from the agent: whether the guest's device is in Doze (the device idle
-   * controller's deep idle state). Sent once after the connection opens and on each change.
+   * controller's deep idle state). The host takes the device not to be in Doze when the agent
+   * connects; the agent sends this on each change after that.
    * </pre>
    *
    * Protobuf type {@code dsa.control.v1.DeviceIdle}

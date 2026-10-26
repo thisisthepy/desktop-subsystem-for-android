@@ -815,10 +815,7 @@ impl Worker {
             self.send_body(Body::ScreenState(control::ScreenState { on: true }));
         }
         self.dozing_since = None;
-        if matches!(
-            self.state(),
-            SessionState::Dozing | SessionState::Frozen
-        ) {
+        if matches!(self.state(), SessionState::Dozing | SessionState::Frozen) {
             self.shared.set(SessionState::Active, None);
         }
     }
@@ -1157,7 +1154,7 @@ impl Worker {
         // A frozen guest cannot shut down in an orderly way; it is let run first.
         if self.state() == SessionState::Frozen {
             if let Err(why) = self.launcher.thaw() {
-                eprintln!("lifecycle: the frozen guest could not be resumed before stopping: {why}");
+                eprintln!("lifecycle: the frozen guest was not resumed before stopping: {why}");
             }
         }
         self.shared.set_vm_id(None);

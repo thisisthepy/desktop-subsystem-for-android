@@ -498,7 +498,12 @@ mod tests {
     fn fr10_only_the_latest_word_on_shown_windows_is_sent() {
         let hidden = TaskRequest::WindowsShown { shown: false };
         let shown = TaskRequest::WindowsShown { shown: true };
-        let requests = vec![hidden.clone(), resize(1, 500), shown.clone(), hidden.clone()];
+        let requests = vec![
+            hidden.clone(),
+            resize(1, 500),
+            shown.clone(),
+            hidden.clone(),
+        ];
         assert_eq!(coalesce(requests), vec![resize(1, 500), hidden]);
         assert_eq!(coalesce(vec![shown.clone()]), vec![shown]);
     }

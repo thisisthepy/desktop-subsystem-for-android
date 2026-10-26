@@ -684,7 +684,9 @@ pub fn windows_shown_reaches_the_caller(make: MakeLocal<'_>) {
         .request(&TaskRequest::WindowsShown { shown: false })
         .expect("the word while stopped");
     client.start().unwrap();
-    client.set_windows_shown(true).expect("the word while running");
+    client
+        .set_windows_shown(true)
+        .expect("the word while running");
     let android = androids.of(&user).unwrap();
     assert_eq!(*android.shown.lock().unwrap(), vec![false, true]);
     assert!(android.requests.lock().unwrap().is_empty());

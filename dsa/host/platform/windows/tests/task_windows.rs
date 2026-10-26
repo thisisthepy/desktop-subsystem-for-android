@@ -1280,9 +1280,10 @@ fn shown_words(running: &Running) -> Vec<bool> {
 }
 
 fn wait_for_shown(running: &Running, shown: bool) {
-    wait_for(&format!("the guest to hear whether a window is shown ({shown})"), || {
-        (shown_words(running).last() == Some(&shown)).then_some(())
-    });
+    wait_for(
+        &format!("the guest to hear whether a window is shown ({shown})"),
+        || (shown_words(running).last() == Some(&shown)).then_some(()),
+    );
 }
 
 #[test]

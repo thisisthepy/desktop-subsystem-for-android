@@ -1336,7 +1336,9 @@ fn fr10_the_guest_leaving_idle_for_maintenance_keeps_the_session_dozing() {
 fn fr10_requests_and_input_reach_a_dozing_guest() {
     let (session, mut agent, _launcher) = lifecycle_session(None);
     dozing(&session, &mut agent);
-    session.pointer(&pointer_down(7)).expect("input reaches Doze");
+    session
+        .pointer(&pointer_down(7))
+        .expect("input reaches Doze");
     assert_eq!(
         next_body(&mut agent),
         Body::PointerEvent(pointer_down(7).to_control())
@@ -1443,7 +1445,9 @@ fn fr10_a_freeze_the_user_asks_for_turns_the_screen_off_and_input_thaws_it() {
     assert_eq!(launcher.0.lock().unwrap().freezes, 1);
 
     // Input in a window the frozen guest still shows wakes it first.
-    session.pointer(&pointer_down(7)).expect("input thaws the guest");
+    session
+        .pointer(&pointer_down(7))
+        .expect("input thaws the guest");
     assert_eq!(session.state(), SessionState::Active);
     assert_eq!(launcher.0.lock().unwrap().thaws, 1);
     assert_eq!(next_body(&mut agent), screen(true));

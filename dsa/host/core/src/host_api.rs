@@ -751,12 +751,9 @@ impl HostApiService {
                     density_dpi: density.density_dpi,
                 },
             ),
-            Some(request::Body::SetWindowsShown(shown)) => self.request(
-                peer,
-                TaskRequest::WindowsShown {
-                    shown: shown.shown,
-                },
-            ),
+            Some(request::Body::SetWindowsShown(shown)) => {
+                self.request(peer, TaskRequest::WindowsShown { shown: shown.shown })
+            }
             Some(request::Body::FreezeSession(_)) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => match android.freeze() {

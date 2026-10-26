@@ -36,11 +36,8 @@ pub fn from_system_status(
         // A charging battery means AC power even when Windows cannot say so directly.
         ac_online: ac_line_status == AC_ONLINE || (ac_line_status == UNKNOWN && charging),
         battery_present: true,
-        battery_percent: if battery_life_percent <= 100 {
-            battery_life_percent
-        } else {
-            100
-        },
+        // 255 when Windows does not know the charge.
+        battery_percent: battery_life_percent.min(100),
         charging,
         power_saver,
     }

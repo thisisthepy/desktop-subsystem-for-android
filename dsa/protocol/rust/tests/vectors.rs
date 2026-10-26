@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use dsa_protocol::control::{
     envelope::Body, AppInfo, AuthChallenge, AuthProof, CloseTask, DeviceIdle, Envelope, Hello,
     HelloAccepted, HelloRejected, ImeCommit, ImeComposition, ImeCursor, KeyAction, KeyEvent,
-    LaunchApp, PointerAction, PointerEvent, PointerTool, PowerState, Rect, RejectReason, ResizeTask,
-    Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
+    LaunchApp, PointerAction, PointerEvent, PointerTool, PowerState, Rect, RejectReason,
+    ResizeTask, Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
 
