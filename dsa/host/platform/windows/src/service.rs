@@ -14,6 +14,10 @@
 //! downloads a newer setup file, and runs it once no user's Android is running, or at
 //! once on `dsa update`. Setup stops this service and starts the new one, which tells the
 //! users how the update went.
+//!
+//! The settings users change from the settings app live in the service's own folder
+//! (`settings_dir`). Turning either kind of update off there stops the checks while the
+//! service runs; the render GPU is for each user's window manager, which asks for it.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -21,7 +25,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::handshake::ControlHandshake;
-use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid, UserAndroids};
+use dsa_host_core::host_api::{
+    HostApiService, PerUser, ServiceFacts, UserAndroid, UserAndroids,
+};
+use dsa_host_core::settings::{FileSettings, SettingsStore};
 use dsa_host_core::session::Session;
 use dsa_host_core::update::program_service::{
     ProgramStatus, ProgramUpdates, Timing, WithProgramStatus,
@@ -36,9 +43,11 @@ use crate::android_vm::AndroidVmLauncher;
 use crate::guest_communication_services::register_graphics_service_guids;
 use crate::guid::Guid;
 use crate::host_config::HostConfig;
+use crate::host_memory::ProcessMemory;
 use crate::https::{UrlFetch, WinHttpFetch};
 use crate::hvsocket::HvSocketListener;
 use crate::pipe::{NamedPipeListener, DEFAULT_PIPE_SDDL};
+use crate::render_gpu::previous_render_gpu;
 use crate::setup::SetupInstaller;
 use crate::user_disk::{bring_disk_to, prepare_user_data_disk, prepare_user_disk_folder};
 use crate::vm_listener::VmBoundListener;
@@ -142,7 +151,13 @@ fn open_updates(config: &HostConfig, build: &str) -> Result<Option<Updates>, Str
 /// `check_interval_hours`, until `stop` is set. Without an image to boot (an installation
 /// that bundled none), it checks at once and again every few minutes until one is in place,
 /// and tells the user what it is downloading.
-fn check_for_updates(config: HostConfig, updates: Updates, build: String, stop: Arc<AtomicBool>) {
+fn check_for_updates(
+    config: HostConfig,
+    updates: Updates,
+    build: String,
+    stop: Arc<AtomicBool>,
+    store: Arc<dyn SettingsStore>,
+) {
     let Some(settings) = config.update.clone() else {
         return;
     };
@@ -170,6 +185,13 @@ fn check_for_updates(config: HostConfig, updates: Updates, build: String, stop: 
             continue;
         }
         let waiting_for_first = no_image();
+        // Turned off in the settings, the list is not read, except for the first image,
+        // without which no Android can start. A minute later it looks again, so turning
+        // updates back on takes effect soon.
+        if !waiting_for_first && !store.machine().image_updates {
+            next = Instant::now() + SETTINGS_RECHECK;
+            continue;
+        }
         // The notice changes with every whole percent; the log gets the start only.
         let mut shown = None;
         let mut announce = |download: &Download| {
@@ -221,6 +243,34 @@ fn check_for_updates(config: HostConfig, updates: Updates, build: String, stop: 
 /// How soon the service tries again while it has no image to boot.
 const FIRST_IMAGE_RETRY: Duration = Duration::from_secs(300);
 
+/// How soon an update check that the settings turned off looks at them again.
+const SETTINGS_RECHECK: Duration = Duration::from_secs(60);
+
+/// Where the settings are kept when the configuration names no folder.
+fn default_settings_dir() -> std::path::PathBuf {
+    std::env::var_os("ProgramData")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("C:\\ProgramData"))
+        .join("DSA")
+        .join("settings")
+}
+
+/// The settings in the service's own folder. A user who has never saved settings starts
+/// from the render GPU in their own `compositor.json`, if they chose one there.
+fn settings_store(config: &HostConfig) -> Arc<dyn SettingsStore> {
+    let dir = config
+        .settings_dir
+        .clone()
+        .unwrap_or_else(default_settings_dir);
+    Arc::new(
+        FileSettings::new(dir).with_previous_render_gpu(Box::new(|sid: &str| {
+            crate::profile::local_app_data(sid)
+                .ok()
+                .and_then(|dir| previous_render_gpu(&dir))
+        })),
+    )
+}
+
 /// Serves the local API until `stop` is set, then stops every user's VM.
 pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(), String> {
     serve_with(config, build, stop, register_graphics_service_guids)
@@ -247,6 +297,7 @@ where
         config.pipe_name
     );
     let grace = Duration::from_secs(config.stop_timeout_secs + 15);
+    let store = settings_store(&config);
     let updates = match open_updates(&config, build) {
         Ok(updates) => updates,
         Err(error) => {
@@ -254,16 +305,18 @@ where
             None
         }
     };
+    let image_updates_available = updates.is_some() && config.image_updates_available();
     if let Some(updates) = &updates {
-        let (config, updates, worker_build, stop) = (
+        let (config, updates, worker_build, stop, store) = (
             config.clone(),
             updates.clone(),
             build.to_string(),
             Arc::clone(&stop),
+            Arc::clone(&store),
         );
         if let Err(error) = thread::Builder::new()
             .name("dsa-updates".into())
-            .spawn(move || check_for_updates(config, updates, worker_build, stop))
+            .spawn(move || check_for_updates(config, updates, worker_build, stop, store))
         {
             eprintln!("{build}: starting the update check failed: {error}");
         }
@@ -274,6 +327,14 @@ where
             eprintln!("{build}: program updates disabled: {error}");
             None
         }
+    };
+    let facts = ServiceFacts {
+        version: crate::VERSION.into(),
+        log_dir: config
+            .log_dir()
+            .map(|dir| dir.to_string_lossy().into_owned()),
+        program_updates_available: program.is_some() && config.program_updates_available(),
+        image_updates_available,
     };
     let program_status = Arc::new(ProgramStatus::default());
     let factory_config = config.clone();
@@ -318,8 +379,10 @@ where
                 .exists()
         })
         .unwrap_or(false);
-    let mut service =
-        HostApiService::new(androids.clone(), build).with_resize_trace_detail(resize_trace_file);
+    let mut service = HostApiService::new(androids.clone(), build)
+        .with_resize_trace_detail(resize_trace_file)
+        .with_settings(Arc::clone(&store), facts)
+        .with_host_memory(Arc::new(ProcessMemory));
     if let Some(settings) = program {
         let check_interval = config
             .update
@@ -334,6 +397,8 @@ where
             program_status,
             build,
         );
+        let switch = Arc::clone(&store);
+        updates.follow_switch(Box::new(move || switch.machine().program_updates));
         service = service.with_program_updates(updates.clone());
         let stop = Arc::clone(&stop);
         if let Err(error) = thread::Builder::new()

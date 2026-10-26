@@ -304,14 +304,19 @@ pub fn current_user_sid() -> io::Result<String> {
 
 /// The user SID in `token`, as an `S-1-...` string.
 fn token_user_sid(token: &OwnedHandle) -> io::Result<String> {
+    user_sid_of_token(token.0)
+}
+
+/// The user SID in the access token `token`, as an `S-1-...` string.
+pub(crate) fn user_sid_of_token(token: HANDLE) -> io::Result<String> {
     let mut needed = 0u32;
     // SAFETY: a size query.
-    unsafe { GetTokenInformation(token.0, TokenUser, std::ptr::null_mut(), 0, &mut needed) };
+    unsafe { GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed) };
     let mut buffer = vec![0u64; (needed as usize).div_ceil(8).max(1)];
     // SAFETY: the buffer holds at least `needed` bytes, aligned for TOKEN_USER.
     if unsafe {
         GetTokenInformation(
-            token.0,
+            token,
             TokenUser,
             buffer.as_mut_ptr().cast(),
             needed,

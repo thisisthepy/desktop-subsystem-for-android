@@ -21,6 +21,8 @@
 //! - [`uninstall`]: what uninstalling needs from `dsa-hostd`.
 //! - [`user_disk`]: each user's Android disk (Windows only).
 //! - [`account`]: the Windows account the host runs as (Windows only).
+//! - [`host_memory`]: the host processes that run a user's Android and the memory each
+//!   takes.
 //! - [`render_gpu`]: which GPU the host renderer runs on, and the setting that chooses it.
 //! - [`compositor`]: the DSA Window Manager, which owns no window and hands each task's
 //!   frames to its app's window host (Windows only).
@@ -56,6 +58,7 @@ pub mod guid;
 #[cfg(windows)]
 pub mod hcs;
 pub mod host_config;
+pub mod host_memory;
 #[cfg(windows)]
 pub mod https;
 #[cfg(windows)]

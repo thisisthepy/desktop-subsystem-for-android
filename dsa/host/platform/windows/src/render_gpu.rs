@@ -5,7 +5,11 @@
 //! asleep. The renderer uses one GPU, so a task window on a monitor that another GPU drives
 //! is still rendered by the primary monitor's GPU, and Windows moves its frames across.
 //!
-//! The user can choose another GPU in `%LOCALAPPDATA%\DSA\compositor.json`:
+//! The user chooses another GPU in the settings app, which keeps the choice in the service's
+//! settings; the window manager asks the service for it when it starts. Before the settings
+//! app, the choice was made in `%LOCALAPPDATA%\DSA\compositor.json`, and that file still
+//! counts: the service starts a user who has never saved settings from it, and the window
+//! manager reads it when it cannot reach the service.
 //!
 //! ```json
 //! { "render_gpu": "discrete" }
@@ -55,6 +59,31 @@ impl RenderGpu {
             "discrete" => RenderGpu::Discrete,
             _ => RenderGpu::Named(trimmed.to_string()),
         })
+    }
+}
+
+impl RenderGpu {
+    /// The value as the settings keep it: a keyword, or the part of a GPU's name as given.
+    pub fn value(&self) -> String {
+        match self {
+            RenderGpu::Display => "display".into(),
+            RenderGpu::Integrated => "integrated".into(),
+            RenderGpu::Discrete => "discrete".into(),
+            RenderGpu::Named(name) => name.clone(),
+        }
+    }
+}
+
+/// The render GPU a user chose in their `compositor.json`, below their local application
+/// data folder, before the settings app kept it. `None` when the file is missing or unusable.
+pub fn previous_render_gpu(local_app_data: &Path) -> Option<String> {
+    let path = default_settings_file(Some(local_app_data));
+    if !path.exists() {
+        return None;
+    }
+    match CompositorSettings::load(&path) {
+        (settings, None) => Some(settings.render_gpu.value()),
+        (_, Some(_)) => None,
     }
 }
 
@@ -113,6 +142,29 @@ impl CompositorSettings {
                     path.display()
                 )),
             ),
+        }
+    }
+}
+
+/// The render GPU the window manager uses: the one the service's settings name, or, when the
+/// service cannot be asked, the one in `compositor.json` (`file` reads it). Returns the
+/// setting and the lines to log about where it came from.
+pub fn render_gpu_setting(
+    service: Result<String, String>,
+    file: impl FnOnce() -> (CompositorSettings, Option<String>),
+) -> (RenderGpu, Vec<String>) {
+    match service.and_then(|value| RenderGpu::parse(&value)) {
+        Ok(setting) => (
+            setting,
+            vec!["render GPU setting from the DSA service's settings".into()],
+        ),
+        Err(why) => {
+            let (settings, problem) = file();
+            let mut notes = vec![format!(
+                "the DSA service's settings could not be read ({why}); using compositor.json"
+            )];
+            notes.extend(problem);
+            (settings.render_gpu, notes)
         }
     }
 }
@@ -380,6 +432,62 @@ mod tests {
         let (settings, why) = CompositorSettings::load(&dir.join("missing.json"));
         assert_eq!(settings, CompositorSettings::default());
         assert!(why.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr17_the_window_manager_takes_the_render_gpu_from_the_service() {
+        let file_read = std::cell::Cell::new(false);
+        let file = || {
+            file_read.set(true);
+            (
+                CompositorSettings {
+                    render_gpu: RenderGpu::Integrated,
+                },
+                None,
+            )
+        };
+        let (setting, notes) = render_gpu_setting(Ok("discrete".into()), file);
+        assert_eq!(setting, RenderGpu::Discrete);
+        assert!(notes[0].contains("service"));
+        assert!(!file_read.get(), "the file is not read when the service answers");
+    }
+
+    #[test]
+    fn fr17_without_the_service_the_window_manager_reads_compositor_json() {
+        let (setting, notes) = render_gpu_setting(Err("the pipe is not there".into()), || {
+            (
+                CompositorSettings {
+                    render_gpu: RenderGpu::Named("Arc".into()),
+                },
+                Some("compositor.json is not usable".into()),
+            )
+        });
+        assert_eq!(setting, RenderGpu::Named("Arc".into()));
+        assert!(notes[0].contains("the pipe is not there"));
+        assert_eq!(notes[1], "compositor.json is not usable");
+    }
+
+    #[test]
+    fn fr17_a_render_gpu_chosen_in_compositor_json_is_kept() {
+        let dir = std::env::temp_dir().join(format!("dsa-previous-gpu-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(previous_render_gpu(&dir), None, "no file, nothing chosen");
+        std::fs::create_dir_all(dir.join("DSA")).unwrap();
+        std::fs::write(
+            dir.join("DSA").join("compositor.json"),
+            r#"{"render_gpu": " RTX 4050 "}"#,
+        )
+        .unwrap();
+        assert_eq!(previous_render_gpu(&dir).as_deref(), Some("RTX 4050"));
+        std::fs::write(
+            dir.join("DSA").join("compositor.json"),
+            r#"{"render_gpu": "Discrete"}"#,
+        )
+        .unwrap();
+        assert_eq!(previous_render_gpu(&dir).as_deref(), Some("discrete"));
+        std::fs::write(dir.join("DSA").join("compositor.json"), "{").unwrap();
+        assert_eq!(previous_render_gpu(&dir), None, "an unusable file chose nothing");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
