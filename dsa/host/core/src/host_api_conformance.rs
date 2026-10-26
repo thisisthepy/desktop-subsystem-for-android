@@ -570,7 +570,11 @@ pub fn resize_and_density_reach_the_caller(make: MakeLocal<'_>) {
     let mut client = connect(&mut *connector);
     client.start().unwrap();
     client.set_task_density(9, 320).expect("the density");
-    client.resize_task(9, 1280, 720).expect("the resize");
+    // A step of a drag, and the resize that ends it.
+    client
+        .resize_task(9, 1280, 720, true)
+        .expect("the live resize");
+    client.resize_task(9, 1280, 720, false).expect("the resize");
     assert_eq!(
         *androids.of(&user).unwrap().requests.lock().unwrap(),
         vec![
@@ -581,7 +585,14 @@ pub fn resize_and_density_reach_the_caller(make: MakeLocal<'_>) {
             TaskRequest::Resize {
                 task_id: 9,
                 width: 1280,
-                height: 720
+                height: 720,
+                live: true
+            },
+            TaskRequest::Resize {
+                task_id: 9,
+                width: 1280,
+                height: 720,
+                live: false
             },
         ]
     );
