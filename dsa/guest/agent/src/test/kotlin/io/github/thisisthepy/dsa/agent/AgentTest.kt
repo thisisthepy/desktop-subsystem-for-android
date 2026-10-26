@@ -127,6 +127,66 @@ class AgentTest {
         assertEquals(listOf(1), restarted.sentMessages().map { it.taskUpdated.taskId })
     }
 
+    private fun launcherApp(packageName: String) =
+        io.github.thisisthepy.dsa.agent.tasks.LauncherApp(packageName, packageName.substringAfterLast('.'), byteArrayOf(1))
+
+    private fun startedWithApps(apps: FakeLauncherApps): Agent {
+        locator.up = daemon
+        val agent = Agent(AGENT, tasks, actions, locator, windowing, injector, scheduler, log, launcherApps = apps)
+        agent.start()
+        scheduler.runDue()
+        return agent
+    }
+
+    private fun listed(endpoint: FakeEndpoint) =
+        endpoint.sentMessages().filter { it.hasInstalledApps() }.map { it.installedApps.packageNamesList }
+
+    @Test
+    fun fr7_the_installed_apps_go_to_the_host_when_the_channel_connects() {
+        val apps = FakeLauncherApps().apply { installed = listOf(launcherApp("org.example.clock")) }
+
+        startedWithApps(apps)
+
+        assertEquals(listOf("org.example.clock"), daemon.sentMessages().filter { it.hasInstalledApp() }.map { it.installedApp.packageName })
+        assertEquals(listOf(listOf("org.example.clock")), listed(daemon))
+    }
+
+    @Test
+    fun fr7_installing_and_removing_an_app_reaches_the_host() {
+        val apps = FakeLauncherApps().apply { installed = listOf(launcherApp("org.example.clock")) }
+        startedWithApps(apps)
+
+        apps.change(listOf(launcherApp("org.example.clock"), launcherApp("org.example.maps")))
+        scheduler.runDue()
+        apps.change(listOf(launcherApp("org.example.maps")))
+        scheduler.runDue()
+
+        assertEquals(
+            listOf(
+                listOf("org.example.clock"),
+                listOf("org.example.clock", "org.example.maps"),
+                listOf("org.example.maps"),
+            ),
+            listed(daemon),
+        )
+    }
+
+    @Test
+    fun fr7_after_the_daemon_restarts_the_host_is_told_every_app_again() {
+        val apps = FakeLauncherApps().apply { installed = listOf(launcherApp("org.example.clock")) }
+        startedWithApps(apps)
+        locator.up = null
+        daemon.die()
+        scheduler.runDue()
+
+        val restarted = FakeEndpoint()
+        locator.up = restarted
+        scheduler.advance(1000)
+
+        assertTrue(restarted.sentMessages().any { it.hasInstalledApp() })
+        assertEquals(listOf(listOf("org.example.clock")), listed(restarted))
+    }
+
     @Test
     fun fr3_two_apps_launched_at_the_same_place_get_places_of_their_own() {
         tasks.running = listOf(appTask(4, bounds = defaultPlace))
