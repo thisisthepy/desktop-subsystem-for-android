@@ -6,6 +6,7 @@ import io.github.thisisthepy.dsa.agent.requests.ResizeOutcome
 import io.github.thisisthepy.dsa.agent.input.InjectedMotion
 import io.github.thisisthepy.dsa.agent.input.InputInjector
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
+import io.github.thisisthepy.dsa.agent.tasks.ScreenDp
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.tasks.TaskKind
 import io.github.thisisthepy.dsa.agent.tasks.TaskSnapshot
@@ -24,7 +25,12 @@ fun appTask(
     focused: Boolean = false,
     kind: TaskKind = TaskKind.APP,
     densityDpi: Int = 160,
-) = TaskSnapshot(taskId, kind, packageName, label, bounds, focused, densityDpi)
+    /** By default the screen size the framework derives from the bounds and the density. */
+    screenDp: ScreenDp? = (bounds.right - bounds.left).let { w ->
+        val h = bounds.bottom - bounds.top
+        ScreenDp(w * 160 / densityDpi, h * 160 / densityDpi, minOf(w, h) * 160 / densityDpi)
+    },
+) = TaskSnapshot(taskId, kind, packageName, label, bounds, focused, densityDpi, screenDp)
 
 fun decode(frame: ByteArray): Envelope = Envelope.parseFrom(frame)
 
@@ -173,6 +179,25 @@ class FakeActions : TaskActions {
     override fun resizeTask(taskId: Int, bounds: TaskBounds, densityDpi: Int?): ResizeOutcome {
         resized += Triple(taskId, bounds, densityDpi)
         return onResize(taskId, bounds, densityDpi)
+    }
+
+    /** Each step of a drag: the task, its bounds, and the screen size its configuration keeps. */
+    val resizedLive = mutableListOf<Triple<Int, TaskBounds, ScreenDp>>()
+
+    /** Each end of a drag: the task, its bounds, and the density if one was asked for. */
+    val endedLive = mutableListOf<Triple<Int, TaskBounds, Int?>>()
+
+    /** What the window manager takes of a step of a drag; by default all of it, applied later. */
+    var onResizeLive: (Int, TaskBounds, ScreenDp) -> ResizeOutcome = { _, _, _ -> ResizeOutcome.APPLIED }
+
+    override fun resizeTaskLive(taskId: Int, bounds: TaskBounds, screen: ScreenDp): ResizeOutcome {
+        resizedLive += Triple(taskId, bounds, screen)
+        return onResizeLive(taskId, bounds, screen)
+    }
+
+    override fun endLiveResize(taskId: Int, bounds: TaskBounds, densityDpi: Int?): ResizeOutcome {
+        endedLive += Triple(taskId, bounds, densityDpi)
+        return ResizeOutcome.APPLIED
     }
 }
 

@@ -30,7 +30,19 @@ data class TaskSnapshot(
     val focused: Boolean,
     /** The density the task's app draws at, in dots per inch; 0 when the framework names none. */
     val densityDpi: Int = 0,
+    /**
+     * The screen size the task's configuration gives its app; null when the framework names
+     * none. The host is not told it: it only says what to hold while a window is resized.
+     */
+    val screenDp: ScreenDp? = null,
 )
+
+/**
+ * A configuration's screen size in density-independent pixels (Configuration's
+ * screenWidthDp, screenHeightDp and smallestScreenWidthDp): what an app's resources, layout
+ * and orientation are chosen by.
+ */
+data class ScreenDp(val widthDp: Int, val heightDp: Int, val smallestWidthDp: Int)
 
 /** Reads the guest's running tasks and says when they may have changed. */
 interface TaskSource {
