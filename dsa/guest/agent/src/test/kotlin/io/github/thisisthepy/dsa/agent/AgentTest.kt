@@ -2,6 +2,7 @@ package io.github.thisisthepy.dsa.agent
 
 import android.view.MotionEvent
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
+import io.github.thisisthepy.dsa.agent.tasks.TaskKind
 import io.github.thisisthepy.dsa.agent.tasks.TaskSource
 import io.github.thisisthepy.dsa.agent.windowing.WINDOWING_MODE_FREEFORM
 import io.github.thisisthepy.dsa.control.v1.CloseTask
@@ -197,6 +198,26 @@ class AgentTest {
 
         assertTrue(actions.moved.isEmpty())
         assertEquals(listOf(4, 5), daemon.sentMessages().map { it.taskUpdated.taskId }.sorted())
+    }
+
+    @Test
+    fun fr3_the_agents_home_task_gets_no_window_is_never_moved_and_cannot_be_ended() {
+        // The agent's own home activity fills the display behind every app task.
+        val home = appTask(3, packageName = AGENT, kind = TaskKind.OTHER, bounds = TaskBounds(0, 0, 1920, 1080))
+        tasks.running = listOf(appTask(4, bounds = defaultPlace), home)
+        actions.closable = setOf(3, 4)
+        started()
+
+        daemon.deliver(Envelope.newBuilder().setCloseTask(CloseTask.newBuilder().setTaskId(3)).build().toByteArray())
+        resize(3, 800, 600)
+        density(3, 320)
+        scheduler.runDue()
+
+        assertEquals(listOf(4), daemon.sentMessages().filter { it.hasTaskUpdated() }.map { it.taskUpdated.taskId })
+        assertTrue(daemon.sentMessages().none { it.hasAppInfo() && it.appInfo.packageName == AGENT })
+        assertTrue(actions.closed.isEmpty())
+        assertTrue(actions.moved.isEmpty())
+        assertTrue(actions.resized.isEmpty())
     }
 
     private fun resize(taskId: Int, width: Int, height: Int) = daemon.deliver(
