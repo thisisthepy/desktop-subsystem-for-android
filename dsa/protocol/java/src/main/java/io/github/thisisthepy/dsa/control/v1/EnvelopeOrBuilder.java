@@ -205,5 +205,38 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.ImeCursor getImeCursor();
 
+  /**
+   * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+   * @return Whether the screenState field is set.
+   */
+  boolean hasScreenState();
+  /**
+   * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+   * @return The screenState.
+   */
+  io.github.thisisthepy.dsa.control.v1.ScreenState getScreenState();
+
+  /**
+   * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+   * @return Whether the powerState field is set.
+   */
+  boolean hasPowerState();
+  /**
+   * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+   * @return The powerState.
+   */
+  io.github.thisisthepy.dsa.control.v1.PowerState getPowerState();
+
+  /**
+   * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+   * @return Whether the deviceIdle field is set.
+   */
+  boolean hasDeviceIdle();
+  /**
+   * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+   * @return The deviceIdle.
+   */
+  io.github.thisisthepy.dsa.control.v1.DeviceIdle getDeviceIdle();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

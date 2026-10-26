@@ -231,6 +231,9 @@ impl UserAndroid for UpdatingAndroid {
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
         UserAndroid::request(&*self.session, request)
     }
+    fn freeze(&self) -> Result<(), TaskRequestError> {
+        UserAndroid::freeze(&*self.session)
+    }
 
     fn start(&self) {
         if self.no_image_yet() {

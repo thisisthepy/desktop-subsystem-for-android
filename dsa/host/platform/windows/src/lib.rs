@@ -12,6 +12,7 @@
 //! - [`guid`]: the VM and service IDs those sockets are addressed by.
 //! - [`vm_listener`]: a control channel listener that follows the VM's ID across restarts.
 //! - [`host_config`]: the configuration file `dsa-hostd` reads.
+//! - [`power`]: the computer's power, which each guest's battery state follows.
 //! - [`service`]: the local API and one VM per user behind it, as `dsa-hostd` serves them
 //!   (Windows only).
 //! - [`setup`]: running a downloaded setup file apart from the service, to update DSA
@@ -62,6 +63,7 @@ pub mod https;
 pub mod hvsocket;
 #[cfg(windows)]
 pub mod pipe;
+pub mod power;
 #[cfg(windows)]
 pub mod profile;
 pub mod render_gpu;

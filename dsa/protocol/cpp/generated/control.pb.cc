@@ -308,6 +308,49 @@ struct ImeCursorDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ImeCursorDefaultTypeInternal _ImeCursor_default_instance_;
+PROTOBUF_CONSTEXPR ScreenState::ScreenState(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.on_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct ScreenStateDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ScreenStateDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ScreenStateDefaultTypeInternal() {}
+  union {
+    ScreenState _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ScreenStateDefaultTypeInternal _ScreenState_default_instance_;
+PROTOBUF_CONSTEXPR PowerState::PowerState(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.battery_percent_)*/0u
+  , /*decltype(_impl_.ac_online_)*/false
+  , /*decltype(_impl_.battery_present_)*/false
+  , /*decltype(_impl_.charging_)*/false
+  , /*decltype(_impl_.power_saver_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct PowerStateDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR PowerStateDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~PowerStateDefaultTypeInternal() {}
+  union {
+    PowerState _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 PowerStateDefaultTypeInternal _PowerState_default_instance_;
+PROTOBUF_CONSTEXPR DeviceIdle::DeviceIdle(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.idle_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct DeviceIdleDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR DeviceIdleDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~DeviceIdleDefaultTypeInternal() {}
+  union {
+    DeviceIdle _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DeviceIdleDefaultTypeInternal _DeviceIdle_default_instance_;
 PROTOBUF_CONSTEXPR Envelope::Envelope(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.body_)*/{}
@@ -5657,6 +5700,651 @@ std::string ImeCursor::GetTypeName() const {
 
 // ===================================================================
 
+class ScreenState::_Internal {
+ public:
+};
+
+ScreenState::ScreenState(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ScreenState)
+}
+ScreenState::ScreenState(const ScreenState& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ScreenState* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.on_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _this->_impl_.on_ = from._impl_.on_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ScreenState)
+}
+
+inline void ScreenState::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.on_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+ScreenState::~ScreenState() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ScreenState)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ScreenState::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void ScreenState::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ScreenState::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ScreenState)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.on_ = false;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ScreenState::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // bool on = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.on_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ScreenState::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ScreenState)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // bool on = 1;
+  if (this->_internal_on() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(1, this->_internal_on(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ScreenState)
+  return target;
+}
+
+size_t ScreenState::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ScreenState)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // bool on = 1;
+  if (this->_internal_on() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ScreenState::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ScreenState*>(
+      &from));
+}
+
+void ScreenState::MergeFrom(const ScreenState& from) {
+  ScreenState* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ScreenState)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_on() != 0) {
+    _this->_internal_set_on(from._internal_on());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ScreenState::CopyFrom(const ScreenState& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ScreenState)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ScreenState::IsInitialized() const {
+  return true;
+}
+
+void ScreenState::InternalSwap(ScreenState* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_.on_, other->_impl_.on_);
+}
+
+std::string ScreenState::GetTypeName() const {
+  return "dsa.control.v1.ScreenState";
+}
+
+
+// ===================================================================
+
+class PowerState::_Internal {
+ public:
+};
+
+PowerState::PowerState(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.PowerState)
+}
+PowerState::PowerState(const PowerState& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  PowerState* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.battery_percent_){}
+    , decltype(_impl_.ac_online_){}
+    , decltype(_impl_.battery_present_){}
+    , decltype(_impl_.charging_){}
+    , decltype(_impl_.power_saver_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.battery_percent_, &from._impl_.battery_percent_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.power_saver_) -
+    reinterpret_cast<char*>(&_impl_.battery_percent_)) + sizeof(_impl_.power_saver_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.PowerState)
+}
+
+inline void PowerState::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.battery_percent_){0u}
+    , decltype(_impl_.ac_online_){false}
+    , decltype(_impl_.battery_present_){false}
+    , decltype(_impl_.charging_){false}
+    , decltype(_impl_.power_saver_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+PowerState::~PowerState() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.PowerState)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void PowerState::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void PowerState::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void PowerState::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.PowerState)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&_impl_.battery_percent_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.power_saver_) -
+      reinterpret_cast<char*>(&_impl_.battery_percent_)) + sizeof(_impl_.power_saver_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* PowerState::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // bool ac_online = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.ac_online_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool battery_present = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.battery_present_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 battery_percent = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.battery_percent_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool charging = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.charging_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool power_saver = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 40)) {
+          _impl_.power_saver_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* PowerState::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.PowerState)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // bool ac_online = 1;
+  if (this->_internal_ac_online() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(1, this->_internal_ac_online(), target);
+  }
+
+  // bool battery_present = 2;
+  if (this->_internal_battery_present() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(2, this->_internal_battery_present(), target);
+  }
+
+  // uint32 battery_percent = 3;
+  if (this->_internal_battery_percent() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(3, this->_internal_battery_percent(), target);
+  }
+
+  // bool charging = 4;
+  if (this->_internal_charging() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(4, this->_internal_charging(), target);
+  }
+
+  // bool power_saver = 5;
+  if (this->_internal_power_saver() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(5, this->_internal_power_saver(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.PowerState)
+  return target;
+}
+
+size_t PowerState::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.PowerState)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // uint32 battery_percent = 3;
+  if (this->_internal_battery_percent() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_battery_percent());
+  }
+
+  // bool ac_online = 1;
+  if (this->_internal_ac_online() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // bool battery_present = 2;
+  if (this->_internal_battery_present() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // bool charging = 4;
+  if (this->_internal_charging() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // bool power_saver = 5;
+  if (this->_internal_power_saver() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void PowerState::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const PowerState*>(
+      &from));
+}
+
+void PowerState::MergeFrom(const PowerState& from) {
+  PowerState* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.PowerState)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_battery_percent() != 0) {
+    _this->_internal_set_battery_percent(from._internal_battery_percent());
+  }
+  if (from._internal_ac_online() != 0) {
+    _this->_internal_set_ac_online(from._internal_ac_online());
+  }
+  if (from._internal_battery_present() != 0) {
+    _this->_internal_set_battery_present(from._internal_battery_present());
+  }
+  if (from._internal_charging() != 0) {
+    _this->_internal_set_charging(from._internal_charging());
+  }
+  if (from._internal_power_saver() != 0) {
+    _this->_internal_set_power_saver(from._internal_power_saver());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void PowerState::CopyFrom(const PowerState& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.PowerState)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool PowerState::IsInitialized() const {
+  return true;
+}
+
+void PowerState::InternalSwap(PowerState* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(PowerState, _impl_.power_saver_)
+      + sizeof(PowerState::_impl_.power_saver_)
+      - PROTOBUF_FIELD_OFFSET(PowerState, _impl_.battery_percent_)>(
+          reinterpret_cast<char*>(&_impl_.battery_percent_),
+          reinterpret_cast<char*>(&other->_impl_.battery_percent_));
+}
+
+std::string PowerState::GetTypeName() const {
+  return "dsa.control.v1.PowerState";
+}
+
+
+// ===================================================================
+
+class DeviceIdle::_Internal {
+ public:
+};
+
+DeviceIdle::DeviceIdle(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.DeviceIdle)
+}
+DeviceIdle::DeviceIdle(const DeviceIdle& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  DeviceIdle* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.idle_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _this->_impl_.idle_ = from._impl_.idle_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.DeviceIdle)
+}
+
+inline void DeviceIdle::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.idle_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+DeviceIdle::~DeviceIdle() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.DeviceIdle)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void DeviceIdle::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void DeviceIdle::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void DeviceIdle::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.DeviceIdle)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.idle_ = false;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* DeviceIdle::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // bool idle = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.idle_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* DeviceIdle::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.DeviceIdle)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // bool idle = 1;
+  if (this->_internal_idle() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(1, this->_internal_idle(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.DeviceIdle)
+  return target;
+}
+
+size_t DeviceIdle::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.DeviceIdle)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // bool idle = 1;
+  if (this->_internal_idle() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void DeviceIdle::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const DeviceIdle*>(
+      &from));
+}
+
+void DeviceIdle::MergeFrom(const DeviceIdle& from) {
+  DeviceIdle* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.DeviceIdle)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_idle() != 0) {
+    _this->_internal_set_idle(from._internal_idle());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void DeviceIdle::CopyFrom(const DeviceIdle& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.DeviceIdle)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool DeviceIdle::IsInitialized() const {
+  return true;
+}
+
+void DeviceIdle::InternalSwap(DeviceIdle* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_.idle_, other->_impl_.idle_);
+}
+
+std::string DeviceIdle::GetTypeName() const {
+  return "dsa.control.v1.DeviceIdle";
+}
+
+
+// ===================================================================
+
 class Envelope::_Internal {
  public:
   static const ::dsa::control::v1::Hello& hello(const Envelope* msg);
@@ -5677,6 +6365,9 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::ImeComposition& ime_composition(const Envelope* msg);
   static const ::dsa::control::v1::ImeCommit& ime_commit(const Envelope* msg);
   static const ::dsa::control::v1::ImeCursor& ime_cursor(const Envelope* msg);
+  static const ::dsa::control::v1::ScreenState& screen_state(const Envelope* msg);
+  static const ::dsa::control::v1::PowerState& power_state(const Envelope* msg);
+  static const ::dsa::control::v1::DeviceIdle& device_idle(const Envelope* msg);
 };
 
 const ::dsa::control::v1::Hello&
@@ -5750,6 +6441,18 @@ Envelope::_Internal::ime_commit(const Envelope* msg) {
 const ::dsa::control::v1::ImeCursor&
 Envelope::_Internal::ime_cursor(const Envelope* msg) {
   return *msg->_impl_.body_.ime_cursor_;
+}
+const ::dsa::control::v1::ScreenState&
+Envelope::_Internal::screen_state(const Envelope* msg) {
+  return *msg->_impl_.body_.screen_state_;
+}
+const ::dsa::control::v1::PowerState&
+Envelope::_Internal::power_state(const Envelope* msg) {
+  return *msg->_impl_.body_.power_state_;
+}
+const ::dsa::control::v1::DeviceIdle&
+Envelope::_Internal::device_idle(const Envelope* msg) {
+  return *msg->_impl_.body_.device_idle_;
 }
 void Envelope::set_allocated_hello(::dsa::control::v1::Hello* hello) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -6021,6 +6724,51 @@ void Envelope::set_allocated_ime_cursor(::dsa::control::v1::ImeCursor* ime_curso
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.ime_cursor)
 }
+void Envelope::set_allocated_screen_state(::dsa::control::v1::ScreenState* screen_state) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (screen_state) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(screen_state);
+    if (message_arena != submessage_arena) {
+      screen_state = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, screen_state, submessage_arena);
+    }
+    set_has_screen_state();
+    _impl_.body_.screen_state_ = screen_state;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.screen_state)
+}
+void Envelope::set_allocated_power_state(::dsa::control::v1::PowerState* power_state) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (power_state) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(power_state);
+    if (message_arena != submessage_arena) {
+      power_state = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, power_state, submessage_arena);
+    }
+    set_has_power_state();
+    _impl_.body_.power_state_ = power_state;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.power_state)
+}
+void Envelope::set_allocated_device_idle(::dsa::control::v1::DeviceIdle* device_idle) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (device_idle) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(device_idle);
+    if (message_arena != submessage_arena) {
+      device_idle = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, device_idle, submessage_arena);
+    }
+    set_has_device_idle();
+    _impl_.body_.device_idle_ = device_idle;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.device_idle)
+}
 Envelope::Envelope(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
@@ -6126,6 +6874,21 @@ Envelope::Envelope(const Envelope& from)
     case kImeCursor: {
       _this->_internal_mutable_ime_cursor()->::dsa::control::v1::ImeCursor::MergeFrom(
           from._internal_ime_cursor());
+      break;
+    }
+    case kScreenState: {
+      _this->_internal_mutable_screen_state()->::dsa::control::v1::ScreenState::MergeFrom(
+          from._internal_screen_state());
+      break;
+    }
+    case kPowerState: {
+      _this->_internal_mutable_power_state()->::dsa::control::v1::PowerState::MergeFrom(
+          from._internal_power_state());
+      break;
+    }
+    case kDeviceIdle: {
+      _this->_internal_mutable_device_idle()->::dsa::control::v1::DeviceIdle::MergeFrom(
+          from._internal_device_idle());
       break;
     }
     case BODY_NOT_SET: {
@@ -6275,6 +7038,24 @@ void Envelope::clear_body() {
     case kImeCursor: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.ime_cursor_;
+      }
+      break;
+    }
+    case kScreenState: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.screen_state_;
+      }
+      break;
+    }
+    case kPowerState: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.power_state_;
+      }
+      break;
+    }
+    case kDeviceIdle: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.device_idle_;
       }
       break;
     }
@@ -6446,6 +7227,30 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.ScreenState screen_state = 40;
+      case 40:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 66)) {
+          ptr = ctx->ParseMessage(_internal_mutable_screen_state(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.PowerState power_state = 41;
+      case 41:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 74)) {
+          ptr = ctx->ParseMessage(_internal_mutable_power_state(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.DeviceIdle device_idle = 42;
+      case 42:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 82)) {
+          ptr = ctx->ParseMessage(_internal_mutable_device_idle(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -6601,6 +7406,27 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::ime_cursor(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.ScreenState screen_state = 40;
+  if (_internal_has_screen_state()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(40, _Internal::screen_state(this),
+        _Internal::screen_state(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.PowerState power_state = 41;
+  if (_internal_has_power_state()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(41, _Internal::power_state(this),
+        _Internal::power_state(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.DeviceIdle device_idle = 42;
+  if (_internal_has_device_idle()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(42, _Internal::device_idle(this),
+        _Internal::device_idle(this).GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -6744,6 +7570,27 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.ime_cursor_);
       break;
     }
+    // .dsa.control.v1.ScreenState screen_state = 40;
+    case kScreenState: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.screen_state_);
+      break;
+    }
+    // .dsa.control.v1.PowerState power_state = 41;
+    case kPowerState: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.power_state_);
+      break;
+    }
+    // .dsa.control.v1.DeviceIdle device_idle = 42;
+    case kDeviceIdle: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.device_idle_);
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -6860,6 +7707,21 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_ime_cursor());
       break;
     }
+    case kScreenState: {
+      _this->_internal_mutable_screen_state()->::dsa::control::v1::ScreenState::MergeFrom(
+          from._internal_screen_state());
+      break;
+    }
+    case kPowerState: {
+      _this->_internal_mutable_power_state()->::dsa::control::v1::PowerState::MergeFrom(
+          from._internal_power_state());
+      break;
+    }
+    case kDeviceIdle: {
+      _this->_internal_mutable_device_idle()->::dsa::control::v1::DeviceIdle::MergeFrom(
+          from._internal_device_idle());
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -6970,6 +7832,18 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::ImeCommit >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::ImeCursor*
 Arena::CreateMaybeMessage< ::dsa::control::v1::ImeCursor >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::ImeCursor >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ScreenState*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ScreenState >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ScreenState >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::PowerState*
+Arena::CreateMaybeMessage< ::dsa::control::v1::PowerState >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::PowerState >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::DeviceIdle*
+Arena::CreateMaybeMessage< ::dsa::control::v1::DeviceIdle >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::DeviceIdle >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::Envelope*
 Arena::CreateMaybeMessage< ::dsa::control::v1::Envelope >(Arena* arena) {

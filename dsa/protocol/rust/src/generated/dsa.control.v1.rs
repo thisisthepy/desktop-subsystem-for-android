@@ -268,12 +268,51 @@ pub struct ImeCursor {
     #[prost(message, optional, tag = "2")]
     pub cursor: ::core::option::Option<Rect>,
 }
+/// Host to guest: whether the guest's screen is on. The host turns it off once no task window
+/// has been shown (every window closed or minimized) for the time the host is configured to
+/// wait, and on again as soon as a window is shown. While it is off the agent turns the
+/// guest's display off and puts the device into Doze; when it is on again the agent wakes the
+/// device and the display. The agent takes the screen to be on when it connects; the host
+/// sends this on each change after that.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ScreenState {
+    #[prost(bool, tag = "1")]
+    pub on: bool,
+}
+/// Host to guest: the host computer's power, which the agent makes the guest's battery state
+/// match. Sent once after the connection opens, when the host knows it, and on each change.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PowerState {
+    /// Whether the host runs on AC power; false while it runs on its battery.
+    #[prost(bool, tag = "1")]
+    pub ac_online: bool,
+    /// Whether the host has a battery. A host without one is reported to the guest as a full
+    /// battery on AC power.
+    #[prost(bool, tag = "2")]
+    pub battery_present: bool,
+    /// The battery's charge, from 0 to 100.
+    #[prost(uint32, tag = "3")]
+    pub battery_percent: u32,
+    /// Whether the battery is charging.
+    #[prost(bool, tag = "4")]
+    pub charging: bool,
+    /// Whether the host's battery saver is on; the guest's battery saver follows it.
+    #[prost(bool, tag = "5")]
+    pub power_saver: bool,
+}
+/// Guest to host, from the agent: whether the guest's device is in Doze (the device idle
+/// controller's deep idle state). Sent once after the connection opens and on each change.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeviceIdle {
+    #[prost(bool, tag = "1")]
+    pub idle: bool,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 40, 41, 42"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -317,6 +356,12 @@ pub mod envelope {
         ImeCommit(super::ImeCommit),
         #[prost(message, tag = "19")]
         ImeCursor(super::ImeCursor),
+        #[prost(message, tag = "40")]
+        ScreenState(super::ScreenState),
+        #[prost(message, tag = "41")]
+        PowerState(super::PowerState),
+        #[prost(message, tag = "42")]
+        DeviceIdle(super::DeviceIdle),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.

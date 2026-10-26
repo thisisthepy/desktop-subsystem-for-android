@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid, UserAndroids};
+use dsa_host_core::power::PowerHub;
 use dsa_host_core::session::Session;
 use dsa_host_core::update::program_service::{
     ProgramStatus, ProgramUpdates, Timing, WithProgramStatus,
@@ -53,11 +54,13 @@ pub struct Updates {
 }
 
 /// The user's Android: their data disk, VM and session, created on their first request.
+/// With `power`, the session hears the computer's power from it.
 pub fn create_user_android(
     config: &HostConfig,
     build: &str,
     sid: &str,
     updates: Option<&Updates>,
+    power: Option<&PowerHub>,
 ) -> Result<Arc<dyn UserAndroid>, String> {
     let user = config.user_vm(sid).map_err(|e| e.to_string())?;
     prepare_user_disk_folder(&user.config.data_disk, !user.disk_in_profile)?;
@@ -107,10 +110,14 @@ pub fn create_user_android(
     let session_config = config.session_config();
     let handshake = ControlHandshake::new(build, session_config.connect_timeout);
     let session = Session::new(launcher, Box::new(listener), handshake, session_config);
+    let session = Arc::new(session);
+    if let Some(power) = power {
+        power.attach(&session);
+    }
     Ok(match updates {
-        None => Arc::new(session),
+        None => session as Arc<dyn UserAndroid>,
         Some(updates) => Arc::new(UpdatingAndroid {
-            session: Arc::new(session),
+            session,
             store: Arc::clone(&updates.store),
             notices: Arc::clone(&updates.notices),
             boot_timeout: updates.boot_timeout,
@@ -276,12 +283,29 @@ where
         }
     };
     let program_status = Arc::new(ProgramStatus::default());
+    // Every user's Android follows the computer's power.
+    let power = Arc::new(PowerHub::new());
+    {
+        let (power, stop) = (Arc::clone(&power), Arc::clone(&stop));
+        if let Err(error) = thread::Builder::new()
+            .name("dsa-power".into())
+            .spawn(move || crate::power::follow(power, stop))
+        {
+            eprintln!("{build}: following the computer's power failed: {error}");
+        }
+    }
     let factory_config = config.clone();
     let factory_build = build.to_string();
     let factory_status = program.as_ref().map(|_| Arc::clone(&program_status));
     let androids = Arc::new(PerUser::new(move |sid: &str| {
         let android = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            create_user_android(&factory_config, &factory_build, sid, updates.as_ref())
+            create_user_android(
+                &factory_config,
+                &factory_build,
+                sid,
+                updates.as_ref(),
+                Some(power.as_ref()),
+            )
         })) {
             Ok(res) => res,
             Err(payload) => {

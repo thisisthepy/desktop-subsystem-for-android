@@ -15,5 +15,6 @@
         <permission name="android.permission.INTERNAL_SYSTEM_WINDOW" />
         <permission name="android.permission.INJECT_EVENTS" />
         <permission name="android.permission.QUERY_ALL_PACKAGES" />
+        <permission name="android.permission.DEVICE_POWER" />
     </privapp-permissions>
 </permissions>

@@ -11,9 +11,19 @@
 //! subscribers. When the guest goes away, every task it had is removed.
 //!
 //! The states are those of the lifecycle: `Stopped`, `Starting`, `Active`, `Dozing`,
-//! `Frozen` and `Stopping`. This module moves between `Stopped`, `Starting`, `Active` and
-//! `Stopping`. Entering `Dozing` and `Frozen` belongs to the lifecycle policy, which is not
-//! implemented yet; a session in either state can still be stopped.
+//! `Frozen` and `Stopping`. While the guest is up the session follows the lifecycle:
+//!
+//! - Once no task window has been shown ([`TaskRequest::WindowsShown`]) for
+//!   [`SessionConfig::doze_delay`], the session tells the guest its screen is off. The agent
+//!   puts the device into Doze and says so, and the session becomes `Dozing`.
+//! - As soon as a window is shown, the session tells the guest its screen is on and becomes
+//!   `Active` at once, without waiting for the guest.
+//! - Freezing stops the guest's processes through the launcher. It happens only when asked
+//!   for ([`Session::freeze`]) or, when [`SessionConfig::freeze_after`] is set, after the
+//!   session has been `Dozing` that long; by default it never happens. A shown window thaws
+//!   the guest and wakes it.
+//! - The host's power ([`Session::set_power`]) goes to the guest whenever it changes and
+//!   each time the agent connects.
 
 use std::fmt;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
@@ -28,6 +38,7 @@ use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::PointerEvent;
 use crate::keys::KeyEvent;
+use crate::power::PowerState;
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskTable, TaskWatch};
 
 /// Where the session is in its life.
@@ -162,6 +173,18 @@ pub trait GuestLauncher: Send + 'static {
     fn vm_id(&self) -> Option<String> {
         None
     }
+
+    /// Stops every process of the running guest where it is, keeping its memory, until
+    /// [`thaw`](Self::thaw). The session asks only when freezing was chosen. A launcher that
+    /// cannot freeze its guest says so, and the guest stays as it was.
+    fn freeze(&mut self) -> Result<(), String> {
+        Err("this kind of guest cannot be frozen".into())
+    }
+
+    /// Lets a frozen guest's processes run again.
+    fn thaw(&mut self) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// Checks a new control channel connection before the session trusts it.
@@ -204,13 +227,25 @@ pub struct SessionConfig {
     pub connect_timeout: Duration,
     /// How long the launcher may take to end every guest process.
     pub stop_timeout: Duration,
+    /// How long no task window may be shown before the guest's screen goes off and the
+    /// guest goes into Doze.
+    pub doze_delay: Duration,
+    /// How long the guest stays in Doze before it is frozen. `None`, the default, never
+    /// freezes it on its own: a frozen guest gets no notifications, alarms or widget
+    /// updates.
+    pub freeze_after: Option<Duration>,
 }
+
+/// The default of [`SessionConfig::doze_delay`].
+pub const DEFAULT_DOZE_DELAY: Duration = Duration::from_secs(30);
 
 impl Default for SessionConfig {
     fn default() -> Self {
         SessionConfig {
             connect_timeout: Duration::from_secs(120),
             stop_timeout: Duration::from_secs(30),
+            doze_delay: DEFAULT_DOZE_DELAY,
+            freeze_after: None,
         }
     }
 }
@@ -224,6 +259,8 @@ pub enum SessionError {
     Transport(TransportError),
     /// The session's worker has ended.
     Gone,
+    /// The guest could not be frozen; the detail says why.
+    FreezeFailed(String),
 }
 
 impl fmt::Display for SessionError {
@@ -232,6 +269,7 @@ impl fmt::Display for SessionError {
             SessionError::NotActive(state) => write!(f, "the session is {state}, not Active"),
             SessionError::Transport(error) => write!(f, "control channel: {error}"),
             SessionError::Gone => write!(f, "the session has shut down"),
+            SessionError::FreezeFailed(why) => write!(f, "the guest was not frozen: {why}"),
         }
     }
 }
@@ -243,6 +281,12 @@ enum Command {
     Stop,
     Send(Vec<u8>, Sender<Result<(), SessionError>>),
     Shutdown,
+    /// Whether any task window is shown.
+    WindowsShown(bool),
+    /// The host's power changed.
+    Power(PowerState),
+    /// Freeze the guest now.
+    Freeze(Sender<Result<(), SessionError>>),
 }
 
 struct Shared {
@@ -305,12 +349,13 @@ impl Shared {
     }
 
     /// Sends `frame` through the connection's second handle. `None` when there is none, or
-    /// the session is not active, so the worker must decide.
+    /// the guest cannot take frames now (it is not running, or it is frozen), so the worker
+    /// must decide. A guest in Doze takes them: Android wakes for what it is sent.
     fn send_direct(&self, frame: &[u8]) -> Option<Result<(), SessionError>> {
         let mut sender = self.sender.lock().unwrap_or_else(|e| e.into_inner());
         let sender = sender.as_mut()?;
         let state = self.status.lock().unwrap_or_else(|e| e.into_inner()).0;
-        if state != SessionState::Active {
+        if !matches!(state, SessionState::Active | SessionState::Dozing) {
             return None;
         }
         Some(sender.send(frame).map_err(SessionError::Transport))
@@ -365,6 +410,12 @@ impl Session {
             connection: None,
             secret: None,
             shutting_down: false,
+            shown: false,
+            hidden_since: Instant::now(),
+            screen_on: true,
+            dozing_since: None,
+            power: None,
+            power_pending: false,
         };
         let worker = thread::Builder::new()
             .name("dsa-session".into())
@@ -483,10 +534,35 @@ impl Session {
             .tasks()
     }
 
+    /// Says whether any task window is shown. The session keeps the latest word in every
+    /// state, so a guest that starts with no window shown goes into Doze after the delay.
+    pub fn windows_shown(&self, shown: bool) -> Result<(), SessionError> {
+        self.commands
+            .send(Command::WindowsShown(shown))
+            .map_err(|_| SessionError::Gone)
+    }
+
+    /// Records the host's power, which the guest is told now if it is up, and each time its
+    /// agent connects.
+    pub fn set_power(&self, state: PowerState) {
+        let _ = self.commands.send(Command::Power(state));
+    }
+
+    /// Freezes the guest now, as when the user chooses it. It stays frozen until a task
+    /// window is shown or it is stopped. Needs a running guest.
+    pub fn freeze(&self) -> Result<(), SessionError> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.commands
+            .send(Command::Freeze(reply_tx))
+            .map_err(|_| SessionError::Gone)?;
+        reply_rx.recv().map_err(|_| SessionError::Gone)?
+    }
+
     /// Asks the guest to close, resize or rescale a task, or to launch an app. Needs an
-    /// active session.
+    /// active session, except for the word on shown windows, which is always taken.
     pub fn request(&self, request: TaskRequest) -> Result<(), SessionError> {
         let body = match request {
+            TaskRequest::WindowsShown { shown } => return self.windows_shown(shown),
             TaskRequest::Close { task_id } => Body::CloseTask(control::CloseTask { task_id }),
             TaskRequest::Launch { package_name } => {
                 Body::LaunchApp(control::LaunchApp { package_name })
@@ -564,6 +640,19 @@ struct Worker {
     /// The running boot's secret, made anew at each start.
     secret: Option<BootSecret>,
     shutting_down: bool,
+    /// Whether any task window is shown, as last said. Kept across restarts.
+    shown: bool,
+    /// Since when no window has been shown, or since the agent connected if later.
+    hidden_since: Instant,
+    /// Whether the guest was last told its screen is on. An agent that connects takes it to
+    /// be on.
+    screen_on: bool,
+    /// Since when the session has been `Dozing`.
+    dozing_since: Option<Instant>,
+    /// The host's power, as last recorded.
+    power: Option<PowerState>,
+    /// Set when the power changed while the guest was frozen, so it is told after the thaw.
+    power_pending: bool,
 }
 
 impl Worker {
@@ -585,9 +674,11 @@ impl Worker {
                     match self.commands.recv() {
                         Ok(Command::Start) => self.start(),
                         Ok(Command::Stop) => {}
-                        Ok(Command::Send(_, reply)) => {
+                        Ok(Command::Send(_, reply)) | Ok(Command::Freeze(reply)) => {
                             let _ = reply.send(Err(SessionError::NotActive(SessionState::Stopped)));
                         }
+                        Ok(Command::WindowsShown(shown)) => self.set_shown(shown),
+                        Ok(Command::Power(state)) => self.set_power(state),
                         Ok(Command::Shutdown) | Err(_) => return,
                     }
                 }
@@ -599,10 +690,12 @@ impl Worker {
                     match self.commands.recv() {
                         Ok(Command::Stop) => self.stop(StopReason::Requested),
                         Ok(Command::Start) => {}
-                        Ok(Command::Send(_, reply)) => {
+                        Ok(Command::Send(_, reply)) | Ok(Command::Freeze(reply)) => {
                             let _ =
                                 reply.send(Err(SessionError::NotActive(SessionState::Stopping)));
                         }
+                        Ok(Command::WindowsShown(shown)) => self.set_shown(shown),
+                        Ok(Command::Power(state)) => self.set_power(state),
                         Ok(Command::Shutdown) | Err(_) => return,
                     }
                 }
@@ -627,19 +720,180 @@ impl Worker {
                 false
             }
             Command::Send(frame, reply) => {
+                // Something for a frozen guest, such as input in a window it still shows,
+                // thaws it first.
+                if self.state() == SessionState::Frozen {
+                    self.wake();
+                }
                 let state = self.state();
                 let result = match self.shared.send_direct(&frame) {
                     Some(result) => result,
                     None => match (state, self.connection.as_mut()) {
-                        (SessionState::Active, Some(connection)) => {
+                        (SessionState::Active | SessionState::Dozing, Some(connection)) => {
                             connection.send(&frame).map_err(SessionError::Transport)
                         }
                         _ => Err(SessionError::NotActive(state)),
                     },
                 };
                 let _ = reply.send(result);
+                self.running()
+            }
+            Command::WindowsShown(shown) => {
+                self.set_shown(shown);
+                self.running()
+            }
+            Command::Power(state) => {
+                self.set_power(state);
                 true
             }
+            Command::Freeze(reply) => {
+                let _ = reply.send(self.freeze_now());
+                true
+            }
+        }
+    }
+
+    fn running(&self) -> bool {
+        matches!(
+            self.state(),
+            SessionState::Active | SessionState::Dozing | SessionState::Frozen
+        )
+    }
+
+    /// Sends a message of the lifecycle to the guest, in any running state. A frame that does
+    /// not go out is logged; a lost channel is noticed by the next read.
+    fn send_body(&mut self, body: Body) {
+        let frame = dsa_protocol::encode(&control::Envelope { body: Some(body) });
+        let direct = {
+            let mut sender = self.shared.sender.lock().unwrap_or_else(|e| e.into_inner());
+            sender.as_mut().map(|sender| sender.send(&frame))
+        };
+        let result = match direct {
+            Some(result) => result,
+            None => match self.connection.as_mut() {
+                Some(connection) => connection.send(&frame),
+                None => return,
+            },
+        };
+        if let Err(error) = result {
+            eprintln!("control channel: could not tell the guest of its screen or power: {error}");
+        }
+    }
+
+    /// Takes the word on shown windows. A window shown again wakes a running guest.
+    fn set_shown(&mut self, shown: bool) {
+        if shown == self.shown {
+            return;
+        }
+        self.shown = shown;
+        if !shown {
+            self.hidden_since = Instant::now();
+        } else if self.running() {
+            self.wake();
+        }
+    }
+
+    /// Thaws a frozen guest, turns its screen on, and makes the session `Active`. The session
+    /// does not wait for the guest to leave Doze: the screen coming on is what ends it.
+    fn wake(&mut self) {
+        if self.state() == SessionState::Frozen {
+            if let Err(why) = self.launcher.thaw() {
+                self.stop(StopReason::GuestExited {
+                    why: format!("the frozen guest could not be resumed: {why}"),
+                    diagnostics: None,
+                });
+                return;
+            }
+            if std::mem::take(&mut self.power_pending) {
+                if let Some(power) = self.power {
+                    self.send_body(Body::PowerState(power.to_control()));
+                }
+            }
+        }
+        if !self.screen_on {
+            self.screen_on = true;
+            self.send_body(Body::ScreenState(control::ScreenState { on: true }));
+        }
+        self.dozing_since = None;
+        if matches!(
+            self.state(),
+            SessionState::Dozing | SessionState::Frozen
+        ) {
+            self.shared.set(SessionState::Active, None);
+        }
+    }
+
+    /// Records the host's power and tells a guest that can hear it.
+    fn set_power(&mut self, state: PowerState) {
+        if self.power == Some(state) {
+            return;
+        }
+        self.power = Some(state);
+        match self.state() {
+            SessionState::Active | SessionState::Dozing => {
+                self.send_body(Body::PowerState(state.to_control()))
+            }
+            SessionState::Frozen => self.power_pending = true,
+            _ => {}
+        }
+    }
+
+    /// Freezes the running guest, turning its screen off first so it wakes as a device whose
+    /// screen comes on.
+    fn freeze_now(&mut self) -> Result<(), SessionError> {
+        match self.state() {
+            SessionState::Frozen => return Ok(()),
+            SessionState::Active | SessionState::Dozing => {}
+            other => return Err(SessionError::NotActive(other)),
+        }
+        if self.screen_on {
+            self.screen_on = false;
+            self.send_body(Body::ScreenState(control::ScreenState { on: false }));
+        }
+        self.launcher.freeze().map_err(SessionError::FreezeFailed)?;
+        self.dozing_since = None;
+        self.shared.set(SessionState::Frozen, None);
+        Ok(())
+    }
+
+    /// Moves the lifecycle on with time: the screen goes off once no window has been shown
+    /// for the doze delay, and a guest in Doze is frozen after `freeze_after`, when set.
+    fn tick_lifecycle(&mut self) {
+        let now = Instant::now();
+        match self.state() {
+            SessionState::Active
+                if !self.shown
+                    && self.screen_on
+                    && now.duration_since(self.hidden_since) >= self.config.doze_delay =>
+            {
+                self.screen_on = false;
+                self.send_body(Body::ScreenState(control::ScreenState { on: false }));
+            }
+            SessionState::Dozing => {
+                let (Some(after), Some(since)) = (self.config.freeze_after, self.dozing_since)
+                else {
+                    return;
+                };
+                if now.duration_since(since) >= after {
+                    if let Err(why) = self.freeze_now() {
+                        // Tried once per stay in Doze, not again at every turn of the loop.
+                        self.dozing_since = None;
+                        eprintln!("lifecycle: {why}");
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The agent says whether the guest is in Doze. The session becomes `Dozing` once the
+    /// guest is in Doze with its screen off. The guest leaves deep idle for short maintenance
+    /// windows while it dozes; the session stays `Dozing` through them, and leaves it only
+    /// when the screen comes on.
+    fn guest_idle(&mut self, idle: bool) {
+        if idle && !self.screen_on && self.state() == SessionState::Active {
+            self.dozing_since = Some(Instant::now());
+            self.shared.set(SessionState::Dozing, None);
         }
     }
 
@@ -710,7 +964,16 @@ impl Worker {
                             self.shared.set_sender(connection.try_clone_sender());
                             self.connection = Some(connection);
                             self.shared.set_vm_id(self.launcher.vm_id());
+                            // The agent takes the screen to be on when it connects; the doze
+                            // delay counts from here when no window is shown.
+                            self.screen_on = true;
+                            self.hidden_since = Instant::now();
+                            self.dozing_since = None;
+                            self.power_pending = false;
                             self.shared.set(SessionState::Active, None);
+                            if let Some(power) = self.power {
+                                self.send_body(Body::PowerState(power.to_control()));
+                            }
                             return;
                         }
                         Err(Refusal::NotTheGuest(why)) => {
@@ -737,8 +1000,16 @@ impl Worker {
     fn handle_starting(&mut self, command: Command) -> bool {
         match command {
             Command::Start => true,
-            Command::Send(_, reply) => {
+            Command::Send(_, reply) | Command::Freeze(reply) => {
                 let _ = reply.send(Err(SessionError::NotActive(SessionState::Starting)));
+                true
+            }
+            Command::WindowsShown(shown) => {
+                self.set_shown(shown);
+                true
+            }
+            Command::Power(state) => {
+                self.set_power(state);
                 true
             }
             Command::Stop => {
@@ -770,6 +1041,7 @@ impl Worker {
                     return;
                 }
             }
+            self.tick_lifecycle();
             let Some(connection) = self.connection.as_mut() else {
                 self.stop(StopReason::ChannelLost("no connection".into()));
                 return;
@@ -851,7 +1123,10 @@ impl Worker {
                     },
                 });
             }
-            Some(Body::CloseTask(_))
+            Some(Body::DeviceIdle(idle)) => self.guest_idle(idle.idle),
+            Some(Body::ScreenState(_))
+            | Some(Body::PowerState(_))
+            | Some(Body::CloseTask(_))
             | Some(Body::LaunchApp(_))
             | Some(Body::ResizeTask(_))
             | Some(Body::SetTaskDensity(_))
@@ -879,6 +1154,12 @@ impl Worker {
     }
 
     fn stop_with(&mut self, reason: impl FnOnce(&mut dyn GuestLauncher) -> StopReason) {
+        // A frozen guest cannot shut down in an orderly way; it is let run first.
+        if self.state() == SessionState::Frozen {
+            if let Err(why) = self.launcher.thaw() {
+                eprintln!("lifecycle: the frozen guest could not be resumed before stopping: {why}");
+            }
+        }
         self.shared.set_vm_id(None);
         self.shared.set(SessionState::Stopping, None);
         self.shared.set_sender(None);

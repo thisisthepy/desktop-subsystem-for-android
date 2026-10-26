@@ -47,6 +47,9 @@ pub struct FakeAndroid {
     pub keys: Mutex<Vec<KeyEvent>>,
     /// The text input it was given, in order.
     pub text: Mutex<Vec<ImeEvent>>,
+    /// Each word on whether any task window is shown, in order. Taken in every state, as a
+    /// session takes it.
+    pub shown: Mutex<Vec<bool>>,
 }
 
 impl FakeAndroid {
@@ -58,6 +61,7 @@ impl FakeAndroid {
             pointers: Mutex::new(Vec::new()),
             keys: Mutex::new(Vec::new()),
             text: Mutex::new(Vec::new()),
+            shown: Mutex::new(Vec::new()),
         }
     }
 
@@ -108,7 +112,23 @@ impl UserAndroid for FakeAndroid {
             events,
         })
     }
+    fn freeze(&self) -> Result<(), TaskRequestError> {
+        let mut state = self.state.lock().unwrap();
+        match *state {
+            SessionState::Active | SessionState::Dozing | SessionState::Frozen => {
+                *state = SessionState::Frozen;
+                Ok(())
+            }
+            other => Err(TaskRequestError::NotRunning(format!(
+                "Android is {other}, not running"
+            ))),
+        }
+    }
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
+        if let TaskRequest::WindowsShown { shown } = request {
+            self.shown.lock().unwrap().push(shown);
+            return Ok(());
+        }
         if self.state() != SessionState::Active {
             return Err(TaskRequestError::NotRunning(format!(
                 "Android is {}, not running",
@@ -309,6 +329,14 @@ macro_rules! host_api_conformance {
         #[test]
         fn fr4_resizing_and_rescaling_a_task_reach_the_callers_android() {
             $crate::host_api_conformance::resize_and_density_reach_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr10_the_word_on_shown_windows_reaches_the_callers_android_in_any_state() {
+            $crate::host_api_conformance::windows_shown_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr10_freezing_reaches_the_callers_android_only_while_it_runs() {
+            $crate::host_api_conformance::freeze_reaches_the_caller(&mut || $make);
         }
         #[test]
         fn fr3_a_request_to_an_android_that_is_not_running_says_so() {
@@ -644,6 +672,35 @@ pub fn resize_and_density_reach_the_caller(make: MakeLocal<'_>) {
             },
         ]
     );
+}
+
+pub fn windows_shown_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut client = connect(&mut *connector);
+    // Taken while the Android is stopped, for its next start.
+    client
+        .request(&TaskRequest::WindowsShown { shown: false })
+        .expect("the word while stopped");
+    client.start().unwrap();
+    client.set_windows_shown(true).expect("the word while running");
+    let android = androids.of(&user).unwrap();
+    assert_eq!(*android.shown.lock().unwrap(), vec![false, true]);
+    assert!(android.requests.lock().unwrap().is_empty());
+}
+
+pub fn freeze_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids);
+    let mut client = connect(&mut *connector);
+    match client.freeze() {
+        Err(ClientError::Service { code, .. }) => assert_eq!(code, ErrorCode::NotRunning),
+        other => panic!("expected the service to say Android is not running, got {other:?}"),
+    }
+    client.start().unwrap();
+    assert_eq!(client.freeze().unwrap().state, SessionState::Frozen);
 }
 
 pub fn request_to_stopped_android_says_so(make: MakeLocal<'_>) {

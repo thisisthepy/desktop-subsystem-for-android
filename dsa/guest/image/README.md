@@ -17,7 +17,7 @@ them with the project's keys.
 | `unavailable-features.xml` | Hardware features the VM lacks, withdrawn from the system |
 | `dsa-channeld.rc` | The service that runs the control channel daemon |
 | `dsa-channel-manifest.xml` | The vendor manifest entry declaring the daemon's binder service |
-| `sepolicy/` | Policy added to the image: vsock for graphics, and the control daemon's domain and binder service |
+| `sepolicy/` | Policy added to the image: vsock for graphics, the control daemon's domain and binder service, and what the agent needs to force Doze and set the battery |
 
 ```
 dsa/guest/image/fetch.sh 17

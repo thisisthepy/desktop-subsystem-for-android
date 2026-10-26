@@ -713,4 +713,7 @@ impl UserAndroid for WithProgramStatus {
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
         self.android.request(request)
     }
+    fn freeze(&self) -> Result<(), TaskRequestError> {
+        self.android.freeze()
+    }
 }

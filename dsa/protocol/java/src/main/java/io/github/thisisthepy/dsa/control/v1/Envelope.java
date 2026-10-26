@@ -38,6 +38,9 @@ public  final class Envelope extends
     IME_COMPOSITION(17),
     IME_COMMIT(18),
     IME_CURSOR(19),
+    SCREEN_STATE(40),
+    POWER_STATE(41),
+    DEVICE_IDLE(42),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -71,6 +74,9 @@ public  final class Envelope extends
         case 17: return IME_COMPOSITION;
         case 18: return IME_COMMIT;
         case 19: return IME_CURSOR;
+        case 40: return SCREEN_STATE;
+        case 41: return POWER_STATE;
+        case 42: return DEVICE_IDLE;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -987,6 +993,156 @@ public  final class Envelope extends
    */
   private void clearImeCursor() {
     if (bodyCase_ == 19) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int SCREEN_STATE_FIELD_NUMBER = 40;
+  /**
+   * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+   */
+  @java.lang.Override
+  public boolean hasScreenState() {
+    return bodyCase_ == 40;
+  }
+  /**
+   * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ScreenState getScreenState() {
+    if (bodyCase_ == 40) {
+       return (io.github.thisisthepy.dsa.control.v1.ScreenState) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ScreenState.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+   */
+  private void setScreenState(io.github.thisisthepy.dsa.control.v1.ScreenState value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 40;
+  }
+  /**
+   * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+   */
+  private void mergeScreenState(io.github.thisisthepy.dsa.control.v1.ScreenState value) {
+    value.getClass();
+  if (bodyCase_ == 40 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ScreenState.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ScreenState.newBuilder((io.github.thisisthepy.dsa.control.v1.ScreenState) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 40;
+  }
+  /**
+   * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+   */
+  private void clearScreenState() {
+    if (bodyCase_ == 40) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int POWER_STATE_FIELD_NUMBER = 41;
+  /**
+   * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+   */
+  @java.lang.Override
+  public boolean hasPowerState() {
+    return bodyCase_ == 41;
+  }
+  /**
+   * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.PowerState getPowerState() {
+    if (bodyCase_ == 41) {
+       return (io.github.thisisthepy.dsa.control.v1.PowerState) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.PowerState.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+   */
+  private void setPowerState(io.github.thisisthepy.dsa.control.v1.PowerState value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 41;
+  }
+  /**
+   * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+   */
+  private void mergePowerState(io.github.thisisthepy.dsa.control.v1.PowerState value) {
+    value.getClass();
+  if (bodyCase_ == 41 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.PowerState.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.PowerState.newBuilder((io.github.thisisthepy.dsa.control.v1.PowerState) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 41;
+  }
+  /**
+   * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+   */
+  private void clearPowerState() {
+    if (bodyCase_ == 41) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int DEVICE_IDLE_FIELD_NUMBER = 42;
+  /**
+   * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+   */
+  @java.lang.Override
+  public boolean hasDeviceIdle() {
+    return bodyCase_ == 42;
+  }
+  /**
+   * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.DeviceIdle getDeviceIdle() {
+    if (bodyCase_ == 42) {
+       return (io.github.thisisthepy.dsa.control.v1.DeviceIdle) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.DeviceIdle.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+   */
+  private void setDeviceIdle(io.github.thisisthepy.dsa.control.v1.DeviceIdle value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 42;
+  }
+  /**
+   * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+   */
+  private void mergeDeviceIdle(io.github.thisisthepy.dsa.control.v1.DeviceIdle value) {
+    value.getClass();
+  if (bodyCase_ == 42 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.DeviceIdle.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.DeviceIdle.newBuilder((io.github.thisisthepy.dsa.control.v1.DeviceIdle) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 42;
+  }
+  /**
+   * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+   */
+  private void clearDeviceIdle() {
+    if (bodyCase_ == 42) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -1967,6 +2123,150 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+     */
+    @java.lang.Override
+    public boolean hasScreenState() {
+      return instance.hasScreenState();
+    }
+    /**
+     * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ScreenState getScreenState() {
+      return instance.getScreenState();
+    }
+    /**
+     * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+     */
+    public Builder setScreenState(io.github.thisisthepy.dsa.control.v1.ScreenState value) {
+      copyOnWrite();
+      instance.setScreenState(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+     */
+    public Builder setScreenState(
+        io.github.thisisthepy.dsa.control.v1.ScreenState.Builder builderForValue) {
+      copyOnWrite();
+      instance.setScreenState(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+     */
+    public Builder mergeScreenState(io.github.thisisthepy.dsa.control.v1.ScreenState value) {
+      copyOnWrite();
+      instance.mergeScreenState(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+     */
+    public Builder clearScreenState() {
+      copyOnWrite();
+      instance.clearScreenState();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+     */
+    @java.lang.Override
+    public boolean hasPowerState() {
+      return instance.hasPowerState();
+    }
+    /**
+     * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.PowerState getPowerState() {
+      return instance.getPowerState();
+    }
+    /**
+     * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+     */
+    public Builder setPowerState(io.github.thisisthepy.dsa.control.v1.PowerState value) {
+      copyOnWrite();
+      instance.setPowerState(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+     */
+    public Builder setPowerState(
+        io.github.thisisthepy.dsa.control.v1.PowerState.Builder builderForValue) {
+      copyOnWrite();
+      instance.setPowerState(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+     */
+    public Builder mergePowerState(io.github.thisisthepy.dsa.control.v1.PowerState value) {
+      copyOnWrite();
+      instance.mergePowerState(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+     */
+    public Builder clearPowerState() {
+      copyOnWrite();
+      instance.clearPowerState();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+     */
+    @java.lang.Override
+    public boolean hasDeviceIdle() {
+      return instance.hasDeviceIdle();
+    }
+    /**
+     * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.DeviceIdle getDeviceIdle() {
+      return instance.getDeviceIdle();
+    }
+    /**
+     * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+     */
+    public Builder setDeviceIdle(io.github.thisisthepy.dsa.control.v1.DeviceIdle value) {
+      copyOnWrite();
+      instance.setDeviceIdle(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+     */
+    public Builder setDeviceIdle(
+        io.github.thisisthepy.dsa.control.v1.DeviceIdle.Builder builderForValue) {
+      copyOnWrite();
+      instance.setDeviceIdle(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+     */
+    public Builder mergeDeviceIdle(io.github.thisisthepy.dsa.control.v1.DeviceIdle value) {
+      copyOnWrite();
+      instance.mergeDeviceIdle(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+     */
+    public Builder clearDeviceIdle() {
+      copyOnWrite();
+      instance.clearDeviceIdle();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -2003,12 +2303,15 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.ImeComposition.class,
             io.github.thisisthepy.dsa.control.v1.ImeCommit.class,
             io.github.thisisthepy.dsa.control.v1.ImeCursor.class,
+            io.github.thisisthepy.dsa.control.v1.ScreenState.class,
+            io.github.thisisthepy.dsa.control.v1.PowerState.class,
+            io.github.thisisthepy.dsa.control.v1.DeviceIdle.class,
           };
           java.lang.String info =
-              "\u0000\u0012\u0001\u0000\u0001\u0013\u0012\u0000\u0000\u0000\u0001<\u0000\u0002<" +
-              "\u0000\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000" +
-              "\t<\u0000\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011" +
-              "<\u0000\u0012<\u0000\u0013<\u0000";
+              "\u0000\u0015\u0001\u0000\u0001*\u0015\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000" +
+              "\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000" +
+              "\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012" +
+              "<\u0000\u0013<\u0000(<\u0000)<\u0000*<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

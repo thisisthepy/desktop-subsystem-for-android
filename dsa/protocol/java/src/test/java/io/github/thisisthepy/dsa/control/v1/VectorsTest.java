@@ -208,6 +208,23 @@ public final class VectorsTest {
                                 .setRight(102)
                                 .setBottom(240)))
                 .build());
+        cases.put("screen_state_off", Envelope.newBuilder()
+                .setScreenState(ScreenState.newBuilder().setOn(false))
+                .build());
+        cases.put("screen_state_on", Envelope.newBuilder()
+                .setScreenState(ScreenState.newBuilder().setOn(true))
+                .build());
+        cases.put("power_state_on_battery", Envelope.newBuilder()
+                .setPowerState(PowerState.newBuilder()
+                        .setAcOnline(false)
+                        .setBatteryPresent(true)
+                        .setBatteryPercent(57)
+                        .setCharging(false)
+                        .setPowerSaver(true))
+                .build());
+        cases.put("device_idle", Envelope.newBuilder()
+                .setDeviceIdle(DeviceIdle.newBuilder().setIdle(true))
+                .build());
         cases.put("hello_rejected_authentication", Envelope.newBuilder()
                 .setHelloRejected(HelloRejected.newBuilder()
                         .setReason(RejectReason.REJECT_REASON_AUTHENTICATION_FAILED)

@@ -10,6 +10,8 @@ import io.github.thisisthepy.dsa.agent.input.KeyInput
 import io.github.thisisthepy.dsa.agent.input.PointerInput
 import io.github.thisisthepy.dsa.agent.input.TextInput
 import io.github.thisisthepy.dsa.agent.input.TextKeys
+import io.github.thisisthepy.dsa.agent.power.DevicePower
+import io.github.thisisthepy.dsa.agent.power.Lifecycle
 import io.github.thisisthepy.dsa.agent.requests.HostRequests
 import io.github.thisisthepy.dsa.agent.requests.RequestResult
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
@@ -32,7 +34,9 @@ import io.github.thisisthepy.dsa.control.v1.Envelope
  * host is injected into its task as it arrives, and reads nothing; a key first gives its
  * task the input focus if the task does not hold it. Text from the host's input method goes
  * to the focused editor through the agent's own input method, which the agent makes the
- * guest's at boot, and the editor's cursor goes back to the host.
+ * guest's at boot, and the editor's cursor goes back to the host. When the host says no task
+ * window is shown the agent turns the screen off and puts the device into Doze, and the
+ * host's battery becomes the guest's ([Lifecycle]).
  */
 class Agent(
     private val ownPackage: String,
@@ -48,6 +52,7 @@ class Agent(
     textKeys: TextKeys = TextKeys { null },
     private val inputMethods: InputMethodSetup = InputMethodSetup.NONE,
     private val trace: ResizeTrace = ResizeTrace(log),
+    power: DevicePower = DevicePower.NONE,
 ) {
     private val channel = ChannelClient(
         locator = locator,
@@ -72,6 +77,7 @@ class Agent(
         send = { frame -> channel.send(frame) },
         log = log,
     )
+    private val lifecycle = Lifecycle(power, { frame -> channel.send(frame) }, log)
     private val freeform = FreeformSetup(windowing, scheduler, log)
     private val arranger = TaskArranger(actions, windowing::displaySize, log)
     private var refreshPending = false
@@ -86,6 +92,7 @@ class Agent(
                 log.warn("could not make the agent's input method the guest's; typed text may not reach editors", e)
             }
             listen()
+            lifecycle.start { work -> scheduler.post(work) }
             channel.start()
             requestRefresh()
         }
@@ -112,6 +119,7 @@ class Agent(
 
     private fun onConnected() {
         reporter.resend()
+        lifecycle.connected()
         requestRefresh()
     }
 
@@ -150,6 +158,7 @@ class Agent(
         } catch (e: InvalidProtocolBufferException) {
             return false
         }
+        if (lifecycle.handle(envelope)) return true
         when (envelope.bodyCase) {
             Envelope.BodyCase.POINTER_EVENT -> try {
                 pointer.handle(envelope.pointerEvent)

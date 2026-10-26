@@ -532,6 +532,7 @@ GFXSTREAM_ALLOWED_PERMS = {
 }
 SEPOLICY_FRAGMENT = HERE / "sepolicy/graphics-vsock.cil"
 CHANNELD_POLICY = HERE / "sepolicy/channeld.cil"
+AGENT_POLICY = HERE / "sepolicy/agent.cil"
 
 
 def narrow_vsock_neverallows(text):
@@ -703,6 +704,9 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             if channeld_payload is not None:
                 # Its rules name the domain they declare, so they go in whole.
                 plat_patched += "\n" + CHANNELD_POLICY.read_text()
+            if agent_payload is not None:
+                # What the agent needs to put the guest into Doze and set its battery.
+                plat_patched += "\n" + AGENT_POLICY.read_text()
             new_plat_bytes = plat_patched.encode()
             cil_map["SYSTEM/etc/selinux/plat_sepolicy.cil"] = new_plat_bytes
 

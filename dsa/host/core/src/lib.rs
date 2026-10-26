@@ -12,6 +12,7 @@
 //! - [`tasks`]: the guest's app tasks, which the session keeps and hands on.
 //! - [`input`]: pointer input in a task's window, as the guest task receives it.
 //! - [`keys`]: key input in a task's window.
+//! - [`power`]: the host computer's power, which each guest's battery state follows.
 //! - [`ime`]: text input through the host's input method in a task's window.
 //! - [`compositor`]: platform-neutral graphics stream bookkeeping, renderer interfaces, and
 //!   which window each task and each frame goes to.
@@ -25,6 +26,7 @@ pub mod host_api_conformance;
 pub mod ime;
 pub mod input;
 pub mod keys;
+pub mod power;
 pub mod resize_trace;
 pub mod session;
 pub mod tasks;

@@ -4,6 +4,7 @@
 //! dsa status
 //! dsa start [--wait]
 //! dsa stop [--wait]
+//! dsa freeze
 //! dsa update [--wait]
 //! dsa launch <package>
 //! dsa tasks
@@ -14,6 +15,9 @@
 //!
 //! `dsa launch` starts an app in a window of its own, named by its package (such as
 //! `com.android.settings`). `dsa tasks` lists the app tasks Android shows as windows.
+//!
+//! `dsa freeze` stops every process of the Android until one of its windows is shown
+//! again. Its notifications, alarms and widgets stop with it.
 //!
 //! `dsa update` installs the newest version of DSA now instead of when no Android is
 //! running. It stops every user's Android, since the service restarts. With `--wait` it
@@ -34,7 +38,7 @@ use dsa_host_core::session::SessionState;
 use dsa_transport::Connector;
 
 pub const USAGE: &str =
-    "usage: dsa <status | start | stop | update | launch <package> | tasks> [--wait] \
+    "usage: dsa <status | start | stop | freeze | update | launch <package> | tasks> [--wait] \
                          [--timeout <seconds>] [--pipe <name> | --socket <path>]";
 
 /// What to ask the service.
@@ -43,6 +47,8 @@ pub enum Command {
     Status,
     Start,
     Stop,
+    /// Freeze the Android until one of its windows is shown again.
+    Freeze,
     Update,
     /// Start an app in a window of its own; the package is in [`Invocation::package`].
     Launch,
@@ -118,10 +124,13 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "status" | "start" | "stop" | "update" | "launch" | "tasks" if command.is_none() => {
+            "status" | "start" | "stop" | "freeze" | "update" | "launch" | "tasks"
+                if command.is_none() =>
+            {
                 command = Some(match arg.as_str() {
                     "status" => Command::Status,
                     "start" => Command::Start,
+                    "freeze" => Command::Freeze,
                     "update" => Command::Update,
                     "launch" => Command::Launch,
                     "tasks" => Command::Tasks,
@@ -332,12 +341,14 @@ pub fn run_with_starter(
     connector: &mut dyn Connector,
     starter: Option<&dyn ServiceStarter>,
 ) -> Result<String, String> {
-    let can_start = invocation.command != Command::Stop;
+    // Stopping or freezing needs an Android that runs, so neither starts the service.
+    let can_start = !matches!(invocation.command, Command::Stop | Command::Freeze);
     let mut client = connect(connector, starter, can_start, Duration::from_secs(10))?;
     let status = match invocation.command {
         Command::Status => client.status(),
         Command::Start => client.start(),
         Command::Stop => client.stop(),
+        Command::Freeze => client.freeze(),
         Command::Update => return update(invocation, client, connector),
         Command::Launch => {
             let package = invocation.package.as_deref().unwrap_or_default();
@@ -350,7 +361,7 @@ pub fn run_with_starter(
         }
     }
     .map_err(|e| e.to_string())?;
-    if !invocation.wait || invocation.command == Command::Status {
+    if !invocation.wait || matches!(invocation.command, Command::Status | Command::Freeze) {
         return Ok(describe(&status));
     }
     let deadline = Instant::now() + invocation.timeout;

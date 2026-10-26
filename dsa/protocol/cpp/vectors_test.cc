@@ -209,6 +209,17 @@ std::map<std::string, v1::Envelope> Cases() {
     rect->set_right(102);
     rect->set_bottom(240);
   }
+  cases["screen_state_off"].mutable_screen_state()->set_on(false);
+  cases["screen_state_on"].mutable_screen_state()->set_on(true);
+  {
+    v1::PowerState* power = cases["power_state_on_battery"].mutable_power_state();
+    power->set_ac_online(false);
+    power->set_battery_present(true);
+    power->set_battery_percent(57);
+    power->set_charging(false);
+    power->set_power_saver(true);
+  }
+  cases["device_idle"].mutable_device_idle()->set_idle(true);
   {
     v1::HelloRejected* rejected = cases["hello_rejected_authentication"].mutable_hello_rejected();
     rejected->set_reason(v1::REJECT_REASON_AUTHENTICATION_FAILED);

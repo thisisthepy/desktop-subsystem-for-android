@@ -460,6 +460,28 @@ fn fr2_dsa_stop_does_not_start_stopped_service() {
 }
 
 #[test]
+fn fr10_dsa_freeze_freezes_a_running_android_and_says_when_none_runs() {
+    assert_eq!(parse(&args("freeze")).unwrap().command, Cmd::Freeze);
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+
+    let refused = dsa(&endpoint, "freeze");
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(
+        stderr(&refused).contains("not running"),
+        "{}",
+        stderr(&refused)
+    );
+
+    assert!(dsa(&endpoint, "start").status.success());
+    let frozen = dsa(&endpoint, "freeze");
+    assert!(frozen.status.success(), "{}", stderr(&frozen));
+    assert_eq!(stdout(&frozen), "Android: Frozen");
+    assert_eq!(androids.of(&user).unwrap().state(), SessionState::Frozen);
+}
+
+#[test]
 fn fr3_dsa_launch_and_dsa_tasks_are_parsed() {
     let launch = parse(&args("launch com.android.settings --pipe p")).unwrap();
     assert_eq!(launch.command, Cmd::Launch);

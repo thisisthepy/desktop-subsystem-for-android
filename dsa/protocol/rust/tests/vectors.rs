@@ -9,10 +9,10 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use dsa_protocol::control::{
-    envelope::Body, AppInfo, AuthChallenge, AuthProof, CloseTask, Envelope, Hello, HelloAccepted,
-    HelloRejected, ImeCommit, ImeComposition, ImeCursor, KeyAction, KeyEvent, LaunchApp,
-    PointerAction, PointerEvent, PointerTool, Rect, RejectReason, ResizeTask, Role, SetTaskDensity,
-    TaskFrames, TaskRemoved, TaskUpdated,
+    envelope::Body, AppInfo, AuthChallenge, AuthProof, CloseTask, DeviceIdle, Envelope, Hello,
+    HelloAccepted, HelloRejected, ImeCommit, ImeComposition, ImeCursor, KeyAction, KeyEvent,
+    LaunchApp, PointerAction, PointerEvent, PointerTool, PowerState, Rect, RejectReason, ResizeTask,
+    Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
 
@@ -290,6 +290,28 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                     bottom: 240,
                 }),
             })),
+        ),
+        (
+            "screen_state_off",
+            wrap(Body::ScreenState(ScreenState { on: false })),
+        ),
+        (
+            "screen_state_on",
+            wrap(Body::ScreenState(ScreenState { on: true })),
+        ),
+        (
+            "power_state_on_battery",
+            wrap(Body::PowerState(PowerState {
+                ac_online: false,
+                battery_present: true,
+                battery_percent: 57,
+                charging: false,
+                power_saver: true,
+            })),
+        ),
+        (
+            "device_idle",
+            wrap(Body::DeviceIdle(DeviceIdle { idle: true })),
         ),
         (
             "hello_rejected_authentication",
