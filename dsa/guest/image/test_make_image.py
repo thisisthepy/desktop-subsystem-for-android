@@ -376,7 +376,7 @@ class ImageLayoutTests(unittest.TestCase):
             source = root / "target-files.zip"
             removed = [
                 "com.google.cf.oemlock", "com.android.hardware.uwb", "com.google.cf.bt",
-                "com.android.hardware.threadnetwork",
+                "com.android.hardware.threadnetwork", "com.google.cf.nfc", "com.google.cf.rild",
             ]
             with zipfile.ZipFile(source, "w") as archive:
                 for apex in removed + ["com.android.hardware.boot"]:
@@ -414,6 +414,26 @@ class ImageLayoutTests(unittest.TestCase):
             for feature in ["android.hardware.bluetooth", "android.hardware.bluetooth_le"]:
                 self.assertIn(f'<unavailable-feature name="{feature}" />', xml)
             self.assertIn("vendor/etc/permissions/dsa-unavailable-features.xml 0 0 644 capabilities=0x0", fs_config)
+
+    def test_fr4_nfc_and_telephony_are_not_advertised_without_the_hardware(self):
+        # Declared, the NFC service and the phone process start, fail to reach their HALs and
+        # time out every few seconds; each ANR dumps the stacks of many processes and takes
+        # the CPU that the apps need to draw.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/etc/permissions 0 2000 755 capabilities=0x0\n")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+            with zipfile.ZipFile(modified) as archive:
+                xml = archive.read("VENDOR/etc/permissions/dsa-unavailable-features.xml").decode()
+            for feature in ["android.hardware.nfc", "android.hardware.nfc.any", "android.hardware.nfc.hce",
+                            "android.hardware.telephony", "android.hardware.telephony.radio.access",
+                            "android.hardware.telephony.subscription", "android.hardware.telephony.data",
+                            "android.hardware.telephony.calling", "android.hardware.telephony.messaging",
+                            "android.hardware.telephony.gsm", "android.hardware.telephony.ims"]:
+                self.assertIn(f'<unavailable-feature name="{feature}" />', xml)
 
     def test_fr1_system_server_does_not_wait_for_a_factory_reset_protection_partition(self):
         # With ro.frp.pst set, system_server starts PersistentDataBlockService, which needs

@@ -51,11 +51,14 @@ REMOVED_APPS = ["Launcher3QuickStep", "SystemUI", "LatinIME"]
 # the host over Cuttlefish's virtio consoles, and Thread needs a radio. They abort in a loop,
 # and system_server waits for the oemlock HAL, which their APEXes declare, forever. Without
 # its HAL the Bluetooth app aborts too, waiting for the controller, each time it restarts.
+# NFC and the radio interface layer reach Cuttlefish's NFC and modem simulators the same way.
 REMOVED_APEXES = [
     "com.google.cf.oemlock",
     "com.android.hardware.uwb",
     "com.google.cf.bt",
     "com.android.hardware.threadnetwork",
+    "com.google.cf.nfc",
+    "com.google.cf.rild",
 ]
 
 # The user's disk. The super partition's UUID is how first-stage init finds the disk, so it
