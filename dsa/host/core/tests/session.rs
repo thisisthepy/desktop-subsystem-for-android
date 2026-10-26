@@ -839,7 +839,8 @@ fn fr4_resizing_and_rescaling_a_task_reach_the_guest() {
         Some(Body::ResizeTask(dsa_protocol::control::ResizeTask {
             task_id: 7,
             width: 1096,
-            height: 1948
+            height: 1948,
+            live: false
         }))
     );
 }

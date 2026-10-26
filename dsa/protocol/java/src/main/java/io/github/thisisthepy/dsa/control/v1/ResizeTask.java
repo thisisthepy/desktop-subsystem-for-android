@@ -10,6 +10,12 @@ package io.github.thisisthepy.dsa.control.v1;
  * sends the size it has now, not every size it passed through. The agent keeps the task
  * clear of other tasks, moving it if the new size would overlap one, and reports the
  * result with TaskUpdated.
+ * `live` is true while the user is still dragging the window's edge. The task then takes
+ * the new size in pixels but keeps the configuration (screen size in dp, smallest width,
+ * orientation) it had when the drag began, so its activities lay out again in the same
+ * frame instead of being recreated for every step. The first ResizeTask with `live`
+ * false, sent when the drag ends even if the size did not change, gives the task the
+ * configuration of its final size.
  * </pre>
  *
  * Protobuf type {@code dsa.control.v1.ResizeTask}
@@ -97,6 +103,32 @@ public  final class ResizeTask extends
   private void clearHeight() {
     
     height_ = 0;
+  }
+
+  public static final int LIVE_FIELD_NUMBER = 4;
+  private boolean live_;
+  /**
+   * <code>bool live = 4;</code>
+   * @return The live.
+   */
+  @java.lang.Override
+  public boolean getLive() {
+    return live_;
+  }
+  /**
+   * <code>bool live = 4;</code>
+   * @param value The live to set.
+   */
+  private void setLive(boolean value) {
+    
+    live_ = value;
+  }
+  /**
+   * <code>bool live = 4;</code>
+   */
+  private void clearLive() {
+    
+    live_ = false;
   }
 
   public static io.github.thisisthepy.dsa.control.v1.ResizeTask parseFrom(
@@ -187,6 +219,12 @@ public  final class ResizeTask extends
    * sends the size it has now, not every size it passed through. The agent keeps the task
    * clear of other tasks, moving it if the new size would overlap one, and reports the
    * result with TaskUpdated.
+   * `live` is true while the user is still dragging the window's edge. The task then takes
+   * the new size in pixels but keeps the configuration (screen size in dp, smallest width,
+   * orientation) it had when the drag began, so its activities lay out again in the same
+   * frame instead of being recreated for every step. The first ResizeTask with `live`
+   * false, sent when the drag ends even if the size did not change, gives the task the
+   * configuration of its final size.
    * </pre>
    *
    * Protobuf type {@code dsa.control.v1.ResizeTask}
@@ -286,6 +324,34 @@ public  final class ResizeTask extends
       return this;
     }
 
+    /**
+     * <code>bool live = 4;</code>
+     * @return The live.
+     */
+    @java.lang.Override
+    public boolean getLive() {
+      return instance.getLive();
+    }
+    /**
+     * <code>bool live = 4;</code>
+     * @param value The live to set.
+     * @return This builder for chaining.
+     */
+    public Builder setLive(boolean value) {
+      copyOnWrite();
+      instance.setLive(value);
+      return this;
+    }
+    /**
+     * <code>bool live = 4;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearLive() {
+      copyOnWrite();
+      instance.clearLive();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.ResizeTask)
   }
   @java.lang.Override
@@ -305,10 +371,11 @@ public  final class ResizeTask extends
             "taskId_",
             "width_",
             "height_",
+            "live_",
           };
           java.lang.String info =
-              "\u0000\u0003\u0000\u0000\u0001\u0003\u0003\u0000\u0000\u0000\u0001\u0004\u0002\u000b" +
-              "\u0003\u000b";
+              "\u0000\u0004\u0000\u0000\u0001\u0004\u0004\u0000\u0000\u0000\u0001\u0004\u0002\u000b" +
+              "\u0003\u000b\u0004\u0007";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through
