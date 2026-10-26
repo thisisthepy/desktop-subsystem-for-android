@@ -10,6 +10,7 @@
 //! when the window manager closes the connection, which it does when the app's last window
 //! closes.
 
+pub mod keys;
 pub mod pointer;
 pub mod window;
 
@@ -78,7 +79,7 @@ pub struct HostSetup {
     pub launch: bool,
     /// Dials the window manager.
     pub connector: Box<dyn Connector>,
-    /// Dials the service's local API, which the windows' pointer input goes to directly, so
+    /// Dials the service's local API, which the windows' pointer and key input go to directly, so
     /// it never waits on the window manager.
     pub input: Box<dyn Connector>,
     /// The process the window manager places the frames' textures in: this one.
@@ -145,7 +146,7 @@ pub fn run(mut setup: HostSetup) -> Result<(), String> {
     let input = std::thread::Builder::new()
         .name("dsa-app-window-input".into())
         .spawn(move || serve_input(input_connector, input_rx, input_logger))
-        .map_err(|e| format!("could not start the pointer input: {e}"))?;
+        .map_err(|e| format!("could not start the window input: {e}"))?;
     let presenters: Presenters = Arc::default();
     let ui = window::start(UiSetup {
         report,

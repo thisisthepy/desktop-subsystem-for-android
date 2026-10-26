@@ -6,7 +6,8 @@
 //! live resize. What the user does to a window goes back to the window manager as a
 //! [`FromHost`] report; even a close only reports, and the window closes when the window
 //! manager says so. Each window hands its mouse, touch and pen messages to its
-//! `PointerWindow` ([`super::pointer`]), which sends the task's pointer events on.
+//! `PointerWindow` ([`super::pointer`]), which sends the task's pointer events on, and its key
+//! messages to its `KeyWindow` ([`super::keys`]), which sends its key events on the same way.
 //!
 //! A window reports its client size, its monitor's scale (once when it opens, then on every
 //! move to another monitor) and the start and end of a drag; the window manager turns them
@@ -22,7 +23,7 @@ use std::thread::{self, JoinHandle};
 
 use dsa_host_core::compositor::task_windows::fit_within;
 use dsa_host_core::compositor::window_hosts::{FromHost, ToHost};
-use dsa_host_core::input::PointerEvent;
+use dsa_host_core::input::InputEvent;
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
 };
@@ -50,6 +51,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::compositor::log::{note, CompositorLogger};
 use crate::compositor::present::{Gpu, WindowPresenter};
 
+use super::keys::KeyWindow;
 use super::pointer::PointerWindow;
 
 /// A task window that is open, as tests and logs see it.
@@ -132,8 +134,8 @@ impl Drop for UiHandle {
 pub struct UiSetup {
     /// Where reports about the windows go.
     pub report: Report,
-    /// Where the pointer input in every task window goes.
-    pub input: Sender<PointerEvent>,
+    /// Where the pointer and key input in every task window goes.
+    pub input: Sender<InputEvent>,
     /// The GPU devices, or `None` when frames cannot be shown (the windows still open).
     pub gpu: Option<Arc<Gpu>>,
     /// Where the UI thread keeps each window's presenter.
@@ -174,6 +176,7 @@ struct WindowData {
     report: Report,
     presenter: RefCell<Option<Arc<WindowPresenter>>>,
     pointer: PointerWindow,
+    keys: KeyWindow,
     /// The largest client area Android can draw for the task, as the window manager last
     /// said, for WM_GETMINMAXINFO.
     max_client: Cell<Option<(u32, u32)>>,
@@ -343,6 +346,9 @@ unsafe extern "system" fn task_window_proc(
 ) -> LRESULT {
     if let Some(data) = window_data(hwnd) {
         if let Some(result) = data.pointer.handle(hwnd, message, wparam, lparam) {
+            return result;
+        }
+        if let Some(result) = data.keys.handle(hwnd, message, wparam, lparam) {
             return result;
         }
     }
@@ -627,6 +633,7 @@ impl Ui {
             report: Arc::clone(&self.setup.report),
             presenter: RefCell::new(None),
             pointer: PointerWindow::new(task_id, size, self.setup.input.clone()),
+            keys: KeyWindow::new(task_id, self.setup.input.clone()),
             max_client: Cell::new(None),
             reporting: Cell::new(false),
         }));
