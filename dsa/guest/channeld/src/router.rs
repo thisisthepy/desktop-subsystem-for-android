@@ -152,6 +152,15 @@ impl Router {
         self.lock().listeners.len()
     }
 
+    /// How many app tasks the guest has open: those a client has reported and not yet ended.
+    pub fn task_count(&self) -> usize {
+        self.lock()
+            .tasks
+            .values()
+            .filter(|task| task.updated.is_some())
+            .count()
+    }
+
     /// Passes a frame from the host to every listener.
     pub fn from_host(&self, frame: &[u8]) {
         self.lock().deliver(frame, None);
