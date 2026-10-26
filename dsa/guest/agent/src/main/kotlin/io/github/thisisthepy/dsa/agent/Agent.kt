@@ -10,6 +10,8 @@ import io.github.thisisthepy.dsa.agent.input.KeyInput
 import io.github.thisisthepy.dsa.agent.input.PointerInput
 import io.github.thisisthepy.dsa.agent.input.TextInput
 import io.github.thisisthepy.dsa.agent.input.TextKeys
+import io.github.thisisthepy.dsa.agent.memory.MemoryReporter
+import io.github.thisisthepy.dsa.agent.memory.MemorySource
 import io.github.thisisthepy.dsa.agent.requests.HostRequests
 import io.github.thisisthepy.dsa.agent.requests.RequestResult
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
@@ -32,7 +34,8 @@ import io.github.thisisthepy.dsa.control.v1.Envelope
  * host is injected into its task as it arrives, and reads nothing; a key first gives its
  * task the input focus if the task does not hold it. Text from the host's input method goes
  * to the focused editor through the agent's own input method, which the agent makes the
- * guest's at boot, and the editor's cursor goes back to the host.
+ * guest's at boot, and the editor's cursor goes back to the host. With a [MemorySource], it
+ * also reports the guest's memory every few minutes and whenever the host asks.
  */
 class Agent(
     private val ownPackage: String,
@@ -48,6 +51,7 @@ class Agent(
     textKeys: TextKeys = TextKeys { null },
     private val inputMethods: InputMethodSetup = InputMethodSetup.NONE,
     private val trace: ResizeTrace = ResizeTrace(log),
+    memory: MemorySource? = null,
 ) {
     private val channel = ChannelClient(
         locator = locator,
@@ -72,6 +76,9 @@ class Agent(
         send = { frame -> channel.send(frame) },
         log = log,
     )
+    private val memoryReporter = memory?.let {
+        MemoryReporter(it, scheduler, log, connected = { channel.connected }, send = { frame -> channel.send(frame) })
+    }
     private val freeform = FreeformSetup(windowing, scheduler, log)
     private val arranger = TaskArranger(actions, windowing::displaySize, log)
     private var refreshPending = false
@@ -112,11 +119,13 @@ class Agent(
 
     private fun onConnected() {
         reporter.resend()
+        memoryReporter?.connected()
         requestRefresh()
     }
 
     private fun onFrame(frame: ByteArray) {
         if (input(frame)) return
+        if (memoryRequest(frame)) return
         val result = try {
             requests.handle(frame)
         } catch (e: Exception) {
@@ -172,6 +181,27 @@ class Agent(
                 log.warn("typing committed text failed", e)
             }
             else -> return false
+        }
+        return true
+    }
+
+    /** Reports the guest's memory if the frame asks for it. False for any other frame. */
+    private fun memoryRequest(frame: ByteArray): Boolean {
+        val envelope = try {
+            Envelope.parseFrom(frame)
+        } catch (e: InvalidProtocolBufferException) {
+            return false
+        }
+        if (envelope.bodyCase != Envelope.BodyCase.REQUEST_GUEST_MEMORY) return false
+        val reporter = memoryReporter
+        if (reporter == null) {
+            log.warn("the host asked for the guest's memory, which this agent does not read")
+        } else {
+            try {
+                reporter.report()
+            } catch (e: Exception) {
+                log.warn("reporting the guest's memory failed", e)
+            }
         }
         return true
     }
