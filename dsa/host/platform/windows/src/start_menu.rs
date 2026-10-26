@@ -312,13 +312,14 @@ mod shell {
                 .map_err(|e| fail("description", e))?;
             let store: IPropertyStore = link.cast().map_err(|e| fail("properties", e))?;
             // The shell reads the ID as a plain wide string. The value borrows `id`, which
-            // outlives it, and the store keeps a copy, so it is never cleared.
+            // outlives it, and the store keeps a copy, so it is never cleared or dropped: that
+            // would free memory COM did not allocate.
             let id: Vec<u16> = shortcut
                 .app_user_model_id
                 .encode_utf16()
                 .chain(std::iter::once(0))
                 .collect();
-            let value = PROPVARIANT {
+            let value = ManuallyDrop::new(PROPVARIANT {
                 Anonymous: PROPVARIANT_0 {
                     Anonymous: ManuallyDrop::new(PROPVARIANT_0_0 {
                         vt: VT_LPWSTR,
@@ -330,9 +331,9 @@ mod shell {
                         },
                     }),
                 },
-            };
+            });
             store
-                .SetValue(&APP_USER_MODEL_ID, &value)
+                .SetValue(&APP_USER_MODEL_ID, &*value)
                 .map_err(|e| fail("app ID", e))?;
             store.Commit().map_err(|e| fail("app ID", e))?;
             let file: IPersistFile = link.cast().map_err(|e| fail("file", e))?;
@@ -382,16 +383,19 @@ mod shell {
                 .map_err(|e| fail("description", e))?;
             let description = text(&buffer);
             let store: IPropertyStore = link.cast().map_err(|e| fail("properties", e))?;
-            let mut value = store
-                .GetValue(&APP_USER_MODEL_ID)
-                .map_err(|e| fail("app ID", e))?;
+            // Cleared once below, and never dropped as well.
+            let mut value = ManuallyDrop::new(
+                store
+                    .GetValue(&APP_USER_MODEL_ID)
+                    .map_err(|e| fail("app ID", e))?,
+            );
             let inner = &value.Anonymous.Anonymous;
             let app_user_model_id = if inner.vt == VT_LPWSTR {
                 inner.Anonymous.pwszVal.to_string().unwrap_or_default()
             } else {
                 String::new()
             };
-            let _ = PropVariantClear(&mut value);
+            let _ = PropVariantClear(&mut *value);
             Ok(Shortcut {
                 target,
                 arguments,
