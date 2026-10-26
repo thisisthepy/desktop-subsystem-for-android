@@ -23,6 +23,10 @@ class AgentApplication : Application() {
             scheduler = HandlerScheduler(thread.looper),
             log = log,
             apps = AndroidAppInfoSource(this, log),
+            // `setprop log.tag.DsaResizeTrace D` turns on the per-stage resize trace lines.
+            trace = io.github.thisisthepy.dsa.agent.trace.ResizeTrace(log, detailed = {
+                android.util.Log.isLoggable("DsaResizeTrace", android.util.Log.DEBUG)
+            }),
         ).start()
     }
 }

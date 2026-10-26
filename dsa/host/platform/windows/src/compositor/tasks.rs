@@ -16,7 +16,8 @@ use dsa_host_core::tasks::{coalesce, TaskRequest};
 use dsa_transport::Connector;
 
 use super::hosts::ManagerEvent;
-use super::log::{note, CompositorLogger};
+use super::log::{note, trace_stage, CompositorLogger};
+use dsa_host_core::resize_trace::millis;
 
 /// The build the compositor names itself by on the local API.
 const BUILD: &str = "dsa-wm";
@@ -115,6 +116,7 @@ pub fn serve_requests(
         let mut waiting = vec![first];
         waiting.extend(requests.try_iter());
         for request in coalesce(waiting) {
+            let started = Instant::now();
             let mut outcome = Err(String::new());
             // A connection the service dropped is made again, once.
             for _ in 0..2 {
@@ -133,6 +135,25 @@ pub fn serve_requests(
                     break;
                 }
                 client = None;
+            }
+            if let TaskRequest::Resize {
+                task_id,
+                width,
+                height,
+                live,
+            } = &request
+            {
+                trace_stage(
+                    logger.as_deref(),
+                    *task_id,
+                    "wm.request",
+                    (*width, *height),
+                    &format!(
+                        "live={live} sent={} took={}",
+                        outcome.is_ok(),
+                        millis(started.elapsed())
+                    ),
+                );
             }
             if let Err(why) = outcome {
                 note(
