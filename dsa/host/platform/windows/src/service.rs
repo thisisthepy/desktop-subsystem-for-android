@@ -309,7 +309,17 @@ where
             None => android,
         }
     }));
-    let mut service = HostApiService::new(androids.clone(), build);
+    // %ProgramData%\DSA\resize-trace turns on the per-stage resize trace lines.
+    let resize_trace_file = std::env::var_os("ProgramData")
+        .map(|data| {
+            std::path::PathBuf::from(data)
+                .join("DSA")
+                .join(dsa_host_core::resize_trace::DETAIL_FILE)
+                .exists()
+        })
+        .unwrap_or(false);
+    let mut service =
+        HostApiService::new(androids.clone(), build).with_resize_trace_detail(resize_trace_file);
     if let Some(settings) = program {
         let check_interval = config
             .update

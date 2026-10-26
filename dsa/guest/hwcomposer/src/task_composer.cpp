@@ -7,6 +7,8 @@
 #include <chrono>
 #include <unordered_map>
 
+#include <sys/system_properties.h>
+
 #include "log.h"
 
 namespace dsa::hwc {
@@ -26,9 +28,34 @@ int64_t steadyMs() {
         .count();
 }
 
+double traceMonoMs() {
+    return std::chrono::duration<double, std::milli>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+int64_t traceWallMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
+bool traceDetailRequested() {
+    char value[PROP_VALUE_MAX] = {};
+    __system_property_get("debug.dsa.resize_trace", value);
+    return value[0] == '1';
+}
+
+void logTrace(const std::vector<std::string>& lines) {
+    for (const std::string& line : lines) {
+        HWC_LOGI("%s", line.c_str());
+    }
+}
+
 }  // namespace
 
-TaskComposer::TaskComposer() : mReconnector([this] { reconnectLoop(); }) {}
+TaskComposer::TaskComposer()
+    : mTrace(traceDetailRequested()), mReconnector([this] { reconnectLoop(); }) {}
 
 TaskComposer::~TaskComposer() {
     {
@@ -72,6 +99,10 @@ void TaskComposer::taskUpdated(const TaskUpdate& update) {
     {
         std::lock_guard<std::mutex> lock(mMutex);
         changed = mTasks.update(update.id, update.bounds);
+        if (changed) {
+            logTrace(mTrace.boundsChanged(update.id, update.bounds.width(),
+                                          update.bounds.height(), traceMonoMs(), traceWallMs()));
+        }
     }
     if (changed) {
         // The window's frame has to follow its new place now, not at the next app redraw.
@@ -90,6 +121,7 @@ void TaskComposer::taskEnded(int32_t task) {
     std::lock_guard<std::mutex> lock(mMutex);
     mTasks.remove(task);
     mResizeGate.forget(task);
+    mTrace.forget(task);
     mDisplays.release(task);
     auto it = mOutputs.find(task);
     if (it != mOutputs.end()) {
@@ -208,6 +240,7 @@ void TaskComposer::present(Frame& frame) {
                 task.task, output.onHost ? output.width : 0, output.onHost ? output.height : 0,
                 task.bounds, drawnAtSize(task.bounds, fills), now);
             if (decision == ResizeGate::Decision::Hold) {
+                logTrace(mTrace.held(task.task, width, height, traceMonoMs(), traceWallMs()));
                 continue;
             }
             if (decision == ResizeGate::Decision::PostLate) {
@@ -320,6 +353,9 @@ void TaskComposer::present(Frame& frame) {
             if (mHost.compose(request)) {
                 mHost.post(output.display, target);
                 output.next ^= 1;
+                logTrace(mTrace.posted(task.task, width, height,
+                                       decision == ResizeGate::Decision::PostLate, traceMonoMs(),
+                                       traceWallMs()));
             }
         }
 

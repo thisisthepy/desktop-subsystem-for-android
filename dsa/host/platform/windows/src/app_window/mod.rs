@@ -27,9 +27,10 @@ use dsa_transport::{Connector, FrameSender, TransportError};
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 
 use self::window::{OpenWindow, Presenters, UiSetup};
-use crate::compositor::log::{note, CompositorLogger};
+use crate::compositor::log::{note, trace_forget, trace_stage, CompositorLogger};
 use crate::compositor::present::{Gpu, OpenedTexture};
 use crate::compositor::tasks::serve_input;
+use dsa_host_core::resize_trace::millis;
 
 /// The build the window host names itself by to the window manager.
 const BUILD: &str = "dsa-app-window";
@@ -194,6 +195,7 @@ pub fn run(mut setup: HostSetup) -> Result<(), String> {
         if let Some(command) = to_host_from_wire(&body) {
             if let dsa_host_core::compositor::window_hosts::ToHost::Close { task_id } = &command {
                 textures.remove(task_id);
+                trace_forget(*task_id);
             }
             if !ui.send(command) {
                 break;
@@ -203,6 +205,7 @@ pub fn run(mut setup: HostSetup) -> Result<(), String> {
         match body {
             Body::FrameTexture(texture) => {
                 let handle = texture.handle as isize;
+                let started = std::time::Instant::now();
                 let opened = match &gpu {
                     Some(gpu) => gpu
                         .open_shared(handle, (texture.width, texture.height))
@@ -214,6 +217,18 @@ pub fn run(mut setup: HostSetup) -> Result<(), String> {
                 // opened texture keeps what it needs.
                 // SAFETY: a handle the window manager duplicated into this process.
                 unsafe { CloseHandle(handle as HANDLE) };
+                trace_stage(
+                    log.as_deref(),
+                    texture.task_id,
+                    "app.texture_opened",
+                    (texture.width, texture.height),
+                    &format!(
+                        "texture={} opened={} took={}",
+                        texture.texture_id,
+                        opened.is_some(),
+                        millis(started.elapsed())
+                    ),
+                );
                 match opened {
                     Some(opened) => {
                         textures.insert(texture.task_id, (texture.texture_id, opened));

@@ -22,6 +22,7 @@
 #include "channel_messages.h"
 #include "compose_request.h"
 #include "host_renderer.h"
+#include "resize_trace.h"
 #include "task_layout.h"
 #include "unique_fd.h"
 
@@ -105,6 +106,8 @@ class TaskComposer {
     std::mutex mMutex;
     TaskRegistry mTasks;
     ResizeGate mResizeGate;
+    // Per-stage lines when the property debug.dsa.resize_trace is 1 at start.
+    ResizeTrace mTrace;
     TaskDisplays mDisplays{kFirstTaskDisplay, kTaskDisplays};
     HostRenderer mHost;
     uint64_t mGeneration = 0;
