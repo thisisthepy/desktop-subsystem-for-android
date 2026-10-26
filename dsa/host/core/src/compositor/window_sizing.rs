@@ -80,6 +80,9 @@ pub struct WindowSizing {
     asked_density: Option<u32>,
     /// Whether the user is dragging the window's edge or moving it.
     dragging: bool,
+    /// Whether the task was given a size live during this drag, so it must be reconfigured
+    /// when the drag ends.
+    resized_live: bool,
     /// Whether the window has said which monitor scale it opened on.
     placed: bool,
 }
@@ -97,6 +100,7 @@ impl WindowSizing {
             asked: None,
             asked_density: None,
             dragging: false,
+            resized_live: false,
             placed: false,
         }
     }
@@ -175,6 +179,12 @@ impl WindowSizing {
     /// The window's client area is now `view`. Returns the request that gives the task that
     /// size, unless the task has it or it was asked for already. Called for every step of a
     /// live resize; the requests are folded together before they are sent.
+    ///
+    /// While the user drags the window, the request is live: the task takes the size
+    /// without being reconfigured, so an app that does not handle a change of screen size is
+    /// laid out again rather than recreated at every step. Any other change of size (a
+    /// maximise, a snap, a move to a monitor of another scale) reconfigures the task at
+    /// once.
     pub fn view_resized(&mut self, view: (u32, u32), now: Instant) -> Option<TaskRequest> {
         if view.0 == 0 || view.1 == 0 {
             return None;
@@ -186,24 +196,54 @@ impl WindowSizing {
             return None;
         }
         self.asked = Some((size, now));
+        if self.dragging {
+            self.resized_live = true;
+        }
         Some(TaskRequest::Resize {
             task_id: self.task_id,
             width: size.0,
             height: size.1,
-            live: false,
+            live: self.dragging,
         })
     }
 
     /// The user started (`true`) or finished dragging the window. While they drag, the
     /// window never resizes itself under them. The guest has [`SETTLE`] from the end of the
     /// drag to take the last size.
-    pub fn dragging(&mut self, active: bool, now: Instant) {
-        self.dragging = active;
-        if !active {
+    ///
+    /// When a drag that resized the task live ends, returns the request (not live) that
+    /// gives the task the window's size and reconfigures it for that size. It is sent even
+    /// when the task has that size already: the live steps left the task with the
+    /// configuration it had when the drag began. A drag that only moved the window asks
+    /// nothing.
+    pub fn dragging(&mut self, active: bool, now: Instant) -> Option<TaskRequest> {
+        if active {
+            if !self.dragging {
+                self.dragging = true;
+                self.resized_live = false;
+            }
+            return None;
+        }
+        if !self.dragging {
+            return None;
+        }
+        self.dragging = false;
+        if !std::mem::take(&mut self.resized_live) {
             if let Some((size, _)) = self.asked {
                 self.asked = Some((size, now));
             }
+            return None;
         }
+        let size = clamp_size(self.view, self.max);
+        // A task that has the size already reports the same bounds after it is
+        // reconfigured, if it reports at all, so there is nothing to wait for.
+        self.asked = (size != self.guest).then_some((size, now));
+        Some(TaskRequest::Resize {
+            task_id: self.task_id,
+            width: size.0,
+            height: size.1,
+            live: false,
+        })
     }
 
     /// The guest reported the task. Returns the client size the window must take, when the
@@ -279,11 +319,100 @@ mod tests {
         })
     }
 
+    fn live_resize(width: u32, height: u32) -> Option<TaskRequest> {
+        Some(TaskRequest::Resize {
+            task_id: 7,
+            width,
+            height,
+            live: true,
+        })
+    }
+
     fn density(density_dpi: u32) -> Option<TaskRequest> {
         Some(TaskRequest::SetDensity {
             task_id: 7,
             density_dpi,
         })
+    }
+
+    #[test]
+    fn fr4_sizes_asked_while_dragging_are_live_and_the_drag_end_reconfigures_once() {
+        let mut sizing = WindowSizing::new(&task(400, 300, 160));
+        let now = Instant::now();
+        assert_eq!(sizing.dragging(true, now), None);
+        assert_eq!(sizing.view_resized((500, 300), now), live_resize(500, 300));
+        assert_eq!(sizing.view_resized((600, 300), now), live_resize(600, 300));
+        // The guest takes each live size and reports it as it would any other.
+        assert_eq!(sizing.guest_updated(&task(500, 300, 160)), None);
+        assert_eq!(sizing.guest_updated(&task(600, 300, 160)), None);
+        assert!(!sizing.waiting());
+        // The task has the size already; the end of the drag asks for it again, not live,
+        // which is what reconfigures it, and waits for nothing.
+        assert_eq!(sizing.dragging(false, now), resize(600, 300));
+        assert!(!sizing.waiting());
+        // The guest's report of it carries the same bounds and changes nothing.
+        assert_eq!(sizing.guest_updated(&task(600, 300, 160)), None);
+        assert_eq!(sizing.tick(now + SETTLE * 2), None);
+        // A change of size outside a drag (a maximise, a snap) is not live.
+        assert_eq!(sizing.view_resized((900, 700), now), resize(900, 700));
+    }
+
+    #[test]
+    fn fr4_the_drag_end_asks_for_a_size_the_guest_has_not_reported_yet() {
+        let mut sizing = WindowSizing::new(&task(400, 300, 160));
+        let start = Instant::now();
+        sizing.dragging(true, start);
+        assert_eq!(
+            sizing.view_resized((700, 300), start),
+            live_resize(700, 300)
+        );
+        let end = start + SETTLE / 4;
+        assert_eq!(sizing.dragging(false, end), resize(700, 300));
+        assert!(sizing.waiting());
+        // The answer to either request clears the wait.
+        assert_eq!(sizing.guest_updated(&task(700, 300, 160)), None);
+        assert!(!sizing.waiting());
+        assert_eq!(sizing.tick(end + SETTLE * 2), None);
+    }
+
+    #[test]
+    fn fr4_the_drag_end_asks_for_no_more_than_the_guest_can_draw() {
+        let mut sizing = WindowSizing::new(&task(400, 300, 160));
+        let now = Instant::now();
+        sizing.dragging(true, now);
+        assert_eq!(
+            sizing.view_resized((2560, 900), now),
+            live_resize(1920, 900)
+        );
+        assert_eq!(sizing.dragging(false, now), resize(1920, 900));
+    }
+
+    #[test]
+    fn fr4_a_drag_that_does_not_resize_the_task_asks_nothing_at_its_end() {
+        let mut sizing = WindowSizing::new(&task(400, 300, 160));
+        let now = Instant::now();
+        // The user only moves the window.
+        assert_eq!(sizing.dragging(true, now), None);
+        assert_eq!(sizing.dragging(false, now), None);
+        // A size the task has already is not a resize either.
+        sizing.dragging(true, now);
+        assert_eq!(sizing.view_resized((400, 300), now), None);
+        assert_eq!(sizing.dragging(false, now), None);
+        // An end the window reports twice asks once.
+        sizing.dragging(true, now);
+        sizing.view_resized((500, 300), now);
+        assert_eq!(sizing.dragging(false, now), resize(500, 300));
+        assert_eq!(sizing.dragging(false, now), None);
+    }
+
+    #[test]
+    fn fr4_a_start_the_window_reports_twice_does_not_forget_the_live_sizes() {
+        let mut sizing = WindowSizing::new(&task(400, 300, 160));
+        let now = Instant::now();
+        sizing.dragging(true, now);
+        sizing.view_resized((500, 300), now);
+        assert_eq!(sizing.dragging(true, now), None);
+        assert_eq!(sizing.dragging(false, now), resize(500, 300));
     }
 
     #[test]
@@ -352,7 +481,7 @@ mod tests {
         assert!(sizing.waiting());
         assert_eq!(sizing.guest_updated(&task(600, 300, 160)), None);
         assert!(!sizing.waiting());
-        sizing.dragging(false, now);
+        assert_eq!(sizing.dragging(false, now), resize(600, 300));
         assert_eq!(sizing.tick(now + SETTLE * 2), None);
     }
 
@@ -380,7 +509,7 @@ mod tests {
         assert_eq!(sizing.tick(start + SETTLE * 5), None);
         // The guest has SETTLE from the end of the drag.
         let end = start + SETTLE * 5;
-        sizing.dragging(false, end);
+        assert_eq!(sizing.dragging(false, end), resize(700, 300));
         assert_eq!(sizing.tick(end + SETTLE / 2), None);
         assert_eq!(sizing.tick(end + SETTLE), Some((650, 300)));
     }
