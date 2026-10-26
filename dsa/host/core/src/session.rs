@@ -497,6 +497,7 @@ impl Session {
                 task_id,
                 width,
                 height,
+                live: false,
             }),
             TaskRequest::SetDensity {
                 task_id,

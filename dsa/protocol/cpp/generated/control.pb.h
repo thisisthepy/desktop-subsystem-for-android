@@ -2018,6 +2018,7 @@ class ResizeTask final :
     kTaskIdFieldNumber = 1,
     kWidthFieldNumber = 2,
     kHeightFieldNumber = 3,
+    kLiveFieldNumber = 4,
   };
   // int32 task_id = 1;
   void clear_task_id();
@@ -2046,6 +2047,15 @@ class ResizeTask final :
   void _internal_set_height(uint32_t value);
   public:
 
+  // bool live = 4;
+  void clear_live();
+  bool live() const;
+  void set_live(bool value);
+  private:
+  bool _internal_live() const;
+  void _internal_set_live(bool value);
+  public:
+
   // @@protoc_insertion_point(class_scope:dsa.control.v1.ResizeTask)
  private:
   class _Internal;
@@ -2057,6 +2067,7 @@ class ResizeTask final :
     int32_t task_id_;
     uint32_t width_;
     uint32_t height_;
+    bool live_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -4144,6 +4155,26 @@ inline void ResizeTask::_internal_set_height(uint32_t value) {
 inline void ResizeTask::set_height(uint32_t value) {
   _internal_set_height(value);
   // @@protoc_insertion_point(field_set:dsa.control.v1.ResizeTask.height)
+}
+
+// bool live = 4;
+inline void ResizeTask::clear_live() {
+  _impl_.live_ = false;
+}
+inline bool ResizeTask::_internal_live() const {
+  return _impl_.live_;
+}
+inline bool ResizeTask::live() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ResizeTask.live)
+  return _internal_live();
+}
+inline void ResizeTask::_internal_set_live(bool value) {
+  
+  _impl_.live_ = value;
+}
+inline void ResizeTask::set_live(bool value) {
+  _internal_set_live(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ResizeTask.live)
 }
 
 // -------------------------------------------------------------------

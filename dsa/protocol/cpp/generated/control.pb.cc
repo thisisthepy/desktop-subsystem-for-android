@@ -184,6 +184,7 @@ PROTOBUF_CONSTEXPR ResizeTask::ResizeTask(
     /*decltype(_impl_.task_id_)*/0
   , /*decltype(_impl_.width_)*/0u
   , /*decltype(_impl_.height_)*/0u
+  , /*decltype(_impl_.live_)*/false
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct ResizeTaskDefaultTypeInternal {
   PROTOBUF_CONSTEXPR ResizeTaskDefaultTypeInternal()
@@ -3252,12 +3253,13 @@ ResizeTask::ResizeTask(const ResizeTask& from)
       decltype(_impl_.task_id_){}
     , decltype(_impl_.width_){}
     , decltype(_impl_.height_){}
+    , decltype(_impl_.live_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   ::memcpy(&_impl_.task_id_, &from._impl_.task_id_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.height_) -
-    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.height_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.live_) -
+    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.live_));
   // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ResizeTask)
 }
 
@@ -3269,6 +3271,7 @@ inline void ResizeTask::SharedCtor(
       decltype(_impl_.task_id_){0}
     , decltype(_impl_.width_){0u}
     , decltype(_impl_.height_){0u}
+    , decltype(_impl_.live_){false}
     , /*decltype(_impl_._cached_size_)*/{}
   };
 }
@@ -3297,8 +3300,8 @@ void ResizeTask::Clear() {
   (void) cached_has_bits;
 
   ::memset(&_impl_.task_id_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.height_) -
-      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.height_));
+      reinterpret_cast<char*>(&_impl_.live_) -
+      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.live_));
   _internal_metadata_.Clear<std::string>();
 }
 
@@ -3328,6 +3331,14 @@ const char* ResizeTask::_InternalParse(const char* ptr, ::_pbi::ParseContext* ct
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
           _impl_.height_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool live = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.live_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -3379,6 +3390,12 @@ uint8_t* ResizeTask::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(3, this->_internal_height(), target);
   }
 
+  // bool live = 4;
+  if (this->_internal_live() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(4, this->_internal_live(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -3408,6 +3425,11 @@ size_t ResizeTask::ByteSizeLong() const {
   // uint32 height = 3;
   if (this->_internal_height() != 0) {
     total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_height());
+  }
+
+  // bool live = 4;
+  if (this->_internal_live() != 0) {
+    total_size += 1 + 1;
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -3440,6 +3462,9 @@ void ResizeTask::MergeFrom(const ResizeTask& from) {
   if (from._internal_height() != 0) {
     _this->_internal_set_height(from._internal_height());
   }
+  if (from._internal_live() != 0) {
+    _this->_internal_set_live(from._internal_live());
+  }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
@@ -3458,8 +3483,8 @@ void ResizeTask::InternalSwap(ResizeTask* other) {
   using std::swap;
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(ResizeTask, _impl_.height_)
-      + sizeof(ResizeTask::_impl_.height_)
+      PROTOBUF_FIELD_OFFSET(ResizeTask, _impl_.live_)
+      + sizeof(ResizeTask::_impl_.live_)
       - PROTOBUF_FIELD_OFFSET(ResizeTask, _impl_.task_id_)>(
           reinterpret_cast<char*>(&_impl_.task_id_),
           reinterpret_cast<char*>(&other->_impl_.task_id_));

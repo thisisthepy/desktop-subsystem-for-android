@@ -887,6 +887,7 @@ impl HostApiClient {
             task_id,
             width,
             height,
+            live: false,
         }))
     }
 
