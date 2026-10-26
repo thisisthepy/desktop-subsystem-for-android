@@ -24,7 +24,7 @@ pub mod names {
     /// The window manager (`dsa-wm.exe`), as Task Manager lists it.
     pub const WINDOW_MANAGER: &str = "DSA Window Manager";
     /// The window manager's name on a Korean desktop.
-    pub const WINDOW_MANAGER_KO: &str = "DSA 창 관리자";
+    pub const WINDOW_MANAGER_KO: &str = "Android용 창 관리자";
     /// The command line tool (`dsa.exe`).
     pub const CLI: &str = "Desktop Subsystem for Android command line";
     /// The app window host as installed (`dsa-app-window.exe`). Each app's copy carries the
@@ -430,7 +430,7 @@ mod tests {
             },
             LANG_KO_KR,
         );
-        assert!(contains(&korean, &utf16("DSA 창 관리자")));
+        assert!(contains(&korean, &utf16("Android용 창 관리자")));
         assert!(contains(&korean, &utf16("041204B0")));
         assert!(contains(&korean, &[0x12, 0x04, 0xB0, 0x04]));
     }
