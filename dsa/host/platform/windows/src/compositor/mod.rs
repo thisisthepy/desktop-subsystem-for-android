@@ -1,24 +1,26 @@
-//! The user-session compositor for Windows.
+//! The DSA Window Manager (`dsa-wm`): the user-session compositor for Windows.
 //!
 //! Runs in the user session, listens on Hyper-V sockets for guest graphics streams
 //! (ports 5566 and 5567), and delegates accepted streams to a [`GraphicsRenderer`].
 //!
-//! It shows one native window per guest app task. It watches the guest's tasks through the
-//! service's local API ([`tasks`]), opens and closes a window for each ([`window`]), and
-//! has the renderer copy each task's frames into its window on the GPU ([`frames`],
-//! [`present`]). When the user closes a window, the guest is asked to end its task. The
-//! mouse, touch and pen input in a window goes to its task ([`pointer`]).
+//! It owns no window. Each guest app task is shown in a native window of the app's own window
+//! host, a small program named and drawn as the app (see `crate::app_window`). The window
+//! manager watches the guest's tasks through the service's local API ([`tasks`]), starts
+//! each app's window host and tells it which windows to open ([`hosts`]), and has the
+//! renderer copy each task's frames, on the GPU, into a texture the window host shows
+//! ([`frames`], [`present`]). When the user closes a window, the guest is asked to end its
+//! task. The mouse, touch and pen input in a window goes from the window host to the service
+//! itself, without passing through the window manager.
 
 pub mod adapter;
 pub mod display_gpu;
 pub mod frames;
+pub mod hosts;
 pub mod log;
-pub mod pointer;
 pub mod present;
 pub mod shutdown;
 pub mod single_instance;
 pub mod tasks;
-pub mod window;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,17 +35,18 @@ use dsa_host_core::compositor::{
 };
 use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::session::SessionState;
+use dsa_transport::local::PeerIgnoringListener;
 use dsa_transport::{Connector, Listener, TransportError};
 
 use self::adapter::{DisplayPresenter, DisplaySink};
 use self::frames::FrameRouter;
+use self::hosts::{HostLauncher, ManagerSetup};
 use self::log::{note, CompositorLogger};
 use self::present::Gpu;
 use self::single_instance::DEFAULT_MUTEX_NAME;
-use self::window::{OpenWindow, UiSetup};
 use crate::guid::Guid;
 use crate::hvsocket::RawHvSocketListener;
-use crate::pipe::NamedPipeConnector;
+use crate::pipe::{current_user_only_sddl, NamedPipeConnector, NamedPipeListener};
 use crate::vm_listener::{BindFn, VmBoundListener, VmIdSlot};
 
 /// Configuration for the user-session compositor.
@@ -88,7 +91,34 @@ pub struct Compositor {
     logger: Option<Arc<CompositorLogger>>,
     /// What copies each display's frames into the task windows, when there is one.
     presenter: Option<Arc<dyn DisplayPresenter>>,
-    open_windows: Arc<Mutex<Vec<OpenWindow>>>,
+    /// Opens where the app window hosts connect.
+    host_listener: Option<HostListenerFn>,
+    /// Starts each app's window host.
+    launcher: Option<Box<dyn HostLauncher>>,
+    windows: Arc<Mutex<Vec<i32>>>,
+}
+
+/// Opens the listener the app window hosts connect to.
+pub type HostListenerFn = Box<dyn FnOnce() -> Result<Box<dyn Listener>, String> + Send>;
+
+/// The session this process runs in.
+pub fn current_session() -> u32 {
+    use windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId;
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    let mut session = 0u32;
+    // SAFETY: our own process ID and a local to write to.
+    unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut session) };
+    session
+}
+
+/// The pipe the window hosts of this session dial, which only this user may open.
+fn session_host_listener() -> HostListenerFn {
+    Box::new(|| {
+        let sddl = current_user_only_sddl().map_err(|e| format!("reading this user: {e}"))?;
+        let listener = NamedPipeListener::bind(&hosts::pipe_name(current_session()), &sddl)
+            .map_err(|e| format!("could not open the app windows' pipe: {e}"))?;
+        Ok(Box::new(PeerIgnoringListener(listener)) as Box<dyn Listener>)
+    })
 }
 
 impl Compositor {
@@ -124,7 +154,9 @@ impl Compositor {
             bind_process_pipe: Some(bind_process_pipe),
             logger: None,
             presenter: None,
-            open_windows: Arc::new(Mutex::new(Vec::new())),
+            host_listener: Some(session_host_listener()),
+            launcher: None,
+            windows: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -146,8 +178,23 @@ impl Compositor {
             bind_process_pipe: Some(bind_process_pipe),
             logger: None,
             presenter: None,
-            open_windows: Arc::new(Mutex::new(Vec::new())),
+            host_listener: None,
+            launcher: None,
+            windows: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Takes the app window hosts' connections from `listener`, and starts each app's window
+    /// host through `launcher`. Without them, the window hosts connect on this session's pipe
+    /// and each app's window program is made and run from the installed window host.
+    pub fn with_window_hosts(
+        mut self,
+        listener: HostListenerFn,
+        launcher: Box<dyn HostLauncher>,
+    ) -> Compositor {
+        self.host_listener = Some(listener);
+        self.launcher = Some(launcher);
+        self
     }
 
     /// Shows each task's frames in its window through `presenter`. Without one, the task
@@ -157,10 +204,10 @@ impl Compositor {
         self
     }
 
-    /// The task windows that are open, in task ID order, kept up to date while the
-    /// compositor runs.
-    pub fn open_windows(&self) -> Arc<Mutex<Vec<OpenWindow>>> {
-        Arc::clone(&self.open_windows)
+    /// The tasks that have a window, in task ID order, kept up to date while the window
+    /// manager runs.
+    pub fn task_windows(&self) -> Arc<Mutex<Vec<i32>>> {
+        Arc::clone(&self.windows)
     }
 
     /// Sets an optional file logger.
@@ -182,7 +229,7 @@ impl Compositor {
     /// Runs the compositor until `stop` is set.
     pub fn run(mut self, stop: Arc<AtomicBool>) {
         if let Some(logger) = &self.logger {
-            logger.log("dsa-compositor starting");
+            logger.log("dsa-wm starting");
         }
 
         let bind_cmd = self.bind_command.take().expect("bind_command present");
@@ -194,7 +241,8 @@ impl Compositor {
         let mut cmd_listener = VmBoundListener::new(Arc::clone(&self.vm_id_slot), bind_cmd);
         let mut proc_listener = VmBoundListener::new(Arc::clone(&self.vm_id_slot), bind_proc);
 
-        // 0. The task windows, the watch of the guest's tasks, and the requests to end them.
+        // 0. The app window hosts, the watch of the guest's tasks, and the requests to end
+        // them.
         let task_windows = self.start_task_windows(&stop);
 
         // 1. Monitor thread that tracks the VM ID and state via the local API.
@@ -205,7 +253,7 @@ impl Compositor {
         let monitor_logger = self.logger.clone();
 
         let monitor_thread = thread::Builder::new()
-            .name("dsa-compositor-monitor".into())
+            .name("dsa-wm-monitor".into())
             .spawn(move || {
                 let mut connector = monitor_connector_factory;
                 let mut client_opt: Option<HostApiClient> = None;
@@ -216,7 +264,7 @@ impl Compositor {
                         None => {
                             match HostApiClient::connect(
                                 &mut *connector,
-                                "dsa-compositor",
+                                "dsa-wm",
                                 Duration::from_secs(1),
                             ) {
                                 Ok(c) => {
@@ -282,7 +330,7 @@ impl Compositor {
         let cmd_logger = self.logger.clone();
 
         let cmd_thread = thread::Builder::new()
-            .name("dsa-compositor-cmd".into())
+            .name("dsa-wm-cmd".into())
             .spawn(move || {
                 while !cmd_stop.load(Ordering::Relaxed) {
                     match cmd_listener.accept(Duration::from_millis(100)) {
@@ -324,7 +372,7 @@ impl Compositor {
         let proc_logger = self.logger.clone();
 
         let proc_thread = thread::Builder::new()
-            .name("dsa-compositor-pipe".into())
+            .name("dsa-wm-pipe".into())
             .spawn(move || {
                 while !proc_stop.load(Ordering::Relaxed) {
                     match proc_listener.accept(Duration::from_millis(100)) {
@@ -370,21 +418,23 @@ impl Compositor {
         let _ = proc_thread.join();
 
         if let Some(logger) = &self.logger {
-            logger.log("dsa-compositor stopped cleanly");
+            logger.log("dsa-wm stopped cleanly");
         }
     }
 
-    /// Starts the task windows. A part that cannot start is logged; the rest of the
-    /// compositor goes on.
-    fn start_task_windows(&self, stop: &Arc<AtomicBool>) -> TaskWindowThreads {
+    /// Starts the task windows: the manager, the listener for the app window hosts, the watch
+    /// of the guest's tasks and the requests to the guest. A part that cannot start is
+    /// logged; the rest of the window manager goes on.
+    fn start_task_windows(&mut self, stop: &Arc<AtomicBool>) -> TaskWindowThreads {
         let logger = self.logger.clone();
         let log = |message: &str| note(logger.as_deref(), message);
         let router = Arc::new(FrameRouter::new());
+        let mut luid = None;
         let gpu = match &self.presenter {
             None => None,
             Some(presenter) => {
-                let luid = presenter.adapter_luid();
-                match Gpu::new(luid) {
+                luid = presenter.adapter_luid();
+                match Gpu::new(luid, false) {
                     Ok(gpu) => {
                         if luid.is_some() && !gpu.on_renderer_gpu {
                             log("the renderer's GPU was not found; task windows may stay empty");
@@ -406,33 +456,75 @@ impl Compositor {
                 }
             }
         };
-        let (requests_tx, requests_rx) = mpsc::channel();
-        let (input_tx, input_rx) = mpsc::channel();
-        let ui = match window::start(UiSetup {
-            requests: requests_tx,
-            input: input_tx,
-            router,
-            gpu,
-            logger: self.logger.clone(),
-            listing: Arc::clone(&self.open_windows),
-        }) {
-            Ok(ui) => ui,
-            Err(why) => {
+        let launcher: Box<dyn HostLauncher> = match self.launcher.take() {
+            Some(launcher) => launcher,
+            None => match (
+                crate::app_exe::default_template(),
+                crate::app_exe::default_apps_dir(),
+            ) {
+                (Some(template), Some(apps_dir)) => Box::new(crate::app_exe::ProgramLauncher {
+                    template,
+                    apps_dir,
+                    logger: self.logger.clone(),
+                }),
+                _ => {
+                    log("cannot tell where the app window programs go; task windows cannot open");
+                    return TaskWindowThreads::default();
+                }
+            },
+        };
+        let listener = match self.host_listener.take().map(|open| open()) {
+            Some(Ok(listener)) => listener,
+            Some(Err(why)) => {
                 log(&format!("task windows cannot open: {why}"));
+                return TaskWindowThreads::default();
+            }
+            None => {
+                log("task windows cannot open: nowhere for the app windows to connect");
                 return TaskWindowThreads::default();
             }
         };
 
-        let watch_sender = ui.sender();
+        let (events_tx, events_rx) = mpsc::channel();
+        let (requests_tx, requests_rx) = mpsc::channel();
+        let manager_stop = Arc::new(AtomicBool::new(false));
+        let setup = ManagerSetup {
+            events: events_rx,
+            requests: requests_tx,
+            router,
+            gpu,
+            launcher,
+            logger: self.logger.clone(),
+            listing: Arc::clone(&self.windows),
+            stop: Arc::clone(&manager_stop),
+        };
+        let manager = thread::Builder::new()
+            .name("dsa-wm-manager".into())
+            .spawn(move || hosts::manage(setup))
+            .map_err(|e| log(&format!("could not start the window manager's thread: {e}")))
+            .ok();
+
+        let accept_events = events_tx.clone();
+        let accept_stop = Arc::clone(&manager_stop);
+        let accept_logger = self.logger.clone();
+        let acceptor = thread::Builder::new()
+            .name("dsa-wm-hosts".into())
+            .spawn(move || {
+                hosts::accept_hosts(listener, accept_events, luid, accept_stop, accept_logger)
+            })
+            .map_err(|e| log(&format!("could not take the app windows' connections: {e}")))
+            .ok();
+
+        let watch_events = events_tx.clone();
         let watch_connector = (self.local_api_connector)();
         let watch_stop = Arc::clone(stop);
         let watch_logger = self.logger.clone();
         let watcher = thread::Builder::new()
-            .name("dsa-compositor-tasks".into())
+            .name("dsa-wm-tasks".into())
             .spawn(move || {
                 tasks::watch(
                     watch_connector,
-                    |event| watch_sender.send(event),
+                    |event| watch_events.send(event).is_ok(),
                     watch_stop,
                     watch_logger,
                 )
@@ -440,35 +532,28 @@ impl Compositor {
             .map_err(|e| log(&format!("could not start the watch of tasks: {e}")))
             .ok();
 
-        let request_sender = ui.sender();
+        let request_events = events_tx;
         let request_connector = (self.local_api_connector)();
         let request_logger = self.logger.clone();
         let requester = thread::Builder::new()
-            .name("dsa-compositor-requests".into())
+            .name("dsa-wm-requests".into())
             .spawn(move || {
                 tasks::serve_requests(
                     request_connector,
                     requests_rx,
-                    |event| request_sender.send(event),
+                    |event| request_events.send(event).is_ok(),
                     request_logger,
                 )
             })
             .map_err(|e| log(&format!("could not start the task requests: {e}")))
             .ok();
 
-        let input_connector = (self.local_api_connector)();
-        let input_logger = self.logger.clone();
-        let input = thread::Builder::new()
-            .name("dsa-compositor-input".into())
-            .spawn(move || tasks::serve_input(input_connector, input_rx, input_logger))
-            .map_err(|e| log(&format!("could not start the pointer input: {e}")))
-            .ok();
-
         TaskWindowThreads {
-            ui: Some(ui),
-            watcher,
-            requester,
-            input,
+            stop: Some(manager_stop),
+            threads: [manager, acceptor, watcher, requester]
+                .into_iter()
+                .flatten()
+                .collect(),
         }
     }
 }
@@ -476,27 +561,23 @@ impl Compositor {
 /// The threads behind the task windows.
 #[derive(Default)]
 struct TaskWindowThreads {
-    ui: Option<window::UiHandle>,
-    watcher: Option<thread::JoinHandle<()>>,
-    requester: Option<thread::JoinHandle<()>>,
-    /// Passes the windows' pointer input on; it ends with the windows.
-    input: Option<thread::JoinHandle<()>>,
+    /// Stops the manager and the listener for the app window hosts.
+    stop: Option<Arc<AtomicBool>>,
+    threads: Vec<thread::JoinHandle<()>>,
 }
 
 impl TaskWindowThreads {
-    /// Stops the frames first, then closes the windows and ends the threads. The watch ends
-    /// on the compositor's stop flag; the request thread ends with the windows.
+    /// Stops the frames first, then the manager, which closes every app window host, then
+    /// the other threads. The watch ends on the window manager's stop flag; the request
+    /// thread ends with the manager.
     fn stop(self, presenter: Option<&dyn DisplayPresenter>) {
         if let Some(presenter) = presenter {
             let _ = presenter.present_displays(None);
         }
-        if let Some(ui) = self.ui {
-            ui.stop();
+        if let Some(stop) = &self.stop {
+            stop.store(true, Ordering::SeqCst);
         }
-        for thread in [self.watcher, self.requester, self.input]
-            .into_iter()
-            .flatten()
-        {
+        for thread in self.threads {
             let _ = thread.join();
         }
     }

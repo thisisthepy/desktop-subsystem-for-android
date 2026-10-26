@@ -210,6 +210,30 @@ fn pr3_a_raw_stream_sends_while_another_thread_waits_to_receive() {
     assert_eq!(reader.join().unwrap().expect("the reader gets it"), b"next");
 }
 
+/// The window manager hands each app window a frame from the renderer's thread while
+/// another thread waits for what the window says back.
+#[test]
+fn pr1_a_framed_connection_sends_from_a_clone_while_another_thread_receives() {
+    let (mut listener, mut connector) = tcp_pair();
+    let mut near = connector.connect(Duration::from_secs(5)).expect("connect");
+    let mut far = listener.accept(Duration::from_secs(5)).expect("accept");
+    let mut sender = near
+        .try_clone_sender()
+        .expect("a framed connection can share its socket");
+    let reader = std::thread::spawn(move || near.recv(Some(Duration::from_secs(5))));
+    std::thread::sleep(Duration::from_millis(50));
+    let big = vec![7u8; 200_000];
+    sender.send(b"first").expect("send while the reader waits");
+    sender.send(&big).expect("a large frame");
+    assert_eq!(far.recv(Some(Duration::from_secs(5))).unwrap(), b"first");
+    assert_eq!(far.recv(Some(Duration::from_secs(5))).unwrap(), big);
+    far.send(b"answer").unwrap();
+    assert_eq!(
+        reader.join().unwrap().expect("the reader gets it"),
+        b"answer"
+    );
+}
+
 /// Pointer input goes to the guest while the host waits on the control channel for the
 /// guest's next message. With one handle for both, every pointer event waited for that
 /// read to time out.

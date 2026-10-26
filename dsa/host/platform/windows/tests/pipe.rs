@@ -72,3 +72,23 @@ fn pr5_an_invalid_security_descriptor_is_refused() {
     assert!(NamedPipeListener::bind(&fresh_name(), "not sddl").is_err());
     assert!(DEFAULT_PIPE_SDDL.starts_with("D:P"));
 }
+
+/// The window manager sends each app window its frames from one thread while another waits
+/// for what the window says back, over one pipe.
+#[test]
+fn pr1_a_pipe_sends_from_a_clone_while_another_thread_receives() {
+    let (mut listener, mut connector) = pipe_pair();
+    let mut near = connector.connect(Duration::from_secs(5)).unwrap();
+    let mut far = listener.accept(Duration::from_secs(5)).unwrap();
+    let mut sender = near
+        .try_clone_sender()
+        .expect("a pipe can share its handle");
+    let reader = std::thread::spawn(move || near.recv(Some(Duration::from_secs(5))));
+    std::thread::sleep(Duration::from_millis(50));
+    let started = std::time::Instant::now();
+    sender.send(b"frame").unwrap();
+    assert_eq!(far.recv(Some(Duration::from_secs(5))).unwrap(), b"frame");
+    assert!(started.elapsed() < Duration::from_secs(1));
+    far.send(b"presented").unwrap();
+    assert_eq!(reader.join().unwrap().unwrap(), b"presented");
+}

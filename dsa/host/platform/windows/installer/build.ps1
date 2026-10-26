@@ -49,11 +49,12 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 $env:DSA_VERSION = $Version
 Push-Location $dsa
 try {
-    cargo build --release -p dsa-host-windows --bin dsa-hostd --bin dsa-compositor -p dsa-cli --bin dsa
+    cargo build --release -p dsa-host-windows --bin dsa-hostd --bin dsa-wm --bin dsa-app-window -p dsa-cli --bin dsa
     if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 } finally { Pop-Location }
 Copy-Item (Join-Path $dsa "target\release\dsa-hostd.exe") $stage
-Copy-Item (Join-Path $dsa "target\release\dsa-compositor.exe") $stage
+Copy-Item (Join-Path $dsa "target\release\dsa-wm.exe") $stage
+Copy-Item (Join-Path $dsa "target\release\dsa-app-window.exe") $stage
 Copy-Item (Join-Path $dsa "target\release\dsa.exe") $stage
 
 if ($GfxstreamBackend) {

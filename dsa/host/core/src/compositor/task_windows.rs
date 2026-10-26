@@ -23,6 +23,8 @@ pub enum WindowChange {
     /// Open a window for the task, with a client area of `width` x `height` pixels.
     Open {
         task_id: i32,
+        /// The package of the task's app, whose window host opens the window.
+        package_name: String,
         title: String,
         width: u32,
         height: u32,
@@ -96,6 +98,7 @@ fn open(task: &Task) -> WindowChange {
     let (width, height) = window_size(&task.bounds);
     WindowChange::Open {
         task_id: task.task_id,
+        package_name: task.package_name.clone(),
         title: window_title(task),
         width,
         height,
@@ -136,6 +139,8 @@ impl TaskWindows {
     /// Records a change to the guest's tasks, and returns what the windows must do.
     pub fn apply(&mut self, event: &TaskEvent) -> Vec<WindowChange> {
         match event {
+            // An app's name and icon belong to its program, not to a window.
+            TaskEvent::App(_) => Vec::new(),
             TaskEvent::Updated(task) => {
                 let previous = self.tasks.insert(task.task_id, task.clone());
                 if self.closing.contains(&task.task_id) {
@@ -312,6 +317,7 @@ mod tests {
     fn opened(task_id: i32, title: &str) -> WindowChange {
         WindowChange::Open {
             task_id,
+            package_name: format!("com.example.app{task_id}"),
             title: title.into(),
             width: 720,
             height: 1280,

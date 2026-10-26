@@ -21,5 +21,8 @@ dsa-host-windows = { path = "../platform/windows" }
 [target.'cfg(unix)'.dependencies]
 dsa-host-unix = { path = "../platform/unix" }
 
+[build-dependencies]
+dsa-exe-resources = { path = "../platform/windows/resources" }
+
 [dev-dependencies]
 dsa-host-core = { workspace = true, features = ["conformance"] }

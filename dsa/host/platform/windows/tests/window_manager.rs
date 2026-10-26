@@ -386,7 +386,7 @@ fn fr3_compositor_logs_to_user_local_appdata_folder() {
         std::process::id(),
         unique_id()
     ));
-    let log_file = temp_dir.join("dsa-compositor.log");
+    let log_file = temp_dir.join("dsa-wm.log");
 
     let logger = CompositorLogger::open(&log_file).expect("open logger");
     logger.log("test log message 1");

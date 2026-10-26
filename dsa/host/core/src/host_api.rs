@@ -32,7 +32,7 @@ use dsa_transport::{Connection, Connector, TransportError};
 
 use crate::input::PointerEvent;
 use crate::session::{Session, SessionError, SessionState};
-use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskWatch};
+use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskWatch};
 
 /// One user's Android, as the service drives it.
 pub trait UserAndroid: Send + Sync {
@@ -263,6 +263,22 @@ fn task_from_wire(task: types::Task) -> Task {
     }
 }
 
+fn app_to_wire(app: AppInfo) -> types::AppInfo {
+    types::AppInfo {
+        package_name: app.package_name,
+        label: app.label,
+        icon_png: app.icon_png,
+    }
+}
+
+fn app_from_wire(app: types::AppInfo) -> AppInfo {
+    AppInfo {
+        package_name: app.package_name,
+        label: app.label,
+        icon_png: app.icon_png,
+    }
+}
+
 fn event_to_wire(event: TaskEvent) -> types::TaskEvent {
     use types::task_event::Body as Event;
     let body = match event {
@@ -275,6 +291,7 @@ fn event_to_wire(event: TaskEvent) -> types::TaskEvent {
             task_id,
             display_id,
         }),
+        TaskEvent::App(app) => Event::App(app_to_wire(app)),
     };
     types::TaskEvent { body: Some(body) }
 }
@@ -290,10 +307,12 @@ fn event_from_wire(event: types::TaskEvent) -> Option<TaskEvent> {
             task_id: frames.task_id,
             display_id: frames.display_id,
         },
+        Event::App(app) => TaskEvent::App(app_from_wire(app)),
     })
 }
 
-/// The tasks of `events`, as a list of tasks and a list of their displays.
+/// The tasks of `events`, as a list of tasks, a list of their displays and a list of their
+/// apps.
 fn tasks_to_wire(events: Vec<TaskEvent>) -> types::Tasks {
     let mut tasks = types::Tasks::default();
     for event in events {
@@ -306,6 +325,7 @@ fn tasks_to_wire(events: Vec<TaskEvent>) -> types::Tasks {
                 task_id,
                 display_id,
             }),
+            TaskEvent::App(app) => tasks.apps.push(app_to_wire(app)),
             TaskEvent::Removed { .. } => {}
         }
     }
@@ -320,6 +340,7 @@ fn tasks_from_wire(tasks: types::Tasks) -> TaskList {
             .into_iter()
             .map(|frames| (frames.task_id, frames.display_id))
             .collect(),
+        apps: tasks.apps.into_iter().map(app_from_wire).collect(),
     }
 }
 
@@ -698,11 +719,15 @@ pub struct TaskList {
     /// The display of each task whose frames have been placed, as `(task_id, display_id)`,
     /// in task ID order.
     pub frames: Vec<(i32, u32)>,
+    /// The name and icon of each app that has a task, in package order.
+    pub apps: Vec<AppInfo>,
 }
 
 impl TaskList {
-    /// The events that bring an empty list of tasks to this one.
+    /// The events that bring an empty list of tasks to this one: every app, then every
+    /// task, then every task's display.
     pub fn events(&self) -> Vec<TaskEvent> {
+        let apps = self.apps.iter().cloned().map(TaskEvent::App);
         let tasks = self.tasks.iter().cloned().map(TaskEvent::Updated);
         let frames = self
             .frames
@@ -711,7 +736,7 @@ impl TaskList {
                 task_id: *task_id,
                 display_id: *display_id,
             });
-        tasks.chain(frames).collect()
+        apps.chain(tasks).chain(frames).collect()
     }
 }
 

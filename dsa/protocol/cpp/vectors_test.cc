@@ -94,6 +94,12 @@ std::map<std::string, v1::Envelope> Cases() {
   cases["close_task"].mutable_close_task()->set_task_id(42);
   cases["launch_app"].mutable_launch_app()->set_package_name("com.example.notes");
   {
+    v1::AppInfo* app = cases["app_info"].mutable_app_info();
+    app->set_package_name("com.example.notes");
+    app->set_label("Notes");
+    app->set_icon_png(std::string("\x89PNG\r\n\x1a\n", 8));
+  }
+  {
     v1::PointerEvent* event = cases["pointer_event_mouse_secondary_down"].mutable_pointer_event();
     event->set_task_id(42);
     event->set_action(v1::POINTER_ACTION_DOWN);

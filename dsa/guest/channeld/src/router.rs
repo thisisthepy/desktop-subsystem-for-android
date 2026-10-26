@@ -7,9 +7,10 @@
 //!   because the hwcomposer groups layers by the task bounds the agent reports.
 //! - A listener whose process has died is dropped.
 //! - The daemon keeps the latest state of each live task (its `TaskUpdated` and its
-//!   `TaskFrames`). A listener that subscribes later, such as a restarted hwcomposer, is
-//!   told the tasks already there, and so is the host each time it connects again, since a
-//!   client sends a task's state only when it changes.
+//!   `TaskFrames`) and the latest `AppInfo` of each app with a live task. A listener that
+//!   subscribes later, such as a restarted hwcomposer, is told the tasks already there, and
+//!   the host each time it connects again is told the apps and then the tasks, since a client
+//!   sends them only when they change.
 //!
 //! None of this knows about binder: a listener is anything that can take a frame, so the
 //! rules run and are tested on any platform. The binder service in `binder` is a thin layer
@@ -71,11 +72,18 @@ struct Subscription {
     listener: Arc<dyn Listener>,
 }
 
+/// The most apps the daemon keeps an `AppInfo` for. An app's is dropped when its last task
+/// ends, so only a broken or hostile client reaches this; past it, the frames still go to the
+/// host but are not kept.
+pub const MAX_APPS: usize = 1024;
+
 /// The latest state of one live task, as the frames that carried it.
 #[derive(Default)]
 struct Task {
     /// The last `TaskUpdated`, and who sent it.
     updated: Option<(Peer, Vec<u8>)>,
+    /// The package that `TaskUpdated` named.
+    package: String,
     /// The last `TaskFrames`.
     frames: Option<Vec<u8>>,
 }
@@ -84,6 +92,8 @@ struct Task {
 struct State {
     listeners: Vec<Subscription>,
     tasks: BTreeMap<i32, Task>,
+    /// The last `AppInfo` of each app, by package.
+    apps: BTreeMap<String, Vec<u8>>,
     next_id: u64,
 }
 
@@ -151,6 +161,9 @@ impl Router {
     /// waiting for the connection go first, so the host ends with the latest state.
     pub fn host_connected(&self) {
         let state = self.lock();
+        for frame in state.apps.values() {
+            let _ = self.to_host.send(frame.clone());
+        }
         for task in state.tasks.values() {
             let frames = task
                 .updated
@@ -190,13 +203,23 @@ impl Router {
                 ))
             }
             Some(Body::TaskUpdated(updated)) => {
-                state.tasks.entry(updated.task_id).or_default().updated =
-                    Some((sender, frame.clone()));
+                let task = state.tasks.entry(updated.task_id).or_default();
+                task.updated = Some((sender, frame.clone()));
+                task.package = updated.package_name;
                 state.deliver(&frame, Some(sender));
             }
             Some(Body::TaskRemoved(removed)) => {
-                state.tasks.remove(&removed.task_id);
+                if let Some(task) = state.tasks.remove(&removed.task_id) {
+                    if !state.tasks.values().any(|t| t.package == task.package) {
+                        state.apps.remove(&task.package);
+                    }
+                }
                 state.deliver(&frame, Some(sender));
+            }
+            Some(Body::AppInfo(app)) => {
+                if state.apps.contains_key(&app.package_name) || state.apps.len() < MAX_APPS {
+                    state.apps.insert(app.package_name, frame.clone());
+                }
             }
             Some(Body::TaskFrames(frames)) => {
                 state.tasks.entry(frames.task_id).or_default().frames = Some(frame.clone());

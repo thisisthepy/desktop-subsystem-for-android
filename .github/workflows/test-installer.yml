@@ -162,18 +162,41 @@ jobs:
           $currentHash = (Get-FileHash -Path $wslconfig -Algorithm SHA256).Hash
           if ($currentHash -ne $env:INITIAL_WSLCONFIG_HASH) { throw ".wslconfig was modified by installation or service startup" }
 
-      - name: fr3_compositor_installed_and_registered
+      # Task Manager and the taskbar name a program by its version information.
+      - name: fr3_every_program_carries_its_name_and_version
         run: |
-          if (-not (Test-Path "$env:PROGRAM_DIR\dsa-compositor.exe")) {
-            throw "dsa-compositor.exe is not installed in $env:PROGRAM_DIR"
+          $expected = [ordered]@{
+            'dsa-hostd.exe' = 'Desktop Subsystem for Android Service'
+            'dsa-wm.exe' = 'DSA Window Manager'
+            'dsa.exe' = 'Desktop Subsystem for Android command line'
+            'dsa-app-window.exe' = 'DSA app window'
           }
-          $runVal = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run').DsaCompositor
+          foreach ($name in $expected.Keys) {
+            $info = (Get-Item "$env:PROGRAM_DIR\$name").VersionInfo
+            Write-Host "$name : $($info.FileDescription) | $($info.ProductName) | $($info.CompanyName) | $($info.ProductVersion)"
+            if ($info.FileDescription -cne $expected[$name]) { throw "$name calls itself '$($info.FileDescription)', not '$($expected[$name])'" }
+            if ($info.ProductName -cne 'Desktop Subsystem for Android') { throw "$name names its product '$($info.ProductName)'" }
+            if ($info.CompanyName -cne 'Thisisthepy') { throw "$name names its company '$($info.CompanyName)'" }
+            if ($info.ProductVersion -cne '0.0.9') { throw "$name says it is version '$($info.ProductVersion)', not 0.0.9" }
+          }
+          $display = (Get-Service DsaHost).DisplayName
+          if ($display -cne 'Desktop Subsystem for Android Service') { throw "the service is called '$display'" }
+
+      - name: fr3_window_manager_installed_and_registered
+        run: |
+          if (-not (Test-Path "$env:PROGRAM_DIR\dsa-app-window.exe")) {
+            throw "dsa-app-window.exe, which each app's window program is made from, is not installed in $env:PROGRAM_DIR"
+          }
+          if (-not (Test-Path "$env:PROGRAM_DIR\dsa-wm.exe")) {
+            throw "dsa-wm.exe is not installed in $env:PROGRAM_DIR"
+          }
+          $runVal = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run').DsaWindowManager
           Write-Host "Run value: $runVal"
           if (-not $runVal) {
-            throw "DsaCompositor value missing from HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+            throw "DsaWindowManager value missing from HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
           }
-          if ($runVal -notmatch 'dsa-compositor\.exe') {
-            throw "DsaCompositor Run value does not point to dsa-compositor.exe: $runVal"
+          if ($runVal -notmatch 'dsa-wm\.exe') {
+            throw "DsaWindowManager Run value does not point to dsa-wm.exe: $runVal"
           }
           $cmdKey = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\000015be-facb-11e6-bd58-64006a7986d3'
           $pipeKey = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\000015bf-facb-11e6-bd58-64006a7986d3'
@@ -417,7 +440,8 @@ jobs:
           if ($p.ExitCode -ne 0) { Get-ChildItem uninstall*.log | ForEach-Object { Get-Content $_ -Tail 80 }; throw "uninstall failed ($($p.ExitCode))" }
           if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
           if (Test-Path "$env:PROGRAM_DIR\dsa.exe") { throw "the program is still there" }
-          if (Test-Path "$env:PROGRAM_DIR\dsa-compositor.exe") { throw "dsa-compositor.exe is still there" }
+          if (Test-Path "$env:PROGRAM_DIR\dsa-wm.exe") { throw "dsa-wm.exe is still there" }
+          if (Test-Path "$env:PROGRAM_DIR\dsa-app-window.exe") { throw "dsa-app-window.exe is still there" }
           if (Test-Path "$env:PROGRAM_DIR\licenses") { throw "the licence folder is still there" }
           if (Test-Path "$env:DATA_DIR\images") { throw "the downloaded images are still there" }
           if (Test-Path "$env:DATA_DIR\updates") { throw "the downloaded setup files are still there" }
@@ -426,14 +450,14 @@ jobs:
           $currentHash = (Get-FileHash -Path $wslconfig -Algorithm SHA256).Hash
           if ($currentHash -ne $env:INITIAL_WSLCONFIG_HASH) { throw ".wslconfig was modified during uninstall" }
 
-      - name: fr3_compositor_and_registry_removed_after_uninstall
+      - name: fr3_window_manager_and_registry_removed_after_uninstall
         run: |
-          if (Test-Path "$env:PROGRAM_DIR\dsa-compositor.exe") {
-            throw "dsa-compositor.exe is still present after uninstall"
+          if (Test-Path "$env:PROGRAM_DIR\dsa-wm.exe") {
+            throw "dsa-wm.exe is still present after uninstall"
           }
-          $runVal = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).DsaCompositor
+          $runVal = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).DsaWindowManager
           if ($runVal) {
-            throw "DsaCompositor Run value is still present after uninstall: $runVal"
+            throw "DsaWindowManager Run value is still present after uninstall: $runVal"
           }
           $cmdKey = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\000015be-facb-11e6-bd58-64006a7986d3'
           $pipeKey = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\000015bf-facb-11e6-bd58-64006a7986d3'
@@ -456,7 +480,7 @@ jobs:
           $service = Get-Service DsaHost
           if ($service.Status -ne 'Running') { throw "DsaHost is $($service.Status)" }
           if (-not (Test-Path "$env:BUNDLE_PROGRAM_DIR\dsa.exe")) { throw "the program is not in the folder named on the command line" }
-          if (-not (Test-Path "$env:BUNDLE_PROGRAM_DIR\dsa-compositor.exe")) { throw "dsa-compositor.exe is not in the folder named on the command line" }
+          if (-not (Test-Path "$env:BUNDLE_PROGRAM_DIR\dsa-wm.exe")) { throw "dsa-wm.exe is not in the folder named on the command line" }
           if (-not (Test-Path "$env:BUNDLE_DATA_DIR\dsa-hostd.json")) { throw "the configuration is not in the folder named on the command line" }
           if (-not (Test-Path "$env:BUNDLE_PROGRAM_DIR\licenses\NOTICE.txt")) { throw "no licence bundle in the quiet installation" }
           $out = & "$env:BUNDLE_PROGRAM_DIR\dsa.exe" status 2>&1
@@ -467,7 +491,7 @@ jobs:
           if ($p.ExitCode -ne 0) { Get-Content bundle-uninstall.log -Tail 80; throw "setup.exe /quiet /uninstall failed ($($p.ExitCode))" }
           if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
           if (Test-Path "$env:BUNDLE_PROGRAM_DIR\dsa.exe") { throw "the program is still there" }
-          if (Test-Path "$env:BUNDLE_PROGRAM_DIR\dsa-compositor.exe") { throw "dsa-compositor.exe is still there after quiet uninstall" }
+          if (Test-Path "$env:BUNDLE_PROGRAM_DIR\dsa-wm.exe") { throw "dsa-wm.exe is still there after quiet uninstall" }
           $wslconfig = "$env:USERPROFILE\.wslconfig"
           $currentHash = (Get-FileHash -Path $wslconfig -Algorithm SHA256).Hash
           if ($currentHash -ne $env:INITIAL_WSLCONFIG_HASH) { throw ".wslconfig was modified by setup.exe" }
