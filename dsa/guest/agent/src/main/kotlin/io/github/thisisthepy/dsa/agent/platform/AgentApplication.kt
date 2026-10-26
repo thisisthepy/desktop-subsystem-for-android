@@ -28,5 +28,9 @@ class AgentApplication : Application() {
                 android.util.Log.isLoggable("DsaResizeTrace", android.util.Log.DEBUG)
             }),
         ).start()
+        // Starting windows draw on a thread of their own, so a slow app theme never holds up
+        // the agent's work or the home activity on the main thread.
+        val splash = HandlerThread("dsa-splash").apply { start() }
+        AndroidStartingWindows(this, splash.looper, log).start()
     }
 }
