@@ -110,6 +110,10 @@ message ListTasks {}
 // lasts across restarts of the Android: when it stops, its tasks are removed.
 message WatchTasks {}
 
+// Asks for the apps installed in the caller's Android that a launcher lists, as the host's
+// start menu shows them.
+message ListApps {}
+
 // The user closed a task's window: asks the caller's Android to end the task.
 message CloseTask {
   int32 task_id = 1;
@@ -298,6 +302,16 @@ message AppInfo {
   bytes icon_png = 3;
 }
 
+// The apps installed in the caller's Android that a launcher lists. The list is kept while
+// the Android is stopped, because its apps stay installed.
+message InstalledApps {
+  // False until the caller's Android has said which apps it has since the service started.
+  // The list is then empty and says nothing about which apps are installed.
+  bool known = 1;
+  // In package order.
+  repeated AppInfo apps = 2;
+}
+
 // A change to the tasks of the caller's Android, sent after the answer to WatchTasks.
 message TaskEvent {
   oneof body {
@@ -306,6 +320,8 @@ message TaskEvent {
     TaskFrames frames = 3;
     AppInfo app = 4;
     ImeCursor ime_cursor = 5;
+    // The apps installed in the caller's Android changed: the whole list, as it is now.
+    InstalledApps installed = 6;
   }
 }
 
@@ -318,6 +334,8 @@ message Tasks {
   repeated TaskFrames frames = 2;
   // The name and icon of each app that has a task, in package order.
   repeated AppInfo apps = 3;
+  // The apps installed in the caller's Android. Unset until it has said which apps it has.
+  InstalledApps installed = 4;
 }
 
 // The answer to a request that has nothing to report but that it was carried out.
@@ -385,6 +403,7 @@ message Request {
     StreamInput stream_input = 11;
     ResizeTask resize_task = 12;
     SetTaskDensity set_task_density = 13;
+    ListApps list_apps = 14;
   }
 }
 
@@ -397,6 +416,7 @@ message Response {
     VmId vm_id = 5;
     Tasks tasks = 6;
     Done done = 7;
+    InstalledApps installed_apps = 8;
   }
 }
 

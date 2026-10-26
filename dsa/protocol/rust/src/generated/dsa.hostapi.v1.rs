@@ -57,6 +57,10 @@ pub struct ListTasks {}
 /// lasts across restarts of the Android: when it stops, its tasks are removed.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct WatchTasks {}
+/// Asks for the apps installed in the caller's Android that a launcher lists, as the host's
+/// start menu shows them.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListApps {}
 /// The user closed a task's window: asks the caller's Android to end the task.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct CloseTask {
@@ -257,15 +261,27 @@ pub struct AppInfo {
     #[prost(bytes = "vec", tag = "3")]
     pub icon_png: ::prost::alloc::vec::Vec<u8>,
 }
+/// The apps installed in the caller's Android that a launcher lists. The list is kept while
+/// the Android is stopped, because its apps stay installed.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct InstalledApps {
+    /// False until the caller's Android has said which apps it has since the service started.
+    /// The list is then empty and says nothing about which apps are installed.
+    #[prost(bool, tag = "1")]
+    pub known: bool,
+    /// In package order.
+    #[prost(message, repeated, tag = "2")]
+    pub apps: ::prost::alloc::vec::Vec<AppInfo>,
+}
 /// A change to the tasks of the caller's Android, sent after the answer to WatchTasks.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TaskEvent {
-    #[prost(oneof = "task_event::Body", tags = "1, 2, 3, 4, 5")]
+    #[prost(oneof = "task_event::Body", tags = "1, 2, 3, 4, 5, 6")]
     pub body: ::core::option::Option<task_event::Body>,
 }
 /// Nested message and enum types in `TaskEvent`.
 pub mod task_event {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Body {
         #[prost(message, tag = "1")]
         Updated(super::Task),
@@ -277,6 +293,9 @@ pub mod task_event {
         App(super::AppInfo),
         #[prost(message, tag = "5")]
         ImeCursor(super::ImeCursor),
+        /// The apps installed in the caller's Android changed: the whole list, as it is now.
+        #[prost(message, tag = "6")]
+        Installed(super::InstalledApps),
     }
 }
 /// The answer to ListTasks and WatchTasks: the tasks there are now.
@@ -292,6 +311,9 @@ pub struct Tasks {
     /// The name and icon of each app that has a task, in package order.
     #[prost(message, repeated, tag = "3")]
     pub apps: ::prost::alloc::vec::Vec<AppInfo>,
+    /// The apps installed in the caller's Android. Unset until it has said which apps it has.
+    #[prost(message, optional, tag = "4")]
+    pub installed: ::core::option::Option<InstalledApps>,
 }
 /// The answer to a request that has nothing to report but that it was carried out.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -341,7 +363,10 @@ pub struct Error {
 pub struct Request {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "request::Body", tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13")]
+    #[prost(
+        oneof = "request::Body",
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14"
+    )]
     pub body: ::core::option::Option<request::Body>,
 }
 /// Nested message and enum types in `Request`.
@@ -372,13 +397,15 @@ pub mod request {
         ResizeTask(super::ResizeTask),
         #[prost(message, tag = "13")]
         SetTaskDensity(super::SetTaskDensity),
+        #[prost(message, tag = "14")]
+        ListApps(super::ListApps),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Response {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "response::Body", tags = "2, 3, 4, 5, 6, 7")]
+    #[prost(oneof = "response::Body", tags = "2, 3, 4, 5, 6, 7, 8")]
     pub body: ::core::option::Option<response::Body>,
 }
 /// Nested message and enum types in `Response`.
@@ -397,6 +424,8 @@ pub mod response {
         Tasks(super::Tasks),
         #[prost(message, tag = "7")]
         Done(super::Done),
+        #[prost(message, tag = "8")]
+        InstalledApps(super::InstalledApps),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.

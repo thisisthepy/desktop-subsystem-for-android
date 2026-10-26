@@ -88,6 +88,9 @@ pub enum TaskEvent {
         task_id: i32,
         cursor: crate::ime::ImeCursor,
     },
+    /// The apps installed in the guest that a launcher lists changed. It carries the whole
+    /// list, in package order, as the host's start menu shows it.
+    Installed(Vec<AppInfo>),
 }
 
 impl TaskEvent {
@@ -98,7 +101,7 @@ impl TaskEvent {
             TaskEvent::Removed { task_id }
             | TaskEvent::Frames { task_id, .. }
             | TaskEvent::ImeCursor { task_id, .. } => Some(*task_id),
-            TaskEvent::App(_) => None,
+            TaskEvent::App(_) | TaskEvent::Installed(_) => None,
         }
     }
 }
@@ -223,6 +226,53 @@ pub const MAX_APPS: usize = MAX_TASKS;
 /// smaller; a larger one is dropped and the app keeps its name.
 pub const MAX_ICON_BYTES: usize = 1024 * 1024;
 
+/// The most installed apps the table keeps, for the same reason as [`MAX_TASKS`].
+pub const MAX_INSTALLED_APPS: usize = 4096;
+
+/// The most bytes of icons the installed apps keep in all. The icons past it are dropped and
+/// their apps keep their names, so a guest cannot fill the host's memory with icons.
+pub const MAX_INSTALLED_ICON_BYTES: usize = 64 * 1024 * 1024;
+
+/// `app` as the table keeps it: an icon larger than [`MAX_ICON_BYTES`] is dropped, and an
+/// empty name is the package's.
+fn kept(app: &AppInfo) -> AppInfo {
+    let mut app = app.clone();
+    if app.icon_png.len() > MAX_ICON_BYTES {
+        app.icon_png.clear();
+    }
+    if app.label.trim().is_empty() {
+        app.label = app.package_name.clone();
+    }
+    app
+}
+
+/// `apps` in package order, each package once, within [`MAX_INSTALLED_APPS`] and
+/// [`MAX_INSTALLED_ICON_BYTES`].
+fn installed_list(apps: &[AppInfo]) -> Vec<AppInfo> {
+    let mut by_package = BTreeMap::new();
+    for app in apps {
+        if app.package_name.is_empty() {
+            continue;
+        }
+        if by_package.len() >= MAX_INSTALLED_APPS && !by_package.contains_key(&app.package_name) {
+            continue;
+        }
+        by_package.insert(app.package_name.clone(), kept(app));
+    }
+    let mut icon_bytes = 0usize;
+    by_package
+        .into_values()
+        .map(|mut app| {
+            icon_bytes += app.icon_png.len();
+            if icon_bytes > MAX_INSTALLED_ICON_BYTES {
+                icon_bytes -= app.icon_png.len();
+                app.icon_png.clear();
+            }
+            app
+        })
+        .collect()
+}
+
 /// The latest state of each task.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TaskTable {
@@ -234,6 +284,12 @@ pub struct TaskTable {
     /// Where the cursor of each task's focused editor last was, so a cursor that did not
     /// move is not passed on again.
     cursors: BTreeMap<i32, crate::ime::ImeCursor>,
+    /// The apps installed in the guest that a launcher lists, once the guest has said which.
+    /// They stay while the guest is stopped, because its apps stay installed.
+    installed: Option<Vec<AppInfo>>,
+    /// The name and icon of each installed app the guest described, by package, until the
+    /// list that names it arrives.
+    described: BTreeMap<String, AppInfo>,
 }
 
 impl TaskTable {
@@ -302,7 +358,65 @@ impl TaskTable {
                 self.cursors.insert(*task_id, *cursor);
                 true
             }
+            TaskEvent::Installed(apps) => {
+                let list = installed_list(apps);
+                if self.installed.as_ref() == Some(&list) {
+                    return false;
+                }
+                self.installed = Some(list);
+                true
+            }
         }
+    }
+
+    /// Records the name and icon the guest gave an installed app, for the list that names it
+    /// next ([`TaskTable::installed_event`]). A guest that describes more than
+    /// [`MAX_INSTALLED_APPS`] apps without listing them has the rest dropped.
+    pub fn describe_installed(&mut self, app: &AppInfo) {
+        if app.package_name.is_empty() {
+            return;
+        }
+        if self.described.len() >= MAX_INSTALLED_APPS
+            && !self.described.contains_key(&app.package_name)
+        {
+            return;
+        }
+        self.described.insert(app.package_name.clone(), kept(app));
+    }
+
+    /// The change that makes `packages` the installed apps, each with the name and icon the
+    /// guest last gave it. A package the guest never described goes under its own name with no
+    /// icon. Apply it to record it.
+    pub fn installed_event(&mut self, packages: &[String]) -> TaskEvent {
+        let previous: BTreeMap<&str, &AppInfo> = self
+            .installed
+            .iter()
+            .flatten()
+            .map(|app| (app.package_name.as_str(), app))
+            .collect();
+        let apps: Vec<AppInfo> = packages
+            .iter()
+            .map(|package| {
+                self.described
+                    .get(package)
+                    .or_else(|| previous.get(package.as_str()).copied())
+                    .cloned()
+                    .unwrap_or_else(|| AppInfo {
+                        package_name: package.clone(),
+                        label: package.clone(),
+                        icon_png: Vec::new(),
+                    })
+            })
+            .collect();
+        self.described
+            .retain(|package, _| packages.iter().any(|named| named == package));
+        TaskEvent::Installed(installed_list(&apps))
+    }
+
+    /// The apps installed in the guest that a launcher lists, in package order; `None` until
+    /// the guest has said which.
+    pub fn installed(&self) -> Option<Vec<AppInfo>> {
+        self.installed.clone()
     }
 
     /// Whether the table has heard of `task_id`, from the agent or from the hwcomposer.
@@ -342,10 +456,13 @@ impl TaskTable {
         self.apps.values().cloned().collect()
     }
 
-    /// The events that bring an empty table to this one: every app, then every task, then
-    /// every pairing of a task with its display.
+    /// The events that bring an empty table to this one: the installed apps when they are
+    /// known, then every app, then every task, then every pairing of a task with its display.
     pub fn snapshot(&self) -> Vec<TaskEvent> {
-        let apps = self.apps.values().cloned().map(TaskEvent::App);
+        let installed = self.installed.clone().map(TaskEvent::Installed);
+        let apps = installed
+            .into_iter()
+            .chain(self.apps.values().cloned().map(TaskEvent::App));
         let tasks = self.tasks.values().cloned().map(TaskEvent::Updated);
         let frames = self
             .frames
@@ -357,7 +474,8 @@ impl TaskTable {
         apps.chain(tasks).chain(frames).collect()
     }
 
-    /// Forgets every task, and returns the removals that say so.
+    /// Forgets every task, and returns the removals that say so. The installed apps stay:
+    /// they are still installed while the guest is stopped.
     pub fn clear(&mut self) -> Vec<TaskEvent> {
         let mut ids: Vec<i32> = self
             .tasks
@@ -610,6 +728,77 @@ mod tests {
         }
         assert!(!table.apply(&TaskEvent::App(app("one.too.many", "x"))));
         assert!(table.apply(&TaskEvent::App(app("p1", "renamed"))));
+    }
+
+    #[test]
+    fn fr7_the_installed_apps_carry_the_names_and_icons_the_guest_gave() {
+        let mut table = TaskTable::new();
+        assert_eq!(table.installed(), None, "unknown until the guest says");
+        table.describe_installed(&app("com.example.clock", "Clock"));
+        table.describe_installed(&app("com.example.maps", "Maps"));
+        let event = table.installed_event(&["com.example.maps".into(), "com.example.clock".into()]);
+        assert!(table.apply(&event));
+        assert!(!table.apply(&event), "the same list is no news");
+        assert_eq!(
+            table.installed(),
+            Some(vec![
+                app("com.example.clock", "Clock"),
+                app("com.example.maps", "Maps")
+            ])
+        );
+        assert_eq!(
+            table.snapshot(),
+            vec![TaskEvent::Installed(vec![
+                app("com.example.clock", "Clock"),
+                app("com.example.maps", "Maps")
+            ])]
+        );
+
+        // Maps is removed; Clock keeps what it was given without being described again.
+        let event = table.installed_event(&["com.example.clock".into()]);
+        assert!(table.apply(&event));
+        assert_eq!(table.installed(), Some(vec![app("com.example.clock", "Clock")]));
+
+        // An app the guest never described goes under its package's name.
+        let event = table.installed_event(&["org.example.bare".into()]);
+        table.apply(&event);
+        let bare = &table.installed().unwrap()[0];
+        assert_eq!(bare.label, "org.example.bare");
+        assert!(bare.icon_png.is_empty());
+    }
+
+    #[test]
+    fn fr7_the_installed_apps_stay_while_the_guest_is_stopped() {
+        let mut table = TaskTable::new();
+        table.describe_installed(&app("com.example.clock", "Clock"));
+        let event = table.installed_event(&["com.example.clock".into()]);
+        table.apply(&event);
+        table.apply(&TaskEvent::Updated(task(1, "a")));
+        table.clear();
+        assert_eq!(table.installed(), Some(vec![app("com.example.clock", "Clock")]));
+        assert_eq!(table.installed_event(&[]), TaskEvent::Installed(Vec::new()));
+    }
+
+    #[test]
+    fn nfr5_a_guest_cannot_grow_the_installed_apps_without_end() {
+        let mut table = TaskTable::new();
+        let mut huge = app("com.huge", "Huge");
+        huge.icon_png = vec![0; MAX_ICON_BYTES + 1];
+        table.describe_installed(&huge);
+        let names: Vec<String> = (0..MAX_INSTALLED_APPS + 10)
+            .map(|n| format!("p{n:05}"))
+            .chain(std::iter::once("com.huge".to_string()))
+            .collect();
+        let event = table.installed_event(&names);
+        table.apply(&event);
+        let installed = table.installed().unwrap();
+        assert_eq!(installed.len(), MAX_INSTALLED_APPS);
+        assert!(installed
+            .iter()
+            .find(|app| app.package_name == "com.huge")
+            .is_none_or(|app| app.icon_png.is_empty()));
+        let total: usize = installed.iter().map(|app| app.icon_png.len()).sum();
+        assert!(total <= MAX_INSTALLED_ICON_BYTES);
     }
 
     #[test]
