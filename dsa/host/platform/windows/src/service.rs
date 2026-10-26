@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid, UserAndroids};
+use dsa_host_core::memory::{summary_lines, HostMemory, LOG_INTERVAL};
 use dsa_host_core::session::Session;
 use dsa_host_core::update::program_service::{
     ProgramStatus, ProgramUpdates, Timing, WithProgramStatus,
@@ -36,6 +37,7 @@ use crate::android_vm::AndroidVmLauncher;
 use crate::guest_communication_services::register_graphics_service_guids;
 use crate::guid::Guid;
 use crate::host_config::HostConfig;
+use crate::host_memory::WindowsHostMemory;
 use crate::https::{UrlFetch, WinHttpFetch};
 use crate::hvsocket::HvSocketListener;
 use crate::pipe::{NamedPipeListener, DEFAULT_PIPE_SDDL};
@@ -221,6 +223,22 @@ fn check_for_updates(config: HostConfig, updates: Updates, build: String, stop: 
 /// How soon the service tries again while it has no image to boot.
 const FIRST_IMAGE_RETRY: Duration = Duration::from_secs(300);
 
+/// Logs the memory of every running user's Android every few minutes until `stop` is set:
+/// on the host, its VM and window processes, and in the guest, what it last reported.
+fn log_memory(androids: &dyn UserAndroids, host: &dyn HostMemory, build: &str, stop: &AtomicBool) {
+    let mut next = Instant::now() + LOG_INTERVAL;
+    while !stop.load(Ordering::Relaxed) {
+        thread::sleep(Duration::from_secs(1));
+        if Instant::now() < next {
+            continue;
+        }
+        next = Instant::now() + LOG_INTERVAL;
+        for line in summary_lines(androids, host) {
+            eprintln!("{build}: {line}");
+        }
+    }
+}
+
 /// Serves the local API until `stop` is set, then stops every user's VM.
 pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(), String> {
     serve_with(config, build, stop, register_graphics_service_guids)
@@ -318,8 +336,20 @@ where
                 .exists()
         })
         .unwrap_or(false);
-    let mut service =
-        HostApiService::new(androids.clone(), build).with_resize_trace_detail(resize_trace_file);
+    let host_memory: Arc<dyn HostMemory> = Arc::new(WindowsHostMemory);
+    let mut service = HostApiService::new(androids.clone(), build)
+        .with_resize_trace_detail(resize_trace_file)
+        .with_host_memory(Arc::clone(&host_memory));
+    {
+        let androids = androids.clone();
+        let (worker_build, stop) = (build.to_string(), Arc::clone(&stop));
+        if let Err(error) = thread::Builder::new()
+            .name("dsa-memory-log".into())
+            .spawn(move || log_memory(&*androids, &*host_memory, &worker_build, &stop))
+        {
+            eprintln!("{build}: starting the memory log failed: {error}");
+        }
+    }
     if let Some(settings) = program {
         let check_interval = config
             .update

@@ -7,6 +7,7 @@
 //! dsa update [--wait]
 //! dsa launch <package>
 //! dsa tasks
+//! dsa memory
 //! ```
 //!
 //! It acts on the Android of the user who runs it: the service learns that user from the
@@ -14,6 +15,9 @@
 //!
 //! `dsa launch` starts an app in a window of its own, named by its package (such as
 //! `com.android.settings`). `dsa tasks` lists the app tasks Android shows as windows.
+//!
+//! `dsa memory` shows how much memory the user's Android takes: on the host, its VM and the
+//! window processes, and inside Android, where its memory goes, as Android reports it.
 //!
 //! `dsa update` installs the newest version of DSA now instead of when no Android is
 //! running. It stops every user's Android, since the service restarts. With `--wait` it
@@ -34,7 +38,7 @@ use dsa_host_core::session::SessionState;
 use dsa_transport::Connector;
 
 pub const USAGE: &str =
-    "usage: dsa <status | start | stop | update | launch <package> | tasks> [--wait] \
+    "usage: dsa <status | start | stop | update | launch <package> | tasks | memory> [--wait] \
                          [--timeout <seconds>] [--pipe <name> | --socket <path>]";
 
 /// What to ask the service.
@@ -48,6 +52,8 @@ pub enum Command {
     Launch,
     /// List the app tasks Android shows as windows.
     Tasks,
+    /// Show how much memory the Android takes, in the guest and on the host.
+    Memory,
 }
 
 /// What can start a host service or ensure it is running.
@@ -118,13 +124,16 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "status" | "start" | "stop" | "update" | "launch" | "tasks" if command.is_none() => {
+            "status" | "start" | "stop" | "update" | "launch" | "tasks" | "memory"
+                if command.is_none() =>
+            {
                 command = Some(match arg.as_str() {
                     "status" => Command::Status,
                     "start" => Command::Start,
                     "update" => Command::Update,
                     "launch" => Command::Launch,
                     "tasks" => Command::Tasks,
+                    "memory" => Command::Memory,
                     _ => Command::Stop,
                 });
             }
@@ -347,6 +356,10 @@ pub fn run_with_starter(
         Command::Tasks => {
             let list = client.tasks().map_err(|e| e.to_string())?;
             return Ok(describe_tasks(&list));
+        }
+        Command::Memory => {
+            let memory = client.memory().map_err(|e| e.to_string())?;
+            return Ok(memory.to_string().trim_end().to_string());
         }
     }
     .map_err(|e| e.to_string())?;

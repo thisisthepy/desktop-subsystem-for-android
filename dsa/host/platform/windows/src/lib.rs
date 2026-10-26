@@ -12,6 +12,8 @@
 //! - [`guid`]: the VM and service IDs those sockets are addressed by.
 //! - [`vm_listener`]: a control channel listener that follows the VM's ID across restarts.
 //! - [`host_config`]: the configuration file `dsa-hostd` reads.
+//! - [`host_memory`]: the host's memory for each user's Android: its VM and its window
+//!   processes (the measuring part on Windows only).
 //! - [`service`]: the local API and one VM per user behind it, as `dsa-hostd` serves them
 //!   (Windows only).
 //! - [`setup`]: running a downloaded setup file apart from the service, to update DSA
@@ -56,6 +58,7 @@ pub mod guid;
 #[cfg(windows)]
 pub mod hcs;
 pub mod host_config;
+pub mod host_memory;
 #[cfg(windows)]
 pub mod https;
 #[cfg(windows)]
