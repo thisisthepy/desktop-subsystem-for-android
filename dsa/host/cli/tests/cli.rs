@@ -562,9 +562,11 @@ fn settings_service(listener: Box<dyn dsa_transport::local::LocalListener>) -> R
                 image_updates_available: true,
             },
         )
-        .with_host_memory(Arc::new(dsa_host_core::host_api_conformance::FakeHostMemory {
-            asked: std::sync::Mutex::new(Vec::new()),
-        }));
+        .with_host_memory(Arc::new(
+            dsa_host_core::host_api_conformance::FakeHostMemory {
+                asked: std::sync::Mutex::new(Vec::new()),
+            },
+        ));
     RunningService::start_service(listener, service)
 }
 
@@ -578,14 +580,19 @@ fn fr17_dsa_settings_set_is_parsed() {
     use dsa_cli::Change;
     let invocation = parse(&args("settings set render-gpu discrete --json")).unwrap();
     assert_eq!(invocation.command, Cmd::Settings);
-    assert_eq!(invocation.change, Some(Change::RenderGpu("discrete".into())));
+    assert_eq!(
+        invocation.change,
+        Some(Change::RenderGpu("discrete".into()))
+    );
     assert!(invocation.json);
     assert_eq!(
         parse(&args("settings set freeze on")).unwrap().change,
         Some(Change::Freeze(true))
     );
     assert_eq!(
-        parse(&args("settings set program-updates off")).unwrap().change,
+        parse(&args("settings set program-updates off"))
+            .unwrap()
+            .change,
         Some(Change::ProgramUpdates(false))
     );
     assert!(parse(&args("settings set freeze maybe")).is_err());
@@ -623,14 +630,25 @@ fn fr17_dsa_settings_reads_and_changes_the_settings_through_the_service() {
     assert_eq!(changed["render_gpu"], "integrated");
     let changed = json_of(&dsa(&endpoint, "settings set freeze on --json"));
     assert_eq!(changed["freeze"], true);
-    assert_eq!(changed["render_gpu"], "integrated", "one change keeps the others");
+    assert_eq!(
+        changed["render_gpu"], "integrated",
+        "one change keeps the others"
+    );
     let changed = json_of(&dsa(&endpoint, "settings set image-updates off --json"));
     assert_eq!(changed["image_updates"], false);
 
     let text = dsa(&endpoint, "settings");
     assert!(text.status.success(), "{}", stderr(&text));
-    assert!(stdout(&text).contains("Render GPU: integrated"), "{}", stdout(&text));
-    assert!(stdout(&text).contains("Freeze when idle: on"), "{}", stdout(&text));
+    assert!(
+        stdout(&text).contains("Render GPU: integrated"),
+        "{}",
+        stdout(&text)
+    );
+    assert!(
+        stdout(&text).contains("Freeze when idle: on"),
+        "{}",
+        stdout(&text)
+    );
 }
 
 #[test]
@@ -643,7 +661,11 @@ fn fr17_dsa_settings_reports_why_a_value_was_refused() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("render GPU"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("render GPU"),
+        "{}",
+        stderr(&output)
+    );
 }
 
 #[test]
@@ -661,7 +683,11 @@ fn fr17_dsa_memory_lists_the_host_processes_of_the_users_android() {
     assert_eq!(roles, ["vm", "window manager", "app window"]);
     assert_eq!(memory["host_total_kb"], 960_000);
     let text = dsa(&endpoint, "memory");
-    assert!(stdout(&text).contains("Android: no report yet"), "{}", stdout(&text));
+    assert!(
+        stdout(&text).contains("Android: no report yet"),
+        "{}",
+        stdout(&text)
+    );
 }
 
 #[test]
@@ -684,8 +710,14 @@ fn fr17_dsa_memory_describes_the_guest_breakdown() {
         }),
         host: Vec::new(),
     });
-    assert!(text.contains("Android: 3072.0 MB of 4096.0 MB available (12 seconds ago)"), "{text}");
-    assert!(text.contains("system_server (process 42): 150.0 MB"), "{text}");
+    assert!(
+        text.contains("Android: 3072.0 MB of 4096.0 MB available (12 seconds ago)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("system_server (process 42): 150.0 MB"),
+        "{text}"
+    );
     let json = dsa_cli::memory_json(&Memory::default());
     assert_eq!(json["host_total_kb"], 0);
 }

@@ -25,11 +25,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::handshake::ControlHandshake;
-use dsa_host_core::host_api::{
-    HostApiService, PerUser, ServiceFacts, UserAndroid, UserAndroids,
-};
-use dsa_host_core::settings::{FileSettings, SettingsStore};
+use dsa_host_core::host_api::{HostApiService, PerUser, ServiceFacts, UserAndroid, UserAndroids};
 use dsa_host_core::session::Session;
+use dsa_host_core::settings::{FileSettings, SettingsStore};
 use dsa_host_core::update::program_service::{
     ProgramStatus, ProgramUpdates, Timing, WithProgramStatus,
 };

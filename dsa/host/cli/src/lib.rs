@@ -379,14 +379,25 @@ pub fn describe_memory(memory: &Memory) -> String {
                 megabytes(guest.mem_total_kb),
                 guest.age_seconds
             ));
-            lines.push(format!("  apps and system: {}", megabytes(guest.total_pss_kb)));
-            lines.push(format!("  cache: {}", megabytes(guest.cached_kb + guest.buffers_kb)));
+            lines.push(format!(
+                "  apps and system: {}",
+                megabytes(guest.total_pss_kb)
+            ));
+            lines.push(format!(
+                "  cache: {}",
+                megabytes(guest.cached_kb + guest.buffers_kb)
+            ));
             lines.push(format!(
                 "  kernel caches it can free: {}",
                 megabytes(guest.slab_reclaimable_kb)
             ));
             for p in &guest.top_processes {
-                lines.push(format!("  {} (process {}): {}", p.name, p.pid, megabytes(p.pss_kb)));
+                lines.push(format!(
+                    "  {} (process {}): {}",
+                    p.name,
+                    p.pid,
+                    megabytes(p.pss_kb)
+                ));
             }
         }
     }

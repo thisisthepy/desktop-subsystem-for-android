@@ -1,5 +1,4 @@
 using Dsa.Settings.Pages;
-using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Animation;
@@ -30,11 +29,6 @@ public sealed partial class MainWindow : Window
         if (File.Exists(icon))
         {
             AppWindow.SetIcon(icon);
-        }
-        if (AppWindow.Presenter is OverlappedPresenter presenter)
-        {
-            presenter.PreferredMinimumWidth = 640;
-            presenter.PreferredMinimumHeight = 480;
         }
         ContentFrame.Navigate(typeof(GeneralPage));
         _ = App.Settings.LoadAsync();

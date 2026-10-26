@@ -408,7 +408,10 @@ fn fr17_turned_off_in_the_settings_the_program_list_is_not_fetched_until_turned_
     let switch = Arc::clone(&on);
     updates.follow_switch(Box::new(move || switch.load(Ordering::Relaxed)));
     let why = updates.check().unwrap_err();
-    assert!(why.to_string().contains("turned off in the settings"), "{why}");
+    assert!(
+        why.to_string().contains("turned off in the settings"),
+        "{why}"
+    );
     assert_eq!(updates.install_when_idle().unwrap(), None);
     assert!(updates.install_now().is_err());
 
@@ -428,7 +431,10 @@ fn fr17_turned_off_in_the_settings_the_program_list_is_not_fetched_until_turned_
         })
     };
     thread::sleep(Duration::from_millis(100));
-    assert!(!worker.is_finished(), "the loop waits for the settings to turn updates on");
+    assert!(
+        !worker.is_finished(),
+        "the loop waits for the settings to turn updates on"
+    );
     stop.store(true, Ordering::Relaxed);
     worker.join().unwrap();
     assert_eq!(installer.runs(), 0);

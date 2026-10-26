@@ -146,7 +146,10 @@ mod tests {
                 (HostRole::AppWindow, 9)
             ]
         );
-        let memory = Memory { guest: None, host: list };
+        let memory = Memory {
+            guest: None,
+            host: list,
+        };
         assert_eq!(memory.host_total_kb(), 4);
     }
 

@@ -138,7 +138,8 @@ mod windows_impl {
         let ok = unsafe {
             K32GetProcessMemoryInfo(
                 process.0,
-                (&mut counters as *mut PROCESS_MEMORY_COUNTERS_EX).cast::<PROCESS_MEMORY_COUNTERS>(),
+                (&mut counters as *mut PROCESS_MEMORY_COUNTERS_EX)
+                    .cast::<PROCESS_MEMORY_COUNTERS>(),
                 counters.cb,
             )
         };
@@ -249,9 +250,17 @@ mod tests {
 
         assert_eq!(role(of("vmmem", None, Some(&vm))), Some(HostRole::Vm));
         assert_eq!(role(of("vmmem", None, Some(&other_vm))), None, "another VM");
-        assert_eq!(role(of("vmmemWSL", None, Some(&other_vm))), None, "WSL's VM");
         assert_eq!(
-            role(of("dsa-wm.exe", Some("C:\\Program Files\\DSA\\dsa-wm.exe"), Some(USER))),
+            role(of("vmmemWSL", None, Some(&other_vm))),
+            None,
+            "WSL's VM"
+        );
+        assert_eq!(
+            role(of(
+                "dsa-wm.exe",
+                Some("C:\\Program Files\\DSA\\dsa-wm.exe"),
+                Some(USER)
+            )),
             Some(HostRole::WindowManager)
         );
         assert_eq!(
@@ -272,14 +281,15 @@ mod tests {
             Some(HostRole::AppWindow)
         );
         assert_eq!(
-            role(of("notepad.exe", Some("C:\\Windows\\notepad.exe"), Some(USER))),
+            role(of(
+                "notepad.exe",
+                Some("C:\\Windows\\notepad.exe"),
+                Some(USER)
+            )),
             None
         );
         assert_eq!(role(of("dsa-wm.exe", None, None)), None, "owner unknown");
         // Without a running VM, no vmmem process is the caller's.
-        assert_eq!(
-            classify(&of("vmmem", None, Some(&vm)), USER, None),
-            None
-        );
+        assert_eq!(classify(&of("vmmem", None, Some(&vm)), USER, None), None);
     }
 }

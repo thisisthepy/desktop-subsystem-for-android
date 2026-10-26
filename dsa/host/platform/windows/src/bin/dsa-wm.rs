@@ -16,13 +16,13 @@ fn main() {
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
 
+    use dsa_host_core::host_api::HostApiClient;
     use dsa_host_windows::compositor::adapter::GfxstreamAdapter;
     use dsa_host_windows::compositor::display_gpu::{adapter_names, display_sources};
     use dsa_host_windows::compositor::log::{default_log_file, CompositorLogger};
     use dsa_host_windows::compositor::shutdown::SignOutListener;
     use dsa_host_windows::compositor::single_instance::SingleInstanceMutex;
     use dsa_host_windows::compositor::{Compositor, CompositorConfig};
-    use dsa_host_core::host_api::HostApiClient;
     use dsa_host_windows::pipe::NamedPipeConnector;
     use dsa_host_windows::render_gpu::{
         choose, default_settings_file, describe_outcome, describe_request, render_gpu_setting,

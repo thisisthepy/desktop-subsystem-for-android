@@ -21,12 +21,12 @@ use crate::host_api::{
     running_of, stop_every, ClientError, HostApiClient, HostApiService, ProgramUpdate,
     ServiceFacts, UpdateProgram, UserAndroid, UserAndroids,
 };
-use crate::memory::{HostMemory, HostProcessMemory, HostRole};
-use crate::settings::{MemorySettings, Settings, SettingsStore};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use crate::keys::{keycode, meta, KeyAction, KeyEvent};
+use crate::memory::{HostMemory, HostProcessMemory, HostRole};
 use crate::session::SessionState;
+use crate::settings::{MemorySettings, Settings, SettingsStore};
 use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskTable, TaskWatch};
 
 /// A fresh listener, a connector that reaches it, and the user it reports for this process.
@@ -1094,7 +1094,10 @@ pub fn memory_reports_host_processes(make: MakeLocal<'_>) {
     let mut client = connect(&mut *connector);
     client.start().unwrap();
     let report = client.memory().expect("the memory report");
-    assert_eq!(report.guest, None, "the fake Android reports no guest memory");
+    assert_eq!(
+        report.guest, None,
+        "the fake Android reports no guest memory"
+    );
     let roles: Vec<(HostRole, u32)> = report.host.iter().map(|p| (p.role, p.pid)).collect();
     assert_eq!(
         roles,

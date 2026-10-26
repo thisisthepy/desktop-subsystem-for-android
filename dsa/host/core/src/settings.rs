@@ -330,7 +330,10 @@ mod tests {
         let settings = store.get("S-1-5-21-1-2-3-1001").unwrap();
         assert_eq!(settings, Settings::default());
         assert_eq!(settings.render_gpu, "display");
-        assert!(!settings.freeze, "freeze is off unless the user turns it on");
+        assert!(
+            !settings.freeze,
+            "freeze is off unless the user turns it on"
+        );
         assert_eq!(store.machine(), MachineSettings::default());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -400,7 +403,10 @@ mod tests {
             (user == "S-1-5-21-1-2-3-1001").then(|| "RTX".to_string())
         }));
         assert_eq!(store.get("S-1-5-21-1-2-3-1001").unwrap().render_gpu, "RTX");
-        assert_eq!(store.get("S-1-5-21-1-2-3-1002").unwrap().render_gpu, "display");
+        assert_eq!(
+            store.get("S-1-5-21-1-2-3-1002").unwrap().render_gpu,
+            "display"
+        );
         // Once saved, the saved value wins.
         store
             .set(

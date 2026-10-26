@@ -450,7 +450,10 @@ mod tests {
         let (setting, notes) = render_gpu_setting(Ok("discrete".into()), file);
         assert_eq!(setting, RenderGpu::Discrete);
         assert!(notes[0].contains("service"));
-        assert!(!file_read.get(), "the file is not read when the service answers");
+        assert!(
+            !file_read.get(),
+            "the file is not read when the service answers"
+        );
     }
 
     #[test]
@@ -487,7 +490,11 @@ mod tests {
         .unwrap();
         assert_eq!(previous_render_gpu(&dir).as_deref(), Some("discrete"));
         std::fs::write(dir.join("DSA").join("compositor.json"), "{").unwrap();
-        assert_eq!(previous_render_gpu(&dir), None, "an unusable file chose nothing");
+        assert_eq!(
+            previous_render_gpu(&dir),
+            None,
+            "an unusable file chose nothing"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
