@@ -310,6 +310,37 @@ def edit_props(text):
     return "\n".join(out) + "\n"
 
 
+# Wi-Fi's init script makes a kernel trace instance when boot completes, for WifiService to
+# record connection attempts into. The VM has no Wi-Fi device, so nothing ever records into
+# it, and on Hyper-V each of its tracefs writes takes up to two seconds of kernel time. At
+# the same moment lmkd attaches its BPF memory event programs to tracepoints, which waits
+# behind those writes, inside the two seconds its watchdog gives its main loop. When the
+# watchdog fires it kills the process lmkd last saw with the highest oom_score_adj, and lmkd
+# has not yet read the update that made the app the user just opened a foreground one.
+WIFI_RC = "SYSTEM/etc/init/wifi.rc"
+WIFI_TRACING_TRIGGER = "on property:sys.boot_completed=1 && property:sys.wifitracing.started=0"
+
+
+def edit_wifi_rc(text):
+    """Returns Wi-Fi's init script without the section that sets up its trace instance."""
+    out = []
+    skipping = False
+    found = False
+    for line in text.splitlines(keepends=True):
+        if line.strip() == WIFI_TRACING_TRIGGER:
+            skipping = found = True
+            continue
+        # An rc section runs until the next line that starts another one at column 0.
+        if skipping and line[:1] not in ("", " ", "\t", "\n", "\r", "#"):
+            skipping = False
+        if not skipping:
+            out.append(line)
+    if not found:
+        raise ValueError(f"{WIFI_RC} has no '{WIFI_TRACING_TRIGGER}' section; check how this build "
+                         "sets up the Wi-Fi trace instance before making the image")
+    return "".join(out)
+
+
 PROP_FILES = {
     "SYSTEM/build.prop",
     "VENDOR/build.prop",
@@ -735,6 +766,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 data = zin.read(name)
                 if name in PROP_FILES:
                     data = edit_props(data.decode()).encode()
+                elif name == WIFI_RC:
+                    data = edit_wifi_rc(data.decode()).encode()
                 elif name.endswith("lib/modules/modules.load") or name.endswith("lib/modules/modules.dep"):
                     data = b""
                 elif name == "META/apexkeys.txt":

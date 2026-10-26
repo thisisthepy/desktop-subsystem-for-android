@@ -81,6 +81,15 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
             ).hex()
             if f'signature="{cert}"' not in mac_permissions:
                 problems.append(f"plat_mac_permissions.xml does not name our {role} certificate")
+    # lmkd attaches its memory event programs to tracepoints when boot completes, and on
+    # Hyper-V that waits behind every tracefs write made at the same time. Wi-Fi's trace
+    # instance setup made enough of them to hold lmkd's main loop past its watchdog, which
+    # then killed the app just opened.
+    if "SYSTEM/etc/init/wifi.rc" in names and re.search(
+            r"^on property:sys\.boot_completed=1 && property:sys\.wifitracing\.started=0\s*$",
+            z.read("SYSTEM/etc/init/wifi.rc").decode(), re.MULTILINE):
+        problems.append("wifi.rc still sets up a kernel trace instance when boot completes, which "
+                        "holds lmkd past its watchdog and gets a just-opened app killed")
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
     if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:
