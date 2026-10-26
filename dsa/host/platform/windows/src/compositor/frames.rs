@@ -183,8 +183,14 @@ mod tests {
         router.frame(3, (10, 20));
         assert_eq!(router.target(4, 30, 40), Some(2030));
         router.frame(4, (30, 40));
-        assert_eq!(*clock.shown.lock().unwrap(), vec![(1010, (10, 20), (10, 20))]);
-        assert_eq!(*maps.shown.lock().unwrap(), vec![(2030, (30, 40), (30, 40))]);
+        assert_eq!(
+            *clock.shown.lock().unwrap(),
+            vec![(1010, (10, 20), (10, 20))]
+        );
+        assert_eq!(
+            *maps.shown.lock().unwrap(),
+            vec![(2030, (30, 40), (30, 40))]
+        );
     }
 
     #[test]
