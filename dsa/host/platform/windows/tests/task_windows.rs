@@ -680,10 +680,25 @@ fn lparam(x: i32, y: i32) -> isize {
     ((y as i16 as u16 as usize) << 16 | x as i16 as u16 as usize) as isize
 }
 
-/// Waits until the fake Android has been given `count` pointer events, and returns them.
+/// Waits until the fake Android has been given `count` pointer events other than hover
+/// events, and returns those. The tests post only button and wheel messages; a hover can
+/// still arrive when the machine's real cursor happens to rest over the test window.
 fn pointers(running: &Running, count: usize) -> Vec<PointerEvent> {
     wait_for(&format!("{count} pointer events in Android"), || {
-        let given = running.android.pointers.lock().unwrap().clone();
+        let given: Vec<PointerEvent> = running
+            .android
+            .pointers
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| {
+                !matches!(
+                    event.action,
+                    PointerAction::HoverMove | PointerAction::HoverExit
+                )
+            })
+            .copied()
+            .collect();
         (given.len() >= count).then_some(given)
     })
 }
