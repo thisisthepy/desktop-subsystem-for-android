@@ -33,6 +33,11 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
 - **Key input.** The host sends the keys pressed in each task's window (`KeyEvent`). The
   agent gives the task the input focus if it does not hold it, and injects the key (see
   below).
+- **Text input.** The host sends what its input method composes and commits in each task's
+  window, and every character a key types (`ImeComposition`, `ImeCommit`). The agent's own
+  input method, which shows nothing, puts it into the focused editor, and the agent reports
+  where the editor's cursor is (`ImeCursor`) so the host's candidate list appears beside it
+  (see below).
 - **The channel.** It reaches the host through the control daemon's binder service,
   `io.github.thisisthepy.dsa.channel.IChannel/default` (`dsa/guest/aidl/`). It looks for
   the service every second until the daemon is up, subscribes, and sends every app task
@@ -168,12 +173,36 @@ locks) and the time on the host's clock (`input/KeyInput.kt`).
   not hold the input focus, the agent focuses it (`IActivityTaskManager.setFocusedTask`).
   Moving between host windows with the keyboard alone moves the guest's focus too.
 - The key is injected on the default display as `SOURCE_KEYBOARD` from the framework's
-  virtual keyboard, whose key character map is a full US keyboard, so a letter, digit or
-  punctuation key with its meta state types its character into a text field.
+  virtual keyboard. The host sends only keys that type no text (arrows, Enter, Backspace,
+  shortcuts with Ctrl or Alt): a key that types a character comes as text instead.
 - A held key keeps the time it went down; its repeats and its release are placed after it
   by the host's times. A release for a key the agent never saw go down is dropped. A
   release the host marks canceled (the window lost the focus) carries `FLAG_CANCELED`, so
   the app lets the key go without acting on it.
+
+## Text input
+
+The host is the shell, so text is typed with the host's input method, in the host's window,
+and the guest has no keyboard app. Android puts text into an editor only through an input
+method, so the agent declares one (`platform/HostInputMethod.kt`) that is no keyboard: it has
+no view, refuses to be shown, and is never fullscreen, so no soft keyboard appears. At boot
+the agent makes it the only enabled and the selected input method, and turns off showing a
+soft keyboard beside a hardware one, through the secure settings the input method manager
+watches (`platform/AndroidTextInput.kt`). Its `input-method` metadata marks it the default,
+so the manager selects it on its own too.
+
+- A composition (`ImeComposition`) becomes the focused editor's composing text, which the
+  editor shows underlined, with the cursor where the host's input method has it; each one
+  replaces the last, and an empty one removes it. A commit (`ImeCommit`) replaces the
+  composition, which ends (`input/TextInput.kt`).
+- Before text goes to a task that does not hold the input focus, the agent focuses it, as
+  for a key.
+- Where no editor takes text (a game, or a view that reads keys itself), committed text is
+  injected as the virtual keyboard's keys for each character, so typing still works there.
+  A composition there has nowhere to go and is dropped.
+- The input method asks every editor it is bound to for cursor updates, and the agent tells
+  the host where the cursor is in the focused task (`ImeCursor`), once for each place it
+  moves to.
 
 ## The home activity
 
@@ -284,8 +313,8 @@ The release APK, `build/outputs/apk/release/dsa-agent-release-unsigned.apk`, is 
 
 | Path | What it is |
 |---|---|
-| `src/main/kotlin/.../agent/` | The agent: task reports, requests, pointer input, the channel client, the freeform setup, task placement |
-| `src/main/kotlin/.../agent/platform/` | The framework side: the application, task source, actions, windowing, input injection, binder channel |
+| `src/main/kotlin/.../agent/` | The agent: task reports, requests, pointer, key and text input, the channel client, the freeform setup, task placement |
+| `src/main/kotlin/.../agent/platform/` | The framework side: the application, task source, actions, windowing, input injection, the input method, binder channel |
 | `src/test/` | The unit tests |
 | `hidden-api/` | Compile-only declarations of framework classes outside the SDK |
 | `privapp-permissions-dsa-agent.xml` | The agent's privileged permissions |

@@ -197,6 +197,16 @@ message TaskSize {
   uint32 max_height = 5;
 }
 
+// Window manager to window host: where the cursor of the editor focused in the task is, in the
+// window's client pixels, so the window puts the input method's windows beside it.
+message ImeCursor {
+  int32 task_id = 1;
+  int32 left = 2;
+  int32 top = 3;
+  int32 right = 4;
+  int32 bottom = 5;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -218,5 +228,6 @@ message Envelope {
     WindowFocus window_focus = 16;
     WindowDragging window_dragging = 17;
     TaskSize task_size = 18;
+    ImeCursor ime_cursor = 19;
   }
 }

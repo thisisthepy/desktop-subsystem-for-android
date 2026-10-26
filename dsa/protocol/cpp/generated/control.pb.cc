@@ -265,6 +265,49 @@ struct KeyEventDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 KeyEventDefaultTypeInternal _KeyEvent_default_instance_;
+PROTOBUF_CONSTEXPR ImeComposition::ImeComposition(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.text_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.task_id_)*/0
+  , /*decltype(_impl_.cursor_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct ImeCompositionDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ImeCompositionDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ImeCompositionDefaultTypeInternal() {}
+  union {
+    ImeComposition _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ImeCompositionDefaultTypeInternal _ImeComposition_default_instance_;
+PROTOBUF_CONSTEXPR ImeCommit::ImeCommit(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.text_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.task_id_)*/0
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct ImeCommitDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ImeCommitDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ImeCommitDefaultTypeInternal() {}
+  union {
+    ImeCommit _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ImeCommitDefaultTypeInternal _ImeCommit_default_instance_;
+PROTOBUF_CONSTEXPR ImeCursor::ImeCursor(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.cursor_)*/nullptr
+  , /*decltype(_impl_.task_id_)*/0
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct ImeCursorDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ImeCursorDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ImeCursorDefaultTypeInternal() {}
+  union {
+    ImeCursor _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ImeCursorDefaultTypeInternal _ImeCursor_default_instance_;
 PROTOBUF_CONSTEXPR Envelope::Envelope(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.body_)*/{}
@@ -4891,6 +4934,729 @@ std::string KeyEvent::GetTypeName() const {
 
 // ===================================================================
 
+class ImeComposition::_Internal {
+ public:
+};
+
+ImeComposition::ImeComposition(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ImeComposition)
+}
+ImeComposition::ImeComposition(const ImeComposition& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ImeComposition* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.text_){}
+    , decltype(_impl_.task_id_){}
+    , decltype(_impl_.cursor_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.text_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.text_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_text().empty()) {
+    _this->_impl_.text_.Set(from._internal_text(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.task_id_, &from._impl_.task_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.cursor_) -
+    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.cursor_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ImeComposition)
+}
+
+inline void ImeComposition::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.text_){}
+    , decltype(_impl_.task_id_){0}
+    , decltype(_impl_.cursor_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.text_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.text_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+ImeComposition::~ImeComposition() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ImeComposition)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ImeComposition::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.text_.Destroy();
+}
+
+void ImeComposition::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ImeComposition::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ImeComposition)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.text_.ClearToEmpty();
+  ::memset(&_impl_.task_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.cursor_) -
+      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.cursor_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ImeComposition::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 task_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.task_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // string text = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_text();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 cursor = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.cursor_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ImeComposition::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ImeComposition)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_task_id(), target);
+  }
+
+  // string text = 2;
+  if (!this->_internal_text().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_text().data(), static_cast<int>(this->_internal_text().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.ImeComposition.text");
+    target = stream->WriteStringMaybeAliased(
+        2, this->_internal_text(), target);
+  }
+
+  // uint32 cursor = 3;
+  if (this->_internal_cursor() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(3, this->_internal_cursor(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ImeComposition)
+  return target;
+}
+
+size_t ImeComposition::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ImeComposition)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string text = 2;
+  if (!this->_internal_text().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_text());
+  }
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_task_id());
+  }
+
+  // uint32 cursor = 3;
+  if (this->_internal_cursor() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_cursor());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ImeComposition::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ImeComposition*>(
+      &from));
+}
+
+void ImeComposition::MergeFrom(const ImeComposition& from) {
+  ImeComposition* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ImeComposition)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_text().empty()) {
+    _this->_internal_set_text(from._internal_text());
+  }
+  if (from._internal_task_id() != 0) {
+    _this->_internal_set_task_id(from._internal_task_id());
+  }
+  if (from._internal_cursor() != 0) {
+    _this->_internal_set_cursor(from._internal_cursor());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ImeComposition::CopyFrom(const ImeComposition& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ImeComposition)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ImeComposition::IsInitialized() const {
+  return true;
+}
+
+void ImeComposition::InternalSwap(ImeComposition* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.text_, lhs_arena,
+      &other->_impl_.text_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(ImeComposition, _impl_.cursor_)
+      + sizeof(ImeComposition::_impl_.cursor_)
+      - PROTOBUF_FIELD_OFFSET(ImeComposition, _impl_.task_id_)>(
+          reinterpret_cast<char*>(&_impl_.task_id_),
+          reinterpret_cast<char*>(&other->_impl_.task_id_));
+}
+
+std::string ImeComposition::GetTypeName() const {
+  return "dsa.control.v1.ImeComposition";
+}
+
+
+// ===================================================================
+
+class ImeCommit::_Internal {
+ public:
+};
+
+ImeCommit::ImeCommit(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ImeCommit)
+}
+ImeCommit::ImeCommit(const ImeCommit& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ImeCommit* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.text_){}
+    , decltype(_impl_.task_id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.text_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.text_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_text().empty()) {
+    _this->_impl_.text_.Set(from._internal_text(), 
+      _this->GetArenaForAllocation());
+  }
+  _this->_impl_.task_id_ = from._impl_.task_id_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ImeCommit)
+}
+
+inline void ImeCommit::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.text_){}
+    , decltype(_impl_.task_id_){0}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.text_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.text_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+ImeCommit::~ImeCommit() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ImeCommit)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ImeCommit::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.text_.Destroy();
+}
+
+void ImeCommit::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ImeCommit::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ImeCommit)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.text_.ClearToEmpty();
+  _impl_.task_id_ = 0;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ImeCommit::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 task_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.task_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // string text = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_text();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ImeCommit::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ImeCommit)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_task_id(), target);
+  }
+
+  // string text = 2;
+  if (!this->_internal_text().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_text().data(), static_cast<int>(this->_internal_text().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.ImeCommit.text");
+    target = stream->WriteStringMaybeAliased(
+        2, this->_internal_text(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ImeCommit)
+  return target;
+}
+
+size_t ImeCommit::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ImeCommit)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string text = 2;
+  if (!this->_internal_text().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_text());
+  }
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_task_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ImeCommit::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ImeCommit*>(
+      &from));
+}
+
+void ImeCommit::MergeFrom(const ImeCommit& from) {
+  ImeCommit* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ImeCommit)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_text().empty()) {
+    _this->_internal_set_text(from._internal_text());
+  }
+  if (from._internal_task_id() != 0) {
+    _this->_internal_set_task_id(from._internal_task_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ImeCommit::CopyFrom(const ImeCommit& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ImeCommit)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ImeCommit::IsInitialized() const {
+  return true;
+}
+
+void ImeCommit::InternalSwap(ImeCommit* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.text_, lhs_arena,
+      &other->_impl_.text_, rhs_arena
+  );
+  swap(_impl_.task_id_, other->_impl_.task_id_);
+}
+
+std::string ImeCommit::GetTypeName() const {
+  return "dsa.control.v1.ImeCommit";
+}
+
+
+// ===================================================================
+
+class ImeCursor::_Internal {
+ public:
+  static const ::dsa::control::v1::Rect& cursor(const ImeCursor* msg);
+};
+
+const ::dsa::control::v1::Rect&
+ImeCursor::_Internal::cursor(const ImeCursor* msg) {
+  return *msg->_impl_.cursor_;
+}
+ImeCursor::ImeCursor(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ImeCursor)
+}
+ImeCursor::ImeCursor(const ImeCursor& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ImeCursor* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.cursor_){nullptr}
+    , decltype(_impl_.task_id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  if (from._internal_has_cursor()) {
+    _this->_impl_.cursor_ = new ::dsa::control::v1::Rect(*from._impl_.cursor_);
+  }
+  _this->_impl_.task_id_ = from._impl_.task_id_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ImeCursor)
+}
+
+inline void ImeCursor::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.cursor_){nullptr}
+    , decltype(_impl_.task_id_){0}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+ImeCursor::~ImeCursor() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ImeCursor)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ImeCursor::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  if (this != internal_default_instance()) delete _impl_.cursor_;
+}
+
+void ImeCursor::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ImeCursor::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ImeCursor)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  if (GetArenaForAllocation() == nullptr && _impl_.cursor_ != nullptr) {
+    delete _impl_.cursor_;
+  }
+  _impl_.cursor_ = nullptr;
+  _impl_.task_id_ = 0;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ImeCursor::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 task_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.task_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.Rect cursor = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          ptr = ctx->ParseMessage(_internal_mutable_cursor(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ImeCursor::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ImeCursor)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_task_id(), target);
+  }
+
+  // .dsa.control.v1.Rect cursor = 2;
+  if (this->_internal_has_cursor()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(2, _Internal::cursor(this),
+        _Internal::cursor(this).GetCachedSize(), target, stream);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ImeCursor)
+  return target;
+}
+
+size_t ImeCursor::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ImeCursor)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // .dsa.control.v1.Rect cursor = 2;
+  if (this->_internal_has_cursor()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *_impl_.cursor_);
+  }
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_task_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ImeCursor::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ImeCursor*>(
+      &from));
+}
+
+void ImeCursor::MergeFrom(const ImeCursor& from) {
+  ImeCursor* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ImeCursor)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_has_cursor()) {
+    _this->_internal_mutable_cursor()->::dsa::control::v1::Rect::MergeFrom(
+        from._internal_cursor());
+  }
+  if (from._internal_task_id() != 0) {
+    _this->_internal_set_task_id(from._internal_task_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ImeCursor::CopyFrom(const ImeCursor& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ImeCursor)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ImeCursor::IsInitialized() const {
+  return true;
+}
+
+void ImeCursor::InternalSwap(ImeCursor* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(ImeCursor, _impl_.task_id_)
+      + sizeof(ImeCursor::_impl_.task_id_)
+      - PROTOBUF_FIELD_OFFSET(ImeCursor, _impl_.cursor_)>(
+          reinterpret_cast<char*>(&_impl_.cursor_),
+          reinterpret_cast<char*>(&other->_impl_.cursor_));
+}
+
+std::string ImeCursor::GetTypeName() const {
+  return "dsa.control.v1.ImeCursor";
+}
+
+
+// ===================================================================
+
 class Envelope::_Internal {
  public:
   static const ::dsa::control::v1::Hello& hello(const Envelope* msg);
@@ -4908,6 +5674,9 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::PointerEvent& pointer_event(const Envelope* msg);
   static const ::dsa::control::v1::AppInfo& app_info(const Envelope* msg);
   static const ::dsa::control::v1::KeyEvent& key_event(const Envelope* msg);
+  static const ::dsa::control::v1::ImeComposition& ime_composition(const Envelope* msg);
+  static const ::dsa::control::v1::ImeCommit& ime_commit(const Envelope* msg);
+  static const ::dsa::control::v1::ImeCursor& ime_cursor(const Envelope* msg);
 };
 
 const ::dsa::control::v1::Hello&
@@ -4969,6 +5738,18 @@ Envelope::_Internal::app_info(const Envelope* msg) {
 const ::dsa::control::v1::KeyEvent&
 Envelope::_Internal::key_event(const Envelope* msg) {
   return *msg->_impl_.body_.key_event_;
+}
+const ::dsa::control::v1::ImeComposition&
+Envelope::_Internal::ime_composition(const Envelope* msg) {
+  return *msg->_impl_.body_.ime_composition_;
+}
+const ::dsa::control::v1::ImeCommit&
+Envelope::_Internal::ime_commit(const Envelope* msg) {
+  return *msg->_impl_.body_.ime_commit_;
+}
+const ::dsa::control::v1::ImeCursor&
+Envelope::_Internal::ime_cursor(const Envelope* msg) {
+  return *msg->_impl_.body_.ime_cursor_;
 }
 void Envelope::set_allocated_hello(::dsa::control::v1::Hello* hello) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -5195,6 +5976,51 @@ void Envelope::set_allocated_key_event(::dsa::control::v1::KeyEvent* key_event) 
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.key_event)
 }
+void Envelope::set_allocated_ime_composition(::dsa::control::v1::ImeComposition* ime_composition) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (ime_composition) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(ime_composition);
+    if (message_arena != submessage_arena) {
+      ime_composition = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, ime_composition, submessage_arena);
+    }
+    set_has_ime_composition();
+    _impl_.body_.ime_composition_ = ime_composition;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.ime_composition)
+}
+void Envelope::set_allocated_ime_commit(::dsa::control::v1::ImeCommit* ime_commit) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (ime_commit) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(ime_commit);
+    if (message_arena != submessage_arena) {
+      ime_commit = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, ime_commit, submessage_arena);
+    }
+    set_has_ime_commit();
+    _impl_.body_.ime_commit_ = ime_commit;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.ime_commit)
+}
+void Envelope::set_allocated_ime_cursor(::dsa::control::v1::ImeCursor* ime_cursor) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (ime_cursor) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(ime_cursor);
+    if (message_arena != submessage_arena) {
+      ime_cursor = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, ime_cursor, submessage_arena);
+    }
+    set_has_ime_cursor();
+    _impl_.body_.ime_cursor_ = ime_cursor;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.ime_cursor)
+}
 Envelope::Envelope(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
@@ -5285,6 +6111,21 @@ Envelope::Envelope(const Envelope& from)
     case kKeyEvent: {
       _this->_internal_mutable_key_event()->::dsa::control::v1::KeyEvent::MergeFrom(
           from._internal_key_event());
+      break;
+    }
+    case kImeComposition: {
+      _this->_internal_mutable_ime_composition()->::dsa::control::v1::ImeComposition::MergeFrom(
+          from._internal_ime_composition());
+      break;
+    }
+    case kImeCommit: {
+      _this->_internal_mutable_ime_commit()->::dsa::control::v1::ImeCommit::MergeFrom(
+          from._internal_ime_commit());
+      break;
+    }
+    case kImeCursor: {
+      _this->_internal_mutable_ime_cursor()->::dsa::control::v1::ImeCursor::MergeFrom(
+          from._internal_ime_cursor());
       break;
     }
     case BODY_NOT_SET: {
@@ -5416,6 +6257,24 @@ void Envelope::clear_body() {
     case kKeyEvent: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.key_event_;
+      }
+      break;
+    }
+    case kImeComposition: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.ime_composition_;
+      }
+      break;
+    }
+    case kImeCommit: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.ime_commit_;
+      }
+      break;
+    }
+    case kImeCursor: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.ime_cursor_;
       }
       break;
     }
@@ -5563,6 +6422,30 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.ImeComposition ime_composition = 17;
+      case 17:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 138)) {
+          ptr = ctx->ParseMessage(_internal_mutable_ime_composition(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.ImeCommit ime_commit = 18;
+      case 18:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 146)) {
+          ptr = ctx->ParseMessage(_internal_mutable_ime_commit(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.ImeCursor ime_cursor = 19;
+      case 19:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 154)) {
+          ptr = ctx->ParseMessage(_internal_mutable_ime_cursor(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -5697,6 +6580,27 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::key_event(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.ImeComposition ime_composition = 17;
+  if (_internal_has_ime_composition()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(17, _Internal::ime_composition(this),
+        _Internal::ime_composition(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.ImeCommit ime_commit = 18;
+  if (_internal_has_ime_commit()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(18, _Internal::ime_commit(this),
+        _Internal::ime_commit(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.ImeCursor ime_cursor = 19;
+  if (_internal_has_ime_cursor()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(19, _Internal::ime_cursor(this),
+        _Internal::ime_cursor(this).GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -5819,6 +6723,27 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.key_event_);
       break;
     }
+    // .dsa.control.v1.ImeComposition ime_composition = 17;
+    case kImeComposition: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.ime_composition_);
+      break;
+    }
+    // .dsa.control.v1.ImeCommit ime_commit = 18;
+    case kImeCommit: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.ime_commit_);
+      break;
+    }
+    // .dsa.control.v1.ImeCursor ime_cursor = 19;
+    case kImeCursor: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.ime_cursor_);
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -5920,6 +6845,21 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_key_event());
       break;
     }
+    case kImeComposition: {
+      _this->_internal_mutable_ime_composition()->::dsa::control::v1::ImeComposition::MergeFrom(
+          from._internal_ime_composition());
+      break;
+    }
+    case kImeCommit: {
+      _this->_internal_mutable_ime_commit()->::dsa::control::v1::ImeCommit::MergeFrom(
+          from._internal_ime_commit());
+      break;
+    }
+    case kImeCursor: {
+      _this->_internal_mutable_ime_cursor()->::dsa::control::v1::ImeCursor::MergeFrom(
+          from._internal_ime_cursor());
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -6018,6 +6958,18 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::PointerEvent >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::KeyEvent*
 Arena::CreateMaybeMessage< ::dsa::control::v1::KeyEvent >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::KeyEvent >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ImeComposition*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ImeComposition >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ImeComposition >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ImeCommit*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ImeCommit >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ImeCommit >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ImeCursor*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ImeCursor >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ImeCursor >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::Envelope*
 Arena::CreateMaybeMessage< ::dsa::control::v1::Envelope >(Arena* arena) {

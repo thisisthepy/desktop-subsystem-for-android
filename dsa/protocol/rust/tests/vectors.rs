@@ -10,8 +10,9 @@ use std::path::PathBuf;
 
 use dsa_protocol::control::{
     envelope::Body, AppInfo, AuthChallenge, AuthProof, CloseTask, Envelope, Hello, HelloAccepted,
-    HelloRejected, KeyAction, KeyEvent, LaunchApp, PointerAction, PointerEvent, PointerTool, Rect,
-    RejectReason, ResizeTask, Role, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
+    HelloRejected, ImeCommit, ImeComposition, ImeCursor, KeyAction, KeyEvent, LaunchApp,
+    PointerAction, PointerEvent, PointerTool, Rect, RejectReason, ResizeTask, Role, SetTaskDensity,
+    TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
 
@@ -254,6 +255,40 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                 event_time_ms: 4_294_967_000,
                 canceled: true,
                 ..KeyEvent::default()
+            })),
+        ),
+        (
+            "ime_composition_korean",
+            wrap(Body::ImeComposition(ImeComposition {
+                task_id: 42,
+                text: "\u{d55c}".into(),
+                cursor: 1,
+            })),
+        ),
+        (
+            "ime_composition_removed",
+            wrap(Body::ImeComposition(ImeComposition {
+                task_id: 7,
+                ..ImeComposition::default()
+            })),
+        ),
+        (
+            "ime_commit_korean",
+            wrap(Body::ImeCommit(ImeCommit {
+                task_id: 42,
+                text: "\u{d55c}\u{ae00}".into(),
+            })),
+        ),
+        (
+            "ime_cursor",
+            wrap(Body::ImeCursor(ImeCursor {
+                task_id: 42,
+                cursor: Some(Rect {
+                    left: 100,
+                    top: 200,
+                    right: 102,
+                    bottom: 240,
+                }),
             })),
         ),
         (

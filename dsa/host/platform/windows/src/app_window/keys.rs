@@ -7,10 +7,16 @@
 //! hands each event to a channel; the rules (what is held, repeats, modifiers) are the
 //! mapper's.
 //!
-//! Every key with a guest key code goes to the guest, the ones that type text included, so
-//! typing works through key events. Windows still turns them into WM_CHAR, which this module
-//! leaves alone. A key the input method is composing with arrives as VK_PROCESSKEY; that key
-//! belongs to the input method, so it is left to Windows and never reaches the guest.
+//! A key that types a character goes to the guest as that character, as text (see
+//! [`super::ime`]), so every keyboard layout types what its keys show; its press is not also
+//! sent as a key event. The window tells such a key by the WM_CHAR (or the WM_DEADCHAR of a
+//! dead key) that TranslateMessage has already queued for it when its WM_KEYDOWN arrives. A
+//! key that types a control character (Enter, Tab, Backspace, Escape, Ctrl with a letter) or
+//! nothing at all (arrows, function keys, the modifiers) goes as a key event, and so does
+//! every key with Alt, which comes as WM_SYSKEYDOWN. A release whose press went as text is
+//! dropped by the mapper, which never saw it held. A key the input method is composing with
+//! arrives as VK_PROCESSKEY; that key belongs to the input method, so it is left to Windows
+//! and never reaches the guest.
 
 use std::cell::RefCell;
 use std::sync::mpsc::Sender;
@@ -30,7 +36,8 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP, VK_Z,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetMessageTime, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    GetMessageTime, PeekMessageW, MSG, PM_NOREMOVE, PM_NOYIELD, WM_CHAR, WM_DEADCHAR, WM_KEYDOWN,
+    WM_KEYUP, WM_KILLFOCUS, WM_SYSCHAR, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 /// The scan code of the right Shift key, which shares its virtual key with the left one.
@@ -116,6 +123,33 @@ pub fn guest_key(vk: VIRTUAL_KEY, scan: u32, extended: bool) -> Option<u32> {
     Some(code)
 }
 
+/// Whether a character message waiting in the queue says the key before it types text: a
+/// dead key's WM_DEADCHAR, or a WM_CHAR of a character that is not a control.
+pub fn types_text(message: u32, unit: u16) -> bool {
+    match message {
+        WM_DEADCHAR => true,
+        WM_CHAR => !char::from_u32(u32::from(unit)).is_some_and(char::is_control),
+        _ => false,
+    }
+}
+
+/// Whether the key whose WM_KEYDOWN `hwnd` is handling, with scan code `scan`, types text:
+/// TranslateMessage queued its character before the key message was dispatched. A character
+/// message carries the scan code of the key that typed it, so a character queued for another
+/// key is never taken for this one's.
+unsafe fn key_types_text(hwnd: HWND, scan: u32) -> bool {
+    let mut next: MSG = std::mem::zeroed();
+    PeekMessageW(
+        &mut next,
+        hwnd,
+        WM_CHAR,
+        WM_DEADCHAR,
+        PM_NOREMOVE | PM_NOYIELD,
+    ) != 0
+        && scan_and_extended(next.lParam).0 == scan
+        && types_text(next.message, next.wParam as u16)
+}
+
 /// The locks on now, as the guest's meta state bits.
 unsafe fn locks() -> u32 {
     let on = |vk: VIRTUAL_KEY| GetKeyState(i32::from(vk)) & 1 != 0;
@@ -154,7 +188,7 @@ impl KeyWindow {
     /// Called on the window's own thread, from its window procedure.
     pub unsafe fn handle(
         &self,
-        _hwnd: HWND,
+        hwnd: HWND,
         message: u32,
         wparam: WPARAM,
         lparam: LPARAM,
@@ -172,6 +206,10 @@ impl KeyWindow {
                 }
                 let (scan, extended) = scan_and_extended(lparam);
                 let key_code = guest_key(vk, scan, extended)?;
+                // Its character goes as text, which the window's WM_CHAR sends.
+                if message == WM_KEYDOWN && key_types_text(hwnd, scan) {
+                    return Some(0);
+                }
                 let down = matches!(message, WM_KEYDOWN | WM_SYSKEYDOWN);
                 let input = KeyInput {
                     key_code,

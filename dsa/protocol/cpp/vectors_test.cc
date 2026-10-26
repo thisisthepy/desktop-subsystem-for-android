@@ -189,6 +189,27 @@ std::map<std::string, v1::Envelope> Cases() {
     event->set_canceled(true);
   }
   {
+    v1::ImeComposition* composition = cases["ime_composition_korean"].mutable_ime_composition();
+    composition->set_task_id(42);
+    composition->set_text("\xed\x95\x9c");
+    composition->set_cursor(1);
+  }
+  cases["ime_composition_removed"].mutable_ime_composition()->set_task_id(7);
+  {
+    v1::ImeCommit* commit = cases["ime_commit_korean"].mutable_ime_commit();
+    commit->set_task_id(42);
+    commit->set_text("\xed\x95\x9c\xea\xb8\x80");
+  }
+  {
+    v1::ImeCursor* cursor = cases["ime_cursor"].mutable_ime_cursor();
+    cursor->set_task_id(42);
+    v1::Rect* rect = cursor->mutable_cursor();
+    rect->set_left(100);
+    rect->set_top(200);
+    rect->set_right(102);
+    rect->set_bottom(240);
+  }
+  {
     v1::HelloRejected* rejected = cases["hello_rejected_authentication"].mutable_hello_rejected();
     rejected->set_reason(v1::REJECT_REASON_AUTHENTICATION_FAILED);
     rejected->set_detail("no proof");

@@ -8,6 +8,8 @@ import io.github.thisisthepy.dsa.agent.tasks.TaskSource
 import io.github.thisisthepy.dsa.agent.windowing.WINDOWING_MODE_FREEFORM
 import io.github.thisisthepy.dsa.control.v1.CloseTask
 import io.github.thisisthepy.dsa.control.v1.Envelope
+import io.github.thisisthepy.dsa.control.v1.ImeCommit
+import io.github.thisisthepy.dsa.control.v1.ImeComposition
 import io.github.thisisthepy.dsa.control.v1.KeyAction
 import io.github.thisisthepy.dsa.control.v1.KeyEvent
 import io.github.thisisthepy.dsa.control.v1.LaunchApp
@@ -34,9 +36,16 @@ class AgentTest {
     // Where Android's freeform launch put both Settings and Clock on a real machine.
     private val defaultPlace = TaskBounds(686, 53, 1234, 1027)
 
+    private val editor = io.github.thisisthepy.dsa.agent.input.FakeEditor()
+    private var hostInputMethodSelected = 0
+
     private fun started(source: TaskSource = tasks): Agent {
         locator.up = daemon
-        val agent = Agent(AGENT, source, actions, locator, windowing, injector, scheduler, log)
+        val agent = Agent(
+            AGENT, source, actions, locator, windowing, injector, scheduler, log,
+            editor = { editor },
+            inputMethods = { hostInputMethodSelected++ },
+        )
         agent.start()
         scheduler.runDue()
         return agent
@@ -684,5 +693,49 @@ class AgentTest {
         scheduler.runDue()
 
         assertTrue(injector.injected.isEmpty())
+    }
+
+    @Test
+    fun fr6_at_boot_the_agents_input_method_becomes_the_guests() {
+        started()
+
+        assertEquals(1, hostInputMethodSelected)
+    }
+
+    @Test
+    fun fr6_text_from_the_host_input_method_reaches_the_focused_editor_of_its_task() {
+        tasks.running = listOf(appTask(4, focused = true))
+        started()
+        val sentBefore = daemon.sent.size
+
+        daemon.deliver(
+            Envelope.newBuilder().setImeComposition(
+                ImeComposition.newBuilder().setTaskId(4).setText("\ud55c").setCursor(1),
+            ).build().toByteArray(),
+        )
+        daemon.deliver(
+            Envelope.newBuilder().setImeCommit(ImeCommit.newBuilder().setTaskId(4).setText("\ud55c"))
+                .build().toByteArray(),
+        )
+        scheduler.runDue()
+
+        assertEquals(listOf("compose \ud55c 1", "commit \ud55c"), editor.calls)
+        assertEquals("\ud55c", editor.text.toString())
+        assertTrue(injector.keys.isEmpty())
+        assertEquals(sentBefore, daemon.sent.size)
+    }
+
+    @Test
+    fun fr6_the_focused_editors_cursor_goes_to_the_host_in_its_tasks_pixels() {
+        tasks.running = listOf(appTask(4, focused = true))
+        val agent = started()
+        val bounds = daemon.sentMessages().last { it.hasTaskUpdated() }.taskUpdated.bounds
+
+        agent.cursorMoved(bounds.left + 30f, bounds.top + 40f, bounds.left + 32f, bounds.top + 70f)
+        scheduler.runDue()
+
+        val cursor = daemon.sentMessages().last().imeCursor
+        assertEquals(4, cursor.taskId)
+        assertEquals(listOf(30, 40, 32, 70), cursor.cursor.let { listOf(it.left, it.top, it.right, it.bottom) })
     }
 }

@@ -6,8 +6,11 @@
 //! live resize. What the user does to a window goes back to the window manager as a
 //! [`FromHost`] report; even a close only reports, and the window closes when the window
 //! manager says so. Each window hands its mouse, touch and pen messages to its
-//! `PointerWindow` ([`super::pointer`]), which sends the task's pointer events on, and its key
-//! messages to its `KeyWindow` ([`super::keys`]), which sends its key events on the same way.
+//! `PointerWindow` ([`super::pointer`]), which sends the task's pointer events on, its key
+//! messages to its `KeyWindow` ([`super::keys`]), which sends its key events on the same way,
+//! and its input method messages and typed characters to its `ImeWindow` ([`super::ime`]),
+//! which sends the task's text on and places the input method's windows at the cursor the
+//! guest reports.
 //!
 //! A window reports its client size, its monitor's scale (once when it opens, then on every
 //! move to another monitor) and the start and end of a drag; the window manager turns them
@@ -51,6 +54,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::compositor::log::{note, CompositorLogger};
 use crate::compositor::present::{Gpu, WindowPresenter};
 
+use super::ime::ImeWindow;
 use super::keys::KeyWindow;
 use super::pointer::PointerWindow;
 
@@ -60,6 +64,9 @@ pub struct OpenWindow {
     pub task_id: i32,
     /// The window's handle, as an integer.
     pub hwnd: isize,
+    /// Where the window places the input method's windows: the cursor of the task's focused
+    /// editor, as the guest last reported it.
+    pub ime_cursor: Option<dsa_host_core::ime::ImeCursor>,
 }
 
 /// Where a report about a window goes: to the window manager.
@@ -134,7 +141,7 @@ impl Drop for UiHandle {
 pub struct UiSetup {
     /// Where reports about the windows go.
     pub report: Report,
-    /// Where the pointer and key input in every task window goes.
+    /// Where the pointer, key and text input in every task window goes.
     pub input: Sender<InputEvent>,
     /// The GPU devices, or `None` when frames cannot be shown (the windows still open).
     pub gpu: Option<Arc<Gpu>>,
@@ -177,6 +184,7 @@ struct WindowData {
     presenter: RefCell<Option<Arc<WindowPresenter>>>,
     pointer: PointerWindow,
     keys: KeyWindow,
+    ime: ImeWindow,
     /// The largest client area Android can draw for the task, as the window manager last
     /// said, for WM_GETMINMAXINFO.
     max_client: Cell<Option<(u32, u32)>>,
@@ -349,6 +357,9 @@ unsafe extern "system" fn task_window_proc(
             return result;
         }
         if let Some(result) = data.keys.handle(hwnd, message, wparam, lparam) {
+            return result;
+        }
+        if let Some(result) = data.ime.handle(hwnd, message, wparam, lparam) {
             return result;
         }
     }
@@ -573,6 +584,13 @@ impl Ui {
                             data.max_client.set(max);
                         }
                     }
+                    ToHost::ImeCursor { task_id, cursor } => {
+                        if let Some(hwnd) = self.open.get(&task_id) {
+                            if let Some(data) = window_data(*hwnd) {
+                                data.ime.cursor_moved(*hwnd, cursor);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -602,6 +620,8 @@ impl Ui {
             .map(|(task_id, hwnd)| OpenWindow {
                 task_id: *task_id,
                 hwnd: *hwnd as isize,
+                // SAFETY: a window of this thread.
+                ime_cursor: unsafe { window_data(*hwnd) }.and_then(|data| data.ime.cursor()),
             })
             .collect();
         listing.sort_by_key(|window| window.task_id);
@@ -634,6 +654,7 @@ impl Ui {
             presenter: RefCell::new(None),
             pointer: PointerWindow::new(task_id, size, self.setup.input.clone()),
             keys: KeyWindow::new(task_id, self.setup.input.clone()),
+            ime: ImeWindow::new(task_id, self.setup.input.clone()),
             max_client: Cell::new(None),
             reporting: Cell::new(false),
         }));

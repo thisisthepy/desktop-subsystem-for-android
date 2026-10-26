@@ -184,6 +184,30 @@ public final class VectorsTest {
                         .setEventTimeMs((int) 4294967000L)
                         .setCanceled(true))
                 .build());
+        cases.put("ime_composition_korean", Envelope.newBuilder()
+                .setImeComposition(ImeComposition.newBuilder()
+                        .setTaskId(42)
+                        .setText("\ud55c")
+                        .setCursor(1))
+                .build());
+        cases.put("ime_composition_removed", Envelope.newBuilder()
+                .setImeComposition(ImeComposition.newBuilder()
+                        .setTaskId(7))
+                .build());
+        cases.put("ime_commit_korean", Envelope.newBuilder()
+                .setImeCommit(ImeCommit.newBuilder()
+                        .setTaskId(42)
+                        .setText("\ud55c\uae00"))
+                .build());
+        cases.put("ime_cursor", Envelope.newBuilder()
+                .setImeCursor(ImeCursor.newBuilder()
+                        .setTaskId(42)
+                        .setCursor(Rect.newBuilder()
+                                .setLeft(100)
+                                .setTop(200)
+                                .setRight(102)
+                                .setBottom(240)))
+                .build());
         cases.put("hello_rejected_authentication", Envelope.newBuilder()
                 .setHelloRejected(HelloRejected.newBuilder()
                         .setReason(RejectReason.REJECT_REASON_AUTHENTICATION_FAILED)

@@ -18,6 +18,7 @@ use dsa_host_core::compositor::window_sizing::{density_for_dpi, rescale};
 use dsa_host_core::compositor::FakeRenderer;
 use dsa_host_core::host_api::{UserAndroid, UserAndroids};
 use dsa_host_core::host_api_conformance::{FakeAndroid, FakeAndroids, RunningService};
+use dsa_host_core::ime::{ImeCursor, ImeEvent};
 use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use dsa_host_core::keys::{keycode, meta, KeyAction, KeyEvent};
 use dsa_host_core::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest};
@@ -33,13 +34,15 @@ use dsa_transport::{Connection, Connector, Listener, TransportError};
 use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
 use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+use windows_sys::Win32::UI::Input::Ime::{GCS_COMPSTR, GCS_CURSORPOS};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_A, VK_BACK, VK_CONTROL, VK_MENU, VK_OEM_1, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_TAB,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetWindowTextW, GetWindowThreadProcessId, IsWindow, IsWindowVisible,
-    PostMessageW, SendMessageW, SetWindowPos, SWP_NOMOVE, SWP_NOZORDER, WM_CLOSE, WM_ENTERSIZEMOVE,
-    WM_EXITSIZEMOVE, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    PostMessageW, SendMessageW, SetWindowPos, SWP_NOMOVE, SWP_NOZORDER, WM_CHAR, WM_CLOSE,
+    WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
+    WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
     WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
@@ -1095,4 +1098,128 @@ fn fr16_losing_the_focus_releases_every_key_still_held() {
     send_key(hwnd, WM_KEYUP, VK_RIGHT, 0x4d, true);
     thread::sleep(Duration::from_millis(200));
     assert_eq!(running.android.keys.lock().unwrap().len(), 4);
+}
+
+/// Waits until the fake Android has been given `count` pieces of text input, and returns
+/// them.
+fn text(running: &Running, count: usize) -> Vec<ImeEvent> {
+    wait_for(&format!("{count} pieces of text in Android"), || {
+        let given = running.android.text.lock().unwrap().clone();
+        (given.len() >= count).then_some(given)
+    })
+}
+
+fn commit(text: &str) -> ImeEvent {
+    ImeEvent::Commit {
+        task_id: 7,
+        text: text.into(),
+    }
+}
+
+#[test]
+fn fr6_a_key_that_types_a_letter_reaches_the_task_as_text_and_never_as_a_key() {
+    let running = start(None);
+    let hwnd = one_task_window(&running);
+    // Through the window's own message loop, which turns the key into its character as it
+    // does for a real key; then Enter, which types no text and goes as a key.
+    unsafe {
+        PostMessageW(
+            hwnd,
+            WM_KEYDOWN,
+            VK_A as usize,
+            key_lparam(0x1e, false, true),
+        );
+        PostMessageW(
+            hwnd,
+            WM_KEYUP,
+            VK_A as usize,
+            key_lparam(0x1e, false, false),
+        );
+        PostMessageW(
+            hwnd,
+            WM_KEYDOWN,
+            VK_RETURN as usize,
+            key_lparam(0x1c, false, true),
+        );
+        PostMessageW(
+            hwnd,
+            WM_KEYUP,
+            VK_RETURN as usize,
+            key_lparam(0x1c, false, false),
+        );
+    }
+    let codes: Vec<(KeyAction, u32)> = keys(&running, 2)
+        .iter()
+        .map(|event| (event.action, event.key_code))
+        .collect();
+    assert_eq!(
+        codes,
+        vec![
+            (KeyAction::Down, keycode::ENTER),
+            (KeyAction::Up, keycode::ENTER)
+        ]
+    );
+    // The letter, once, as the layout typed it; Enter's carriage return is not text.
+    assert_eq!(text(&running, 1), vec![commit("a")]);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(running.android.text.lock().unwrap().len(), 1);
+    assert_eq!(running.android.keys.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn fr6_characters_of_any_layout_reach_the_task_as_text() {
+    let running = start(None);
+    let hwnd = one_task_window(&running);
+    unsafe {
+        // A German layout's sharp s, then U+1F600 in its two halves, then a carriage return,
+        // whose key went as a key event.
+        for unit in [0xdf_usize, 0xd83d, 0xde00, 0x0d, 0x6b] {
+            SendMessageW(hwnd, WM_CHAR, unit, 1);
+        }
+    }
+    assert_eq!(
+        text(&running, 3),
+        vec![commit("\u{df}"), commit("\u{1f600}"), commit("k")]
+    );
+    assert!(running.android.keys.lock().unwrap().is_empty());
+}
+
+#[test]
+fn fr6_input_method_messages_without_a_composition_send_nothing() {
+    let running = start(None);
+    let hwnd = one_task_window(&running);
+    unsafe {
+        // The window opens no composition window of its own: the guest's editor shows it.
+        assert_eq!(SendMessageW(hwnd, WM_IME_STARTCOMPOSITION, 0, 0), 0);
+        // No input method composes here, so there is nothing to read.
+        SendMessageW(
+            hwnd,
+            WM_IME_COMPOSITION,
+            0,
+            (GCS_COMPSTR | GCS_CURSORPOS) as isize,
+        );
+        SendMessageW(hwnd, WM_IME_ENDCOMPOSITION, 0, 0);
+        // A commit already carried an input method's characters.
+        SendMessageW(hwnd, WM_IME_CHAR, 0xd55c, 1);
+        SendMessageW(hwnd, WM_CHAR, usize::from(b'z'), 1);
+    }
+    assert_eq!(text(&running, 1), vec![commit("z")]);
+}
+
+#[test]
+fn fr6_the_window_places_the_input_method_at_the_cursor_the_guest_reports() {
+    let running = start(None);
+    one_task_window(&running);
+    let cursor = ImeCursor {
+        left: 120,
+        top: 64,
+        right: 122,
+        bottom: 96,
+    };
+    running
+        .android
+        .publish(TaskEvent::ImeCursor { task_id: 7, cursor });
+    wait_for("the window to place the input method at the cursor", || {
+        (running.windows().first()?.ime_cursor == Some(cursor)).then_some(())
+    });
 }

@@ -81,6 +81,13 @@ pub enum TaskEvent {
     Frames { task_id: i32, display_id: u32 },
     /// The name or icon of an app changed, or the app is about to have its first task.
     App(AppInfo),
+    /// The cursor of the editor focused in the task moved, or an editor gained the focus.
+    /// It only places the input method's windows, so it is passed on as it comes and is not
+    /// part of the tasks a late watcher starts from.
+    ImeCursor {
+        task_id: i32,
+        cursor: crate::ime::ImeCursor,
+    },
 }
 
 impl TaskEvent {
@@ -88,7 +95,9 @@ impl TaskEvent {
     pub fn task_id(&self) -> Option<i32> {
         match self {
             TaskEvent::Updated(task) => Some(task.task_id),
-            TaskEvent::Removed { task_id } | TaskEvent::Frames { task_id, .. } => Some(*task_id),
+            TaskEvent::Removed { task_id }
+            | TaskEvent::Frames { task_id, .. }
+            | TaskEvent::ImeCursor { task_id, .. } => Some(*task_id),
             TaskEvent::App(_) => None,
         }
     }
@@ -222,6 +231,9 @@ pub struct TaskTable {
     /// The name and icon of each app, by package. An app is forgotten when its last task
     /// ends; the guest describes it again before its next task.
     apps: BTreeMap<String, AppInfo>,
+    /// Where the cursor of each task's focused editor last was, so a cursor that did not
+    /// move is not passed on again.
+    cursors: BTreeMap<i32, crate::ime::ImeCursor>,
 }
 
 impl TaskTable {
@@ -246,6 +258,7 @@ impl TaskTable {
             TaskEvent::Removed { task_id } => {
                 let removed = self.tasks.remove(task_id);
                 let had_frames = self.frames.remove(task_id).is_some();
+                self.cursors.remove(task_id);
                 if let Some(task) = &removed {
                     let package = &task.package_name;
                     if !self.tasks.values().any(|t| &t.package_name == package) {
@@ -279,6 +292,14 @@ impl TaskTable {
                     return false;
                 }
                 self.frames.insert(*task_id, *display_id);
+                true
+            }
+            TaskEvent::ImeCursor { task_id, cursor } => {
+                // Only for a task there is a window of.
+                if !self.knows(*task_id) || self.cursors.get(task_id) == Some(cursor) {
+                    return false;
+                }
+                self.cursors.insert(*task_id, *cursor);
                 true
             }
         }
@@ -349,6 +370,7 @@ impl TaskTable {
         self.tasks.clear();
         self.frames.clear();
         self.apps.clear();
+        self.cursors.clear();
         ids.into_iter()
             .map(|task_id| TaskEvent::Removed { task_id })
             .collect()
@@ -600,5 +622,29 @@ mod tests {
         };
         assert_eq!(bounds.width(), 0);
         assert_eq!(bounds.height(), 20);
+    }
+
+    #[test]
+    fn fr6_a_cursor_is_passed_on_when_it_moves_and_only_for_a_known_task() {
+        let mut table = TaskTable::new();
+        let cursor = |left| TaskEvent::ImeCursor {
+            task_id: 7,
+            cursor: crate::ime::ImeCursor {
+                left,
+                top: 10,
+                right: left + 2,
+                bottom: 40,
+            },
+        };
+        assert!(!table.apply(&cursor(5)), "no such task");
+        table.apply(&TaskEvent::Updated(task(7, "Notes")));
+        assert!(table.apply(&cursor(5)));
+        assert!(!table.apply(&cursor(5)), "it did not move");
+        assert!(table.apply(&cursor(6)));
+        // A late watcher starts from the tasks alone.
+        assert_eq!(table.snapshot(), vec![TaskEvent::Updated(task(7, "Notes"))]);
+        table.apply(&TaskEvent::Removed { task_id: 7 });
+        table.apply(&TaskEvent::Updated(task(7, "Notes")));
+        assert!(table.apply(&cursor(6)), "a new task's cursor is news");
     }
 }
