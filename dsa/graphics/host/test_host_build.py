@@ -91,7 +91,7 @@ class HostGraphicsBuildTests(unittest.TestCase):
 
     def test_fr3_each_display_is_copied_into_its_window_on_the_gpu(self):
         header = (HERE / "dsa_gfx_backend.h").read_text(encoding="utf-8")
-        self.assertIn("dsa_gfx_set_display_callbacks", header)
+        self.assertIn("dsa_gfx_set_display_callbacks2", header)
         self.assertIn("dsa_gfx_get_adapter_luid", header)
         source = (HERE / "dsa_gfx_display.cpp").read_text(encoding="utf-8")
         # The frame goes into the window's Direct3D texture without a trip through the CPU.
@@ -100,6 +100,18 @@ class HostGraphicsBuildTests(unittest.TestCase):
         self.assertNotIn("readColorBuffer", source)
         self.assertIn("setDisplayColorBuffer", source)
         self.assertIn("dsa_gfx_display.cpp", CMAKE_FILE.read_text(encoding="utf-8"))
+
+    def test_fr4_only_the_region_a_frame_fills_is_copied(self):
+        source = (HERE / "dsa_gfx_display.cpp").read_text(encoding="utf-8")
+        # The guest's buffers keep their size while a window is resized; the display's size
+        # says how much of the buffer the frame fills, and only that is copied and shown.
+        self.assertIn("operations.getDisplayPose", source)
+        self.assertIn("region.srcOffsets[1] = {copy_width, copy_height, 1};", source)
+        self.assertIn("region.dstOffsets[1] = {copy_width, copy_height, 1};", source)
+        self.assertIn(
+            "presenter.frame_cb(presenter.context, display_id, content_width, content_height);",
+            source,
+        )
 
 
 if __name__ == "__main__":

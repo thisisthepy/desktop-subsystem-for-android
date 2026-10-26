@@ -18,8 +18,11 @@ nothing else.
    `TaskFrames {task_id, display_id}` before the first frame. A task keeps its display until
    `TaskRemoved`, when the display and its ColorBuffers are released.
 4. The task's layers are composed on the host GPU with `rcComposeWithoutPost`
-   (`ComposeDevice_v2`) into a ColorBuffer the size of the task's bounds. Layer frames are
-   moved so the task's top left corner is the origin. The request names display 0, not
+   (`ComposeDevice_v2`) into the top-left corner of a ColorBuffer. Layer frames are moved
+   so the task's top left corner is the origin. The ColorBuffers are made at the display's
+   size, the largest a task can be, so resizing a window remakes none of them; only the
+   task display's size (`rcSetDisplayPose`) follows the task, and it tells the host how
+   much of the ColorBuffer the frame fills. The request names display 0, not
    the task's: given a display, the host would make the target that display's frame
    before composing into it, and the window would show each frame one late. Once the
    compose has finished, the hwcomposer makes the ColorBuffer the task display's current

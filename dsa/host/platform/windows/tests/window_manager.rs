@@ -522,7 +522,7 @@ fn pr3_compositor_serves_a_gfxstream_client() {
         fn target(&self, _: u32, _: u32, _: u32) -> Option<isize> {
             None
         }
-        fn frame(&self, _: u32) {}
+        fn frame(&self, _: u32, _: (u32, u32)) {}
     }
     adapter
         .present_displays(Some(Arc::new(NoWindows)))

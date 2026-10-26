@@ -196,6 +196,16 @@ std::optional<TaskDisplays::Pairing> TaskDisplays::acquire(int32_t task) {
     return std::nullopt;
 }
 
+BufferSize taskBufferSize(BufferSize current, const Rect& display, int64_t taskWidth,
+                          int64_t taskHeight) {
+    const int64_t width = std::max<int64_t>({display.width(), taskWidth, 1});
+    const int64_t height = std::max<int64_t>({display.height(), taskHeight, 1});
+    if (current.covers(width, height)) {
+        return current;
+    }
+    return BufferSize{width, height};
+}
+
 std::optional<uint32_t> TaskDisplays::release(int32_t task) {
     auto it = mByTask.find(task);
     if (it == mByTask.end()) {

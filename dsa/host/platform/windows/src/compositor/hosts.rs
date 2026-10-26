@@ -10,7 +10,9 @@
 //! [`RemoteWindow`], the frame target the renderer copies into. It makes a shared texture on
 //! the renderer's GPU, places the texture's NT handle in the window host's process, and for
 //! each frame tells the window host and waits until it has copied the frame out. No frame
-//! passes through the CPU.
+//! passes through the CPU. The texture has the size of the guest's buffers, the largest a
+//! frame of the task can be, so resizing the window does not remake it: each frame fills its
+//! top-left region and says how large that region is.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -19,6 +21,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_host_core::compositor::frame_buffers::texture_fits;
 use dsa_host_core::compositor::task_windows::{TaskWindows, WindowChange};
 use dsa_host_core::compositor::window_hosts::{
     accept_window_host, answer_attached, report_from_wire, to_wire, FromHost, HostAction, HostId,
@@ -260,12 +263,13 @@ impl FrameTarget for RemoteWindow {
             return None;
         }
         if let Some(texture) = &state.texture {
-            if texture.shared.size() == (width, height) {
+            if texture_fits(texture.shared.size(), (width, height)) {
                 return Some(Arc::clone(texture));
             }
         }
         state.texture = None;
-        // The renderer has the first frame of a new size for this window.
+        // The renderer has the first frame for this window, or the guest's buffers changed
+        // size, which they do only when its display does.
         let started = Instant::now();
         let shared = match self.gpu.shared_texture(width, height) {
             Ok(shared) => shared,
@@ -330,7 +334,7 @@ impl FrameTarget for RemoteWindow {
         texture.shared.handle()
     }
 
-    fn present(&self, texture: &HostTexture) {
+    fn present(&self, texture: &HostTexture, (width, height): (u32, u32)) {
         let sequence = {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             if state.closed {
@@ -344,6 +348,8 @@ impl FrameTarget for RemoteWindow {
             task_id: self.task_id,
             texture_id: texture.id,
             sequence,
+            width,
+            height,
         }));
         // The renderer writes the texture again once this returns, so the window host must
         // have copied the frame out by then.
@@ -356,7 +362,7 @@ impl FrameTarget for RemoteWindow {
                 self.logger.as_deref(),
                 self.task_id,
                 "wm.frame",
-                texture.shared.size(),
+                (width, height),
                 &format!(
                     "texture={} sequence={sequence} shown={shown} round_trip={}",
                     texture.id,

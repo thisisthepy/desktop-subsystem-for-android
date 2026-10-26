@@ -323,4 +323,59 @@ TEST(fr3_task_frames_are_composed_relative_to_the_task_origin) {
     EXPECT_EQ(layers[2].color.a, 128);
 }
 
+TEST(fr4_a_task_buffers_are_made_at_the_display_size) {
+    // The first frame of a 600x400 task on a 1920x1080 display.
+    const BufferSize first = taskBufferSize({}, kDisplay, 600, 400);
+    EXPECT_EQ(first.width, 1920);
+    EXPECT_EQ(first.height, 1080);
+}
+
+TEST(fr4_resizing_a_task_within_the_display_keeps_its_buffers) {
+    BufferSize buffers = taskBufferSize({}, kDisplay, 600, 400);
+    // A drag through many sizes, smaller and larger, up to the whole display.
+    const int64_t sizes[][2] = {{610, 405}, {580, 390}, {1200, 800}, {1920, 1080}, {300, 200}};
+    for (const auto& size : sizes) {
+        const BufferSize next = taskBufferSize(buffers, kDisplay, size[0], size[1]);
+        EXPECT_TRUE(next == buffers);
+        buffers = next;
+    }
+}
+
+TEST(fr4_a_task_larger_than_the_display_gets_buffers_that_hold_it) {
+    const BufferSize buffers = taskBufferSize({1920, 1080}, kDisplay, 2000, 900);
+    EXPECT_EQ(buffers.width, 2000);
+    EXPECT_EQ(buffers.height, 1080);
+    // Once they hold it, they stay.
+    EXPECT_TRUE(taskBufferSize(buffers, kDisplay, 1990, 1000) == buffers);
+}
+
+TEST(fr4_a_larger_display_remakes_the_buffers_once) {
+    const Rect larger{0, 0, 2560, 1440};
+    const BufferSize buffers = taskBufferSize({1920, 1080}, larger, 600, 400);
+    EXPECT_EQ(buffers.width, 2560);
+    EXPECT_EQ(buffers.height, 1440);
+    EXPECT_TRUE(taskBufferSize(buffers, larger, 640, 420) == buffers);
+}
+
+TEST(fr4_a_resized_task_is_composed_into_the_top_left_of_its_buffers) {
+    // The task moved and grew; its layers land at its own origin in the larger buffer, so
+    // the frame fills exactly the task's size from (0, 0).
+    const Rect bounds{300, 200, 1000, 700};
+    std::vector<ComposeInput> inputs(1);
+    inputs[0].mode = ComposeMode::Device;
+    inputs[0].colorBuffer = 7;
+    inputs[0].frame = bounds;
+    inputs[0].crop = FRect{0, 0, 700, 500};
+    const std::vector<uint8_t> request = buildComposeRequest(0, 9, bounds, inputs);
+    WireComposeDeviceV2 header;
+    std::memcpy(&header, request.data(), sizeof(header));
+    EXPECT_EQ(header.targetHandle, 9u);
+    WireComposeLayer layer;
+    std::memcpy(&layer, request.data() + sizeof(header), sizeof(layer));
+    EXPECT_EQ(layer.displayFrame.left, 0);
+    EXPECT_EQ(layer.displayFrame.top, 0);
+    EXPECT_EQ(layer.displayFrame.right, 700);
+    EXPECT_EQ(layer.displayFrame.bottom, 500);
+}
+
 int main() { return ::dsa::test::runAll(); }

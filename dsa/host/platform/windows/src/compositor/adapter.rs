@@ -83,8 +83,10 @@ pub type DisplayTargetFn = unsafe extern "C" fn(
     height: u32,
 ) -> *mut c_void;
 
-/// Says that a display's frame is in the texture [`DisplayTargetFn`] named.
-pub type DisplayFrameFn = unsafe extern "C" fn(context: *mut c_void, display_id: u32);
+/// Says that a display's frame is in the texture [`DisplayTargetFn`] named, filling its
+/// top-left `width` x `height` pixels.
+pub type DisplayFrameFn =
+    unsafe extern "C" fn(context: *mut c_void, display_id: u32, width: u32, height: u32);
 
 /// Where each display's frames go.
 ///
@@ -94,13 +96,15 @@ pub type DisplayFrameFn = unsafe extern "C" fn(context: *mut c_void, display_id:
 pub trait DisplaySink: Send + Sync {
     /// The shared NT handle of a Direct3D 11 texture of exactly `width` x `height` pixels in
     /// `DXGI_FORMAT_R8G8B8A8_UNORM` to copy the display's new frame into, or `None` to drop
-    /// the frame. The handle must stay open until a later call for the same display returns
-    /// something else.
+    /// the frame. The size is the guest's buffer's, which stays at the largest size the task
+    /// can have while its window is resized. The handle must stay open until a later call
+    /// for the same display returns something else.
     fn target(&self, display_id: u32, width: u32, height: u32) -> Option<isize>;
 
-    /// The frame is in the texture, and the GPU has finished copying it. The texture is not
-    /// written again for this display until this returns.
-    fn frame(&self, display_id: u32);
+    /// The frame is in the texture, filling its top-left `content` pixels, and the GPU has
+    /// finished copying it. The texture is not written again for this display until this
+    /// returns.
+    fn frame(&self, display_id: u32, content: (u32, u32));
 }
 
 /// What can hand display frames to a [`DisplaySink`].
@@ -134,12 +138,19 @@ unsafe extern "C" fn display_target_trampoline(
     .map_or(std::ptr::null_mut(), |handle| handle as *mut c_void)
 }
 
-unsafe extern "C" fn display_frame_trampoline(context: *mut c_void, display_id: u32) {
+unsafe extern "C" fn display_frame_trampoline(
+    context: *mut c_void,
+    display_id: u32,
+    width: u32,
+    height: u32,
+) {
     if context.is_null() {
         return;
     }
     let sink = &*(context as *const Arc<dyn DisplaySink>);
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sink.frame(display_id)));
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sink.frame(display_id, (width, height))
+    }));
 }
 
 fn wide(text: &str) -> Vec<u16> {
@@ -210,8 +221,8 @@ pub struct NativeBackend {
     fn_process_pipe: unsafe extern "C" fn(StreamReadFn, StreamWriteFn, *mut c_void) -> c_int,
     fn_on_process_create: unsafe extern "C" fn() -> u64,
     fn_on_process_destroy: unsafe extern "C" fn(u64),
-    /// Absent from a backend built before task windows: it still serves streams, and the
-    /// windows stay empty.
+    /// Absent from a backend built before frames carried their content size: it still
+    /// serves streams, and the windows stay empty.
     fn_set_display_callbacks: Option<
         unsafe extern "C" fn(Option<DisplayTargetFn>, Option<DisplayFrameFn>, *mut c_void) -> c_int,
     >,
@@ -257,7 +268,7 @@ impl NativeBackend {
             let fn_on_process_create = Self::get_symbol(handle, b"dsa_gfx_on_process_create\0")?;
             let fn_on_process_destroy = Self::get_symbol(handle, b"dsa_gfx_on_process_destroy\0")?;
             let fn_set_display_callbacks =
-                Self::get_symbol(handle, b"dsa_gfx_set_display_callbacks\0").ok();
+                Self::get_symbol(handle, b"dsa_gfx_set_display_callbacks2\0").ok();
             let fn_get_adapter_luid = Self::get_symbol(handle, b"dsa_gfx_get_adapter_luid\0").ok();
             let fn_select_gpu: Option<SelectGpuFn> =
                 Self::get_symbol(handle, b"dsa_gfx_select_gpu\0").ok();
@@ -394,15 +405,15 @@ impl GfxBackend for NativeBackend {
         };
         let Some(set_display_callbacks) = self.fn_set_display_callbacks else {
             return Err(
-                "this graphics backend predates task windows (no dsa_gfx_set_display_callbacks); \
-                 task windows stay empty"
+                "this graphics backend predates the current task window frames (no \
+                 dsa_gfx_set_display_callbacks2); task windows stay empty"
                     .into(),
             );
         };
         match set_display_callbacks(target, frame, context) {
             0 => Ok(()),
             code => Err(format!(
-                "the graphics backend cannot present displays (dsa_gfx_set_display_callbacks \
+                "the graphics backend cannot present displays (dsa_gfx_set_display_callbacks2 \
                  returned {code}); task windows stay empty"
             )),
         }
@@ -827,13 +838,23 @@ mod tests {
 
     impl PresentingBackend {
         fn post(&self, display_id: u32, width: u32, height: u32) -> Option<isize> {
+            self.post_content(display_id, (width, height), (width, height))
+        }
+
+        /// A frame of `content` pixels in a ColorBuffer of `buffer` pixels.
+        fn post_content(
+            &self,
+            display_id: u32,
+            buffer: (u32, u32),
+            content: (u32, u32),
+        ) -> Option<isize> {
             let (target, frame, context) = (*self.callbacks.lock().unwrap())?;
             let context = context as *mut c_void;
-            let handle = unsafe { target(context, display_id, width, height) };
+            let handle = unsafe { target(context, display_id, buffer.0, buffer.1) };
             if handle.is_null() {
                 return None;
             }
-            unsafe { frame(context, display_id) };
+            unsafe { frame(context, display_id, content.0, content.1) };
             Some(handle as isize)
         }
     }
@@ -877,7 +898,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingSink {
         shown: Mutex<Vec<(u32, u32, u32)>>,
-        framed: Mutex<Vec<u32>>,
+        framed: Mutex<Vec<(u32, (u32, u32))>>,
         panic_on: Option<u32>,
     }
 
@@ -889,8 +910,8 @@ mod tests {
             self.shown.lock().unwrap().push((display_id, width, height));
             (display_id == 3).then_some(0x1234)
         }
-        fn frame(&self, display_id: u32) {
-            self.framed.lock().unwrap().push(display_id);
+        fn frame(&self, display_id: u32, content: (u32, u32)) {
+            self.framed.lock().unwrap().push((display_id, content));
         }
     }
 
@@ -913,10 +934,37 @@ mod tests {
             *sink.shown.lock().unwrap(),
             vec![(3, 720, 1280), (0, 1920, 1080)]
         );
-        assert_eq!(*sink.framed.lock().unwrap(), vec![3]);
+        assert_eq!(*sink.framed.lock().unwrap(), vec![(3, (720, 1280))]);
 
         adapter.present_displays(None).unwrap();
         assert_eq!(backend.post(3, 720, 1280), None);
+    }
+
+    #[test]
+    fn fr4_a_frame_reaches_the_sink_with_its_content_size() {
+        let backend = Arc::new(PresentingBackend::default());
+        let adapter = GfxstreamAdapter::with_backend(backend.clone());
+        let sink = Arc::new(RecordingSink::default());
+        adapter
+            .present_displays(Some(sink.clone() as Arc<dyn DisplaySink>))
+            .unwrap();
+        // The ColorBuffer stays at the display's size while the task is resized.
+        assert_eq!(
+            backend.post_content(3, (1920, 1080), (800, 600)),
+            Some(0x1234)
+        );
+        assert_eq!(
+            backend.post_content(3, (1920, 1080), (820, 610)),
+            Some(0x1234)
+        );
+        assert_eq!(
+            *sink.shown.lock().unwrap(),
+            vec![(3, 1920, 1080), (3, 1920, 1080)]
+        );
+        assert_eq!(
+            *sink.framed.lock().unwrap(),
+            vec![(3, (800, 600)), (3, (820, 610))]
+        );
     }
 
     #[test]

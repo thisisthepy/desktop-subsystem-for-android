@@ -127,6 +127,13 @@ pub struct Frame {
     /// Goes up by one with each frame of the task.
     #[prost(uint64, tag = "3")]
     pub sequence: u64,
+    /// The frame fills only the top-left width x height pixels of the texture, which stays at
+    /// the largest size the task can have so that resizing the window does not remake it. 0
+    /// means the frame fills the whole texture.
+    #[prost(uint32, tag = "4")]
+    pub width: u32,
+    #[prost(uint32, tag = "5")]
+    pub height: u32,
 }
 /// Window host to window manager: the frame has been copied out of the texture, so the
 /// texture may be written again.
