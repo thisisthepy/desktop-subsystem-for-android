@@ -67,6 +67,28 @@ class HostGraphicsBuildTests(unittest.TestCase):
         self.assertIn("gfxstream::vk::setGpuPreference(preference)", source)
         self.assertIn("gfxstream::vk::gpuPreferenceMatched()", source)
 
+    def test_fr4_destroying_a_color_buffer_never_waits_for_the_gpu_queue(self):
+        # A resize makes the guest destroy and create ColorBuffers for every size step. The
+        # destroy runs under the renderer's FrameBuffer lock, which every creation needs, so
+        # a destroy that waits for the queue to go idle stalls the guest's allocator.
+        script = FETCH_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('"0009-*.patch"', script)
+        patch = (HERE.parent / "patches" /
+                 "0009-free-vulkan-resources-without-waiting-for-the-queue.patch")
+        text = patch.read_text(encoding="utf-8")
+        self.assertIn("host/vulkan/VkCommonOperations.cpp", text)
+        removed = [line for line in text.splitlines() if line.startswith("-")]
+        added = [line for line in text.splitlines() if line.startswith("+")]
+        # Both waits leave the teardown paths; the only wait left is the fallback when no
+        # fence can be submitted.
+        self.assertEqual(sum("vkQueueWaitIdle" in line for line in removed), 2)
+        self.assertEqual(sum("vkQueueWaitIdle" in line for line in added), 1)
+        self.assertIn("+        result = vk->vkQueueSubmit(mQueue, 0, nullptr, resource.fence);",
+                      text)
+        self.assertIn("vkGetFenceStatus(mDevice, it->fence)", text)
+        # Nothing retired outlives the device.
+        self.assertIn("+    freeRetiredLocked(/*wait=*/true);", text)
+
     def test_fr3_each_display_is_copied_into_its_window_on_the_gpu(self):
         header = (HERE / "dsa_gfx_backend.h").read_text(encoding="utf-8")
         self.assertIn("dsa_gfx_set_display_callbacks", header)

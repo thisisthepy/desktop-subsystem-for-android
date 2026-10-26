@@ -38,13 +38,17 @@ git -C $GfxstreamDir clean -fdx
 # eleven task windows. Without 0006 a Vulkan call naming an image, buffer or memory the
 # host does not have reaches the GPU driver or aborts, and takes the renderer down with
 # every app on it. Without 0007 the renderer cannot be asked for the GPU that drives the
-# display. A patch that does not apply stops the fetch.
+# display. Without 0009 every ColorBuffer the guest destroys waits, under the renderer's
+# locks, for all GPU work on the queue to finish, and the guest's buffer allocations queue
+# up behind it for seconds while a window is resized. A patch that does not apply stops the
+# fetch.
 $PatchDir = Join-Path $RepoRoot "dsa/graphics/patches"
 $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0004-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0005-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0006-*.patch") +
-    @(Get-ChildItem -Path $PatchDir -Filter "0007-*.patch")
+    @(Get-ChildItem -Path $PatchDir -Filter "0007-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0009-*.patch")
 foreach ($Patch in $Patches) {
     Write-Host "Applying patch: $($Patch.Name)"
     git -C $GfxstreamDir apply --recount $Patch.FullName
