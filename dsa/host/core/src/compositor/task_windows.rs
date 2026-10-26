@@ -652,7 +652,8 @@ mod tests {
             vec![TaskRequest::Resize {
                 task_id: 1,
                 width: 800,
-                height: 1000
+                height: 1000,
+                live: false
             }]
         );
         assert_eq!(windows.window_resized(1, (800, 1000), now), vec![]);

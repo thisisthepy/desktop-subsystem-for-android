@@ -190,6 +190,7 @@ impl WindowSizing {
             task_id: self.task_id,
             width: size.0,
             height: size.1,
+            live: false,
         })
     }
 
@@ -274,6 +275,7 @@ mod tests {
             task_id: 7,
             width,
             height,
+            live: false,
         })
     }
 

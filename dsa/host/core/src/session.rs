@@ -493,11 +493,12 @@ impl Session {
                 task_id,
                 width,
                 height,
+                live,
             } => Body::ResizeTask(control::ResizeTask {
                 task_id,
                 width,
                 height,
-                live: false,
+                live,
             }),
             TaskRequest::SetDensity {
                 task_id,

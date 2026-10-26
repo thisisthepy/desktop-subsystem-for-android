@@ -488,6 +488,7 @@ fn last_resize(running: &Running, task_id: i32) -> Option<(u32, u32)> {
                 task_id: id,
                 width,
                 height,
+                ..
             } if *id == task_id => Some((*width, *height)),
             _ => None,
         })

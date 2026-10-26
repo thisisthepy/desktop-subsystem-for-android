@@ -646,6 +646,7 @@ impl HostApiService {
                     task_id: resize.task_id,
                     width: resize.width,
                     height: resize.height,
+                    live: resize.live,
                 },
             ),
             Some(request::Body::SetTaskDensity(density)) => self.request(
@@ -876,18 +877,21 @@ impl HostApiClient {
     }
 
     /// Asks the caller's Android to give a task the client size of its window, in Android
-    /// display pixels, as when the user resizes the window.
+    /// display pixels, as when the user resizes the window. `live` is true while the user is
+    /// still dragging the window's edge: the task takes the size without being reconfigured,
+    /// and the resize with `live` false at the end of the drag reconfigures it once.
     pub fn resize_task(
         &mut self,
         task_id: i32,
         width: u32,
         height: u32,
+        live: bool,
     ) -> Result<(), ClientError> {
         self.done(request::Body::ResizeTask(types::ResizeTask {
             task_id,
             width,
             height,
-            live: false,
+            live,
         }))
     }
 
@@ -909,7 +913,8 @@ impl HostApiClient {
                 task_id,
                 width,
                 height,
-            } => self.resize_task(*task_id, *width, *height),
+                live,
+            } => self.resize_task(*task_id, *width, *height, *live),
             TaskRequest::SetDensity {
                 task_id,
                 density_dpi,
