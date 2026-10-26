@@ -23,7 +23,8 @@ std::string ResizeTrace::utcStamp(int64_t wallMs) {
     const time_t secs = static_cast<time_t>(wallMs / 1000);
     std::tm tm{};
     gmtime_r(&secs, &tm);
-    char buf[40];
+    // Room for any year the int fields can hold, so the format can never be cut short.
+    char buf[96];
     std::snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", tm.tm_year + 1900,
                   tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
                   static_cast<int>(wallMs % 1000));
