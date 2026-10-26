@@ -23,11 +23,13 @@ public partial class MainWindow : FluentWindow
         InitializeComponent();
         // The light or the dark theme Windows uses for apps, its accent colour, and their
         // changes while the app runs.
-        ApplicationThemeManager.Apply(AppsUseDarkTheme() ? ApplicationTheme.Dark : ApplicationTheme.Light,
-            WindowBackdropType.Mica, true);
         SystemThemeWatcher.Watch(this, WindowBackdropType.Mica, true);
         Loaded += (_, _) =>
         {
+            // The watcher follows changes; the theme to start with is the apps' setting, which
+            // it does not read itself.
+            ApplicationThemeManager.Apply(AppsUseDarkTheme() ? ApplicationTheme.Dark : ApplicationTheme.Light,
+                WindowBackdropType.Mica, true);
             Navigation.Navigate(StartPage());
             _ = App.Settings.LoadAsync();
         };
