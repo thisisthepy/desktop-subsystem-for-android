@@ -263,7 +263,25 @@
     <value>Download signed security updates and new versions of Android. They apply at the next start of Android.</value>
   </data>
   <data name="UpdatesMachineNote.Text" xml:space="preserve">
-    <value>These settings apply to every user of this PC. A switch that cannot be changed is not offered by this installation.</value>
+    <value>These settings apply to every user of this PC, and only an administrator can change them. A switch that stays off is not offered by this installation.</value>
+  </data>
+  <data name="AdminBar.Title" xml:space="preserve">
+    <value>Administrator rights needed</value>
+  </data>
+  <data name="AdminBar.Message" xml:space="preserve">
+    <value>The update settings apply to every user of this PC, so only an administrator can change them. Use Change as administrator, and Windows asks for permission.</value>
+  </data>
+  <data name="AdminShield.ToolTip" xml:space="preserve">
+    <value>Only an administrator can change this setting.</value>
+  </data>
+  <data name="ChangeAsAdmin.Content" xml:space="preserve">
+    <value>Change as administrator</value>
+  </data>
+  <data name="ElevatedFailed" xml:space="preserve">
+    <value>The setting was not changed (dsa ended with code {0}).</value>
+  </data>
+  <data name="ElevationDeclined" xml:space="preserve">
+    <value>The setting was not changed, because administrator rights were not given.</value>
   </data>
   <data name="UpdateNowHeader.Text" xml:space="preserve">
     <value>Install now</value>

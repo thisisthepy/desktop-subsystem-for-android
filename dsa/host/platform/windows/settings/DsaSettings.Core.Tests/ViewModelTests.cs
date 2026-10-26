@@ -105,8 +105,16 @@ public class ViewModelTests
         Assert.False(vm.Freeze);
         Assert.Equal("0.0.9", vm.ServiceVersion);
         Assert.Equal("C:\\ProgramData\\DSA\\logs", vm.LogDir);
+        // The update switches apply to every user: only an administrator changes them here.
+        Assert.False(vm.CanChangeProgramUpdates);
+        Assert.True(vm.ProgramUpdatesNeedAdministrator);
+        Assert.True(vm.NeedsAdministrator);
+        Assert.True(vm.CanUpdateNow);
+        vm.IsAdministrator = true;
         Assert.True(vm.CanChangeProgramUpdates);
-        Assert.False(vm.CanChangeImageUpdates);
+        Assert.False(vm.ProgramUpdatesNeedAdministrator);
+        Assert.False(vm.CanChangeImageUpdates, "this installation does not update images");
+        Assert.False(vm.ImageUpdatesNeedAdministrator);
         Assert.Equal("Intel(R) Arc(TM) Graphics", vm.DisplayGpuName);
         Assert.Equal(
             new[] { "display", "integrated", "discrete", "Intel(R) Arc(TM) Graphics", "NVIDIA GeForce RTX 4050 Laptop GPU" },

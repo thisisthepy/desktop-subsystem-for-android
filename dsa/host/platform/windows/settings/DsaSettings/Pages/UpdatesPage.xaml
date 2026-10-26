@@ -12,26 +12,44 @@
                         IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
             <ui:InfoBar x:Name="NoticeBar" Title="{l:Text UpdateNoticeBar.Title}" Severity="Informational" IsClosable="False"
                         Margin="0,0,0,4" />
+            <ui:InfoBar Title="{l:Text AdminBar.Title}" Message="{l:Text AdminBar.Message}" Severity="Warning"
+                        IsClosable="False" IsOpen="{Binding NeedsAdministrator, Mode=OneWay}" Margin="0,0,0,4" />
 
             <ui:CardControl Icon="{ui:SymbolIcon ArrowSync24}">
                 <ui:CardControl.Header>
                     <StackPanel>
-                        <TextBlock Text="{l:Text ProgramUpdatesCard.Header}" Style="{StaticResource CardTitle}" />
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{l:Text ProgramUpdatesCard.Header}" Style="{StaticResource CardTitle}" />
+                            <ui:SymbolIcon Symbol="Shield24" Margin="6,0,0,0" ToolTip="{l:Text AdminShield.ToolTip}" />
+                        </StackPanel>
                         <TextBlock Text="{l:Text ProgramUpdatesCard.Description}" Style="{StaticResource CardDescription}" />
                     </StackPanel>
                 </ui:CardControl.Header>
-                <ui:ToggleSwitch x:Name="ProgramSwitch" IsChecked="{Binding ProgramUpdates, Mode=OneWay}"
-                                 IsEnabled="{Binding CanChangeProgramUpdates, Mode=OneWay}" Click="OnProgramToggled" />
+                <StackPanel Orientation="Horizontal">
+                    <ui:Button Content="{l:Text ChangeAsAdmin.Content}" Icon="{ui:SymbolIcon Shield24}" Margin="0,0,12,0"
+                               Visibility="{Binding ProgramUpdatesNeedAdministrator, Converter={StaticResource Visible}}"
+                               Click="OnProgramAsAdministrator" />
+                    <ui:ToggleSwitch x:Name="ProgramSwitch" IsChecked="{Binding ProgramUpdates, Mode=OneWay}"
+                                     IsEnabled="{Binding CanChangeProgramUpdates, Mode=OneWay}" Click="OnProgramToggled" />
+                </StackPanel>
             </ui:CardControl>
             <ui:CardControl Icon="{ui:SymbolIcon ArrowDownload24}">
                 <ui:CardControl.Header>
                     <StackPanel>
-                        <TextBlock Text="{l:Text ImageUpdatesCard.Header}" Style="{StaticResource CardTitle}" />
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{l:Text ImageUpdatesCard.Header}" Style="{StaticResource CardTitle}" />
+                            <ui:SymbolIcon Symbol="Shield24" Margin="6,0,0,0" ToolTip="{l:Text AdminShield.ToolTip}" />
+                        </StackPanel>
                         <TextBlock Text="{l:Text ImageUpdatesCard.Description}" Style="{StaticResource CardDescription}" />
                     </StackPanel>
                 </ui:CardControl.Header>
-                <ui:ToggleSwitch x:Name="ImageSwitch" IsChecked="{Binding ImageUpdates, Mode=OneWay}"
-                                 IsEnabled="{Binding CanChangeImageUpdates, Mode=OneWay}" Click="OnImageToggled" />
+                <StackPanel Orientation="Horizontal">
+                    <ui:Button Content="{l:Text ChangeAsAdmin.Content}" Icon="{ui:SymbolIcon Shield24}" Margin="0,0,12,0"
+                               Visibility="{Binding ImageUpdatesNeedAdministrator, Converter={StaticResource Visible}}"
+                               Click="OnImageAsAdministrator" />
+                    <ui:ToggleSwitch x:Name="ImageSwitch" IsChecked="{Binding ImageUpdates, Mode=OneWay}"
+                                     IsEnabled="{Binding CanChangeImageUpdates, Mode=OneWay}" Click="OnImageToggled" />
+                </StackPanel>
             </ui:CardControl>
             <TextBlock Text="{l:Text UpdatesMachineNote.Text}" Style="{StaticResource Note}" />
 
@@ -47,7 +65,7 @@
                     <ui:ProgressRing x:Name="UpdateRing" IsIndeterminate="True" Width="20" Height="20" Margin="0,0,12,0"
                                      Visibility="Collapsed" />
                     <ui:Button x:Name="UpdateNowButton" Content="{l:Text UpdateNowButton.Content}" Click="OnUpdateNow"
-                               IsEnabled="{Binding CanChangeProgramUpdates, Mode=OneWay}" />
+                               IsEnabled="{Binding CanUpdateNow, Mode=OneWay}" />
                 </StackPanel>
             </ui:CardControl>
         </StackPanel>

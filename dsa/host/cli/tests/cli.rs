@@ -629,8 +629,6 @@ fn fr17_dsa_settings_reads_and_changes_the_settings_through_the_service() {
         changed["render_gpu"], "integrated",
         "one change keeps the others"
     );
-    let changed = json_of(&dsa(&endpoint, "settings set image-updates off --json"));
-    assert_eq!(changed["image_updates"], false);
 
     let text = dsa(&endpoint, "settings");
     assert!(text.status.success(), "{}", stderr(&text));

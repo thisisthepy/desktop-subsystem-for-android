@@ -28,6 +28,24 @@ public partial class UpdatesPage : Page
     private async void OnImageToggled(object sender, RoutedEventArgs e) =>
         await ViewModel.SetImageUpdatesAsync(ImageSwitch.IsChecked == true);
 
+    private void OnProgramAsAdministrator(object sender, RoutedEventArgs e) =>
+        ChangeAsAdministrator("program-updates", !ViewModel.ProgramUpdates);
+
+    private void OnImageAsAdministrator(object sender, RoutedEventArgs e) =>
+        ChangeAsAdministrator("image-updates", !ViewModel.ImageUpdates);
+
+    /// <summary>Runs <c>dsa settings set</c> as an administrator (Windows asks the user),
+    /// then shows what the service keeps.</summary>
+    private static async void ChangeAsAdministrator(string name, bool on)
+    {
+        var problem = await Shell.RunDsaElevated("settings", "set", name, on ? "on" : "off");
+        if (problem is not null)
+        {
+            await Shell.Tell(App.Text.Get("SettingsErrorBar.Title"), problem);
+        }
+        await ViewModel.LoadAsync();
+    }
+
     private async void OnUpdateNow(object sender, RoutedEventArgs e)
     {
         var confirmed = await Shell.Confirm(App.Text.Get("UpdateNowTitle"),
@@ -50,7 +68,7 @@ public partial class UpdatesPage : Page
         finally
         {
             UpdateRing.Visibility = Visibility.Collapsed;
-            UpdateNowButton.IsEnabled = ViewModel.CanChangeProgramUpdates;
+            UpdateNowButton.IsEnabled = ViewModel.CanUpdateNow;
         }
     }
 }

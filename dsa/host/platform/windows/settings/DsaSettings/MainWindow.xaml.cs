@@ -10,6 +10,7 @@ public partial class MainWindow : FluentWindow
     public MainWindow()
     {
         // The light or the dark theme and the accent colour Windows uses, and their changes.
+        App.Settings.IsAdministrator = Shell.IsAdministrator();
         ApplicationThemeManager.ApplySystemTheme(true);
         InitializeComponent();
         SystemThemeWatcher.Watch(this, WindowBackdropType.Mica, true);

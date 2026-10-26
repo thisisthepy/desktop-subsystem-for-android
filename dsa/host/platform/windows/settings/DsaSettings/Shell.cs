@@ -55,6 +55,53 @@ internal static class Shell
         return await box.ShowDialogAsync() == MessageBoxResult.Primary;
     }
 
+    /// <summary>Whether this app runs as an administrator (elevated).</summary>
+    public static bool IsAdministrator()
+    {
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        return new System.Security.Principal.WindowsPrincipal(identity)
+            .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+    }
+
+    /// <summary>Runs the dsa command with <paramref name="args"/> as an administrator: Windows
+    /// asks the user to allow it. Returns an error to show, or null.</summary>
+    public static async Task<string?> RunDsaElevated(params string[] args)
+    {
+        var start = new ProcessStartInfo(ProcessDsaCliPath)
+        {
+            UseShellExecute = true,
+            Verb = "runas",
+            WindowStyle = ProcessWindowStyle.Hidden,
+        };
+        foreach (var arg in args)
+        {
+            start.ArgumentList.Add(arg);
+        }
+        try
+        {
+            using var process = Process.Start(start);
+            if (process is null)
+            {
+                return App.Text.Get("Problem_CliMissing");
+            }
+            await process.WaitForExitAsync();
+            return process.ExitCode == 0
+                ? null
+                : string.Format(App.Text.Get("ElevatedFailed"), process.ExitCode);
+        }
+        catch (System.ComponentModel.Win32Exception e) when (e.NativeErrorCode == 1223)
+        {
+            // The user declined the prompt.
+            return App.Text.Get("ElevationDeclined");
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return e.Message;
+        }
+    }
+
+    private static string ProcessDsaCliPath => Dsa.Settings.Core.ProcessDsaCli.Locate(AppContext.BaseDirectory);
+
     /// <summary>Ends this user's window manager in this session and starts it again, so it
     /// chooses its render GPU anew. Returns an error to show, or null.</summary>
     public static async Task<string?> RestartWindowManager()

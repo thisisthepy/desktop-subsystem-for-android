@@ -143,6 +143,7 @@ public sealed class SettingsViewModel : ObservableObject
     private IReadOnlyList<GpuInfo> _gpus = Array.Empty<GpuInfo>();
     private string? _error;
     private bool _busy;
+    private bool _administrator;
 
     public SettingsViewModel(DsaService service, ITextSource text)
     {
@@ -160,8 +161,27 @@ public sealed class SettingsViewModel : ObservableObject
     public bool ImageUpdates => _settings?.ImageUpdates ?? false;
     public bool ProgramUpdatesAvailable => _settings?.ProgramUpdatesAvailable ?? false;
     public bool ImageUpdatesAvailable => _settings?.ImageUpdatesAvailable ?? false;
-    public bool CanChangeProgramUpdates => Loaded && !_busy && ProgramUpdatesAvailable;
-    public bool CanChangeImageUpdates => Loaded && !_busy && ImageUpdatesAvailable;
+    /// <summary>Whether the app runs as an administrator (an elevated process). The update
+    /// settings apply to every user, so the service lets only an administrator change
+    /// them.</summary>
+    public bool IsAdministrator
+    {
+        get => _administrator;
+        set
+        {
+            _administrator = value;
+            ChangedAll();
+        }
+    }
+
+    public bool CanChangeProgramUpdates => Loaded && !_busy && ProgramUpdatesAvailable && _administrator;
+    public bool CanChangeImageUpdates => Loaded && !_busy && ImageUpdatesAvailable && _administrator;
+    /// <summary>Whether a switch can be changed only by running dsa as an administrator.</summary>
+    public bool ProgramUpdatesNeedAdministrator => Loaded && !_busy && ProgramUpdatesAvailable && !_administrator;
+    public bool ImageUpdatesNeedAdministrator => Loaded && !_busy && ImageUpdatesAvailable && !_administrator;
+    public bool NeedsAdministrator => Loaded && !_administrator && (ProgramUpdatesAvailable || ImageUpdatesAvailable);
+    /// <summary>Whether the newest version can be installed now; any user may ask.</summary>
+    public bool CanUpdateNow => Loaded && !_busy && ProgramUpdatesAvailable;
     public bool CanChange => Loaded && !_busy;
     public string ServiceVersion => _settings?.Version ?? "";
     public string LogDir => _settings?.LogDir ?? "";
