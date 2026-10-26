@@ -739,6 +739,21 @@ fn fr3_a_window_host_names_its_app_by_its_file_or_its_argument() {
         ),
         Some("com.android.settings".to_string())
     );
+    // Each app's program is in a folder named after its package, and named after the app.
+    assert_eq!(
+        app_window::package_of(
+            Path::new(r"C:\Users\u\AppData\Local\DSA\apps\com.android.deskclock\Clock.exe"),
+            &none
+        ),
+        Some("com.android.deskclock".to_string())
+    );
+    assert_eq!(
+        app_window::package_of(
+            Path::new(r"C:\Users\u\AppData\Local\DSA\apps\com.example.notes\My.Notes.exe"),
+            &none
+        ),
+        Some("com.example.notes".to_string())
+    );
     assert_eq!(
         app_window::package_of(Path::new(r"C:\Program Files\DSA\dsa-app-window.exe"), &none),
         None

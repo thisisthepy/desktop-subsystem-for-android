@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use dsa_exe_resources::{parse_ico, LANG_EN_US, RT_GROUP_ICON, RT_ICON, RT_VERSION};
 use dsa_host_core::tasks::AppInfo;
-use dsa_host_windows::app_exe::ensure;
+use dsa_host_windows::app_exe::{ensure, program_name, program_path, NOTE_NAME};
 use windows_sys::Win32::Foundation::FreeLibrary;
 use windows_sys::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
@@ -122,7 +122,8 @@ fn fr3_an_apps_window_program_carries_its_name_and_icon() {
     )
     .expect("making the window program");
     assert!(note.is_none());
-    assert_eq!(program, dir.join("com.example.clock.exe"));
+    assert_eq!(program, dir.join("com.example.clock").join("Clock.exe"));
+    assert!(dir.join("com.example.clock").join(NOTE_NAME).exists());
     assert_eq!(description(&program), "Clock");
     // The icon is the app's alone: its PNG is the first image, and the group lists only it.
     assert_eq!(resource(&program, RT_ICON, 1, 0), Some(png()));
@@ -137,6 +138,10 @@ fn fr3_an_app_without_a_name_or_icon_is_named_by_its_package() {
     let dir = fresh_dir("bare");
     let (program, _) =
         ensure(Path::new(TEMPLATE), &dir, "org.example.bare", None).expect("making it");
+    assert_eq!(
+        program,
+        dir.join("org.example.bare").join("org.example.bare.exe")
+    );
     assert_eq!(description(&program), "org.example.bare");
     // It keeps the window host's own icon.
     assert!(resource(&program, RT_ICON, 2, 0).is_some());
@@ -159,8 +164,110 @@ fn fr3_a_window_program_is_made_again_only_when_its_app_changes() {
         label: "World Clock".into(),
         ..clock()
     };
-    ensure(template, &dir, "com.example.clock", Some(&renamed)).unwrap();
-    assert_eq!(description(&program), "World Clock");
+    let (renamed_program, _) = ensure(template, &dir, "com.example.clock", Some(&renamed)).unwrap();
+    assert_eq!(
+        renamed_program,
+        dir.join("com.example.clock").join("World Clock.exe")
+    );
+    assert_eq!(description(&renamed_program), "World Clock");
+    // The program under the app's old name is gone.
+    assert!(!program.exists());
+}
+
+#[test]
+fn fr3_a_window_program_is_named_after_its_app() {
+    assert_eq!(program_name("com.example.clock", "Clock"), "Clock");
+    assert_eq!(
+        program_name("com.example.clock", "  World Clock  "),
+        "World Clock"
+    );
+    assert_eq!(program_name("com.example.x", "시계"), "시계");
+    // What Windows does not allow in a file name is taken out.
+    assert_eq!(
+        program_name("com.example.x", r#"a<b>c:d"e/f\g|h?i*j"#),
+        "abcdefghij"
+    );
+    assert_eq!(program_name("com.example.x", "tab\there\n"), "tabhere");
+    // Windows drops trailing dots and spaces, so they never end a name.
+    assert_eq!(program_name("com.example.x", "Notes. . ."), "Notes");
+    // Device names would open the device rather than a file.
+    assert_eq!(program_name("com.example.x", "CON"), "CON_");
+    assert_eq!(program_name("com.example.x", "nul.txt"), "nul.txt_");
+    assert_eq!(program_name("com.example.x", "Com1"), "Com1_");
+    assert_eq!(program_name("com.example.x", "LPT9"), "LPT9_");
+    assert_eq!(program_name("com.example.x", "Console"), "Console");
+    assert_eq!(program_name("com.example.x", "COM10"), "COM10");
+    // A long name is cut short.
+    assert_eq!(
+        program_name("com.example.x", &"a".repeat(300))
+            .chars()
+            .count(),
+        64
+    );
+    // Nothing usable left: the package stands in.
+    for empty in ["", "   ", "...", "???", "\u{7}"] {
+        assert_eq!(
+            program_name("com.example.x", empty),
+            "com.example.x",
+            "{empty:?}"
+        );
+    }
+}
+
+#[test]
+fn fr3_apps_of_the_same_name_get_programs_of_their_own() {
+    let dir = Path::new(r"C:\apps");
+    let one = program_path(dir, "com.example.notes", "Notes");
+    let two = program_path(dir, "org.other.notes", "Notes");
+    assert_eq!(one, Path::new(r"C:\apps\com.example.notes\Notes.exe"));
+    assert_eq!(two, Path::new(r"C:\apps\org.other.notes\Notes.exe"));
+}
+
+#[test]
+fn fr3_a_program_of_the_earlier_layout_is_replaced() {
+    let dir = fresh_dir("layout");
+    std::fs::create_dir_all(&dir).unwrap();
+    let old = dir.join("com.example.clock.exe");
+    std::fs::copy(TEMPLATE, &old).unwrap();
+    std::fs::write(dir.join("com.example.clock.json"), "{}").unwrap();
+    std::fs::write(dir.join("com.example.clock.exe.new"), "").unwrap();
+    let (program, _) = ensure(
+        Path::new(TEMPLATE),
+        &dir,
+        "com.example.clock",
+        Some(&clock()),
+    )
+    .unwrap();
+    assert_eq!(program, dir.join("com.example.clock").join("Clock.exe"));
+    assert!(!old.exists());
+    assert!(!dir.join("com.example.clock.json").exists());
+    assert!(!dir.join("com.example.clock.exe.new").exists());
+}
+
+#[test]
+fn fr3_a_running_program_under_an_old_name_does_not_keep_the_old_name() {
+    let dir = fresh_dir("running");
+    let template = Path::new(TEMPLATE);
+    let (bare, _) = ensure(template, &dir, "com.example.clock", None).unwrap();
+    // Opened without sharing deletion, as a running program's file is held.
+    let held = {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1) // FILE_SHARE_READ only
+            .open(&bare)
+            .unwrap()
+    };
+    let (program, note) = ensure(template, &dir, "com.example.clock", Some(&clock())).unwrap();
+    assert!(note.is_none());
+    assert_eq!(program, dir.join("com.example.clock").join("Clock.exe"));
+    assert_eq!(description(&program), "Clock");
+    // The old one cannot go while it runs, and goes the next time once it has ended.
+    assert!(bare.exists());
+    drop(held);
+    ensure(template, &dir, "com.example.clock", Some(&clock())).unwrap();
+    assert!(!bare.exists());
+    assert!(program.exists());
 }
 
 #[test]
