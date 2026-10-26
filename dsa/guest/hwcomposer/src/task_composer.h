@@ -2,9 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Turns each frame of the one freeform display into one frame per task: the layers of each
-// task are composed on the host GPU into a ColorBuffer the size of the task's window, which
-// becomes the current frame of that task's own host display and is posted. The host never
-// receives the display as a whole.
+// task are composed on the host GPU into the top-left corner of a ColorBuffer, at the size of
+// the task's window, which becomes the current frame of that task's own host display and is
+// posted. The host never receives the display as a whole.
+//
+// The ColorBuffers are kept at the display's size (taskBufferSize), so resizing a window
+// remakes none of them: only the host display's size, which tells the host how much of the
+// buffer the frame fills, changes with the task.
 
 #pragma once
 
@@ -84,8 +88,11 @@ class TaskComposer {
    private:
     struct Output {
         uint32_t display = 0;
+        // The size of the task's frames: the host display's size.
         int64_t width = 0;
         int64_t height = 0;
+        // The size of the ColorBuffers in `targets`, at least the frame's.
+        BufferSize buffers;
         // The display exists on the host connection mGeneration names.
         bool onHost = false;
         // The host has been told this task's frames go to `display`.

@@ -144,6 +144,27 @@ class ResizeGate {
     std::map<int32_t, int64_t> mHeldSince;
 };
 
+// The size of a task's ColorBuffers on the host. Each frame is composed into their top-left
+// corner at the task's size, so they only need to be at least as large as the task.
+struct BufferSize {
+    int64_t width = 0;
+    int64_t height = 0;
+
+    bool covers(int64_t w, int64_t h) const { return width >= w && height >= h; }
+    bool operator==(const BufferSize& other) const {
+        return width == other.width && height == other.height;
+    }
+    bool operator!=(const BufferSize& other) const { return !(*this == other); }
+};
+
+// The size a task's ColorBuffers should have, given the size they have now (`current`, 0 x 0
+// when there are none), the freeform display, and the task's size. They are made at the
+// display's size, the largest a task inside it can be, so that resizing the task's window
+// does not remake them: the answer is `current` while that still holds both the display and
+// the task. A task larger than the display gets buffers of its own size in that direction.
+BufferSize taskBufferSize(BufferSize current, const Rect& display, int64_t taskWidth,
+                          int64_t taskHeight);
+
 // Which host display carries each task's frames. A task keeps its display from its first
 // frame until it ends, so the host sees one stable pairing per window.
 class TaskDisplays {
