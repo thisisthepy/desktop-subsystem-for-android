@@ -15,8 +15,9 @@
 //! A window reports its client size, its monitor's scale (once when it opens, then on every
 //! move to another monitor) and the start and end of a drag; the window manager turns them
 //! into the task's size and density. It never grows past the size the window manager says
-//! Android can draw, and it shows its last frame stretched over a new size only until a
-//! frame of that size arrives.
+//! Android can draw, not even when maximised: on a monitor larger than that, a maximised
+//! window takes that size, centred on the work area, so the task stays 1:1. It shows its
+//! last frame stretched over a new size only until a frame of that size arrives.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -26,12 +27,13 @@ use std::thread::{self, JoinHandle};
 
 use dsa_host_core::compositor::task_windows::fit_within;
 use dsa_host_core::compositor::window_hosts::{FromHost, ToHost};
+use dsa_host_core::compositor::window_sizing::maximized_position;
 use dsa_host_core::input::InputEvent;
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, GetMonitorInfoW, MonitorFromWindow, MONITORINFO,
+    BeginPaint, EndPaint, GetMonitorInfoW, MonitorFromRect, MonitorFromWindow, MONITORINFO,
     MONITOR_DEFAULTTONEAREST, PAINTSTRUCT,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -41,14 +43,14 @@ use windows_sys::Win32::UI::HiDpi::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-    GetWindowLongPtrW, KillTimer, LoadCursorW, LoadIconW, PostMessageW, PostQuitMessage,
+    GetWindowLongPtrW, IsZoomed, KillTimer, LoadCursorW, LoadIconW, PostMessageW, PostQuitMessage,
     RegisterClassExW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
     TranslateMessage, CREATESTRUCTW, CW_USEDEFAULT, GWLP_USERDATA, HWND_MESSAGE, IDC_ARROW,
-    MINMAXINFO, MSG, SIZE_MINIMIZED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SW_SHOW,
-    SW_SHOWNOACTIVATE, WA_INACTIVE, WINDOW_EX_STYLE, WINDOW_STYLE, WM_ACTIVATE, WM_APP, WM_CLOSE,
-    WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCCREATE,
-    WM_NCDESTROY, WM_PAINT, WM_SIZE, WM_TIMER, WNDCLASSEXW, WS_EX_APPWINDOW,
-    WS_EX_NOREDIRECTIONBITMAP, WS_OVERLAPPEDWINDOW,
+    MINMAXINFO, MSG, SIZE_MINIMIZED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_SHOW,
+    SW_SHOWNOACTIVATE, WA_INACTIVE, WINDOWPOS, WINDOW_EX_STYLE, WINDOW_STYLE, WM_ACTIVATE, WM_APP,
+    WM_CLOSE, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
+    WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SIZE, WM_TIMER, WM_WINDOWPOSCHANGING, WNDCLASSEXW,
+    WS_EX_APPWINDOW, WS_EX_NOREDIRECTIONBITMAP, WS_OVERLAPPEDWINDOW,
 };
 
 use crate::compositor::log::{note, CompositorLogger};
@@ -417,6 +419,26 @@ unsafe extern "system" fn task_window_proc(
             }
             0
         }
+        WM_WINDOWPOSCHANGING => {
+            let result = DefWindowProcW(hwnd, message, wparam, lparam);
+            // A maximised window takes the most Android can draw (WM_GETMINMAXINFO above),
+            // shown 1:1. On a monitor larger than that it is centred on the work area rather
+            // than left in its top left corner.
+            let pos = &mut *(lparam as *mut WINDOWPOS);
+            if IsZoomed(hwnd) != 0 && pos.flags & (SWP_NOMOVE | SWP_NOSIZE) == 0 {
+                let proposed = RECT {
+                    left: pos.x,
+                    top: pos.y,
+                    right: pos.x + pos.cx,
+                    bottom: pos.y + pos.cy,
+                };
+                if let Some(work) = work_area(&proposed) {
+                    pos.x = maximized_position(pos.x, work.left, work.right - work.left, pos.cx);
+                    pos.y = maximized_position(pos.y, work.top, work.bottom - work.top, pos.cy);
+                }
+            }
+            result
+        }
         WM_DPICHANGED => {
             // The scale goes first, so the task gets its new density before the size that
             // goes with it, which the resize below reports.
@@ -499,6 +521,14 @@ unsafe fn outer_size(client: (u32, u32), dpi: u32) -> (i32, i32) {
     };
     AdjustWindowRectExForDpi(&mut rect, TASK_STYLE, 0, TASK_EX_STYLE, dpi);
     (rect.right - rect.left, rect.bottom - rect.top)
+}
+
+/// The work area of the monitor nearest `rect`, when the monitor says.
+unsafe fn work_area(rect: &RECT) -> Option<RECT> {
+    let monitor = MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST);
+    let mut info: MONITORINFO = std::mem::zeroed();
+    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    (GetMonitorInfoW(monitor, &mut info) != 0).then_some(info.rcWork)
 }
 
 /// The largest client area a window can have on its monitor's work area.
