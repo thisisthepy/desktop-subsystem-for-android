@@ -164,8 +164,9 @@ impl TaskWindows {
     /// Records a change to the guest's tasks, and returns what the windows must do.
     pub fn apply(&mut self, event: &TaskEvent) -> Vec<WindowChange> {
         match event {
-            // An app's name and icon belong to its program, not to a window.
-            TaskEvent::App(_) => Vec::new(),
+            // An app's name and icon belong to its program, not to a window, and the installed
+            // apps to the start menu.
+            TaskEvent::App(_) | TaskEvent::Installed(_) => Vec::new(),
             TaskEvent::Updated(task) => {
                 let previous = self.tasks.insert(task.task_id, task.clone());
                 let follow = match self.sizes.get_mut(&task.task_id) {

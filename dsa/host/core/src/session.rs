@@ -310,6 +310,22 @@ impl Shared {
             .retain(|watcher| watcher.send(event.clone()).is_ok());
     }
 
+    /// Records the name and icon of an installed app, for the list that names it next.
+    fn describe_installed(&self, app: AppInfo) {
+        let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        hub.table.describe_installed(&app);
+    }
+
+    /// Makes `packages` the installed apps and hands the list to the watchers, unless it
+    /// changes nothing.
+    fn publish_installed(&self, packages: &[String]) {
+        let event = {
+            let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+            hub.table.installed_event(packages)
+        };
+        self.publish_task(event);
+    }
+
     fn set_sender(&self, sender: Option<Box<dyn FrameSender>>) {
         *self.sender.lock().unwrap_or_else(|e| e.into_inner()) = sender;
     }
@@ -871,6 +887,16 @@ impl Worker {
                     label: app.label,
                     icon_png: app.icon_png,
                 }));
+            }
+            Some(Body::InstalledApp(app)) => {
+                self.shared.describe_installed(AppInfo {
+                    package_name: app.package_name,
+                    label: app.label,
+                    icon_png: app.icon_png,
+                });
+            }
+            Some(Body::InstalledApps(apps)) => {
+                self.shared.publish_installed(&apps.package_names);
             }
             Some(Body::ImeCursor(cursor)) => {
                 let rect = cursor.cursor.unwrap_or_default();

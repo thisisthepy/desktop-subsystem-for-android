@@ -40,6 +40,8 @@ public  final class Envelope extends
     IME_CURSOR(19),
     REQUEST_GUEST_MEMORY(20),
     GUEST_MEMORY(21),
+    INSTALLED_APP(22),
+    INSTALLED_APPS(23),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -75,6 +77,8 @@ public  final class Envelope extends
         case 19: return IME_CURSOR;
         case 20: return REQUEST_GUEST_MEMORY;
         case 21: return GUEST_MEMORY;
+        case 22: return INSTALLED_APP;
+        case 23: return INSTALLED_APPS;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -1091,6 +1095,106 @@ public  final class Envelope extends
    */
   private void clearGuestMemory() {
     if (bodyCase_ == 21) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int INSTALLED_APP_FIELD_NUMBER = 22;
+  /**
+   * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+   */
+  @java.lang.Override
+  public boolean hasInstalledApp() {
+    return bodyCase_ == 22;
+  }
+  /**
+   * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.InstalledApp getInstalledApp() {
+    if (bodyCase_ == 22) {
+       return (io.github.thisisthepy.dsa.control.v1.InstalledApp) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.InstalledApp.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+   */
+  private void setInstalledApp(io.github.thisisthepy.dsa.control.v1.InstalledApp value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 22;
+  }
+  /**
+   * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+   */
+  private void mergeInstalledApp(io.github.thisisthepy.dsa.control.v1.InstalledApp value) {
+    value.getClass();
+  if (bodyCase_ == 22 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.InstalledApp.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.InstalledApp.newBuilder((io.github.thisisthepy.dsa.control.v1.InstalledApp) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 22;
+  }
+  /**
+   * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+   */
+  private void clearInstalledApp() {
+    if (bodyCase_ == 22) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int INSTALLED_APPS_FIELD_NUMBER = 23;
+  /**
+   * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+   */
+  @java.lang.Override
+  public boolean hasInstalledApps() {
+    return bodyCase_ == 23;
+  }
+  /**
+   * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.InstalledApps getInstalledApps() {
+    if (bodyCase_ == 23) {
+       return (io.github.thisisthepy.dsa.control.v1.InstalledApps) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.InstalledApps.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+   */
+  private void setInstalledApps(io.github.thisisthepy.dsa.control.v1.InstalledApps value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 23;
+  }
+  /**
+   * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+   */
+  private void mergeInstalledApps(io.github.thisisthepy.dsa.control.v1.InstalledApps value) {
+    value.getClass();
+  if (bodyCase_ == 23 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.InstalledApps.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.InstalledApps.newBuilder((io.github.thisisthepy.dsa.control.v1.InstalledApps) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 23;
+  }
+  /**
+   * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+   */
+  private void clearInstalledApps() {
+    if (bodyCase_ == 23) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -2167,6 +2271,102 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+     */
+    @java.lang.Override
+    public boolean hasInstalledApp() {
+      return instance.hasInstalledApp();
+    }
+    /**
+     * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.InstalledApp getInstalledApp() {
+      return instance.getInstalledApp();
+    }
+    /**
+     * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+     */
+    public Builder setInstalledApp(io.github.thisisthepy.dsa.control.v1.InstalledApp value) {
+      copyOnWrite();
+      instance.setInstalledApp(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+     */
+    public Builder setInstalledApp(
+        io.github.thisisthepy.dsa.control.v1.InstalledApp.Builder builderForValue) {
+      copyOnWrite();
+      instance.setInstalledApp(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+     */
+    public Builder mergeInstalledApp(io.github.thisisthepy.dsa.control.v1.InstalledApp value) {
+      copyOnWrite();
+      instance.mergeInstalledApp(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+     */
+    public Builder clearInstalledApp() {
+      copyOnWrite();
+      instance.clearInstalledApp();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+     */
+    @java.lang.Override
+    public boolean hasInstalledApps() {
+      return instance.hasInstalledApps();
+    }
+    /**
+     * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.InstalledApps getInstalledApps() {
+      return instance.getInstalledApps();
+    }
+    /**
+     * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+     */
+    public Builder setInstalledApps(io.github.thisisthepy.dsa.control.v1.InstalledApps value) {
+      copyOnWrite();
+      instance.setInstalledApps(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+     */
+    public Builder setInstalledApps(
+        io.github.thisisthepy.dsa.control.v1.InstalledApps.Builder builderForValue) {
+      copyOnWrite();
+      instance.setInstalledApps(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+     */
+    public Builder mergeInstalledApps(io.github.thisisthepy.dsa.control.v1.InstalledApps value) {
+      copyOnWrite();
+      instance.mergeInstalledApps(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+     */
+    public Builder clearInstalledApps() {
+      copyOnWrite();
+      instance.clearInstalledApps();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -2205,12 +2405,15 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.ImeCursor.class,
             io.github.thisisthepy.dsa.control.v1.RequestGuestMemory.class,
             io.github.thisisthepy.dsa.control.v1.GuestMemory.class,
+            io.github.thisisthepy.dsa.control.v1.InstalledApp.class,
+            io.github.thisisthepy.dsa.control.v1.InstalledApps.class,
           };
           java.lang.String info =
-              "\u0000\u0014\u0001\u0000\u0001\u0015\u0014\u0000\u0000\u0000\u0001<\u0000\u0002<" +
+              "\u0000\u0016\u0001\u0000\u0001\u0017\u0016\u0000\u0000\u0000\u0001<\u0000\u0002<" +
               "\u0000\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000" +
               "\t<\u0000\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011" +
-              "<\u0000\u0012<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000";
+              "<\u0000\u0012<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000" +
+              "";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

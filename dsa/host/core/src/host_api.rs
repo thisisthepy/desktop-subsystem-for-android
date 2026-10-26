@@ -328,6 +328,7 @@ fn event_to_wire(event: TaskEvent) -> types::TaskEvent {
             display_id,
         }),
         TaskEvent::App(app) => Event::App(app_to_wire(app)),
+        TaskEvent::Installed(apps) => Event::Installed(installed_to_wire(Some(apps))),
         TaskEvent::ImeCursor { task_id, cursor } => Event::ImeCursor(types::ImeCursor {
             task_id,
             cursor: Some(types::Rect {
@@ -353,6 +354,7 @@ fn event_from_wire(event: types::TaskEvent) -> Option<TaskEvent> {
             display_id: frames.display_id,
         },
         Event::App(app) => TaskEvent::App(app_from_wire(app)),
+        Event::Installed(installed) => TaskEvent::Installed(installed_from_wire(installed)?),
         Event::ImeCursor(cursor) => {
             let rect = cursor.cursor.unwrap_or_default();
             TaskEvent::ImeCursor {
@@ -383,14 +385,42 @@ fn tasks_to_wire(events: Vec<TaskEvent>) -> types::Tasks {
                 display_id,
             }),
             TaskEvent::App(app) => tasks.apps.push(app_to_wire(app)),
+            TaskEvent::Installed(apps) => tasks.installed = Some(installed_to_wire(Some(apps))),
             TaskEvent::Removed { .. } | TaskEvent::ImeCursor { .. } => {}
         }
     }
     tasks
 }
 
+/// The installed apps on the wire; `None` when the Android has not said which it has.
+fn installed_to_wire(apps: Option<Vec<AppInfo>>) -> types::InstalledApps {
+    types::InstalledApps {
+        known: apps.is_some(),
+        apps: apps
+            .unwrap_or_default()
+            .into_iter()
+            .map(app_to_wire)
+            .collect(),
+    }
+}
+
+fn installed_from_wire(installed: types::InstalledApps) -> Option<Vec<AppInfo>> {
+    installed
+        .known
+        .then(|| installed.apps.into_iter().map(app_from_wire).collect())
+}
+
+/// The installed apps among `events`, if the Android has said which it has.
+fn installed_of(events: Vec<TaskEvent>) -> Option<Vec<AppInfo>> {
+    events.into_iter().find_map(|event| match event {
+        TaskEvent::Installed(apps) => Some(apps),
+        _ => None,
+    })
+}
+
 fn tasks_from_wire(tasks: types::Tasks) -> TaskList {
     TaskList {
+        installed: tasks.installed.and_then(installed_from_wire),
         tasks: tasks.tasks.into_iter().map(task_from_wire).collect(),
         frames: tasks
             .frames
@@ -745,6 +775,14 @@ impl HostApiService {
                         .unwrap_or_default(),
                 )),
             },
+            Some(request::Body::ListApps(_)) => match self.androids.android(&peer.user) {
+                Err(why) => error(ErrorCode::Unavailable, why),
+                Ok(android) => response::Body::InstalledApps(installed_to_wire(
+                    android
+                        .watch_tasks()
+                        .and_then(|watch| installed_of(watch.current)),
+                )),
+            },
             Some(request::Body::CloseTask(close)) => self.request(
                 peer,
                 TaskRequest::Close {
@@ -788,6 +826,7 @@ impl HostApiService {
                         request::Body::UpdateProgram(_)
                         | request::Body::GetVmId(_)
                         | request::Body::ListTasks(_)
+                        | request::Body::ListApps(_)
                         | request::Body::WatchTasks(_)
                         | request::Body::CloseTask(_)
                         | request::Body::LaunchApp(_)
@@ -932,13 +971,19 @@ pub struct TaskList {
     pub frames: Vec<(i32, u32)>,
     /// The name and icon of each app that has a task, in package order.
     pub apps: Vec<AppInfo>,
+    /// The apps installed in the Android that a launcher lists, in package order; `None`
+    /// until it has said which.
+    pub installed: Option<Vec<AppInfo>>,
 }
 
 impl TaskList {
-    /// The events that bring an empty list of tasks to this one: every app, then every
-    /// task, then every task's display.
+    /// The events that bring an empty list of tasks to this one: the installed apps when
+    /// they are known, then every app, then every task, then every task's display.
     pub fn events(&self) -> Vec<TaskEvent> {
-        let apps = self.apps.iter().cloned().map(TaskEvent::App);
+        let installed = self.installed.clone().map(TaskEvent::Installed);
+        let apps = installed
+            .into_iter()
+            .chain(self.apps.iter().cloned().map(TaskEvent::App));
         let tasks = self.tasks.iter().cloned().map(TaskEvent::Updated);
         let frames = self
             .frames
@@ -1060,6 +1105,62 @@ impl HostApiClient {
         match self.exchange(request::Body::ListTasks(types::ListTasks {}), self.timeout)? {
             response::Body::Tasks(tasks) => Ok(tasks_from_wire(tasks)),
             _ => Err(ClientError::Malformed("expected the list of tasks".into())),
+        }
+    }
+
+    /// The apps installed in the caller's Android that a launcher lists, in package order;
+    /// `None` until it has said which since the service started.
+    pub fn installed_apps(&mut self) -> Result<Option<Vec<AppInfo>>, ClientError> {
+        match self.exchange(request::Body::ListApps(types::ListApps {}), self.timeout)? {
+            response::Body::InstalledApps(installed) => Ok(installed_from_wire(installed)),
+            _ => Err(ClientError::Malformed(
+                "expected the list of installed apps".into(),
+            )),
+        }
+    }
+
+    /// Makes sure the caller's Android is running: starts it when it is stopped, and waits at
+    /// most `timeout` for it to be running, asking every `poll`. `waiting` is called once
+    /// whenever the state it waits through changes, so the caller can show progress. A start
+    /// that fails is an error carrying the reason the service gives.
+    pub fn ensure_running(
+        &mut self,
+        timeout: Duration,
+        poll: Duration,
+        mut waiting: impl FnMut(SessionState),
+    ) -> Result<(), ClientError> {
+        let deadline = Instant::now() + timeout;
+        let mut status = self.status()?;
+        let mut started = false;
+        let mut last = None;
+        loop {
+            match status.state {
+                SessionState::Active | SessionState::Dozing | SessionState::Frozen => return Ok(()),
+                SessionState::Stopped if started => {
+                    return Err(ClientError::Service {
+                        code: ErrorCode::Unavailable,
+                        detail: status
+                            .last_reason
+                            .unwrap_or_else(|| "Android stopped while it was starting".into()),
+                    })
+                }
+                SessionState::Stopped => {
+                    started = true;
+                    status = self.start()?;
+                    continue;
+                }
+                SessionState::Starting | SessionState::Stopping => {}
+            }
+            if last != Some(status.state) {
+                last = Some(status.state);
+                waiting(status.state);
+            }
+            if Instant::now() >= deadline {
+                return Err(ClientError::Transport(TransportError::Timeout));
+            }
+            thread::sleep(poll);
+            // A start asked for while it was stopping goes in once it has stopped.
+            status = self.status()?;
         }
     }
 
