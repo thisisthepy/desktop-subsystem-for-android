@@ -119,6 +119,42 @@ Layout assignLayersToTasks(const std::vector<LayerPlacement>& layers,
     return layout;
 }
 
+bool drawnAtSize(const Rect& bounds, const std::vector<LayerFill>& layers) {
+    for (const LayerFill& layer : layers) {
+        if (layer.drawn && layer.frame == bounds) {
+            return true;
+        }
+    }
+    return false;
+}
+
+ResizeGate::Decision ResizeGate::decide(int32_t task, int64_t postedWidth, int64_t postedHeight,
+                                        const Rect& bounds, bool drawn, int64_t nowMs) {
+    const bool firstFrame = postedWidth <= 0 || postedHeight <= 0;
+    const bool sameSize = postedWidth == bounds.width() && postedHeight == bounds.height();
+    if (firstFrame || sameSize || drawn) {
+        mHeldSince.erase(task);
+        return Decision::Post;
+    }
+    const int64_t since = mHeldSince.emplace(task, nowMs).first->second;
+    if (nowMs - since >= kHoldMs) {
+        mHeldSince.erase(task);
+        return Decision::PostLate;
+    }
+    return Decision::Hold;
+}
+
+std::optional<int64_t> ResizeGate::nextDeadline() const {
+    std::optional<int64_t> first;
+    for (const auto& [_, since] : mHeldSince) {
+        const int64_t deadline = since + kHoldMs;
+        if (!first || deadline < *first) {
+            first = deadline;
+        }
+    }
+    return first;
+}
+
 bool TaskRegistry::update(int32_t id, const Rect& bounds) {
     auto it = mTasks.find(id);
     if (it != mTasks.end() && it->second == bounds) {

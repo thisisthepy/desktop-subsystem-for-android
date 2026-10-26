@@ -85,4 +85,32 @@ public interface TaskUpdatedOrBuilder extends
    * @return The focused.
    */
   boolean getFocused();
+
+  /**
+   * <pre>
+   * The density the task's app draws at, in dots per inch (160 draws one pixel per
+   * density-independent pixel). 0 when the agent cannot read it.
+   * </pre>
+   *
+   * <code>uint32 density_dpi = 6;</code>
+   * @return The densityDpi.
+   */
+  int getDensityDpi();
+
+  /**
+   * <pre>
+   * The largest size the guest can give the task, in guest display pixels: its display's.
+   * A window larger than this could only show the task's frames stretched. 0 when unknown.
+   * </pre>
+   *
+   * <code>uint32 max_width = 7;</code>
+   * @return The maxWidth.
+   */
+  int getMaxWidth();
+
+  /**
+   * <code>uint32 max_height = 8;</code>
+   * @return The maxHeight.
+   */
+  int getMaxHeight();
 }

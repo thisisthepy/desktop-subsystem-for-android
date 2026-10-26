@@ -118,6 +118,28 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.LaunchApp getLaunchApp();
 
   /**
+   * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+   * @return Whether the resizeTask field is set.
+   */
+  boolean hasResizeTask();
+  /**
+   * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+   * @return The resizeTask.
+   */
+  io.github.thisisthepy.dsa.control.v1.ResizeTask getResizeTask();
+
+  /**
+   * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+   * @return Whether the setTaskDensity field is set.
+   */
+  boolean hasSetTaskDensity();
+  /**
+   * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+   * @return The setTaskDensity.
+   */
+  io.github.thisisthepy.dsa.control.v1.SetTaskDensity getSetTaskDensity();
+
+  /**
    * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
    * @return Whether the pointerEvent field is set.
    */

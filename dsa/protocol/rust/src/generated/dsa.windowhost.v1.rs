@@ -172,12 +172,38 @@ pub struct WindowFocus {
     #[prost(bool, tag = "2")]
     pub focused: bool,
 }
+/// Window host to window manager: the user started dragging the task's window, to move or
+/// resize it, or let go. While a drag lasts the window manager never resizes the window.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WindowDragging {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(bool, tag = "2")]
+    pub dragging: bool,
+}
+/// Window manager to window host: the task's size in Android, which its frames and its pointer
+/// input are measured in, and the largest client area its window may have (what Android can
+/// draw; 0 when unknown). Sent when either changes, which a resize the window asked for does
+/// without the window itself changing.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TaskSize {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub width: u32,
+    #[prost(uint32, tag = "3")]
+    pub height: u32,
+    #[prost(uint32, tag = "4")]
+    pub max_width: u32,
+    #[prost(uint32, tag = "5")]
+    pub max_height: u32,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -217,6 +243,10 @@ pub mod envelope {
         WindowDpi(super::WindowDpi),
         #[prost(message, tag = "16")]
         WindowFocus(super::WindowFocus),
+        #[prost(message, tag = "17")]
+        WindowDragging(super::WindowDragging),
+        #[prost(message, tag = "18")]
+        TaskSize(super::TaskSize),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.

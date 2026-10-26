@@ -178,6 +178,25 @@ message WindowFocus {
   bool focused = 2;
 }
 
+// Window host to window manager: the user started dragging the task's window, to move or
+// resize it, or let go. While a drag lasts the window manager never resizes the window.
+message WindowDragging {
+  int32 task_id = 1;
+  bool dragging = 2;
+}
+
+// Window manager to window host: the task's size in Android, which its frames and its pointer
+// input are measured in, and the largest client area its window may have (what Android can
+// draw; 0 when unknown). Sent when either changes, which a resize the window asked for does
+// without the window itself changing.
+message TaskSize {
+  int32 task_id = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  uint32 max_width = 4;
+  uint32 max_height = 5;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -197,5 +216,7 @@ message Envelope {
     WindowResized window_resized = 14;
     WindowDpi window_dpi = 15;
     WindowFocus window_focus = 16;
+    WindowDragging window_dragging = 17;
+    TaskSize task_size = 18;
   }
 }

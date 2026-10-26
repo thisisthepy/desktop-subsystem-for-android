@@ -123,7 +123,7 @@ fn updated(task_id: i32, label: &str) -> Body {
         }),
         package_name: format!("com.example.app{task_id}"),
         label: label.into(),
-        focused: false,
+        ..control::TaskUpdated::default()
     })
 }
 
@@ -138,7 +138,7 @@ fn task(task_id: i32, label: &str) -> Task {
         },
         package_name: format!("com.example.app{task_id}"),
         label: label.into(),
-        focused: false,
+        ..Task::default()
     }
 }
 

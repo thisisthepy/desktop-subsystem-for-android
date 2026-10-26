@@ -14,6 +14,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <thread>
 #include <vector>
@@ -97,10 +98,13 @@ class TaskComposer {
     void releaseOutputLocked(Output& output);
     void syncGenerationLocked();
     void reconnectLoop();
+    // Asks SurfaceFlinger for a new frame.
+    void refreshNow();
     void send(const std::vector<std::vector<uint8_t>>& outbox);
 
     std::mutex mMutex;
     TaskRegistry mTasks;
+    ResizeGate mResizeGate;
     TaskDisplays mDisplays{kFirstTaskDisplay, kTaskDisplays};
     HostRenderer mHost;
     uint64_t mGeneration = 0;
@@ -113,10 +117,13 @@ class TaskComposer {
     Sender mSend;
     RefreshRequest mRefresh;
 
-    // Reaches the host again after the connection broke, then asks for a frame.
+    // Reaches the host again after the connection broke, then asks for a frame. It also asks
+    // for a frame when a task held back after a resize runs out of time (mRefreshAtMs).
     std::mutex mReconnectMutex;
     std::condition_variable mReconnectWake;
     bool mStopping = false;
+    // Steady clock milliseconds; 0 for none. Guarded by mReconnectMutex.
+    int64_t mRefreshAtMs = 0;
     // Starts true: the first connection is made in the background too.
     std::atomic<bool> mDisconnected{true};
     std::thread mReconnector;

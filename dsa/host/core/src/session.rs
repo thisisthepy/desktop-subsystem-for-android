@@ -481,13 +481,30 @@ impl Session {
             .tasks()
     }
 
-    /// Asks the guest to close a task or launch an app. Needs an active session.
+    /// Asks the guest to close, resize or rescale a task, or to launch an app. Needs an
+    /// active session.
     pub fn request(&self, request: TaskRequest) -> Result<(), SessionError> {
         let body = match request {
             TaskRequest::Close { task_id } => Body::CloseTask(control::CloseTask { task_id }),
             TaskRequest::Launch { package_name } => {
                 Body::LaunchApp(control::LaunchApp { package_name })
             }
+            TaskRequest::Resize {
+                task_id,
+                width,
+                height,
+            } => Body::ResizeTask(control::ResizeTask {
+                task_id,
+                width,
+                height,
+            }),
+            TaskRequest::SetDensity {
+                task_id,
+                density_dpi,
+            } => Body::SetTaskDensity(control::SetTaskDensity {
+                task_id,
+                density_dpi,
+            }),
         };
         self.send(dsa_protocol::encode(&control::Envelope {
             body: Some(body),
@@ -779,6 +796,9 @@ impl Worker {
                     package_name: update.package_name,
                     label: update.label,
                     focused: update.focused,
+                    density_dpi: update.density_dpi,
+                    max_width: update.max_width,
+                    max_height: update.max_height,
                 }));
             }
             Some(Body::TaskRemoved(removed)) => {
@@ -799,7 +819,11 @@ impl Worker {
                     icon_png: app.icon_png,
                 }));
             }
-            Some(Body::CloseTask(_)) | Some(Body::LaunchApp(_)) | Some(Body::PointerEvent(_)) => {
+            Some(Body::CloseTask(_))
+            | Some(Body::LaunchApp(_))
+            | Some(Body::ResizeTask(_))
+            | Some(Body::SetTaskDensity(_))
+            | Some(Body::PointerEvent(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
             }
             None => {

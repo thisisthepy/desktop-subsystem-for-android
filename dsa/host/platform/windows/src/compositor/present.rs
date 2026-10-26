@@ -7,12 +7,17 @@
 //! visual holding a flip-model swapchain, and [`WindowPresenter::present`] copies the frame
 //! into the swapchain and presents it. The visual is scaled to fill the window, so while the
 //! user resizes it, the last frame is stretched over the new size until a frame of that size
-//! arrives. No frame passes through the CPU.
+//! arrives, which is then shown 1:1. No frame passes through the CPU.
+//!
+//! Each presenter measures how long its window waited for a frame of its new size
+//! (`ResizeLatency`) and logs a summary every 20 resizes and when the window closes, and a
+//! warning when a window is left showing a stretched frame.
 
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use dsa_host_core::compositor::resize_latency::ResizeLatency;
 use dsa_host_core::compositor::task_windows::fill_scale;
 use windows::core::{Interface, BOOL, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HMODULE, HWND, LUID};
@@ -39,6 +44,8 @@ use windows::Win32::Graphics::Dxgi::{
     DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
 };
 use windows_numerics::Matrix3x2;
+
+use super::log::{note, CompositorLogger};
 
 /// How long a present waits for the GPU to finish reading the shared texture.
 const COPY_WAIT: Duration = Duration::from_millis(500);
@@ -272,12 +279,18 @@ struct State {
     view: (u32, u32),
     query: Option<ID3D11Query>,
     closed: bool,
+    /// How long the window waits for a frame of its size after each resize.
+    latency: ResizeLatency,
 }
+
+/// How many resizes go between two summaries of their waits in the log.
+const SUMMARY_EVERY: usize = 20;
 
 /// Shows one task's frames in its window.
 pub struct WindowPresenter {
     gpu: Arc<Gpu>,
     state: Mutex<State>,
+    logger: Option<Arc<CompositorLogger>>,
 }
 
 // SAFETY: every COM object in the state is used under the state's lock, and the
@@ -288,7 +301,12 @@ unsafe impl Sync for WindowPresenter {}
 impl WindowPresenter {
     /// Puts a visual on the window `hwnd`, whose client area is `view` pixels. Called on the
     /// thread that owns the window.
-    pub fn new(gpu: Arc<Gpu>, hwnd: isize, view: (u32, u32)) -> Result<Arc<Self>, String> {
+    pub fn new(
+        gpu: Arc<Gpu>,
+        hwnd: isize,
+        view: (u32, u32),
+        logger: Option<Arc<CompositorLogger>>,
+    ) -> Result<Arc<Self>, String> {
         let dcomp = gpu.dcomp()?.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: `hwnd` is a live window of this thread; the rest are plain COM calls.
         let (target, visual) = unsafe {
@@ -317,7 +335,9 @@ impl WindowPresenter {
                 view,
                 query: None,
                 closed: false,
+                latency: ResizeLatency::new(),
             }),
+            logger,
         }))
     }
 
@@ -328,14 +348,41 @@ impl WindowPresenter {
             return;
         }
         state.view = view;
+        state.latency.view_changed(view, Instant::now());
         if state.swapchain.is_some() {
             self.scale(&state, true);
+        }
+    }
+
+    /// Time has passed: a window left showing a stretched frame is logged, once per size.
+    pub fn tick(&self) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.closed {
+            return;
+        }
+        if let Some(((width, height), waited)) = state.latency.stuck(Instant::now()) {
+            note(
+                self.logger.as_deref(),
+                &format!(
+                    "a task window shows its last frame stretched: no {width}x{height} frame \
+                     came in the {} ms since it took that size",
+                    waited.as_millis()
+                ),
+            );
         }
     }
 
     /// The window is closing: nothing more is shown in it.
     pub fn close(&self) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if !state.closed {
+            if let Some(summary) = state.latency.summary() {
+                note(
+                    self.logger.as_deref(),
+                    &format!("a task window closed after {summary}"),
+                );
+            }
+        }
         state.closed = true;
         let Ok(dcomp) = self.gpu.dcomp() else {
             return;
@@ -355,7 +402,18 @@ impl WindowPresenter {
         if state.closed {
             return Ok(());
         }
-        self.present_locked(&mut state, &texture.texture, texture.size)
+        self.present_locked(&mut state, &texture.texture, texture.size)?;
+        if state
+            .latency
+            .frame_shown(texture.size, Instant::now())
+            .is_some()
+            && state.latency.count() % SUMMARY_EVERY == 0
+        {
+            if let Some(summary) = state.latency.summary() {
+                note(self.logger.as_deref(), &format!("task window: {summary}"));
+            }
+        }
+        Ok(())
     }
 
     /// Scales the visual so the frame fills the client area, and commits it. `wait` waits

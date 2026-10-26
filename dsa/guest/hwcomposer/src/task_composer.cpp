@@ -20,6 +20,12 @@ constexpr uint32_t kNoDisplay = 0;
 // The blend mode SurfaceFlinger's client target is composed with.
 constexpr int32_t kBlendPremultiplied = 2;
 
+int64_t steadyMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
 }  // namespace
 
 TaskComposer::TaskComposer() : mReconnector([this] { reconnectLoop(); }) {}
@@ -83,6 +89,7 @@ void TaskComposer::taskUpdated(const TaskUpdate& update) {
 void TaskComposer::taskEnded(int32_t task) {
     std::lock_guard<std::mutex> lock(mMutex);
     mTasks.remove(task);
+    mResizeGate.forget(task);
     mDisplays.release(task);
     auto it = mOutputs.find(task);
     if (it != mOutputs.end()) {
@@ -125,6 +132,7 @@ void TaskComposer::syncGenerationLocked() {
     // one, so every display is made, and announced, again.
     mGeneration = mHost.generation();
     mShared.clear();
+    mResizeGate.clear();
     for (auto& [_, output] : mOutputs) {
         output.onHost = false;
         output.announced = false;
@@ -150,6 +158,7 @@ uint32_t TaskComposer::sharedHandleLocked(const BufferRef& buffer) {
 
 void TaskComposer::present(Frame& frame) {
     std::vector<std::vector<uint8_t>> outbox;
+    std::optional<int64_t> refreshAt;
     {
         std::lock_guard<std::mutex> lock(mMutex);
         if (!mHost.connected()) {
@@ -171,6 +180,7 @@ void TaskComposer::present(Frame& frame) {
         const Layout layout = assignLayersToTasks(placements, mTasks.tasks(), frame.display);
 
         bool clientTargetReady = false;
+        const int64_t now = steadyMs();
         for (const TaskLayers& task : layout.tasks) {
             const auto pairing = mDisplays.acquire(task.task);
             if (!pairing) {
@@ -184,6 +194,27 @@ void TaskComposer::present(Frame& frame) {
             output.display = pairing->displayId;
             const int64_t width = std::max<int64_t>(task.bounds.width(), 1);
             const int64_t height = std::max<int64_t>(task.bounds.height(), 1);
+
+            // After a resize, the first frame at the new size is one the app drew at it.
+            std::vector<LayerFill> fills;
+            fills.reserve(task.layers.size());
+            for (int64_t id : task.layers) {
+                const FrameLayer& layer = *byId[id];
+                fills.push_back(LayerFill{
+                    layer.frame,
+                    layer.client || (layer.mode == ComposeMode::Device && layer.buffer.valid())});
+            }
+            const ResizeGate::Decision decision = mResizeGate.decide(
+                task.task, output.onHost ? output.width : 0, output.onHost ? output.height : 0,
+                task.bounds, drawnAtSize(task.bounds, fills), now);
+            if (decision == ResizeGate::Decision::Hold) {
+                continue;
+            }
+            if (decision == ResizeGate::Decision::PostLate) {
+                HWC_LOGW("task %d did not draw at %lldx%lld within %lld ms; its frame goes as it is",
+                         task.task, static_cast<long long>(width), static_cast<long long>(height),
+                         static_cast<long long>(ResizeGate::kHoldMs));
+            }
 
             if (!output.onHost) {
                 if (!mHost.createDisplay(output.display, static_cast<uint32_t>(width),
@@ -306,14 +337,45 @@ void TaskComposer::present(Frame& frame) {
             mDisconnected = true;
             mReconnectWake.notify_all();
         }
+        refreshAt = mResizeGate.nextDeadline();
+    }
+    if (refreshAt) {
+        // SurfaceFlinger presents only when something changes; a held task whose app never
+        // draws still has to be sent once its time is up.
+        std::lock_guard<std::mutex> lock(mReconnectMutex);
+        mRefreshAtMs = std::max<int64_t>(*refreshAt, 1);
+        mReconnectWake.notify_all();
     }
     send(outbox);
+}
+
+void TaskComposer::refreshNow() {
+    RefreshRequest refresh;
+    {
+        std::lock_guard<std::mutex> lock(mCallbackMutex);
+        refresh = mRefresh;
+    }
+    if (refresh) {
+        refresh();
+    }
 }
 
 void TaskComposer::reconnectLoop() {
     std::unique_lock<std::mutex> wait(mReconnectMutex);
     while (!mStopping) {
         if (!mDisconnected) {
+            if (mRefreshAtMs != 0) {
+                const int64_t left = mRefreshAtMs - steadyMs();
+                if (left <= 0) {
+                    mRefreshAtMs = 0;
+                    wait.unlock();
+                    refreshNow();
+                    wait.lock();
+                    continue;
+                }
+                mReconnectWake.wait_for(wait, std::chrono::milliseconds(std::min<int64_t>(left, 1000)));
+                continue;
+            }
             mReconnectWake.wait_for(wait, std::chrono::seconds(1));
             continue;
         }
@@ -329,14 +391,7 @@ void TaskComposer::reconnectLoop() {
         }
         if (reconnected) {
             mDisconnected = false;
-            RefreshRequest refresh;
-            {
-                std::lock_guard<std::mutex> lock(mCallbackMutex);
-                refresh = mRefresh;
-            }
-            if (refresh) {
-                refresh();
-            }
+            refreshNow();
         }
         wait.lock();
         if (!reconnected && !mStopping) {

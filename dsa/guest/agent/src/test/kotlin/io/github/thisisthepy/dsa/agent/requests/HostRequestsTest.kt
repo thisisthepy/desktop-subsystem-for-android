@@ -4,9 +4,12 @@ import io.github.thisisthepy.dsa.agent.AGENT
 import io.github.thisisthepy.dsa.agent.FakeActions
 import io.github.thisisthepy.dsa.agent.appTask
 import io.github.thisisthepy.dsa.agent.tasks.Messages
+import io.github.thisisthepy.dsa.agent.windowing.Size
 import io.github.thisisthepy.dsa.control.v1.CloseTask
 import io.github.thisisthepy.dsa.control.v1.Envelope
 import io.github.thisisthepy.dsa.control.v1.LaunchApp
+import io.github.thisisthepy.dsa.control.v1.ResizeTask
+import io.github.thisisthepy.dsa.control.v1.SetTaskDensity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -21,6 +24,35 @@ class HostRequestsTest {
 
     private fun close(taskId: Int) =
         Envelope.newBuilder().setCloseTask(CloseTask.newBuilder().setTaskId(taskId)).build().toByteArray()
+
+    private fun resize(taskId: Int, width: Int, height: Int) = Envelope.newBuilder()
+        .setResizeTask(ResizeTask.newBuilder().setTaskId(taskId).setWidth(width).setHeight(height))
+        .build().toByteArray()
+
+    private fun density(taskId: Int, densityDpi: Int) = Envelope.newBuilder()
+        .setSetTaskDensity(SetTaskDensity.newBuilder().setTaskId(taskId).setDensityDpi(densityDpi))
+        .build().toByteArray()
+
+    @Test
+    fun fr4_a_resize_and_a_density_for_a_reported_task_are_handed_back() {
+        reported += 3
+
+        assertEquals(RequestResult.Resize(3, Size(1280, 720)), requests.handle(resize(3, 1280, 720)))
+        assertEquals(RequestResult.Density(3, 320), requests.handle(density(3, 320)))
+    }
+
+    @Test
+    fun fr4_sizes_for_unknown_tasks_and_impossible_sizes_are_refused() {
+        reported += 3
+
+        assertTrue(requests.handle(resize(4, 1280, 720)) is RequestResult.SizeRefused)
+        assertTrue(requests.handle(density(4, 320)) is RequestResult.SizeRefused)
+        assertTrue(requests.handle(resize(3, 0, 720)) is RequestResult.Malformed)
+        // An unsigned size past Int.MAX_VALUE.
+        assertTrue(requests.handle(resize(3, -1, 720)) is RequestResult.Malformed)
+        assertTrue(requests.handle(density(3, 0)) is RequestResult.Malformed)
+        assertTrue(requests.handle(density(3, 5000)) is RequestResult.Malformed)
+    }
 
     @Test
     fun fr3_launch_app_starts_the_package() {

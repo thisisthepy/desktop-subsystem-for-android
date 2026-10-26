@@ -113,6 +113,9 @@ PROTOBUF_CONSTEXPR TaskUpdated::TaskUpdated(
   , /*decltype(_impl_.bounds_)*/nullptr
   , /*decltype(_impl_.task_id_)*/0
   , /*decltype(_impl_.focused_)*/false
+  , /*decltype(_impl_.density_dpi_)*/0u
+  , /*decltype(_impl_.max_width_)*/0u
+  , /*decltype(_impl_.max_height_)*/0u
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct TaskUpdatedDefaultTypeInternal {
   PROTOBUF_CONSTEXPR TaskUpdatedDefaultTypeInternal()
@@ -176,6 +179,35 @@ struct LaunchAppDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 LaunchAppDefaultTypeInternal _LaunchApp_default_instance_;
+PROTOBUF_CONSTEXPR ResizeTask::ResizeTask(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.task_id_)*/0
+  , /*decltype(_impl_.width_)*/0u
+  , /*decltype(_impl_.height_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct ResizeTaskDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ResizeTaskDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ResizeTaskDefaultTypeInternal() {}
+  union {
+    ResizeTask _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ResizeTaskDefaultTypeInternal _ResizeTask_default_instance_;
+PROTOBUF_CONSTEXPR SetTaskDensity::SetTaskDensity(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.task_id_)*/0
+  , /*decltype(_impl_.density_dpi_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct SetTaskDensityDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR SetTaskDensityDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~SetTaskDensityDefaultTypeInternal() {}
+  union {
+    SetTaskDensity _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 SetTaskDensityDefaultTypeInternal _SetTaskDensity_default_instance_;
 PROTOBUF_CONSTEXPR AppInfo::AppInfo(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.package_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
@@ -2021,6 +2053,9 @@ TaskUpdated::TaskUpdated(const TaskUpdated& from)
     , decltype(_impl_.bounds_){nullptr}
     , decltype(_impl_.task_id_){}
     , decltype(_impl_.focused_){}
+    , decltype(_impl_.density_dpi_){}
+    , decltype(_impl_.max_width_){}
+    , decltype(_impl_.max_height_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
@@ -2044,8 +2079,8 @@ TaskUpdated::TaskUpdated(const TaskUpdated& from)
     _this->_impl_.bounds_ = new ::dsa::control::v1::Rect(*from._impl_.bounds_);
   }
   ::memcpy(&_impl_.task_id_, &from._impl_.task_id_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.focused_) -
-    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.focused_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.max_height_) -
+    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.max_height_));
   // @@protoc_insertion_point(copy_constructor:dsa.control.v1.TaskUpdated)
 }
 
@@ -2059,6 +2094,9 @@ inline void TaskUpdated::SharedCtor(
     , decltype(_impl_.bounds_){nullptr}
     , decltype(_impl_.task_id_){0}
     , decltype(_impl_.focused_){false}
+    , decltype(_impl_.density_dpi_){0u}
+    , decltype(_impl_.max_width_){0u}
+    , decltype(_impl_.max_height_){0u}
     , /*decltype(_impl_._cached_size_)*/{}
   };
   _impl_.package_name_.InitDefault();
@@ -2104,8 +2142,8 @@ void TaskUpdated::Clear() {
   }
   _impl_.bounds_ = nullptr;
   ::memset(&_impl_.task_id_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.focused_) -
-      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.focused_));
+      reinterpret_cast<char*>(&_impl_.max_height_) -
+      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.max_height_));
   _internal_metadata_.Clear<std::string>();
 }
 
@@ -2155,6 +2193,30 @@ const char* TaskUpdated::_InternalParse(const char* ptr, ::_pbi::ParseContext* c
       case 5:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 40)) {
           _impl_.focused_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 density_dpi = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 48)) {
+          _impl_.density_dpi_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 max_width = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 56)) {
+          _impl_.max_width_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 max_height = 8;
+      case 8:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 64)) {
+          _impl_.max_height_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -2227,6 +2289,24 @@ uint8_t* TaskUpdated::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteBoolToArray(5, this->_internal_focused(), target);
   }
 
+  // uint32 density_dpi = 6;
+  if (this->_internal_density_dpi() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(6, this->_internal_density_dpi(), target);
+  }
+
+  // uint32 max_width = 7;
+  if (this->_internal_max_width() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(7, this->_internal_max_width(), target);
+  }
+
+  // uint32 max_height = 8;
+  if (this->_internal_max_height() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(8, this->_internal_max_height(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -2274,6 +2354,21 @@ size_t TaskUpdated::ByteSizeLong() const {
     total_size += 1 + 1;
   }
 
+  // uint32 density_dpi = 6;
+  if (this->_internal_density_dpi() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_density_dpi());
+  }
+
+  // uint32 max_width = 7;
+  if (this->_internal_max_width() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_max_width());
+  }
+
+  // uint32 max_height = 8;
+  if (this->_internal_max_height() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_max_height());
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
   }
@@ -2311,6 +2406,15 @@ void TaskUpdated::MergeFrom(const TaskUpdated& from) {
   if (from._internal_focused() != 0) {
     _this->_internal_set_focused(from._internal_focused());
   }
+  if (from._internal_density_dpi() != 0) {
+    _this->_internal_set_density_dpi(from._internal_density_dpi());
+  }
+  if (from._internal_max_width() != 0) {
+    _this->_internal_set_max_width(from._internal_max_width());
+  }
+  if (from._internal_max_height() != 0) {
+    _this->_internal_set_max_height(from._internal_max_height());
+  }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
@@ -2339,8 +2443,8 @@ void TaskUpdated::InternalSwap(TaskUpdated* other) {
       &other->_impl_.label_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(TaskUpdated, _impl_.focused_)
-      + sizeof(TaskUpdated::_impl_.focused_)
+      PROTOBUF_FIELD_OFFSET(TaskUpdated, _impl_.max_height_)
+      + sizeof(TaskUpdated::_impl_.max_height_)
       - PROTOBUF_FIELD_OFFSET(TaskUpdated, _impl_.bounds_)>(
           reinterpret_cast<char*>(&_impl_.bounds_),
           reinterpret_cast<char*>(&other->_impl_.bounds_));
@@ -3131,6 +3235,456 @@ std::string LaunchApp::GetTypeName() const {
 
 // ===================================================================
 
+class ResizeTask::_Internal {
+ public:
+};
+
+ResizeTask::ResizeTask(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ResizeTask)
+}
+ResizeTask::ResizeTask(const ResizeTask& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ResizeTask* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){}
+    , decltype(_impl_.width_){}
+    , decltype(_impl_.height_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.task_id_, &from._impl_.task_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.height_) -
+    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.height_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ResizeTask)
+}
+
+inline void ResizeTask::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){0}
+    , decltype(_impl_.width_){0u}
+    , decltype(_impl_.height_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+ResizeTask::~ResizeTask() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ResizeTask)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ResizeTask::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void ResizeTask::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ResizeTask::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ResizeTask)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&_impl_.task_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.height_) -
+      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.height_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ResizeTask::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 task_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.task_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 width = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.width_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 height = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.height_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ResizeTask::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ResizeTask)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_task_id(), target);
+  }
+
+  // uint32 width = 2;
+  if (this->_internal_width() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(2, this->_internal_width(), target);
+  }
+
+  // uint32 height = 3;
+  if (this->_internal_height() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(3, this->_internal_height(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ResizeTask)
+  return target;
+}
+
+size_t ResizeTask::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ResizeTask)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_task_id());
+  }
+
+  // uint32 width = 2;
+  if (this->_internal_width() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_width());
+  }
+
+  // uint32 height = 3;
+  if (this->_internal_height() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_height());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ResizeTask::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ResizeTask*>(
+      &from));
+}
+
+void ResizeTask::MergeFrom(const ResizeTask& from) {
+  ResizeTask* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ResizeTask)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_task_id() != 0) {
+    _this->_internal_set_task_id(from._internal_task_id());
+  }
+  if (from._internal_width() != 0) {
+    _this->_internal_set_width(from._internal_width());
+  }
+  if (from._internal_height() != 0) {
+    _this->_internal_set_height(from._internal_height());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ResizeTask::CopyFrom(const ResizeTask& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ResizeTask)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ResizeTask::IsInitialized() const {
+  return true;
+}
+
+void ResizeTask::InternalSwap(ResizeTask* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(ResizeTask, _impl_.height_)
+      + sizeof(ResizeTask::_impl_.height_)
+      - PROTOBUF_FIELD_OFFSET(ResizeTask, _impl_.task_id_)>(
+          reinterpret_cast<char*>(&_impl_.task_id_),
+          reinterpret_cast<char*>(&other->_impl_.task_id_));
+}
+
+std::string ResizeTask::GetTypeName() const {
+  return "dsa.control.v1.ResizeTask";
+}
+
+
+// ===================================================================
+
+class SetTaskDensity::_Internal {
+ public:
+};
+
+SetTaskDensity::SetTaskDensity(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.SetTaskDensity)
+}
+SetTaskDensity::SetTaskDensity(const SetTaskDensity& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  SetTaskDensity* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){}
+    , decltype(_impl_.density_dpi_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.task_id_, &from._impl_.task_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.density_dpi_) -
+    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.density_dpi_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.SetTaskDensity)
+}
+
+inline void SetTaskDensity::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.task_id_){0}
+    , decltype(_impl_.density_dpi_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+SetTaskDensity::~SetTaskDensity() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.SetTaskDensity)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void SetTaskDensity::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void SetTaskDensity::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void SetTaskDensity::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.SetTaskDensity)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&_impl_.task_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.density_dpi_) -
+      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.density_dpi_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* SetTaskDensity::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int32 task_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.task_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 density_dpi = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.density_dpi_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* SetTaskDensity::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.SetTaskDensity)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(1, this->_internal_task_id(), target);
+  }
+
+  // uint32 density_dpi = 2;
+  if (this->_internal_density_dpi() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(2, this->_internal_density_dpi(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.SetTaskDensity)
+  return target;
+}
+
+size_t SetTaskDensity::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.SetTaskDensity)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // int32 task_id = 1;
+  if (this->_internal_task_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_task_id());
+  }
+
+  // uint32 density_dpi = 2;
+  if (this->_internal_density_dpi() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_density_dpi());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void SetTaskDensity::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const SetTaskDensity*>(
+      &from));
+}
+
+void SetTaskDensity::MergeFrom(const SetTaskDensity& from) {
+  SetTaskDensity* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.SetTaskDensity)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_task_id() != 0) {
+    _this->_internal_set_task_id(from._internal_task_id());
+  }
+  if (from._internal_density_dpi() != 0) {
+    _this->_internal_set_density_dpi(from._internal_density_dpi());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void SetTaskDensity::CopyFrom(const SetTaskDensity& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.SetTaskDensity)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool SetTaskDensity::IsInitialized() const {
+  return true;
+}
+
+void SetTaskDensity::InternalSwap(SetTaskDensity* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(SetTaskDensity, _impl_.density_dpi_)
+      + sizeof(SetTaskDensity::_impl_.density_dpi_)
+      - PROTOBUF_FIELD_OFFSET(SetTaskDensity, _impl_.task_id_)>(
+          reinterpret_cast<char*>(&_impl_.task_id_),
+          reinterpret_cast<char*>(&other->_impl_.task_id_));
+}
+
+std::string SetTaskDensity::GetTypeName() const {
+  return "dsa.control.v1.SetTaskDensity";
+}
+
+
+// ===================================================================
+
 class AppInfo::_Internal {
  public:
 };
@@ -3914,6 +4468,8 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::TaskFrames& task_frames(const Envelope* msg);
   static const ::dsa::control::v1::CloseTask& close_task(const Envelope* msg);
   static const ::dsa::control::v1::LaunchApp& launch_app(const Envelope* msg);
+  static const ::dsa::control::v1::ResizeTask& resize_task(const Envelope* msg);
+  static const ::dsa::control::v1::SetTaskDensity& set_task_density(const Envelope* msg);
   static const ::dsa::control::v1::PointerEvent& pointer_event(const Envelope* msg);
   static const ::dsa::control::v1::AppInfo& app_info(const Envelope* msg);
 };
@@ -3957,6 +4513,14 @@ Envelope::_Internal::close_task(const Envelope* msg) {
 const ::dsa::control::v1::LaunchApp&
 Envelope::_Internal::launch_app(const Envelope* msg) {
   return *msg->_impl_.body_.launch_app_;
+}
+const ::dsa::control::v1::ResizeTask&
+Envelope::_Internal::resize_task(const Envelope* msg) {
+  return *msg->_impl_.body_.resize_task_;
+}
+const ::dsa::control::v1::SetTaskDensity&
+Envelope::_Internal::set_task_density(const Envelope* msg) {
+  return *msg->_impl_.body_.set_task_density_;
 }
 const ::dsa::control::v1::PointerEvent&
 Envelope::_Internal::pointer_event(const Envelope* msg) {
@@ -4116,6 +4680,36 @@ void Envelope::set_allocated_launch_app(::dsa::control::v1::LaunchApp* launch_ap
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.launch_app)
 }
+void Envelope::set_allocated_resize_task(::dsa::control::v1::ResizeTask* resize_task) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (resize_task) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(resize_task);
+    if (message_arena != submessage_arena) {
+      resize_task = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, resize_task, submessage_arena);
+    }
+    set_has_resize_task();
+    _impl_.body_.resize_task_ = resize_task;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.resize_task)
+}
+void Envelope::set_allocated_set_task_density(::dsa::control::v1::SetTaskDensity* set_task_density) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (set_task_density) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(set_task_density);
+    if (message_arena != submessage_arena) {
+      set_task_density = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, set_task_density, submessage_arena);
+    }
+    set_has_set_task_density();
+    _impl_.body_.set_task_density_ = set_task_density;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.set_task_density)
+}
 void Envelope::set_allocated_pointer_event(::dsa::control::v1::PointerEvent* pointer_event) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
   clear_body();
@@ -4211,6 +4805,16 @@ Envelope::Envelope(const Envelope& from)
     case kLaunchApp: {
       _this->_internal_mutable_launch_app()->::dsa::control::v1::LaunchApp::MergeFrom(
           from._internal_launch_app());
+      break;
+    }
+    case kResizeTask: {
+      _this->_internal_mutable_resize_task()->::dsa::control::v1::ResizeTask::MergeFrom(
+          from._internal_resize_task());
+      break;
+    }
+    case kSetTaskDensity: {
+      _this->_internal_mutable_set_task_density()->::dsa::control::v1::SetTaskDensity::MergeFrom(
+          from._internal_set_task_density());
       break;
     }
     case kPointerEvent: {
@@ -4322,6 +4926,18 @@ void Envelope::clear_body() {
     case kLaunchApp: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.launch_app_;
+      }
+      break;
+    }
+    case kResizeTask: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.resize_task_;
+      }
+      break;
+    }
+    case kSetTaskDensity: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.set_task_density_;
       }
       break;
     }
@@ -4441,6 +5057,22 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.ResizeTask resize_task = 11;
+      case 11:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 90)) {
+          ptr = ctx->ParseMessage(_internal_mutable_resize_task(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.SetTaskDensity set_task_density = 12;
+      case 12:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 98)) {
+          ptr = ctx->ParseMessage(_internal_mutable_set_task_density(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       // .dsa.control.v1.PointerEvent pointer_event = 13;
       case 13:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 106)) {
@@ -4556,6 +5188,20 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::launch_app(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.ResizeTask resize_task = 11;
+  if (_internal_has_resize_task()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(11, _Internal::resize_task(this),
+        _Internal::resize_task(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.SetTaskDensity set_task_density = 12;
+  if (_internal_has_set_task_density()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(12, _Internal::set_task_density(this),
+        _Internal::set_task_density(this).GetCachedSize(), target, stream);
+  }
+
   // .dsa.control.v1.PointerEvent pointer_event = 13;
   if (_internal_has_pointer_event()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
@@ -4657,6 +5303,20 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.launch_app_);
       break;
     }
+    // .dsa.control.v1.ResizeTask resize_task = 11;
+    case kResizeTask: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.resize_task_);
+      break;
+    }
+    // .dsa.control.v1.SetTaskDensity set_task_density = 12;
+    case kSetTaskDensity: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.set_task_density_);
+      break;
+    }
     // .dsa.control.v1.PointerEvent pointer_event = 13;
     case kPointerEvent: {
       total_size += 1 +
@@ -4747,6 +5407,16 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_launch_app());
       break;
     }
+    case kResizeTask: {
+      _this->_internal_mutable_resize_task()->::dsa::control::v1::ResizeTask::MergeFrom(
+          from._internal_resize_task());
+      break;
+    }
+    case kSetTaskDensity: {
+      _this->_internal_mutable_set_task_density()->::dsa::control::v1::SetTaskDensity::MergeFrom(
+          from._internal_set_task_density());
+      break;
+    }
     case kPointerEvent: {
       _this->_internal_mutable_pointer_event()->::dsa::control::v1::PointerEvent::MergeFrom(
           from._internal_pointer_event());
@@ -4835,6 +5505,14 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::CloseTask >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::LaunchApp*
 Arena::CreateMaybeMessage< ::dsa::control::v1::LaunchApp >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::LaunchApp >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ResizeTask*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ResizeTask >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ResizeTask >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::SetTaskDensity*
+Arena::CreateMaybeMessage< ::dsa::control::v1::SetTaskDensity >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::SetTaskDensity >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::AppInfo*
 Arena::CreateMaybeMessage< ::dsa::control::v1::AppInfo >(Arena* arena) {

@@ -35,6 +35,43 @@ bool hasTask(const Layout& layout, int32_t task) {
 
 }  // namespace
 
+TEST(fr4_an_app_has_drawn_at_its_size_when_a_drawn_layer_fills_the_task) {
+    const Rect bounds{100, 100, 700, 600};
+    // The old, smaller surface, and a solid colour that fills the task.
+    const std::vector<LayerFill> beforeRedraw{{{100, 100, 500, 400}, true}, {bounds, false}};
+    const std::vector<LayerFill> afterRedraw{{{100, 100, 500, 400}, true}, {bounds, true}};
+    EXPECT_TRUE(!drawnAtSize(bounds, beforeRedraw));
+    EXPECT_TRUE(drawnAtSize(bounds, afterRedraw));
+    EXPECT_TRUE(!drawnAtSize(bounds, {}));
+}
+
+TEST(fr4_a_resized_task_is_held_until_its_app_draws_at_the_new_size) {
+    ResizeGate gate;
+    const Rect grown{0, 0, 600, 500};
+    // The first frame, and frames of the size the host has, always go.
+    EXPECT_TRUE(gate.decide(1, 0, 0, grown, false, 0) == ResizeGate::Decision::Post);
+    EXPECT_TRUE(gate.decide(1, 600, 500, grown, false, 0) == ResizeGate::Decision::Post);
+    // Grown to 600x500 from 400x300: held while the app has not drawn at it.
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 1000) == ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(1000 + ResizeGate::kHoldMs));
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 1200) == ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, true, 1250) == ResizeGate::Decision::Post);
+    EXPECT_TRUE(!gate.nextDeadline());
+}
+
+TEST(fr4_a_resized_task_whose_app_does_not_draw_is_sent_in_time) {
+    ResizeGate gate;
+    const Rect grown{0, 0, 600, 500};
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 0) == ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.decide(2, 300, 300, grown, false, 100) == ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(ResizeGate::kHoldMs));
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, ResizeGate::kHoldMs) ==
+                ResizeGate::Decision::PostLate);
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(100 + ResizeGate::kHoldMs));
+    gate.forget(2);
+    EXPECT_TRUE(!gate.nextDeadline());
+}
+
 TEST(fr3_a_layer_inside_one_task_goes_to_that_task) {
     const std::vector<Task> tasks{{1, {100, 100, 900, 700}}, {2, {1000, 100, 1800, 700}}};
     const std::vector<LayerPlacement> layers{
