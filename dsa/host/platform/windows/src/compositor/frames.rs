@@ -128,12 +128,15 @@ mod tests {
         }
     }
 
+    /// A frame a test window showed: the texture's handle, its size, and the frame's size.
+    type Shown = (isize, (u32, u32), (u32, u32));
+
     /// A window that hands out a new texture for each frame size and records what it shows.
     struct Window {
         base: isize,
         current: Mutex<Option<Arc<Texture>>>,
         /// Each frame shown: the texture's handle, its size, and the frame's content size.
-        shown: Mutex<Vec<(isize, (u32, u32), (u32, u32))>>,
+        shown: Mutex<Vec<Shown>>,
         dropped: Arc<AtomicUsize>,
     }
 
