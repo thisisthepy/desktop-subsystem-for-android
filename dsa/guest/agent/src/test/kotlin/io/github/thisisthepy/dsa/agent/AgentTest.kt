@@ -1,6 +1,7 @@
 package io.github.thisisthepy.dsa.agent
 
 import android.view.MotionEvent
+import io.github.thisisthepy.dsa.agent.tasks.ScreenDp
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.tasks.TaskKind
 import io.github.thisisthepy.dsa.agent.tasks.TaskSource
@@ -220,9 +221,9 @@ class AgentTest {
         assertTrue(actions.resized.isEmpty())
     }
 
-    private fun resize(taskId: Int, width: Int, height: Int) = daemon.deliver(
+    private fun resize(taskId: Int, width: Int, height: Int, live: Boolean = false) = daemon.deliver(
         Envelope.newBuilder()
-            .setResizeTask(ResizeTask.newBuilder().setTaskId(taskId).setWidth(width).setHeight(height))
+            .setResizeTask(ResizeTask.newBuilder().setTaskId(taskId).setWidth(width).setHeight(height).setLive(live))
             .build().toByteArray(),
     )
 
@@ -360,6 +361,200 @@ class AgentTest {
 
         assertEquals(400, daemon.sentMessages().last().taskUpdated.bounds.right)
         assertTrue(log.lines.any { it.startsWith("warn: the framework refused to give task 1") })
+    }
+
+    @Test
+    fun fr4_a_resize_outside_a_drag_is_a_plain_resize() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+
+        resize(1, 500, 300)
+        scheduler.runDue()
+
+        assertEquals(listOf(Triple(1, TaskBounds(0, 0, 500, 300), null as Int?)), actions.resized)
+        assertTrue(actions.resizedLive.isEmpty())
+        assertTrue(actions.endedLive.isEmpty())
+    }
+
+    @Test
+    fun fr4_a_live_resize_keeps_the_screen_size_the_task_had_when_the_drag_began() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+        val atStart = ScreenDp(400, 300, 300)
+
+        resize(1, 500, 300, live = true)
+        scheduler.runDue()
+        assertEquals(listOf(Triple(1, TaskBounds(0, 0, 500, 300), atStart)), actions.resizedLive)
+
+        // The step lands. Whatever screen size the framework reports now, the next step
+        // holds the one from the start of the drag.
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 500, 300)))
+        scheduler.advance(20)
+        resize(1, 600, 300, live = true)
+        scheduler.runDue()
+
+        assertEquals(Triple(1, TaskBounds(0, 0, 600, 300), atStart), actions.resizedLive.last())
+        assertEquals(2, actions.resizedLive.size)
+        assertTrue(actions.resized.isEmpty())
+        assertTrue(actions.endedLive.isEmpty())
+        // Reported at the size it is taking, as any resize is.
+        assertEquals(600, daemon.sentMessages().last().taskUpdated.bounds.right)
+    }
+
+    @Test
+    fun fr4_the_end_of_a_drag_reconfigures_the_task_once_even_at_an_unchanged_size() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+
+        resize(1, 500, 300, live = true)
+        scheduler.runDue()
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 500, 300)))
+        scheduler.advance(20)
+
+        // The drag ends where the last step left the task.
+        resize(1, 500, 300)
+        scheduler.advance(100)
+
+        assertEquals(listOf(Triple(1, TaskBounds(0, 0, 500, 300), null as Int?)), actions.endedLive)
+        assertTrue(actions.resized.isEmpty())
+
+        // After the drag, a size is a plain resize again.
+        resize(1, 550, 300)
+        scheduler.runDue()
+        assertEquals(listOf(Triple(1, TaskBounds(0, 0, 550, 300), null as Int?)), actions.resized)
+        assertEquals(1, actions.endedLive.size)
+    }
+
+    @Test
+    fun fr4_the_end_of_a_drag_is_not_lost_behind_a_step_that_has_not_landed() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+
+        resize(1, 500, 300, live = true)
+        scheduler.runDue()
+        resize(1, 600, 300, live = true)
+        resize(1, 650, 300)
+        scheduler.runDue()
+        assertEquals(1, actions.resizedLive.size)
+        assertTrue(actions.endedLive.isEmpty())
+
+        // The first step lands; the end of the drag goes out next, at its own size.
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 500, 300)))
+        scheduler.advance(20)
+
+        assertEquals(listOf(Triple(1, TaskBounds(0, 0, 650, 300), null as Int?)), actions.endedLive)
+        assertEquals(1, actions.resizedLive.size)
+    }
+
+    @Test
+    fun fr4_a_drag_that_starts_again_before_its_end_is_applied_still_ends() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+
+        resize(1, 500, 300, live = true)
+        scheduler.runDue()
+        resize(1, 520, 300)
+        resize(1, 540, 300, live = true)
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 500, 300)))
+        scheduler.advance(20)
+
+        // The first drag ends at the latest size; the next step starts a new hold from the
+        // screen size the task has then.
+        assertEquals(listOf(Triple(1, TaskBounds(0, 0, 540, 300), null as Int?)), actions.endedLive)
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 540, 300)))
+        scheduler.advance(20)
+        resize(1, 560, 300, live = true)
+        scheduler.runDue()
+        assertEquals(Triple(1, TaskBounds(0, 0, 560, 300), ScreenDp(540, 300, 300)), actions.resizedLive.last())
+    }
+
+    @Test
+    fun fr4_the_end_of_a_drag_keeps_the_density_the_host_asked_for() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+        density(1, 320)
+        scheduler.runDue()
+        assertEquals(listOf(Triple(1, TaskBounds(0, 0, 400, 300), 320 as Int?)), actions.resized)
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300), densityDpi = 320))
+        scheduler.advance(20)
+
+        resize(1, 500, 300, live = true)
+        scheduler.runDue()
+        assertEquals(ScreenDp(200, 150, 150), actions.resizedLive.single().third)
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 500, 300), densityDpi = 320))
+        scheduler.advance(20)
+        resize(1, 500, 300)
+        scheduler.runDue()
+
+        assertEquals(listOf(Triple(1, TaskBounds(0, 0, 500, 300), 320 as Int?)), actions.endedLive)
+    }
+
+    @Test
+    fun fr4_a_density_during_a_drag_ends_the_hold_and_the_next_step_holds_anew() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+
+        resize(1, 500, 300, live = true)
+        scheduler.runDue()
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 500, 300)))
+        scheduler.advance(20)
+        density(1, 320)
+        resize(1, 600, 300, live = true)
+        scheduler.runDue()
+        assertEquals(listOf(Triple(1, TaskBounds(0, 0, 600, 300), 320 as Int?)), actions.endedLive)
+
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 600, 300), densityDpi = 320))
+        scheduler.advance(20)
+        resize(1, 700, 300, live = true)
+        scheduler.runDue()
+        assertEquals(Triple(1, TaskBounds(0, 0, 700, 300), ScreenDp(300, 150, 150)), actions.resizedLive.last())
+    }
+
+    @Test
+    fun fr4_a_task_dragged_into_a_newer_one_moves_the_newer_one() {
+        tasks.running = listOf(
+            appTask(1, bounds = TaskBounds(0, 0, 500, 400)),
+            appTask(2, bounds = TaskBounds(500, 0, 900, 400)),
+        )
+        started()
+
+        resize(1, 700, 400, live = true)
+        scheduler.runDue()
+
+        assertEquals(TaskBounds(0, 0, 700, 400), actions.resizedLive.single().second)
+        assertEquals(listOf(2 to TaskBounds(700, 0, 1100, 400)), actions.moved)
+        val reported = daemon.sentMessages().filter { it.hasTaskUpdated() }.map { it.taskUpdated }
+        assertEquals(700, reported.last { it.taskId == 1 }.bounds.right)
+        assertEquals(700, reported.last { it.taskId == 2 }.bounds.left)
+    }
+
+    @Test
+    fun fr4_a_task_whose_screen_size_is_unknown_is_resized_plainly_while_dragged() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300), screenDp = null))
+        started()
+
+        resize(1, 500, 300, live = true)
+        scheduler.runDue()
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 500, 300), screenDp = null))
+        scheduler.advance(20)
+        resize(1, 500, 300)
+        scheduler.runDue()
+
+        assertEquals(listOf(Triple(1, TaskBounds(0, 0, 500, 300), null as Int?)), actions.resized)
+        assertTrue(actions.resizedLive.isEmpty())
+        assertEquals(1, actions.endedLive.size)
+    }
+
+    @Test
+    fun fr4_a_change_of_screen_size_alone_is_no_news_to_the_host() {
+        tasks.running = listOf(appTask(1))
+        started()
+        val sent = daemon.sent.size
+
+        tasks.change(listOf(appTask(1, screenDp = ScreenDp(1, 2, 1))))
+        scheduler.runDue()
+
+        assertEquals(sent, daemon.sent.size)
     }
 
     @Test

@@ -1,6 +1,7 @@
 package io.github.thisisthepy.dsa.agent.requests
 
 import com.google.protobuf.InvalidProtocolBufferException
+import io.github.thisisthepy.dsa.agent.tasks.ScreenDp
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.windowing.Size
 import io.github.thisisthepy.dsa.control.v1.Envelope
@@ -29,14 +30,35 @@ interface TaskActions {
      * once. It may apply them later. Returns what the framework took.
      */
     fun resizeTask(taskId: Int, bounds: TaskBounds, densityDpi: Int?): ResizeOutcome
+
+    /**
+     * One step of a resize the user is still dragging: asks the window manager to give the
+     * task [bounds] while its configuration keeps the screen size [screen], in one change.
+     * The app then lays itself out again in the new bounds instead of having its activities
+     * recreated for a new configuration at every step. It may apply them later. Returns what
+     * the framework took ([ResizeOutcome.BOUNDS_ONLY]: the bounds, but the screen size
+     * follows them).
+     */
+    fun resizeTaskLive(taskId: Int, bounds: TaskBounds, screen: ScreenDp): ResizeOutcome
+
+    /**
+     * The end of a drag: asks the window manager to give the task [bounds] and to let its
+     * configuration follow them again, with the density [densityDpi] when it is not null,
+     * in one change, so the app is reconfigured once at its final size. It may apply them
+     * later. Returns what the framework took.
+     */
+    fun endLiveResize(taskId: Int, bounds: TaskBounds, densityDpi: Int?): ResizeOutcome
 }
 
 /** What the framework took of a resize. */
 enum class ResizeOutcome {
-    /** The bounds, and the density if one was asked for. */
+    /** The bounds, and the density or screen size if one was asked for. */
     APPLIED,
 
-    /** The bounds, but not the density: the framework has no way to set a task's density. */
+    /**
+     * The bounds, but not the density or the screen size: the framework has no way to set
+     * them for one task.
+     */
     BOUNDS_ONLY,
 
     /** Nothing. */
