@@ -377,11 +377,23 @@ impl TaskWindows {
             .collect()
     }
 
-    /// The user started or finished dragging the task's window.
-    pub fn window_dragging(&mut self, task_id: i32, active: bool, now: Instant) {
-        if let Some(sizing) = self.sizes.get_mut(&task_id) {
-            sizing.dragging(active, now);
+    /// The user started or finished dragging the task's window. The sizes the window asks
+    /// for while it is dragged are live; when a drag that resized the task ends, returns the
+    /// request that reconfigures the task for its final size.
+    pub fn window_dragging(
+        &mut self,
+        task_id: i32,
+        active: bool,
+        now: Instant,
+    ) -> Vec<TaskRequest> {
+        if !self.has_window(task_id) {
+            return Vec::new();
         }
+        self.sizes
+            .get_mut(&task_id)
+            .and_then(|sizing| sizing.dragging(active, now))
+            .into_iter()
+            .collect()
     }
 
     /// The task's size as the guest last reported it, which its frames and its pointer
@@ -646,13 +658,14 @@ mod tests {
         let mut windows = TaskWindows::new();
         windows.apply(&updated(1, "Clock"));
         let now = Instant::now();
-        windows.window_dragging(1, true, now);
+        assert_eq!(windows.window_dragging(1, true, now), vec![]);
         assert_eq!(
             windows.window_resized(1, (800, 1000), now),
             vec![TaskRequest::Resize {
                 task_id: 1,
                 width: 800,
-                height: 1000
+                height: 1000,
+                live: true
             }]
         );
         assert_eq!(windows.window_resized(1, (800, 1000), now), vec![]);
@@ -663,10 +676,24 @@ mod tests {
         assert!(windows
             .apply(&TaskEvent::Updated(task(1, "Clock", 800, 1000)))
             .is_empty());
-        windows.window_dragging(1, false, now);
+        // The end of the drag reconfigures the task for the size it took live.
+        assert_eq!(
+            windows.window_dragging(1, false, now),
+            vec![TaskRequest::Resize {
+                task_id: 1,
+                width: 800,
+                height: 1000,
+                live: false
+            }]
+        );
         assert!(windows
             .tick(now + super::super::window_sizing::SETTLE)
             .is_empty());
+        // Nothing is asked for a window the user closed.
+        windows.window_dragging(1, true, now);
+        windows.window_resized(1, (900, 1000), now);
+        windows.user_closed(1);
+        assert_eq!(windows.window_dragging(1, false, now), vec![]);
     }
 
     #[test]

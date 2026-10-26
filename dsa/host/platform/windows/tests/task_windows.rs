@@ -34,8 +34,8 @@ use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetWindowTextW, GetWindowThreadProcessId, IsWindow, IsWindowVisible,
-    PostMessageW, SetWindowPos, SWP_NOMOVE, SWP_NOZORDER, WM_CLOSE, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP,
+    PostMessageW, SendMessageW, SetWindowPos, SWP_NOMOVE, SWP_NOZORDER, WM_CLOSE, WM_ENTERSIZEMOVE,
+    WM_EXITSIZEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -488,6 +488,7 @@ fn last_resize(running: &Running, task_id: i32) -> Option<(u32, u32)> {
                 task_id: id,
                 width,
                 height,
+                ..
             } if *id == task_id => Some((*width, *height)),
             _ => None,
         })
@@ -583,6 +584,80 @@ fn fr4_a_live_resize_ends_with_the_guest_asked_for_the_last_size() {
         "a 60-step live resize sent {sent} size requests; the last arrived {} ms after the first step",
         started.elapsed().as_millis()
     );
+}
+
+/// The task's size requests since the first `skip` requests, with whether each was live.
+fn resizes_since(running: &Running, skip: usize, task_id: i32) -> Vec<((u32, u32), bool)> {
+    running
+        .android
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .skip(skip)
+        .filter_map(|request| match request {
+            TaskRequest::Resize {
+                task_id: id,
+                width,
+                height,
+                live,
+            } if *id == task_id => Some(((*width, *height), *live)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn fr4_a_dragged_window_resizes_its_task_live_and_reconfigures_it_when_let_go() {
+    let running = start(None);
+    running.android.start();
+    running
+        .android
+        .publish(TaskEvent::Updated(task_at_monitor_density(1, 400, 300)));
+    let open = windows_of(&running, 1);
+    let hwnd = open[0].hwnd as HWND;
+
+    // Only the requests the drag makes count, not the ones the window made opening.
+    thread::sleep(Duration::from_millis(200));
+    let before = running.android.requests.lock().unwrap().len();
+    // Windows' sizing loop starts as the user takes hold of the window's edge.
+    unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
+    resize_to(open[0].hwnd, 520, 430);
+    wait_for("a live size to reach the guest", || {
+        resizes_since(&running, before, 1)
+            .iter()
+            .any(|(_, live)| *live)
+            .then_some(())
+    });
+    for step in 1..10 {
+        resize_to(open[0].hwnd, 520 + step * 9, 430 + step * 4);
+    }
+    let (width, height) = client_size(open[0].hwnd);
+    let size = (width as u32, height as u32);
+    // The user lets go.
+    unsafe { SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0) };
+    let asked = wait_for("the drag's end to reach the guest", || {
+        let asked = resizes_since(&running, before, 1);
+        (asked.last() == Some(&(size, false))).then_some(asked)
+    });
+    let (last, steps) = asked.split_last().unwrap();
+    assert_eq!(*last, (size, false));
+    assert!(
+        steps.iter().all(|(_, live)| *live),
+        "a size asked while the window was dragged was not live: {asked:?}"
+    );
+
+    // A drag that only moves the window asks nothing at its end, and a resize outside a
+    // drag is not live.
+    unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
+    unsafe { SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0) };
+    let after_move = running.android.requests.lock().unwrap().len();
+    resize_to(open[0].hwnd, 700, 500);
+    let (width, height) = client_size(open[0].hwnd);
+    let size = (width as u32, height as u32);
+    wait_for("the resize to reach the guest", || {
+        (resizes_since(&running, after_move, 1) == vec![(size, false)]).then_some(())
+    });
 }
 
 #[test]

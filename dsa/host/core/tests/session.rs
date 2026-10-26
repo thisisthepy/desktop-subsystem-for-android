@@ -820,6 +820,7 @@ fn fr4_resizing_and_rescaling_a_task_reach_the_guest() {
             task_id: 7,
             width: 1096,
             height: 1948,
+            live: false,
         })
         .expect("the resize is sent");
 
@@ -839,9 +840,37 @@ fn fr4_resizing_and_rescaling_a_task_reach_the_guest() {
         Some(Body::ResizeTask(dsa_protocol::control::ResizeTask {
             task_id: 7,
             width: 1096,
-            height: 1948
+            height: 1948,
+            live: false
         }))
     );
+}
+
+#[test]
+fn fr4_a_resize_while_the_window_is_dragged_reaches_the_guest_as_live() {
+    let (session, mut agent, _launcher) = active_session();
+    for (width, live) in [(900, true), (960, true), (960, false)] {
+        session
+            .request(TaskRequest::Resize {
+                task_id: 7,
+                width,
+                height: 700,
+                live,
+            })
+            .expect("the resize is sent");
+    }
+    for (width, live) in [(900, true), (960, true), (960, false)] {
+        let sent = dsa_protocol::decode(&agent.recv(Some(WAIT)).unwrap()).unwrap();
+        assert_eq!(
+            sent.body,
+            Some(Body::ResizeTask(dsa_protocol::control::ResizeTask {
+                task_id: 7,
+                width,
+                height: 700,
+                live
+            }))
+        );
+    }
 }
 
 #[test]

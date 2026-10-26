@@ -110,11 +110,15 @@ pub enum TaskRequest {
     /// Start the app's launcher activity as a new task in its own window.
     Launch { package_name: String },
     /// The user resized the task's window: the task takes its client size, in guest
-    /// display pixels.
+    /// display pixels. `live` is true while the user is still dragging the window's edge:
+    /// the task takes the size without being reconfigured, so its activities lay out again
+    /// instead of being recreated at every step. The first request with `live` false, sent
+    /// when the drag ends, reconfigures the task once for its final size.
     Resize {
         task_id: i32,
         width: u32,
         height: u32,
+        live: bool,
     },
     /// The task's window is on a monitor of another scale: the task draws at this density.
     SetDensity { task_id: i32, density_dpi: u32 },
@@ -130,7 +134,14 @@ impl TaskRequest {
                 task_id,
                 width,
                 height,
+                live: false,
             } => format!("resize task {task_id} to {width}x{height}"),
+            TaskRequest::Resize {
+                task_id,
+                width,
+                height,
+                live: true,
+            } => format!("resize task {task_id} to {width}x{height} while it is dragged"),
             TaskRequest::SetDensity {
                 task_id,
                 density_dpi,
@@ -143,7 +154,9 @@ impl TaskRequest {
 ///
 /// Only a task's latest size and latest density count: while the user drags a window's
 /// edge, the sizes it passed through are dropped rather than queued, so the guest never
-/// works through a backlog. The latest of each keeps its place, so a density followed by
+/// works through a backlog. The latest size goes as it was asked for, live or not, so the
+/// request that ends a drag (not live) is never dropped for a live one before it, and a run
+/// of steps still being dragged stays live. The latest of each keeps its place, so a density followed by
 /// the size that goes with it still arrives in that order. Closes and launches are kept, in
 /// order.
 pub fn coalesce(requests: Vec<TaskRequest>) -> Vec<TaskRequest> {
@@ -366,7 +379,46 @@ mod tests {
             task_id,
             width,
             height: 600,
+            live: false,
         }
+    }
+
+    fn live_resize(task_id: i32, width: u32) -> TaskRequest {
+        TaskRequest::Resize {
+            task_id,
+            width,
+            height: 600,
+            live: true,
+        }
+    }
+
+    #[test]
+    fn fr4_the_resize_that_ends_a_drag_is_never_dropped_for_a_live_one() {
+        // The drag's steps fold into the request that ends it, which reconfigures the task.
+        let requests = vec![live_resize(1, 500), live_resize(1, 520), resize(1, 520)];
+        assert_eq!(coalesce(requests), vec![resize(1, 520)]);
+        // Steps still being dragged fold into the latest one, which stays live.
+        let requests = vec![
+            live_resize(1, 500),
+            live_resize(2, 300),
+            live_resize(1, 540),
+        ];
+        assert_eq!(
+            coalesce(requests),
+            vec![live_resize(2, 300), live_resize(1, 540)]
+        );
+        // A new drag that starts before the last one's end was sent ends with its own.
+        let requests = vec![resize(1, 520), live_resize(1, 560), resize(1, 580)];
+        assert_eq!(coalesce(requests), vec![resize(1, 580)]);
+    }
+
+    #[test]
+    fn fr4_a_resize_says_in_words_whether_it_is_live() {
+        assert_eq!(resize(1, 500).describe(), "resize task 1 to 500x600");
+        assert_eq!(
+            live_resize(1, 500).describe(),
+            "resize task 1 to 500x600 while it is dragged"
+        );
     }
 
     #[test]

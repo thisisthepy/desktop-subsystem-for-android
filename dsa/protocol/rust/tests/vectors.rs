@@ -117,6 +117,7 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                 task_id: 42,
                 width: 1280,
                 height: 720,
+                live: false,
             })),
         ),
         (

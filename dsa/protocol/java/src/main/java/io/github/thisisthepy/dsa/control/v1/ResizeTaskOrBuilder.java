@@ -24,4 +24,10 @@ public interface ResizeTaskOrBuilder extends
    * @return The height.
    */
   int getHeight();
+
+  /**
+   * <code>bool live = 4;</code>
+   * @return The live.
+   */
+  boolean getLive();
 }

@@ -22,7 +22,8 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
 - **Host requests.** `LaunchApp` starts the package's launcher activity as a new task in a
   freeform window (or brings its task to the front). `CloseTask` ends the task, but only a
   task the host was told about. `ResizeTask` gives a task its host window's client size,
-  and `SetTaskDensity` the density of the window's monitor (see below); both are refused
+  holding the app's configuration while the user drags the window's edge, and
+  `SetTaskDensity` the density of the window's monitor (see below); both are refused
   for a task the host was not told about.
 - **Density and size limits in reports.** Each `TaskUpdated` also carries the density the
   task's app draws at and the display's size, which is the largest a task can be.
@@ -102,6 +103,29 @@ windowing gives a task a density of its own. The density is part of the task's
 configuration, so tasks on the one display each draw at their own density. On a framework
 without these calls the task still gets its size through `resizeTask`, draws at the
 display's density, and the agent logs it once.
+
+**While the user drags.** A `ResizeTask` with `live` set is a step of a drag that has not
+ended. A new size changes the task's screen size in dp, and with it the orientation, the
+screen layout and the smallest width, so the window manager relaunches the app's
+activities, which takes far longer than a frame. On an Android 16 image, Clock and
+Settings showed a stretched frame for 156 ms (median) at each step. So at the first live
+step the agent takes the screen size the task's configuration has then
+(`screenWidthDp`, `screenHeightDp` and `smallestScreenWidthDp`, read with the running
+tasks), and every step gives the task its new bounds while its configuration keeps that
+screen size, in one transaction (`setBounds`, `setScreenSizeDp` and
+`setSmallestScreenWidthDp`). Only the task's window configuration changes, which does not
+relaunch anything, so the app lays itself out again in the new bounds within a frame.
+Split screen holds a task's configuration the same way while its divider is dragged.
+
+The first `ResizeTask` without `live` ends the drag, even when its size is the one the task
+already has. The agent gives the task that size and clears the held screen size (a screen
+size of 0, `Configuration.SCREEN_WIDTH_DP_UNDEFINED` and the others), with the density the
+host last asked for, in one transaction, so the app is reconfigured once, at its final
+size. The end of a drag waits behind a step that has not landed, as any size does, and a
+live size that arrives after it does not replace it. A density that arrives during a drag
+ends the hold too, because a screen size held at the old density would be wrong at the new
+one. A `ResizeTask` without `live` outside a drag is the plain resize above. On a framework
+without these calls each step is a plain resize, and the agent logs it once.
 
 **Capacity.** A phone app's default freeform size on the default 1920x1080 display is
 548x974, so three such tasks fit side by side. A fourth goes where it shares the fewest
