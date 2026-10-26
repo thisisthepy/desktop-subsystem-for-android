@@ -3,7 +3,9 @@
   The guest agent. coreApp makes it start in the core-only boot stages too; persistent makes
   the activity manager start it at boot and restart it if it dies. The host is the shell: the
   agent reports tasks and acts on the host's requests, and its one activity is the guest's
-  invisible home (platform/HomeActivity.kt), which Android requires and nobody sees.
+  invisible home (platform/HomeActivity.kt), which Android requires and nobody sees. Its one
+  service is the guest's input method (platform/HostInputMethod.kt), which shows nothing and
+  types what the host's input method composes.
   Every permission here is also in privapp-permissions-dsa-agent.xml.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -55,5 +57,23 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!--
+          The guest's only input method. It is no keyboard: it has no view and is never shown,
+          and it puts the text the host's input method composes and commits into the focused
+          editor. BIND_INPUT_METHOD keeps every caller but the input method manager out.
+        -->
+        <service
+            android:name=".platform.HostInputMethod"
+            android:exported="true"
+            android:label="@string/input_method_name"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/host_input_method" />
+        </service>
     </application>
 </manifest>

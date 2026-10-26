@@ -13,7 +13,7 @@ class AgentApplication : Application() {
         super.onCreate()
         val thread = HandlerThread("dsa-agent").apply { start() }
         val log = AndroidLog
-        Agent(
+        val agent = Agent(
             ownPackage = packageName,
             tasks = AndroidTaskSource(this, log),
             actions = AndroidTaskActions(this, log),
@@ -23,6 +23,11 @@ class AgentApplication : Application() {
             scheduler = HandlerScheduler(thread.looper),
             log = log,
             apps = AndroidAppInfoSource(this, log),
-        ).start()
+            editor = { HostInputMethod.connection },
+            textKeys = AndroidTextKeys(),
+            inputMethods = AndroidInputMethodSetup(this),
+        )
+        HostInputMethod.onCursor = { rect -> agent.cursorMoved(rect.left, rect.top, rect.right, rect.bottom) }
+        agent.start()
     }
 }

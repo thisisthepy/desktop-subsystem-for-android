@@ -3,9 +3,13 @@ package io.github.thisisthepy.dsa.agent
 import com.google.protobuf.InvalidProtocolBufferException
 import io.github.thisisthepy.dsa.agent.channel.ChannelClient
 import io.github.thisisthepy.dsa.agent.channel.ChannelLocator
+import io.github.thisisthepy.dsa.agent.input.EditorConnection
 import io.github.thisisthepy.dsa.agent.input.InputInjector
+import io.github.thisisthepy.dsa.agent.input.InputMethodSetup
 import io.github.thisisthepy.dsa.agent.input.KeyInput
 import io.github.thisisthepy.dsa.agent.input.PointerInput
+import io.github.thisisthepy.dsa.agent.input.TextInput
+import io.github.thisisthepy.dsa.agent.input.TextKeys
 import io.github.thisisthepy.dsa.agent.requests.HostRequests
 import io.github.thisisthepy.dsa.agent.requests.RequestResult
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
@@ -25,7 +29,9 @@ import io.github.thisisthepy.dsa.control.v1.Envelope
  * Everything runs on the scheduler's one thread. Task changes are coalesced: however many
  * arrive before the agent gets to them, it reads the tasks once. Pointer input from the
  * host is injected into its task as it arrives, and reads nothing; a key first gives its
- * task the input focus if the task does not hold it.
+ * task the input focus if the task does not hold it. Text from the host's input method goes
+ * to the focused editor through the agent's own input method, which the agent makes the
+ * guest's at boot, and the editor's cursor goes back to the host.
  */
 class Agent(
     private val ownPackage: String,
@@ -37,6 +43,9 @@ class Agent(
     private val scheduler: Scheduler,
     private val log: Log,
     apps: AppInfoSource = AppInfoSource.NONE,
+    editor: () -> EditorConnection = { EditorConnection.NONE },
+    textKeys: TextKeys = TextKeys { null },
+    private val inputMethods: InputMethodSetup = InputMethodSetup.NONE,
 ) {
     private val channel = ChannelClient(
         locator = locator,
@@ -49,6 +58,18 @@ class Agent(
     private val requests = HostRequests(ownPackage, actions, reporter::isReported)
     private val pointer = PointerInput(injector, reporter::reportedBounds, log)
     private val keys = KeyInput(injector, reporter::isReported, reporter::reportedFocused, actions::focusTask, log)
+    private val text = TextInput(
+        editor = editor,
+        injector = injector,
+        keys = textKeys,
+        isReported = reporter::isReported,
+        isFocused = reporter::reportedFocused,
+        focus = actions::focusTask,
+        bounds = reporter::reportedBounds,
+        focusedTask = reporter::focusedTask,
+        send = { frame -> channel.send(frame) },
+        log = log,
+    )
     private val freeform = FreeformSetup(windowing, scheduler, log)
     private val arranger = TaskArranger(actions, windowing::displaySize, log)
     private var refreshPending = false
@@ -57,6 +78,11 @@ class Agent(
     fun start() {
         scheduler.post {
             freeform.start()
+            try {
+                inputMethods.useHostInputMethod()
+            } catch (e: Exception) {
+                log.warn("could not make the agent's input method the guest's; typed text may not reach editors", e)
+            }
             listen()
             channel.start()
             requestRefresh()
@@ -69,6 +95,16 @@ class Agent(
         } catch (e: Exception) {
             log.warn("listening to task changes failed; trying again", e)
             scheduler.postDelayed(RETRY_MILLIS, ::listen)
+        }
+    }
+
+    /**
+     * The focused editor's cursor is at these display pixels, as the agent's input method
+     * read it. Called from any thread.
+     */
+    fun cursorMoved(left: Float, top: Float, right: Float, bottom: Float) {
+        scheduler.post {
+            if (channel.connected) text.cursorMoved(left, top, right, bottom)
         }
     }
 
@@ -102,7 +138,7 @@ class Agent(
         if (result !is RequestResult.NotForTheAgent) requestRefresh()
     }
 
-    /** Injects the frame if it is pointer or key input. False for any other frame. */
+    /** Injects the frame if it is pointer, key or text input. False for any other frame. */
     private fun input(frame: ByteArray): Boolean {
         val envelope = try {
             Envelope.parseFrom(frame)
@@ -119,6 +155,16 @@ class Agent(
                 keys.handle(envelope.keyEvent)
             } catch (e: Exception) {
                 log.warn("injecting key input failed", e)
+            }
+            Envelope.BodyCase.IME_COMPOSITION -> try {
+                text.handle(envelope.imeComposition)
+            } catch (e: Exception) {
+                log.warn("putting a composition into the editor failed", e)
+            }
+            Envelope.BodyCase.IME_COMMIT -> try {
+                text.handle(envelope.imeCommit)
+            } catch (e: Exception) {
+                log.warn("typing committed text failed", e)
             }
             else -> return false
         }
@@ -159,6 +205,7 @@ class Agent(
         )
         pointer.retainTasks(reporter.reported)
         keys.retainTasks(reporter.reported)
+        text.retainTasks(reporter.reported)
     }
 
     /**
