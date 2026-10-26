@@ -36,6 +36,7 @@ fn missing_files() -> AndroidVmConfig {
         page_reporting_order: 9,
         console_pipe: None,
         image_version: None,
+        hosting_process_name_suffix: None,
     }
 }
 
