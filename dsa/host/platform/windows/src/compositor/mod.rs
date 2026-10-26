@@ -10,7 +10,8 @@
 //! renderer copy each task's frames, on the GPU, into a texture the window host shows
 //! ([`frames`], [`present`]). When the user closes a window, the guest is asked to end its
 //! task. The mouse, touch and pen input in a window goes from the window host to the service
-//! itself, without passing through the window manager.
+//! itself, without passing through the window manager. While no task window is open, it gives
+//! back the memory it is not using ([`trim`]).
 
 pub mod adapter;
 pub mod display_gpu;
@@ -21,33 +22,37 @@ pub mod present;
 pub mod shutdown;
 pub mod single_instance;
 pub mod tasks;
+pub mod trim;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::{
     GraphicsRenderer, GraphicsStreamKind, StreamTracker, GRAPHICS_COMMAND_PORT,
     GRAPHICS_PROCESS_PIPE_PORT,
 };
 use dsa_host_core::host_api::HostApiClient;
+use dsa_host_core::memory::{IdleTrim, IDLE_TRIM_DELAY};
 use dsa_host_core::session::SessionState;
 use dsa_transport::local::PeerIgnoringListener;
 use dsa_transport::{Connector, Listener, TransportError};
 
 use self::adapter::{DisplayPresenter, DisplaySink};
 use self::frames::FrameRouter;
-use self::hosts::{HostLauncher, ManagerSetup};
+use self::hosts::{HostLauncher, ManagerEvent, ManagerSetup};
 use self::log::{note, CompositorLogger};
 use self::present::Gpu;
 use self::single_instance::DEFAULT_MUTEX_NAME;
 use crate::guid::Guid;
 use crate::hvsocket::RawHvSocketListener;
 use crate::pipe::{current_user_only_sddl, NamedPipeConnector, NamedPipeListener};
+use crate::start_menu::StartMenuSetup;
 use crate::vm_listener::{BindFn, VmBoundListener, VmIdSlot};
+use dsa_host_core::tasks::{AppInfo, TaskEvent};
 
 /// Configuration for the user-session compositor.
 #[derive(Debug, Clone)]
@@ -96,6 +101,20 @@ pub struct Compositor {
     /// Starts each app's window host.
     launcher: Option<Box<dyn HostLauncher>>,
     windows: Arc<Mutex<Vec<i32>>>,
+    /// Where the apps' Start menu shortcuts go, when they are kept.
+    start_menu: Option<StartMenuSetup>,
+}
+
+/// The installed apps an event from the watch of the tasks carries, if it carries them.
+pub fn installed_in(event: &ManagerEvent) -> Option<Vec<AppInfo>> {
+    match event {
+        ManagerEvent::Sync(current) => current.iter().find_map(|event| match event {
+            TaskEvent::Installed(apps) => Some(apps.clone()),
+            _ => None,
+        }),
+        ManagerEvent::Task(TaskEvent::Installed(apps)) => Some(apps.clone()),
+        _ => None,
+    }
 }
 
 /// Opens the listener the app window hosts connect to.
@@ -157,6 +176,7 @@ impl Compositor {
             host_listener: Some(session_host_listener()),
             launcher: None,
             windows: Arc::new(Mutex::new(Vec::new())),
+            start_menu: crate::start_menu::StartMenuSetup::default_for_user(),
         }
     }
 
@@ -181,7 +201,15 @@ impl Compositor {
             host_listener: None,
             launcher: None,
             windows: Arc::new(Mutex::new(Vec::new())),
+            start_menu: None,
         }
+    }
+
+    /// Keeps a Start menu shortcut for each app installed in the user's Android, as `setup`
+    /// says where. [`Compositor::new`] keeps the user's own Start menu.
+    pub fn with_start_menu(mut self, setup: StartMenuSetup) -> Compositor {
+        self.start_menu = Some(setup);
+        self
     }
 
     /// Takes the app window hosts' connections from `listener`, and starts each app's window
@@ -515,6 +543,30 @@ impl Compositor {
             .map_err(|e| log(&format!("could not take the app windows' connections: {e}")))
             .ok();
 
+        // The Start menu follows the installed apps on a thread of its own, since making the
+        // apps' programs and shortcuts takes a while and the windows must not wait on it.
+        let mut start_menu = None;
+        let mut installed_tx = None;
+        if let Some(setup) = self.start_menu.take() {
+            let (tx, rx) = mpsc::channel();
+            let menu_logger = self.logger.clone();
+            start_menu = thread::Builder::new()
+                .name("dsa-wm-start-menu".into())
+                .spawn(move || crate::start_menu::keep(rx, setup, menu_logger))
+                .map_err(|e| log(&format!("could not start the Start menu's thread: {e}")))
+                .ok();
+            installed_tx = Some(tx);
+        }
+        let idle = Arc::new(Mutex::new(IdleTrim::new(IDLE_TRIM_DELAY, Instant::now())));
+        let trim_idle = Arc::clone(&idle);
+        let trim_stop = Arc::clone(&manager_stop);
+        let trim_logger = self.logger.clone();
+        let trimmer = thread::Builder::new()
+            .name("dsa-wm-trim".into())
+            .spawn(move || trim::run(trim_idle, trim_stop, trim_logger))
+            .map_err(|e| log(&format!("could not start the idle memory trim: {e}")))
+            .ok();
+
         let watch_events = events_tx.clone();
         let watch_connector = (self.local_api_connector)();
         let watch_stop = Arc::clone(stop);
@@ -524,7 +576,13 @@ impl Compositor {
             .spawn(move || {
                 tasks::watch(
                     watch_connector,
-                    |event| watch_events.send(event).is_ok(),
+                    |event| {
+                        if let (Some(tx), Some(apps)) = (&installed_tx, installed_in(&event)) {
+                            let _ = tx.send(apps);
+                        }
+                        note_tasks(&idle, &event);
+                        watch_events.send(event).is_ok()
+                    },
                     watch_stop,
                     watch_logger,
                 )
@@ -550,11 +608,23 @@ impl Compositor {
 
         TaskWindowThreads {
             stop: Some(manager_stop),
-            threads: [manager, acceptor, watcher, requester]
+            threads: [manager, acceptor, watcher, requester, trimmer, start_menu]
                 .into_iter()
                 .flatten()
                 .collect(),
         }
+    }
+}
+
+/// Tells the idle memory trim which task windows are open.
+fn note_tasks(idle: &Mutex<IdleTrim>, event: &ManagerEvent) {
+    let mut idle = idle.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    match event {
+        ManagerEvent::Sync(events) => idle.sync(events, now),
+        ManagerEvent::Task(event) => idle.task_event(Some(event), now),
+        ManagerEvent::Lost => idle.task_event(None, now),
+        _ => {}
     }
 }
 

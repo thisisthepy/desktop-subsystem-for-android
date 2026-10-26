@@ -175,6 +175,7 @@ dependencies = [
  "dsa-host-unix",
  "dsa-host-windows",
  "dsa-transport",
+ "serde_json",
 ]
 
 [[package]]

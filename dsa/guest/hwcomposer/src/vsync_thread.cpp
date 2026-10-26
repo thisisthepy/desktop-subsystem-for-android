@@ -25,8 +25,23 @@ void sleepUntil(int64_t nanos) {
 
 }  // namespace
 
-VsyncThread::VsyncThread(int32_t periodNanos, std::function<void(int64_t)> onVsync)
-    : mPeriodNanos(periodNanos), mOnVsync(std::move(onVsync)), mThread([this] { run(); }) {}
+int64_t nextVsyncAfter(int64_t previous, int64_t now, int32_t periodNanos) {
+    if (periodNanos <= 0) {
+        return now;
+    }
+    int64_t next = previous + periodNanos;
+    if (next <= now) {
+        next += ((now - next) / periodNanos + 1) * periodNanos;
+    }
+    return next;
+}
+
+VsyncThread::VsyncThread(int32_t periodNanos, std::function<void(int64_t)> onVsync,
+                         std::function<void()> onStart)
+    : mPeriodNanos(periodNanos),
+      mOnVsync(std::move(onVsync)),
+      mOnStart(std::move(onStart)),
+      mThread([this] { run(); }) {}
 
 VsyncThread::~VsyncThread() {
     {
@@ -46,26 +61,24 @@ void VsyncThread::setEnabled(bool enabled) {
 }
 
 void VsyncThread::run() {
-    int64_t next = nowNanos();
+    if (mOnStart) {
+        mOnStart();
+    }
+    int64_t last = nowNanos();
     for (;;) {
         {
             std::unique_lock<std::mutex> lock(mMutex);
             if (!mEnabled && !mStopping) {
                 mWake.wait(lock, [this] { return mEnabled || mStopping; });
-                // Keep the ticks on the period's grid, but do not replay the missed ones.
-                const int64_t now = nowNanos();
-                next += ((now - next) / mPeriodNanos + 1) * mPeriodNanos;
             }
             if (mStopping) {
                 return;
             }
         }
-        next += mPeriodNanos;
-        const int64_t now = nowNanos();
-        if (next < now) {
-            next += ((now - next) / mPeriodNanos + 1) * mPeriodNanos;
-        }
+        // On the period's grid, skipping whatever was missed while disabled or descheduled.
+        const int64_t next = nextVsyncAfter(last, nowNanos(), mPeriodNanos);
         sleepUntil(next);
+        last = next;
         bool enabled;
         {
             std::lock_guard<std::mutex> lock(mMutex);

@@ -575,6 +575,10 @@ impl Manager {
                 }
                 let changes = self.windows.apply(&event);
                 self.change(changes, now);
+                // A task that took a size its window gave it live outside a drag (a
+                // maximise, a snap) is reconfigured for it now, at a size it has.
+                let requests = self.windows.reconfigures(now);
+                self.request(requests);
             }
             ManagerEvent::Lost => {
                 let changes = self.windows.reset();
@@ -684,6 +688,10 @@ impl Manager {
         // A window whose task did not take the size it asked for takes the task's size.
         let changes = self.windows.tick(Instant::now());
         self.change(changes, Instant::now());
+        // A task that never took the size it was given live is reconfigured at the size it
+        // stayed at, which its window has gone back to.
+        let requests = self.windows.reconfigures(Instant::now());
+        self.request(requests);
         let (failed, actions) = self.hosts.tick(Instant::now());
         for (package, tasks) in failed {
             self.log(&format!(

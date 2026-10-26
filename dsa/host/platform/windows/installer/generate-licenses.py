@@ -562,6 +562,23 @@ It incorporates or links against the following third-party components:
   Licensed under the MIT License.
 """
 
+SETTINGS_APP_NOTICE = """DSA Settings
+
+The settings app (settings\\DsaSettings.exe) is developed as part of Desktop Subsystem for
+Android and is licensed under the Apache License, Version 2.0. It is a self-contained WPF
+app: its folder carries the runtime it is built on.
+
+It incorporates the following third-party components:
+- .NET runtime and WPF (8.0):
+  Licensed under the MIT License. Source code: https://github.com/dotnet/runtime and
+  https://github.com/dotnet/wpf
+- WPF UI (3.0.5), Windows 11 style controls for WPF:
+  Copyright (c) 2021-2024 Leszek Pomianowski and WPF UI Contributors.
+  Licensed under the MIT License. Source code: https://github.com/lepoco/wpfui
+
+The MIT License text is in mit.txt.
+"""
+
 GFXSTREAM_NOTICE = """gfxstream Graphics Remoting Transport
 
 Desktop Subsystem for Android includes patches and components from the Android Open Source
@@ -731,6 +748,7 @@ def generate_bundle(workspace_dir: Path, out_dir: Path, master_notice: Path | No
     (out_dir / "kernel-GPL-2.0.txt").write_text(KERNEL_GPL_TEXT, encoding="utf-8")
     (out_dir / "wix-MS-RL.txt").write_text(WIX_MSRL_TEXT, encoding="utf-8")
     (out_dir / "setup-ui.txt").write_text(SETUP_UI_NOTICE, encoding="utf-8")
+    (out_dir / "settings-app.txt").write_text(SETTINGS_APP_NOTICE, encoding="utf-8")
     (out_dir / "gfxstream.txt").write_text(GFXSTREAM_NOTICE, encoding="utf-8")
     (out_dir / "aosp-notice.txt").write_text(AOSP_NOTICE, encoding="utf-8")
     (out_dir / "apache-2.0.txt").write_text(APACHE_2_0_TEXT, encoding="utf-8")
@@ -782,7 +800,12 @@ def generate_bundle(workspace_dir: Path, out_dir: Path, master_notice: Path | No
         "   - License: Apache License 2.0, GNU General Public License v2.0, BSD, MIT",
         "   - Detailed attribution notices: carried alongside each image release asset",
         "",
-        "5. Rust Host Binaries and Crate Dependencies",
+        "5. Settings App (settings\\DsaSettings.exe)",
+        "   - .NET runtime and WPF, WPF UI (lepoco/wpfui)",
+        "   - License: MIT License",
+        "   - Full details: see licenses/settings-app.txt",
+        "",
+        "6. Rust Host Binaries and Crate Dependencies",
         "   - Full list of all Rust dependencies, versions and licenses:",
         "",
     ]

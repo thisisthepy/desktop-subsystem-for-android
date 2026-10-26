@@ -33,8 +33,12 @@ use dsa_transport::{Connection, Connector, TransportError};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{InputEvent, PointerEvent};
 use crate::keys::KeyEvent;
+use crate::memory::{
+    snapshot_from_wire, snapshot_to_wire, GuestMemoryReport, HostMemory, MemorySnapshot,
+};
 use crate::resize_trace::{self, detail_requested, ResizeTrace, DETAIL_ENV};
 use crate::session::{Session, SessionError, SessionState};
+use crate::settings::{Settings, SettingsStore};
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskWatch};
 
 /// One user's Android, as the service drives it.
@@ -64,26 +68,29 @@ pub trait UserAndroid: Send + Sync {
             "this Android does not take requests about its tasks".into(),
         ))
     }
-    /// Passes pointer input in a task's window to this Android.
-    fn pointer(&self, event: &PointerEvent) -> Result<(), TaskRequestError> {
-        let _ = event;
-        Err(TaskRequestError::Failed(
-            "this Android does not take pointer input".into(),
-        ))
-    }
+    /// Passes pointer input in a task's window to this Android. Required, with key and text
+    /// input, so a wrapper around another Android cannot silently drop input by not
+    /// forwarding it.
+    fn pointer(&self, event: &PointerEvent) -> Result<(), TaskRequestError>;
     /// Passes a key pressed or released in a task's window to this Android.
-    fn key(&self, event: &KeyEvent) -> Result<(), TaskRequestError> {
-        let _ = event;
+    fn key(&self, event: &KeyEvent) -> Result<(), TaskRequestError>;
+    /// Passes text composed or committed in a task's window to this Android.
+    fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError>;
+    /// The last report of how this Android uses its memory, if it has sent one since it
+    /// started.
+    fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        None
+    }
+    /// Asks this Android for a memory report now.
+    fn request_guest_memory(&self) -> Result<(), TaskRequestError> {
         Err(TaskRequestError::Failed(
-            "this Android does not take key input".into(),
+            "this Android does not report its memory".into(),
         ))
     }
-    /// Passes text composed or committed in a task's window to this Android.
-    fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError> {
-        let _ = event;
-        Err(TaskRequestError::Failed(
-            "this Android does not take text input".into(),
-        ))
+    /// Lets this Android be frozen once it has been in Doze a while (`on`), or never, as the
+    /// user's freeze setting says.
+    fn freeze_when_idle(&self, on: bool) {
+        let _ = on;
     }
     /// Freezes this Android until a task window is shown again.
     fn freeze(&self) -> Result<(), TaskRequestError> {
@@ -133,6 +140,15 @@ impl UserAndroid for Session {
     }
     fn freeze(&self) -> Result<(), TaskRequestError> {
         Session::freeze(self).map_err(request_error)
+    }
+    fn freeze_when_idle(&self, on: bool) {
+        Session::freeze_when_idle(self, on)
+    }
+    fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        Session::guest_memory(self)
+    }
+    fn request_guest_memory(&self) -> Result<(), TaskRequestError> {
+        Session::request_guest_memory(self).map_err(request_error)
     }
 }
 
@@ -330,6 +346,7 @@ fn event_to_wire(event: TaskEvent) -> types::TaskEvent {
             display_id,
         }),
         TaskEvent::App(app) => Event::App(app_to_wire(app)),
+        TaskEvent::Installed(apps) => Event::Installed(installed_to_wire(Some(apps))),
         TaskEvent::ImeCursor { task_id, cursor } => Event::ImeCursor(types::ImeCursor {
             task_id,
             cursor: Some(types::Rect {
@@ -355,6 +372,7 @@ fn event_from_wire(event: types::TaskEvent) -> Option<TaskEvent> {
             display_id: frames.display_id,
         },
         Event::App(app) => TaskEvent::App(app_from_wire(app)),
+        Event::Installed(installed) => TaskEvent::Installed(installed_from_wire(installed)?),
         Event::ImeCursor(cursor) => {
             let rect = cursor.cursor.unwrap_or_default();
             TaskEvent::ImeCursor {
@@ -385,14 +403,42 @@ fn tasks_to_wire(events: Vec<TaskEvent>) -> types::Tasks {
                 display_id,
             }),
             TaskEvent::App(app) => tasks.apps.push(app_to_wire(app)),
+            TaskEvent::Installed(apps) => tasks.installed = Some(installed_to_wire(Some(apps))),
             TaskEvent::Removed { .. } | TaskEvent::ImeCursor { .. } => {}
         }
     }
     tasks
 }
 
+/// The installed apps on the wire; `None` when the Android has not said which it has.
+fn installed_to_wire(apps: Option<Vec<AppInfo>>) -> types::InstalledApps {
+    types::InstalledApps {
+        known: apps.is_some(),
+        apps: apps
+            .unwrap_or_default()
+            .into_iter()
+            .map(app_to_wire)
+            .collect(),
+    }
+}
+
+fn installed_from_wire(installed: types::InstalledApps) -> Option<Vec<AppInfo>> {
+    installed
+        .known
+        .then(|| installed.apps.into_iter().map(app_from_wire).collect())
+}
+
+/// The installed apps among `events`, if the Android has said which it has.
+fn installed_of(events: Vec<TaskEvent>) -> Option<Vec<AppInfo>> {
+    events.into_iter().find_map(|event| match event {
+        TaskEvent::Installed(apps) => Some(apps),
+        _ => None,
+    })
+}
+
 fn tasks_from_wire(tasks: types::Tasks) -> TaskList {
     TaskList {
+        installed: tasks.installed.and_then(installed_from_wire),
         tasks: tasks.tasks.into_iter().map(task_from_wire).collect(),
         frames: tasks
             .frames
@@ -419,14 +465,41 @@ fn from_wire(state: i32) -> Option<SessionState> {
     }
 }
 
+/// What the service tells a client about itself with the settings, which no client changes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServiceFacts {
+    /// The version of DSA the service runs.
+    pub version: String,
+    /// The folder the service writes its log to, if it keeps one.
+    pub log_dir: Option<String>,
+    /// Whether this installation can update DSA itself.
+    pub program_updates_available: bool,
+    /// Whether this installation can download new Android images.
+    pub image_updates_available: bool,
+}
+
+/// The settings as the service reported them, with what it says about itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingsReport {
+    pub settings: Settings,
+    pub facts: ServiceFacts,
+}
+/// How long the service waits for the fresh memory report it asks Android for.
+const MEMORY_WAIT: Duration = Duration::from_secs(3);
+
 /// The service end of the local API.
 pub struct HostApiService {
     androids: Arc<dyn UserAndroids>,
     program: Option<Arc<dyn UpdateProgram>>,
+    settings: Option<(Arc<dyn SettingsStore>, ServiceFacts)>,
     hello: types::Hello,
     handshake_timeout: Duration,
     /// Logs when each resize was handed to Android, and how long that took.
     resize_trace: Mutex<ResizeTrace>,
+    /// Measures the host processes of each user's Android for `dsa memory`.
+    host_memory: Option<Arc<dyn HostMemory>>,
+    /// How long `dsa memory` waits for the fresh report it asks Android for.
+    memory_wait: Duration,
 }
 
 impl HostApiService {
@@ -434,13 +507,29 @@ impl HostApiService {
         HostApiService {
             androids,
             program: None,
+            settings: None,
             hello: local_hello(Role::Service, build),
             handshake_timeout: Duration::from_secs(5),
             resize_trace: Mutex::new(ResizeTrace::new(
                 detail_requested(std::env::var(DETAIL_ENV).ok().as_deref(), false),
                 Instant::now(),
             )),
+            host_memory: None,
+            memory_wait: MEMORY_WAIT,
         }
+    }
+
+    /// Measures the host processes of each user's Android with `host_memory`, for
+    /// `dsa memory`.
+    pub fn with_host_memory(mut self, host_memory: Arc<dyn HostMemory>) -> HostApiService {
+        self.host_memory = Some(host_memory);
+        self
+    }
+
+    /// Waits at most `wait` for the fresh memory report `dsa memory` asks Android for.
+    pub fn with_memory_wait(mut self, wait: Duration) -> HostApiService {
+        self.memory_wait = wait;
+        self
     }
 
     /// Turns on the per-stage resize trace lines, as when the file that asks for them is
@@ -456,6 +545,16 @@ impl HostApiService {
     /// The service that answers `dsa update` with `program`.
     pub fn with_program_updates(mut self, program: Arc<dyn UpdateProgram>) -> HostApiService {
         self.program = Some(program);
+        self
+    }
+
+    /// The service that keeps the settings in `store` and reports `facts` with them.
+    pub fn with_settings(
+        mut self,
+        store: Arc<dyn SettingsStore>,
+        facts: ServiceFacts,
+    ) -> HostApiService {
+        self.settings = Some((store, facts));
         self
     }
 
@@ -703,6 +802,15 @@ impl HostApiService {
                     .into(),
             ),
             Some(request::Body::UpdateProgram(_)) => self.update_program(peer),
+            Some(request::Body::GetSettings(_)) => self.get_settings(peer),
+            Some(request::Body::SetSettings(set)) => self.set_settings(peer, set),
+            Some(request::Body::GetMemory(_)) => match self.androids.android(&peer.user) {
+                Err(why) => error(ErrorCode::Unavailable, why),
+                Ok(android) => {
+                    let memory = self.memory_of(&peer.user, &*android);
+                    response::Body::Memory(snapshot_to_wire(&memory))
+                }
+            },
             Some(request::Body::GetVmId(_)) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => response::Body::VmId(types::VmId {
@@ -716,6 +824,14 @@ impl HostApiService {
                         .watch_tasks()
                         .map(|watch| watch.current)
                         .unwrap_or_default(),
+                )),
+            },
+            Some(request::Body::ListApps(_)) => match self.androids.android(&peer.user) {
+                Err(why) => error(ErrorCode::Unavailable, why),
+                Ok(android) => response::Body::InstalledApps(installed_to_wire(
+                    android
+                        .watch_tasks()
+                        .and_then(|watch| installed_of(watch.current)),
                 )),
             },
             Some(request::Body::CloseTask(close)) => self.request(
@@ -772,6 +888,7 @@ impl HostApiService {
                         request::Body::UpdateProgram(_)
                         | request::Body::GetVmId(_)
                         | request::Body::ListTasks(_)
+                        | request::Body::ListApps(_)
                         | request::Body::WatchTasks(_)
                         | request::Body::CloseTask(_)
                         | request::Body::LaunchApp(_)
@@ -779,6 +896,9 @@ impl HostApiService {
                         | request::Body::SetTaskDensity(_)
                         | request::Body::SetWindowsShown(_)
                         | request::Body::FreezeSession(_)
+                        | request::Body::GetSettings(_)
+                        | request::Body::SetSettings(_)
+                        | request::Body::GetMemory(_)
                         | request::Body::StreamInput(_) => unreachable!("answered above"),
                     }
                     status(android.as_ref())
@@ -843,6 +963,32 @@ impl HostApiService {
         }
     }
 
+    /// The memory of `user`'s Android now. A running Android is asked for a fresh report,
+    /// which is waited for a moment; a slow one leaves the last report in its place.
+    pub fn memory_of(&self, user: &str, android: &dyn UserAndroid) -> MemorySnapshot {
+        let before = android.guest_memory().map(|report| report.age);
+        if android.request_guest_memory().is_ok() {
+            let deadline = Instant::now() + self.memory_wait;
+            while Instant::now() < deadline {
+                let now = android.guest_memory().map(|report| report.age);
+                // A report younger than the one before arrived since the request.
+                if now.is_some_and(|age| before.is_none_or(|before| age < before)) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+        let vm_id = android.vm_id();
+        MemorySnapshot {
+            guest: android.guest_memory(),
+            host: self
+                .host_memory
+                .as_ref()
+                .map(|host| host.processes(user, vm_id.as_deref()))
+                .unwrap_or_default(),
+        }
+    }
+
     fn update_program(&self, peer: &Peer) -> response::Body {
         let Some(program) = &self.program else {
             return error(
@@ -858,6 +1004,126 @@ impl HostApiService {
             }),
             Err(why) => error(ErrorCode::UpdateFailed, why),
         }
+    }
+}
+
+impl HostApiService {
+    fn no_settings() -> response::Body {
+        error(
+            ErrorCode::Unavailable,
+            "this service keeps no settings; update the service".into(),
+        )
+    }
+
+    fn get_settings(&self, peer: &Peer) -> response::Body {
+        let Some((store, facts)) = &self.settings else {
+            return Self::no_settings();
+        };
+        match store.get(&peer.user) {
+            Ok(settings) => response::Body::Settings(settings_to_wire(&settings, facts)),
+            Err(why) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
+    fn set_settings(&self, peer: &Peer, set: types::SetSettings) -> response::Body {
+        let Some((store, facts)) = &self.settings else {
+            return Self::no_settings();
+        };
+        let Some(wanted) = set.settings else {
+            return error(
+                ErrorCode::InvalidSetting,
+                "the request carries no settings".into(),
+            );
+        };
+        let wanted = Settings {
+            render_gpu: wanted.render_gpu,
+            freeze: wanted.freeze,
+            program_updates: wanted.program_updates,
+            image_updates: wanted.image_updates,
+        };
+        // The update settings apply to every user of the machine, so only an administrator
+        // may change them; the caller's own settings are theirs to change.
+        let machine = store.machine();
+        let changed: Vec<&str> = [
+            (
+                "program updates",
+                wanted.program_updates != machine.program_updates,
+            ),
+            (
+                "image updates",
+                wanted.image_updates != machine.image_updates,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(name, changed)| changed.then_some(name))
+        .collect();
+        if !changed.is_empty() && !peer.administrator {
+            return error(
+                ErrorCode::NotAllowed,
+                format!(
+                    "only an administrator can change this setting ({}); it applies to every \
+                     user of this computer. Run the command as an administrator.",
+                    changed.join(", ")
+                ),
+            );
+        }
+        match store.set(&peer.user, &wanted) {
+            Ok(settings) => {
+                // The caller's Android follows the freeze setting at once.
+                if let Ok(android) = self.androids.android(&peer.user) {
+                    android.freeze_when_idle(settings.freeze);
+                }
+                eprintln!(
+                    "local API: {} changed the settings: render GPU {}, freeze {}, program \
+                     updates {}, image updates {}",
+                    peer.user,
+                    settings.render_gpu,
+                    on_off(settings.freeze),
+                    on_off(settings.program_updates),
+                    on_off(settings.image_updates)
+                );
+                response::Body::Settings(settings_to_wire(&settings, facts))
+            }
+            Err(why) => error(ErrorCode::InvalidSetting, why),
+        }
+    }
+}
+
+fn on_off(value: bool) -> &'static str {
+    if value {
+        "on"
+    } else {
+        "off"
+    }
+}
+
+fn settings_to_wire(settings: &Settings, facts: &ServiceFacts) -> types::Settings {
+    types::Settings {
+        render_gpu: settings.render_gpu.clone(),
+        freeze: settings.freeze,
+        program_updates: settings.program_updates,
+        image_updates: settings.image_updates,
+        program_updates_available: facts.program_updates_available,
+        image_updates_available: facts.image_updates_available,
+        version: facts.version.clone(),
+        log_dir: facts.log_dir.clone().unwrap_or_default(),
+    }
+}
+
+fn settings_from_wire(settings: types::Settings) -> SettingsReport {
+    SettingsReport {
+        settings: Settings {
+            render_gpu: settings.render_gpu,
+            freeze: settings.freeze,
+            program_updates: settings.program_updates,
+            image_updates: settings.image_updates,
+        },
+        facts: ServiceFacts {
+            version: settings.version,
+            log_dir: Some(settings.log_dir).filter(|dir| !dir.is_empty()),
+            program_updates_available: settings.program_updates_available,
+            image_updates_available: settings.image_updates_available,
+        },
     }
 }
 
@@ -895,13 +1161,19 @@ pub struct TaskList {
     pub frames: Vec<(i32, u32)>,
     /// The name and icon of each app that has a task, in package order.
     pub apps: Vec<AppInfo>,
+    /// The apps installed in the Android that a launcher lists, in package order; `None`
+    /// until it has said which.
+    pub installed: Option<Vec<AppInfo>>,
 }
 
 impl TaskList {
-    /// The events that bring an empty list of tasks to this one: every app, then every
-    /// task, then every task's display.
+    /// The events that bring an empty list of tasks to this one: the installed apps when
+    /// they are known, then every app, then every task, then every task's display.
     pub fn events(&self) -> Vec<TaskEvent> {
-        let apps = self.apps.iter().cloned().map(TaskEvent::App);
+        let installed = self.installed.clone().map(TaskEvent::Installed);
+        let apps = installed
+            .into_iter()
+            .chain(self.apps.iter().cloned().map(TaskEvent::App));
         let tasks = self.tasks.iter().cloned().map(TaskEvent::Updated);
         let frames = self
             .frames
@@ -1019,11 +1291,102 @@ impl HostApiClient {
         }
     }
 
+    /// How much memory the caller's Android takes, in the guest and on the host. The service
+    /// asks Android for a fresh report first, so this takes a moment.
+    pub fn memory(&mut self) -> Result<MemorySnapshot, ClientError> {
+        let timeout = self.timeout + MEMORY_WAIT;
+        match self.exchange(request::Body::GetMemory(types::GetMemory {}), timeout)? {
+            response::Body::Memory(memory) => Ok(snapshot_from_wire(memory)),
+            _ => Err(ClientError::Malformed(
+                "expected the memory of the caller's Android".into(),
+            )),
+        }
+    }
+
     /// The app tasks of the caller's Android.
     pub fn tasks(&mut self) -> Result<TaskList, ClientError> {
         match self.exchange(request::Body::ListTasks(types::ListTasks {}), self.timeout)? {
             response::Body::Tasks(tasks) => Ok(tasks_from_wire(tasks)),
             _ => Err(ClientError::Malformed("expected the list of tasks".into())),
+        }
+    }
+
+    /// The settings of the caller's DSA, with what the service says about itself.
+    pub fn settings(&mut self) -> Result<SettingsReport, ClientError> {
+        match self.exchange(
+            request::Body::GetSettings(types::GetSettings {}),
+            self.timeout,
+        )? {
+            response::Body::Settings(settings) => Ok(settings_from_wire(settings)),
+            _ => Err(ClientError::Malformed("expected the settings".into())),
+        }
+    }
+
+    /// Replaces the settings of the caller's DSA, and returns them as the service now keeps
+    /// them.
+    pub fn set_settings(&mut self, settings: &Settings) -> Result<SettingsReport, ClientError> {
+        let body = request::Body::SetSettings(types::SetSettings {
+            settings: Some(settings_to_wire(settings, &ServiceFacts::default())),
+        });
+        match self.exchange(body, self.timeout)? {
+            response::Body::Settings(settings) => Ok(settings_from_wire(settings)),
+            _ => Err(ClientError::Malformed("expected the settings".into())),
+        }
+    }
+
+    /// The apps installed in the caller's Android that a launcher lists, in package order;
+    /// `None` until it has said which since the service started.
+    pub fn installed_apps(&mut self) -> Result<Option<Vec<AppInfo>>, ClientError> {
+        match self.exchange(request::Body::ListApps(types::ListApps {}), self.timeout)? {
+            response::Body::InstalledApps(installed) => Ok(installed_from_wire(installed)),
+            _ => Err(ClientError::Malformed(
+                "expected the list of installed apps".into(),
+            )),
+        }
+    }
+
+    /// Makes sure the caller's Android is running: starts it when it is stopped, and waits at
+    /// most `timeout` for it to be running, asking every `poll`. `waiting` is called once
+    /// whenever the state it waits through changes, so the caller can show progress. A start
+    /// that fails is an error carrying the reason the service gives.
+    pub fn ensure_running(
+        &mut self,
+        timeout: Duration,
+        poll: Duration,
+        mut waiting: impl FnMut(SessionState),
+    ) -> Result<(), ClientError> {
+        let deadline = Instant::now() + timeout;
+        let mut status = self.status()?;
+        let mut started = false;
+        let mut last = None;
+        loop {
+            match status.state {
+                SessionState::Active | SessionState::Dozing | SessionState::Frozen => return Ok(()),
+                SessionState::Stopped if started => {
+                    return Err(ClientError::Service {
+                        code: ErrorCode::Unavailable,
+                        detail: status
+                            .last_reason
+                            .unwrap_or_else(|| "Android stopped while it was starting".into()),
+                    })
+                }
+                SessionState::Stopped => {
+                    started = true;
+                    status = self.start()?;
+                    continue;
+                }
+                SessionState::Starting | SessionState::Stopping => {}
+            }
+            if last != Some(status.state) {
+                last = Some(status.state);
+                waiting(status.state);
+            }
+            if Instant::now() >= deadline {
+                return Err(ClientError::Transport(TransportError::Timeout));
+            }
+            thread::sleep(poll);
+            // A start asked for while it was stopping goes in once it has stopped.
+            status = self.status()?;
         }
     }
 

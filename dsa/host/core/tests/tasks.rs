@@ -245,6 +245,95 @@ fn nfr5_a_guest_that_dies_closes_every_task_a_client_watches() {
     }
 }
 
+fn installed_app(package: &str, label: &str) -> AppInfo {
+    AppInfo {
+        package_name: package.into(),
+        label: label.into(),
+        icon_png: vec![0x89, b'P', b'N', b'G', label.len() as u8],
+    }
+}
+
+fn describe(agent: &mut Box<dyn Connection>, app: &AppInfo) {
+    send(
+        agent,
+        Body::InstalledApp(control::InstalledApp {
+            package_name: app.package_name.clone(),
+            label: app.label.clone(),
+            icon_png: app.icon_png.clone(),
+        }),
+    );
+}
+
+fn list(agent: &mut Box<dyn Connection>, packages: &[&str]) {
+    send(
+        agent,
+        Body::InstalledApps(control::InstalledApps {
+            package_names: packages.iter().map(|p| p.to_string()).collect(),
+        }),
+    );
+}
+
+#[test]
+fn fr7_the_installed_apps_reach_a_client_that_lists_or_watches_them() {
+    let mut setup = setup();
+    assert_eq!(
+        client(&mut setup.api).installed_apps().unwrap(),
+        None,
+        "unknown until the agent says"
+    );
+    let mut stream = client(&mut setup.api).watch_tasks().expect("watching");
+    assert_eq!(stream.current().installed, None);
+
+    let clock = installed_app("com.example.clock", "Clock");
+    let maps = installed_app("com.example.maps", "Maps");
+    describe(&mut setup.agent, &maps);
+    describe(&mut setup.agent, &clock);
+    list(&mut setup.agent, &["com.example.clock", "com.example.maps"]);
+    assert_eq!(
+        stream.next(WAIT).unwrap(),
+        Some(TaskEvent::Installed(vec![clock.clone(), maps.clone()]))
+    );
+    assert_eq!(
+        client(&mut setup.api).installed_apps().unwrap(),
+        Some(vec![clock.clone(), maps.clone()])
+    );
+
+    // Maps is removed.
+    list(&mut setup.agent, &["com.example.clock"]);
+    assert_eq!(
+        stream.next(WAIT).unwrap(),
+        Some(TaskEvent::Installed(vec![clock.clone()]))
+    );
+
+    // A client that watches later starts from the list.
+    let late = client(&mut setup.api).watch_tasks().expect("watching");
+    assert_eq!(late.current().installed, Some(vec![clock.clone()]));
+    assert_eq!(
+        late.current().events()[0],
+        TaskEvent::Installed(vec![clock])
+    );
+}
+
+#[test]
+fn fr7_the_installed_apps_are_kept_while_android_is_stopped() {
+    let mut setup = setup();
+    let clock = installed_app("com.example.clock", "Clock");
+    describe(&mut setup.agent, &clock);
+    list(&mut setup.agent, &["com.example.clock"]);
+    let deadline = Instant::now() + WAIT;
+    while client(&mut setup.api).installed_apps().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "the list never arrived");
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    setup.agent.close();
+    assert!(setup.session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(
+        client(&mut setup.api).installed_apps().unwrap(),
+        Some(vec![clock])
+    );
+}
+
 #[test]
 fn fr3_an_apps_name_and_icon_reach_a_watching_client_before_its_task() {
     let mut setup = setup();

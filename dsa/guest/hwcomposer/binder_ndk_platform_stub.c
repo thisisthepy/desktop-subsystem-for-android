@@ -18,5 +18,7 @@ bool ABinderProcess_setThreadPoolMaxThreadCount(uint32_t numThreads) { return fa
 void ABinderProcess_startThreadPool(void) {}
 void ABinderProcess_joinThreadPool(void) {}
 void AIBinder_markVintfStability(AIBinder* binder) {}
+void AIBinder_setMinSchedulerPolicy(AIBinder* binder, int policy, int priority) {}
+void AIBinder_setInheritRt(AIBinder* binder, bool inheritRt) {}
 void AIBinder_markVendorStability(AIBinder* binder) {}
 void AIBinder_forceDowngradeToVendorStability(AIBinder* binder) {}

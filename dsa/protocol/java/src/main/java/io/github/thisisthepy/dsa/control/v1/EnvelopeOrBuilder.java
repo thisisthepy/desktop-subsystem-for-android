@@ -206,37 +206,48 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.ImeCursor getImeCursor();
 
   /**
-   * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
-   * @return Whether the screenState field is set.
+   * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
+   * @return Whether the requestGuestMemory field is set.
    */
-  boolean hasScreenState();
+  boolean hasRequestGuestMemory();
   /**
-   * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
-   * @return The screenState.
+   * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
+   * @return The requestGuestMemory.
    */
-  io.github.thisisthepy.dsa.control.v1.ScreenState getScreenState();
+  io.github.thisisthepy.dsa.control.v1.RequestGuestMemory getRequestGuestMemory();
 
   /**
-   * <code>.dsa.control.v1.PowerState power_state = 41;</code>
-   * @return Whether the powerState field is set.
+   * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
+   * @return Whether the guestMemory field is set.
    */
-  boolean hasPowerState();
+  boolean hasGuestMemory();
   /**
-   * <code>.dsa.control.v1.PowerState power_state = 41;</code>
-   * @return The powerState.
+   * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
+   * @return The guestMemory.
    */
-  io.github.thisisthepy.dsa.control.v1.PowerState getPowerState();
+  io.github.thisisthepy.dsa.control.v1.GuestMemory getGuestMemory();
 
   /**
-   * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
-   * @return Whether the deviceIdle field is set.
+   * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+   * @return Whether the installedApp field is set.
    */
-  boolean hasDeviceIdle();
+  boolean hasInstalledApp();
   /**
-   * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
-   * @return The deviceIdle.
+   * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+   * @return The installedApp.
    */
-  io.github.thisisthepy.dsa.control.v1.DeviceIdle getDeviceIdle();
+  io.github.thisisthepy.dsa.control.v1.InstalledApp getInstalledApp();
+
+  /**
+   * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+   * @return Whether the installedApps field is set.
+   */
+  boolean hasInstalledApps();
+  /**
+   * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+   * @return The installedApps.
+   */
+  io.github.thisisthepy.dsa.control.v1.InstalledApps getInstalledApps();
 
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

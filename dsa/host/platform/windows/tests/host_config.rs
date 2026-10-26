@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use dsa_host_windows::host_config::{expand_locations, profile_disk, HostConfig};
+use dsa_host_windows::host_config::{
+    expand_locations, page_reporting_order_for_build, profile_disk, HostConfig,
+};
 
 const MINIMAL: &str = r#"{
   "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
@@ -22,7 +24,7 @@ fn fr2_a_minimal_configuration_gets_working_defaults() {
     let vm = config.vm_config(Some("S-1-5-21-1-2-3-1001")).unwrap();
     assert_eq!(vm.kernel, PathBuf::from(r"C:\Program Files\DSA\vm\bzImage"));
     assert_eq!(vm.memory_mb, 4096);
-    assert_eq!(vm.page_reporting_order, 9);
+    assert!([5, 9].contains(&vm.page_reporting_order));
     assert_eq!(vm.socket_sids, ["S-1-5-21-1-2-3-1001"]);
     vm.to_hcs_document().expect("the defaults make a valid VM");
 }
@@ -43,6 +45,18 @@ fn fr10_freezing_after_a_time_in_doze_is_a_setting() {
     let session = HostConfig::parse(&json).unwrap().session_config();
     assert_eq!(session.doze_delay, Duration::from_secs(5));
     assert_eq!(session.freeze_after, Some(Duration::from_secs(3600)));
+}
+
+#[test]
+fn nfr2_free_pages_are_reported_in_the_smallest_pieces_the_host_takes() {
+    assert_eq!(page_reporting_order_for_build(None), 9);
+    assert_eq!(page_reporting_order_for_build(Some(19045)), 9);
+    assert_eq!(page_reporting_order_for_build(Some(22000)), 5);
+    assert_eq!(page_reporting_order_for_build(Some(26300)), 5);
+    let pinned = MINIMAL.replace("\n}", ",\n  \"page_reporting_order\": 9\n}");
+    let config = HostConfig::parse(&pinned).unwrap();
+    let vm = config.vm_config(Some("S-1-5-21-1-2-3-1001")).unwrap();
+    assert_eq!(vm.page_reporting_order, 9);
 }
 
 #[test]

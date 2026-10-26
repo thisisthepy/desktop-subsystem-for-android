@@ -1458,6 +1458,19 @@ fn fr10_a_freeze_the_user_asks_for_turns_the_screen_off_and_input_thaws_it() {
 }
 
 #[test]
+fn fr10_the_users_freeze_setting_turns_freezing_in_doze_off_and_on() {
+    let (session, mut agent, launcher) = lifecycle_session(Some(Duration::from_millis(100)));
+    session.freeze_when_idle(false);
+    dozing(&session, &mut agent);
+    thread::sleep(Duration::from_millis(400));
+    assert_eq!(session.state(), SessionState::Dozing);
+    assert_eq!(launcher.0.lock().unwrap().freezes, 0);
+
+    session.freeze_when_idle(true);
+    assert!(session.wait_for(SessionState::Frozen, WAIT));
+}
+
+#[test]
 fn fr10_a_guest_that_cannot_be_frozen_stays_as_it_was_and_says_why() {
     let (session, _agent, launcher) = lifecycle_session(None);
     launcher.0.lock().unwrap().cannot_freeze = Some("no pause on this host".into());
