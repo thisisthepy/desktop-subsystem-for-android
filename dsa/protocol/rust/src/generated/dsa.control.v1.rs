@@ -124,6 +124,13 @@ pub struct LaunchApp {
 /// sends the size it has now, not every size it passed through. The agent keeps the task
 /// clear of other tasks, moving it if the new size would overlap one, and reports the
 /// result with TaskUpdated.
+///
+/// `live` is true while the user is still dragging the window's edge. The task then takes
+/// the new size in pixels but keeps the configuration (screen size in dp, smallest width,
+/// orientation) it had when the drag began, so its activities lay out again in the same
+/// frame instead of being recreated for every step. The first ResizeTask with `live`
+/// false, sent when the drag ends even if the size did not change, gives the task the
+/// configuration of its final size.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ResizeTask {
     #[prost(int32, tag = "1")]
@@ -132,6 +139,8 @@ pub struct ResizeTask {
     pub width: u32,
     #[prost(uint32, tag = "3")]
     pub height: u32,
+    #[prost(bool, tag = "4")]
+    pub live: bool,
 }
 /// Host to guest: the task's window is on a monitor of another scale; the task's app draws
 /// at `density_dpi` (160 at a scale of 100%). The host sends the matching ResizeTask right

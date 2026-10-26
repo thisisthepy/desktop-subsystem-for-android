@@ -122,11 +122,14 @@ message LaunchApp {
 }
 
 // The user resized a task's window: asks the caller's Android to give the task the
-// window's client size, in Android display pixels.
+// window's client size, in Android display pixels. `live` is true while the user is still
+// dragging the window's edge: the task takes the size without being reconfigured, and the
+// request with `live` false at the end of the drag reconfigures it once.
 message ResizeTask {
   int32 task_id = 1;
   uint32 width = 2;
   uint32 height = 3;
+  bool live = 4;
 }
 
 // A task's window moved to a monitor of another scale: asks the caller's Android to draw

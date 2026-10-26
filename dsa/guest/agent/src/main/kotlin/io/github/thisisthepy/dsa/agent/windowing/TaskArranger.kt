@@ -3,6 +3,7 @@ package io.github.thisisthepy.dsa.agent.windowing
 import io.github.thisisthepy.dsa.agent.Log
 import io.github.thisisthepy.dsa.agent.requests.ResizeOutcome
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
+import io.github.thisisthepy.dsa.agent.tasks.ScreenDp
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.tasks.TaskSnapshot
 
@@ -23,6 +24,20 @@ import io.github.thisisthepy.dsa.agent.tasks.TaskSnapshot
  * resize is under way, the next one waits for it to land, so the window manager never works
  * through a backlog of sizes the user has already dragged past.
  *
+ * A size the host marks live is a step of a drag the user has not finished. A change of a
+ * task's screen size in dp recreates its activities, which takes far longer than a frame, so
+ * at the first live step the arranger takes the screen size the task's configuration has
+ * then, and every step of the drag gives the task its new bounds while its configuration
+ * keeps that screen size ([TaskActions.resizeTaskLive]); the app only lays itself out again.
+ * The first size that is not live ends the drag, even when it is the size the task already
+ * has: the task takes it and its configuration follows its bounds again
+ * ([TaskActions.endLiveResize]), with the density the host last asked for, so the app is
+ * reconfigured once, at its final size. The end of a drag waits its turn like any size, but
+ * a live size that arrives after it never replaces it. A density that arrives during a drag
+ * ends the hold as well, because a screen size held at the old density would be wrong at the
+ * new one; the next live step holds the screen size the task has by then. A size that is not
+ * live and comes outside a drag is applied as it always was ([TaskActions.resizeTask]).
+ *
  * The window manager may apply a move or a resize later (it queues it behind a running
  * transition), and it does not always call the task stack listener. So the arranger reports
  * a task that is changing at the bounds it is going to; the agent reads the tasks again
@@ -42,10 +57,27 @@ class TaskArranger(
     private class Pending(val target: TaskBounds, var millisLeft: Long, val resize: Boolean)
 
     /** What the host last asked of a task and the arranger has not yet asked the framework. */
-    private class Wanted(var size: Size? = null, var densityDpi: Int? = null)
+    private class Wanted(
+        var size: Size? = null,
+        var densityDpi: Int? = null,
+        /** Whether the latest size is a step of a drag. */
+        var live: Boolean = false,
+        /** Whether a size that ends the task's drag came in; a later live size keeps it. */
+        var endsDrag: Boolean = false,
+    )
 
     private val pending = HashMap<Int, Pending>()
     private val wanted = HashMap<Int, Wanted>()
+
+    /**
+     * Tasks whose window the user is dragging, and the screen size their configuration keeps
+     * meanwhile: null when the framework did not say what it was, and the task is then
+     * resized plainly.
+     */
+    private val dragging = HashMap<Int, ScreenDp?>()
+
+    /** The density the host last asked for each task, which the end of a drag keeps. */
+    private val densities = HashMap<Int, Int>()
 
     /** Tasks the window manager would not move, and the bounds they stayed at. */
     private val stuck = HashMap<Int, TaskBounds>()
@@ -66,9 +98,15 @@ class TaskArranger(
     val checkIntervalMillis: Long
         get() = if (wanted.isNotEmpty() || pending.values.any { it.resize }) RESIZE_CHECK_MILLIS else MOVE_CHECK_MILLIS
 
-    /** The host asked for the task to be [size] pixels. */
-    fun resize(taskId: Int, size: Size) {
-        wanted.getOrPut(taskId) { Wanted() }.size = size
+    /**
+     * The host asked for the task to be [size] pixels: [live] while the user is still
+     * dragging the window's edge.
+     */
+    fun resize(taskId: Int, size: Size, live: Boolean = false) {
+        val want = wanted.getOrPut(taskId) { Wanted() }
+        want.size = size
+        want.live = live
+        if (!live && taskId in dragging) want.endsDrag = true
     }
 
     /** The host asked for the task to draw at [densityDpi]. */
@@ -83,9 +121,14 @@ class TaskArranger(
      */
     fun arrange(apps: List<TaskSnapshot>): Map<Int, TaskBounds> {
         val current = LinkedHashMap<Int, TaskBounds>()
-        for (task in apps) current.putIfAbsent(task.taskId, task.bounds)
+        val screens = HashMap<Int, ScreenDp?>()
+        for (task in apps) {
+            if (current.putIfAbsent(task.taskId, task.bounds) == null) screens[task.taskId] = task.screenDp
+        }
         settle(current)
         wanted.keys.retainAll(current.keys)
+        dragging.keys.retainAll(current.keys)
+        densities.keys.retainAll(current.keys)
 
         val size = try {
             displaySize().also { warnedNoDisplay = false }
@@ -97,20 +140,21 @@ class TaskArranger(
         display = size
         if (size != null) {
             val layout = LinkedHashMap(expected(current))
-            val resized = LinkedHashMap<Int, Int?>()
+            val resized = LinkedHashMap<Int, Wanted>()
             for ((taskId, want) in wanted.entries.toList()) {
-                // One resize at a time: the next waits for this one to land.
+                // One resize at a time: the next waits for this one to land. What it asks
+                // for stays in wanted meanwhile, so the end of a drag is never lost.
                 if (pending[taskId]?.resize == true) continue
                 val now = layout.getValue(taskId)
                 want.size?.let { layout[taskId] = sized(now, it, size) }
-                resized[taskId] = want.densityDpi
+                resized[taskId] = want
                 wanted.remove(taskId)
             }
             val fixed = (stuck.keys + pending.keys) - resized.keys
             val moves = TaskPlacement.plan(layout, size, fixed).associateBy { it.taskId }
-            for ((taskId, densityDpi) in resized) {
+            for ((taskId, want) in resized) {
                 val target = moves[taskId]?.to ?: layout.getValue(taskId)
-                startResize(taskId, current.getValue(taskId), target, densityDpi)
+                startResize(taskId, current.getValue(taskId), target, want, screens[taskId])
             }
             for (move in moves.values) {
                 if (move.taskId !in resized) start(move, size)
@@ -162,9 +206,29 @@ class TaskArranger(
         }
     }
 
-    private fun startResize(taskId: Int, from: TaskBounds, to: TaskBounds, densityDpi: Int?) {
+    /**
+     * Asks the framework for [to], the bounds [want] comes to, in the way the drag calls for:
+     * a live step holds the screen size [screen] the task had when the drag began, the end of
+     * a drag lets the configuration follow the bounds again, and anything else is a plain
+     * resize.
+     */
+    private fun startResize(taskId: Int, from: TaskBounds, to: TaskBounds, want: Wanted, screen: ScreenDp?) {
+        want.densityDpi?.let { densities[taskId] = it }
+        val endsDrag = taskId in dragging && (want.endsDrag || !want.live || want.densityDpi != null)
+        var densityDpi = want.densityDpi
         val outcome = try {
-            actions.resizeTask(taskId, to, densityDpi)
+            when {
+                endsDrag -> {
+                    dragging.remove(taskId)
+                    densityDpi = densities[taskId]
+                    actions.endLiveResize(taskId, to, densityDpi)
+                }
+                want.live && want.densityDpi == null -> {
+                    val held = if (taskId in dragging) dragging[taskId] else screen.also { dragging[taskId] = it }
+                    if (held != null) actions.resizeTaskLive(taskId, to, held) else actions.resizeTask(taskId, to, null)
+                }
+                else -> actions.resizeTask(taskId, to, densityDpi)
+            }
         } catch (e: Exception) {
             log.warn("resizing task $taskId failed", e)
             ResizeOutcome.REFUSED

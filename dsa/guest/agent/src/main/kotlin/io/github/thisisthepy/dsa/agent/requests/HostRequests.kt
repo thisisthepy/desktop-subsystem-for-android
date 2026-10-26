@@ -1,6 +1,7 @@
 package io.github.thisisthepy.dsa.agent.requests
 
 import com.google.protobuf.InvalidProtocolBufferException
+import io.github.thisisthepy.dsa.agent.tasks.ScreenDp
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.windowing.Size
 import io.github.thisisthepy.dsa.control.v1.Envelope
@@ -29,14 +30,35 @@ interface TaskActions {
      * once. It may apply them later. Returns what the framework took.
      */
     fun resizeTask(taskId: Int, bounds: TaskBounds, densityDpi: Int?): ResizeOutcome
+
+    /**
+     * One step of a resize the user is still dragging: asks the window manager to give the
+     * task [bounds] while its configuration keeps the screen size [screen], in one change.
+     * The app then lays itself out again in the new bounds instead of having its activities
+     * recreated for a new configuration at every step. It may apply them later. Returns what
+     * the framework took ([ResizeOutcome.BOUNDS_ONLY]: the bounds, but the screen size
+     * follows them).
+     */
+    fun resizeTaskLive(taskId: Int, bounds: TaskBounds, screen: ScreenDp): ResizeOutcome
+
+    /**
+     * The end of a drag: asks the window manager to give the task [bounds] and to let its
+     * configuration follow them again, with the density [densityDpi] when it is not null,
+     * in one change, so the app is reconfigured once at its final size. It may apply them
+     * later. Returns what the framework took.
+     */
+    fun endLiveResize(taskId: Int, bounds: TaskBounds, densityDpi: Int?): ResizeOutcome
 }
 
 /** What the framework took of a resize. */
 enum class ResizeOutcome {
-    /** The bounds, and the density if one was asked for. */
+    /** The bounds, and the density or screen size if one was asked for. */
     APPLIED,
 
-    /** The bounds, but not the density: the framework has no way to set a task's density. */
+    /**
+     * The bounds, but not the density or the screen size: the framework has no way to set
+     * them for one task.
+     */
     BOUNDS_ONLY,
 
     /** Nothing. */
@@ -50,8 +72,12 @@ sealed interface RequestResult {
     data class Closed(val taskId: Int) : RequestResult
     data class CloseRefused(val taskId: Int, val reason: String) : RequestResult
 
-    /** The host resized the task's window; the task takes [size]. */
-    data class Resize(val taskId: Int, val size: Size) : RequestResult
+    /**
+     * The host resized the task's window; the task takes [size]. [live] while the user is
+     * still dragging the window's edge. The first one with [live] false after a drag ends
+     * the drag, even when [size] is the size the task already has.
+     */
+    data class Resize(val taskId: Int, val size: Size, val live: Boolean = false) : RequestResult
 
     /** The host's window for the task is on a monitor of another scale; it draws at [densityDpi]. */
     data class Density(val taskId: Int, val densityDpi: Int) : RequestResult
@@ -90,8 +116,9 @@ class HostRequests(
         return when (envelope.bodyCase) {
             Envelope.BodyCase.LAUNCH_APP -> launch(envelope.launchApp.packageName)
             Envelope.BodyCase.CLOSE_TASK -> close(envelope.closeTask.taskId)
-            Envelope.BodyCase.RESIZE_TASK ->
-                resize(envelope.resizeTask.taskId, envelope.resizeTask.width, envelope.resizeTask.height)
+            Envelope.BodyCase.RESIZE_TASK -> envelope.resizeTask.let {
+                resize(it.taskId, it.width, it.height, it.live)
+            }
             Envelope.BodyCase.SET_TASK_DENSITY ->
                 density(envelope.setTaskDensity.taskId, envelope.setTaskDensity.densityDpi)
             Envelope.BodyCase.BODY_NOT_SET, null -> RequestResult.Malformed("the frame carries no message")
@@ -113,11 +140,11 @@ class HostRequests(
     }
 
     // The sizes are unsigned on the wire; a value past Int.MAX_VALUE reads as negative here.
-    private fun resize(taskId: Int, width: Int, height: Int): RequestResult = when {
+    private fun resize(taskId: Int, width: Int, height: Int, live: Boolean): RequestResult = when {
         width <= 0 || height <= 0 || width > MAX_LENGTH || height > MAX_LENGTH ->
             RequestResult.Malformed("ResizeTask asks for a size of ${Integer.toUnsignedString(width)}x${Integer.toUnsignedString(height)}")
         !reported(taskId) -> RequestResult.SizeRefused(taskId, "the host was never told about this task")
-        else -> RequestResult.Resize(taskId, Size(width, height))
+        else -> RequestResult.Resize(taskId, Size(width, height), live)
     }
 
     private fun density(taskId: Int, densityDpi: Int): RequestResult = when {

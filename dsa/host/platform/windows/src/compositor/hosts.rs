@@ -575,8 +575,11 @@ impl Manager {
                 self.request(requests);
                 self.change(changes, now);
             }
+            // The sizes asked for while the user drags are live; the end of a drag that
+            // resized the task asks once more, not live, which reconfigures the task.
             FromHost::Dragging { task_id, dragging } => {
-                self.windows.window_dragging(task_id, dragging, now);
+                let requests = self.windows.window_dragging(task_id, dragging, now);
+                self.request(requests);
             }
             FromHost::Focus { .. } => {}
         }
