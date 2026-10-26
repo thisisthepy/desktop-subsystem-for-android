@@ -142,6 +142,11 @@ message Frame {
   uint64 texture_id = 2;
   // Goes up by one with each frame of the task.
   uint64 sequence = 3;
+  // The frame fills only the top-left width x height pixels of the texture, which stays at
+  // the largest size the task can have so that resizing the window does not remake it. 0
+  // means the frame fills the whole texture.
+  uint32 width = 4;
+  uint32 height = 5;
 }
 
 // Window host to window manager: the frame has been copied out of the texture, so the

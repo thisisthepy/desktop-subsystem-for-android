@@ -152,6 +152,7 @@ void TaskComposer::releaseOutputLocked(Output& output) {
         mHost.closeColorBuffer(target);
         target = 0;
     }
+    output.buffers = BufferSize{};
     mHost.destroyDisplay(output.display);
     output.onHost = false;
 }
@@ -169,6 +170,7 @@ void TaskComposer::syncGenerationLocked() {
         output.onHost = false;
         output.announced = false;
         output.targets[0] = output.targets[1] = 0;
+        output.buffers = BufferSize{};
         output.next = 0;
     }
 }
@@ -258,15 +260,22 @@ void TaskComposer::present(Frame& frame) {
                 output.width = width;
                 output.height = height;
             } else if (output.width != width || output.height != height) {
-                // The window was resized: its frames are composed at the new size.
-                for (uint32_t& target : output.targets) {
-                    mHost.closeColorBuffer(target);
-                    target = 0;
-                }
+                // The window was resized: its frames are composed at the new size, into the
+                // same buffers. The display's size tells the host how much of them the frame
+                // fills, and setting it makes nothing on the host.
                 mHost.resizeDisplay(output.display, static_cast<uint32_t>(width),
                                     static_cast<uint32_t>(height));
                 output.width = width;
                 output.height = height;
+            }
+            const BufferSize buffers = taskBufferSize(output.buffers, frame.display, width, height);
+            if (buffers != output.buffers) {
+                // The first frame, a task larger than its buffers, or a larger display.
+                for (uint32_t& target : output.targets) {
+                    mHost.closeColorBuffer(target);
+                    target = 0;
+                }
+                output.buffers = buffers;
             }
             if (!output.announced) {
                 // Before the first post, so the host knows whose frames these are.
@@ -276,8 +285,8 @@ void TaskComposer::present(Frame& frame) {
 
             uint32_t& target = output.targets[output.next];
             if (target == 0) {
-                target = mHost.createColorBuffer(static_cast<uint32_t>(width),
-                                                 static_cast<uint32_t>(height));
+                target = mHost.createColorBuffer(static_cast<uint32_t>(output.buffers.width),
+                                                 static_cast<uint32_t>(output.buffers.height));
             }
             if (target == 0) {
                 continue;

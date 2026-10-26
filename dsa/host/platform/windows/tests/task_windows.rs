@@ -432,7 +432,7 @@ fn fr3_only_a_tasks_own_display_reaches_its_window_and_the_whole_screen_never_do
     // The window host copies the frame into its window's swapchain, presents it and says
     // so; the frame call returns only then.
     let started = Instant::now();
-    sink.frame(3);
+    sink.frame(3, (400, 300));
     assert!(
         started.elapsed() < Duration::from_millis(500),
         "the window host did not answer the frame: {:?}",
@@ -442,13 +442,13 @@ fn fr3_only_a_tasks_own_display_reaches_its_window_and_the_whole_screen_never_do
     assert_eq!(sink.target(4, 400, 300), None, "a task without a window");
     assert_eq!(sink.target(5, 400, 300), None, "a display no task claimed");
 
-    // A frame of another size gets a texture of that size; resizing the window meanwhile
-    // stretches the last frame over it.
+    // A guest buffer of another size gets a texture of that size; resizing the window
+    // meanwhile stretches the last frame over it.
     let resized = sink
         .target(3, 640, 480)
         .expect("a texture for the new size");
     assert_ne!(resized, handle);
-    sink.frame(3);
+    sink.frame(3, (640, 480));
     unsafe {
         SetWindowPos(
             open[0].hwnd as HWND,
@@ -467,6 +467,55 @@ fn fr3_only_a_tasks_own_display_reaches_its_window_and_the_whole_screen_never_do
     wait_for("display 3 to reach nothing", || {
         sink.target(3, 640, 480).is_none().then_some(())
     });
+}
+
+#[test]
+fn fr4_frames_of_a_resizing_task_reuse_one_texture_and_each_is_shown() {
+    let presenter = Arc::new(CapturingPresenter::default());
+    let running = start(Some(Arc::clone(&presenter)));
+    let Some(sink) = presenter.sink.lock().unwrap().clone() else {
+        eprintln!("skipping: no Direct3D 11 device on this machine");
+        return;
+    };
+    running
+        .android
+        .publish(TaskEvent::Updated(task(1, "Clock", 400, 300)));
+    running.android.publish(TaskEvent::Frames {
+        task_id: 1,
+        display_id: 3,
+    });
+    let open = windows_of(&running, 1);
+
+    // The guest keeps the task's buffers at its display's size and draws each frame into
+    // their top-left region, so every frame of the resize comes in the same texture.
+    let handle = wait_for("display 3 to reach task 1's window", || {
+        sink.target(3, 1280, 720)
+    });
+    for step in 0..12u32 {
+        let size = (400 + 10 * step, 300 + 8 * step);
+        resize_to(open[0].hwnd, size.0 as i32 + 16, size.1 as i32 + 39);
+        assert_eq!(
+            sink.target(3, 1280, 720),
+            Some(handle),
+            "a frame of {}x{} made a new texture",
+            size.0,
+            size.1
+        );
+        let started = Instant::now();
+        sink.frame(3, size);
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "the window host did not answer the {}x{} frame: {:?}",
+            size.0,
+            size.1,
+            started.elapsed()
+        );
+    }
+    // A frame that says no size fills the texture, as one from an older guest does.
+    sink.frame(3, (0, 0));
+
+    running.android.publish(TaskEvent::Removed { task_id: 1 });
+    windows_of(&running, 0);
 }
 
 fn resize_to(hwnd: isize, width: i32, height: i32) {
