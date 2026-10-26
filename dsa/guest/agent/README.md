@@ -3,7 +3,8 @@
 The agent: a system app in the guest that tells the host about each app task, so the host
 can show each task as a window of its own, and acts on the host's requests. It is a
 persistent, platform-signed privileged app (`io.github.thisisthepy.dsa.agent`), installed
-by the image in `/system_ext/priv-app/DsaAgent/`. It has no activity: the host is the shell.
+by the image in `/system_ext/priv-app/DsaAgent/`. The host is the shell, so the agent shows
+nothing. Its one activity is the guest's home, which draws nothing (see "The home activity").
 
 ## What it does
 
@@ -130,6 +131,28 @@ dropped.
 Injection rather than a uinput device: a uinput device needs `/dev/uinput` opened by a
 process the SELinux policy allows, which an app is not, and a mouse there reports movement,
 not places. Injection takes each event's place, source, tool and buttons as they are.
+
+## The home activity
+
+Android always keeps a home activity at the bottom of the display, and gives it input focus
+whenever no app task has focus. The guest has no launcher, so the agent declares the home
+activity itself (`platform/HomeActivity.kt`). It is not a launcher: it has no content, its
+theme is transparent, it is not in recents, and it is not in the launcher category, so it
+is in no app list. Its task is a home task, which the agent never reports, so the host shows
+no window for it, and the hwcomposer sends no layer of it, because no app task's bounds
+contain a display-wide layer.
+
+Without it, Android used Settings' fallback home, `FallbackHome`, which runs in the Settings
+process. A window must answer each focus change within 5 seconds. While the Settings
+process was busy, for example starting cold or creating the Settings activity the host had
+launched, `FallbackHome` answered too late. With no dialog to show, the activity manager
+then killed the whole process, and the user's Settings task ended with it. Each restart of
+the process started cold again, so it could repeat.
+
+The agent's home runs in the agent's own process. That process is persistent, so it is
+always running and never starts cold, and its main thread does nothing else, because the
+agent's work runs on a thread of its own. So the home answers at once, and no app's process
+holds the home task.
 
 ## Framework interfaces outside the SDK
 
