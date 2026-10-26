@@ -205,5 +205,27 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.ImeCursor getImeCursor();
 
+  /**
+   * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
+   * @return Whether the requestGuestMemory field is set.
+   */
+  boolean hasRequestGuestMemory();
+  /**
+   * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
+   * @return The requestGuestMemory.
+   */
+  io.github.thisisthepy.dsa.control.v1.RequestGuestMemory getRequestGuestMemory();
+
+  /**
+   * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
+   * @return Whether the guestMemory field is set.
+   */
+  boolean hasGuestMemory();
+  /**
+   * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
+   * @return The guestMemory.
+   */
+  io.github.thisisthepy.dsa.control.v1.GuestMemory getGuestMemory();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

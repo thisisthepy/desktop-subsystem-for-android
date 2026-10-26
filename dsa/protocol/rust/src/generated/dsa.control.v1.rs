@@ -268,12 +268,74 @@ pub struct ImeCursor {
     #[prost(message, optional, tag = "2")]
     pub cursor: ::core::option::Option<Rect>,
 }
+/// Host to guest: asks the agent for a GuestMemory report now, instead of at its next
+/// periodic one.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RequestGuestMemory {}
+/// One guest process's share of the guest's memory.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ProcessMemory {
+    #[prost(int32, tag = "1")]
+    pub pid: i32,
+    /// The process name, as the guest's process list shows it.
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    /// Its proportional set size in KiB: its private pages plus its share of the pages it
+    /// shares with other processes.
+    #[prost(uint64, tag = "3")]
+    pub pss_kb: u64,
+    /// How much of it is swapped out to compressed memory, proportionally, in KiB.
+    #[prost(uint64, tag = "4")]
+    pub swap_pss_kb: u64,
+}
+/// Guest to host, from the agent: how the guest uses its memory. Sent every few minutes, and
+/// in answer to RequestGuestMemory. Sizes are in KiB, as the guest kernel counts them, and 0
+/// when the guest cannot read the value.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GuestMemory {
+    #[prost(uint64, tag = "1")]
+    pub mem_total_kb: u64,
+    #[prost(uint64, tag = "2")]
+    pub mem_free_kb: u64,
+    #[prost(uint64, tag = "3")]
+    pub mem_available_kb: u64,
+    #[prost(uint64, tag = "4")]
+    pub buffers_kb: u64,
+    /// The page cache: file contents kept in memory, which the guest can drop when clean.
+    #[prost(uint64, tag = "5")]
+    pub cached_kb: u64,
+    /// Process memory that no file backs.
+    #[prost(uint64, tag = "6")]
+    pub anon_pages_kb: u64,
+    #[prost(uint64, tag = "7")]
+    pub shmem_kb: u64,
+    /// Kernel caches the kernel can free on demand.
+    #[prost(uint64, tag = "8")]
+    pub slab_reclaimable_kb: u64,
+    #[prost(uint64, tag = "9")]
+    pub swap_total_kb: u64,
+    #[prost(uint64, tag = "10")]
+    pub swap_free_kb: u64,
+    /// Compressed swap (zram): the size of the pages stored in it, and the memory it takes to
+    /// hold them compressed.
+    #[prost(uint64, tag = "11")]
+    pub zram_original_kb: u64,
+    #[prost(uint64, tag = "12")]
+    pub zram_used_kb: u64,
+    /// The proportional set size of the processes the guest's activity manager runs (the apps
+    /// and the system server) together. Native daemons are not counted.
+    #[prost(uint64, tag = "13")]
+    pub total_pss_kb: u64,
+    /// The processes with the largest proportional set size, largest first, at most 10.
+    #[prost(message, repeated, tag = "14")]
+    pub top_processes: ::prost::alloc::vec::Vec<ProcessMemory>,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -317,6 +379,10 @@ pub mod envelope {
         ImeCommit(super::ImeCommit),
         #[prost(message, tag = "19")]
         ImeCursor(super::ImeCursor),
+        #[prost(message, tag = "20")]
+        RequestGuestMemory(super::RequestGuestMemory),
+        #[prost(message, tag = "21")]
+        GuestMemory(super::GuestMemory),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
