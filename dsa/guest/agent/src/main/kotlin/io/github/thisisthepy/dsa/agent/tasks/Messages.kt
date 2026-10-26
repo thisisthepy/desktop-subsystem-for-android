@@ -4,6 +4,8 @@ import com.google.protobuf.ByteString
 import io.github.thisisthepy.dsa.agent.windowing.Size
 import io.github.thisisthepy.dsa.control.v1.AppInfo
 import io.github.thisisthepy.dsa.control.v1.Envelope
+import io.github.thisisthepy.dsa.control.v1.InstalledApp
+import io.github.thisisthepy.dsa.control.v1.InstalledApps
 import io.github.thisisthepy.dsa.control.v1.Rect
 import io.github.thisisthepy.dsa.control.v1.TaskRemoved
 import io.github.thisisthepy.dsa.control.v1.TaskUpdated
@@ -37,6 +39,20 @@ object Messages {
             .setIconPng(ByteString.copyFrom(details.iconPng))
         return Envelope.newBuilder().setAppInfo(info).build().toByteArray()
     }
+
+    fun installedApp(app: LauncherApp): ByteArray {
+        val info = InstalledApp.newBuilder()
+            .setPackageName(app.packageName)
+            .setLabel(app.label)
+            .setIconPng(ByteString.copyFrom(app.iconPng))
+        return Envelope.newBuilder().setInstalledApp(info).build().toByteArray()
+    }
+
+    fun installedApps(packageNames: List<String>): ByteArray =
+        Envelope.newBuilder()
+            .setInstalledApps(InstalledApps.newBuilder().addAllPackageNames(packageNames))
+            .build()
+            .toByteArray()
 
     fun taskRemoved(taskId: Int): ByteArray =
         Envelope.newBuilder().setTaskRemoved(TaskRemoved.newBuilder().setTaskId(taskId)).build().toByteArray()

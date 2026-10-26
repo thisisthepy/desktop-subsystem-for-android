@@ -269,3 +269,124 @@ fn nfr5_a_crashed_android_reports_stopped_and_can_start_again() {
     client.start().unwrap();
     assert_eq!(client.status().unwrap().state, SessionState::Active);
 }
+
+/// An Android that boots for a few status reads before it runs, or fails to boot.
+struct Booting {
+    state: std::sync::Mutex<SessionState>,
+    reads_left: std::sync::Mutex<u32>,
+    fails: bool,
+    starts: std::sync::atomic::AtomicU32,
+}
+
+impl Booting {
+    fn new(state: SessionState, reads: u32, fails: bool) -> Booting {
+        Booting {
+            state: std::sync::Mutex::new(state),
+            reads_left: std::sync::Mutex::new(reads),
+            fails,
+            starts: std::sync::atomic::AtomicU32::new(0),
+        }
+    }
+
+    fn starts(&self) -> u32 {
+        self.starts.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl UserAndroid for Booting {
+    fn state(&self) -> SessionState {
+        let mut state = self.state.lock().unwrap();
+        let mut left = self.reads_left.lock().unwrap();
+        if matches!(*state, SessionState::Starting | SessionState::Stopping) {
+            if *left == 0 {
+                *state = match *state {
+                    SessionState::Starting if self.fails => SessionState::Stopped,
+                    SessionState::Starting => SessionState::Active,
+                    _ => SessionState::Stopped,
+                };
+            } else {
+                *left -= 1;
+            }
+        }
+        *state
+    }
+    fn last_reason(&self) -> Option<String> {
+        self.fails
+            .then(|| "the guest did not start: no disk".to_string())
+    }
+    fn start(&self) {
+        self.starts
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut state = self.state.lock().unwrap();
+        if *state == SessionState::Stopped {
+            *state = SessionState::Starting;
+            *self.reads_left.lock().unwrap() = 3;
+        }
+    }
+    fn stop(&self) {}
+    fn pointer(&self, _: &PointerEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn key(&self, _: &KeyEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn ime(&self, _: &ImeEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+}
+
+fn booting_client(android: Arc<Booting>) -> (HostApiClient, RunningService) {
+    let (listener, mut connector) = local::pair();
+    let androids = Arc::new(PerUser::new(move |_: &str| {
+        Ok(Arc::clone(&android) as Arc<dyn UserAndroid>)
+    }));
+    let service = RunningService::start(Box::new(listener), androids);
+    let client = HostApiClient::connect(&mut connector, "test", WAIT).unwrap();
+    (client, service)
+}
+
+#[test]
+fn fr7_opening_an_app_starts_a_stopped_android_and_waits_until_it_runs() {
+    let android = Arc::new(Booting::new(SessionState::Stopped, 0, false));
+    let (mut client, _service) = booting_client(Arc::clone(&android));
+    let mut seen = Vec::new();
+    client
+        .ensure_running(WAIT, Duration::from_millis(1), |state| seen.push(state))
+        .expect("Android runs");
+    assert_eq!(android.state(), SessionState::Active);
+    assert_eq!(android.starts(), 1);
+    assert_eq!(seen, vec![SessionState::Starting]);
+}
+
+#[test]
+fn fr7_opening_an_app_while_android_runs_starts_nothing() {
+    let android = Arc::new(Booting::new(SessionState::Active, 0, false));
+    let (mut client, _service) = booting_client(Arc::clone(&android));
+    client
+        .ensure_running(WAIT, Duration::from_millis(1), |_| {})
+        .expect("Android runs");
+    assert_eq!(android.starts(), 0);
+}
+
+#[test]
+fn fr7_opening_an_app_while_android_stops_starts_it_again_once_stopped() {
+    let android = Arc::new(Booting::new(SessionState::Stopping, 2, false));
+    let (mut client, _service) = booting_client(Arc::clone(&android));
+    client
+        .ensure_running(WAIT, Duration::from_millis(1), |_| {})
+        .expect("Android runs");
+    assert_eq!(android.state(), SessionState::Active);
+    assert_eq!(android.starts(), 1);
+}
+
+#[test]
+fn fr7_an_android_that_does_not_start_says_why() {
+    let android = Arc::new(Booting::new(SessionState::Stopped, 0, true));
+    let (mut client, _service) = booting_client(android);
+    match client.ensure_running(WAIT, Duration::from_millis(1), |_| {}) {
+        Err(dsa_host_core::host_api::ClientError::Service { detail, .. }) => {
+            assert!(detail.contains("no disk"), "{detail}")
+        }
+        other => panic!("expected the reason, got {other:?}"),
+    }
+}

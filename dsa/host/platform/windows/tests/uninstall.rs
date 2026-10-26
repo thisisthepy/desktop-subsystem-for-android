@@ -91,3 +91,30 @@ fn fr15_a_folder_that_is_not_the_update_folder_is_left_alone() {
         "only a folder named updates"
     );
 }
+
+#[test]
+fn fr7_uninstalling_removes_only_the_start_menu_shortcuts_dsa_made() {
+    use dsa_host_windows::uninstall::remove_start_menu_shortcuts;
+    let root = fresh("start-menu");
+    let programs = root.parent().unwrap().join("Programs");
+    let note = root.parent().unwrap().join("start-menu.json");
+    std::fs::create_dir_all(programs.join("Tools")).unwrap();
+    for file in ["Clock.lnk", "Maps (com.example.maps).lnk", "Paint.lnk"] {
+        std::fs::write(programs.join(file), b"x").unwrap();
+    }
+    std::fs::write(
+        &note,
+        r#"{"shortcuts":{"com.example.clock":"Clock.lnk",
+            "com.example.maps":"Maps (com.example.maps).lnk",
+            "com.example.bad":"..\\Paint.lnk","com.example.dir":"Tools"}}"#,
+    )
+    .unwrap();
+
+    assert_eq!(remove_start_menu_shortcuts(&note, &programs).unwrap(), 2);
+    assert!(programs.join("Paint.lnk").exists(), "not DSA's");
+    assert!(programs.join("Tools").exists(), "not a shortcut");
+    assert!(!programs.join("Clock.lnk").exists());
+    assert!(!note.exists());
+    // A user who never had shortcuts has nothing to remove.
+    assert_eq!(remove_start_menu_shortcuts(&note, &programs).unwrap(), 0);
+}

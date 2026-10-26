@@ -307,7 +307,17 @@
                       Execute="deferred"
                       Impersonate="no"
                       Return="ignore" />
+        <!-- The window manager made a Start menu shortcut for each Android app in each user's
+             profile; they would open nothing once DSA is gone. Only the ones it recorded
+             making are removed. -->
+        <CustomAction Id="RemoveStartMenu"
+                      FileRef="HostdExe"
+                      ExeCommand="remove-start-menu"
+                      Execute="deferred"
+                      Impersonate="no"
+                      Return="ignore" />
         <InstallExecuteSequence>
+            <Custom Action="RemoveStartMenu" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
             <Custom Action="RemoveImages" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
             <Custom Action="RemoveUpdates" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
         </InstallExecuteSequence>
