@@ -762,6 +762,9 @@ pub fn pointer_input_to_stopped_android_is_dropped(make: MakeLocal<'_>) {
     input
         .send(&pointer(4, PointerAction::Down, 1.0))
         .expect("the event is sent");
+    // The service reads the stream on a thread of its own, and nothing answers an input
+    // event, so the test gives it time to drop the first event before Android starts.
+    thread::sleep(Duration::from_millis(300));
     // Once Android runs, the same stream carries input to it.
     connect(&mut *connector).start().unwrap();
     let up = pointer(4, PointerAction::Up, 2.0);
