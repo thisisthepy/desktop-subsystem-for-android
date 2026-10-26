@@ -886,19 +886,16 @@ impl HostApiService {
 }
 
 impl HostApiService {
-    fn settings_store(&self) -> Result<&(Arc<dyn SettingsStore>, ServiceFacts), response::Body> {
-        self.settings.as_ref().ok_or_else(|| {
-            error(
-                ErrorCode::Unavailable,
-                "this service keeps no settings; update the service".into(),
-            )
-        })
+    fn no_settings() -> response::Body {
+        error(
+            ErrorCode::Unavailable,
+            "this service keeps no settings; update the service".into(),
+        )
     }
 
     fn get_settings(&self, peer: &Peer) -> response::Body {
-        let (store, facts) = match self.settings_store() {
-            Ok(found) => found,
-            Err(answer) => return answer,
+        let Some((store, facts)) = &self.settings else {
+            return Self::no_settings();
         };
         match store.get(&peer.user) {
             Ok(settings) => response::Body::Settings(settings_to_wire(&settings, facts)),
@@ -907,9 +904,8 @@ impl HostApiService {
     }
 
     fn set_settings(&self, peer: &Peer, set: types::SetSettings) -> response::Body {
-        let (store, facts) = match self.settings_store() {
-            Ok(found) => found,
-            Err(answer) => return answer,
+        let Some((store, facts)) = &self.settings else {
+            return Self::no_settings();
         };
         let Some(wanted) = set.settings else {
             return error(
