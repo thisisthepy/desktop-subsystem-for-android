@@ -260,6 +260,15 @@ impl UserAndroid for Booting {
         }
     }
     fn stop(&self) {}
+    fn pointer(&self, _: &PointerEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn key(&self, _: &KeyEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn ime(&self, _: &ImeEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
 }
 
 fn booting_client(android: Arc<Booting>) -> (HostApiClient, RunningService) {
