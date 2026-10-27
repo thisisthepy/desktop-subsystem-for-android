@@ -9,6 +9,7 @@ use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::ime::{ImeCursor, ImeEvent};
 use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use dsa_host_core::keys::{keycode, meta, KeyAction, KeyEvent};
+use dsa_host_core::power::{PowerHub, PowerState};
 use dsa_host_core::session::{
     GuestLauncher, Session, SessionConfig, SessionError, SessionEvent, SessionState, StopReason,
 };
@@ -41,6 +42,13 @@ struct Guest {
     secrets: Vec<BootSecret>,
     /// The running boot's secret, as only the guest's daemon would know it.
     secret: Option<BootSecret>,
+    /// Whether the guest's processes are frozen, and how many times they were frozen and
+    /// thawed.
+    frozen: bool,
+    freezes: usize,
+    thaws: usize,
+    /// Set to make freezing fail, as on a host that cannot pause the guest.
+    cannot_freeze: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -112,6 +120,23 @@ impl GuestLauncher for FakeLauncher {
     fn vm_id(&self) -> Option<String> {
         (self.0.lock().unwrap().processes > 0).then(|| "fake-vm".into())
     }
+
+    fn freeze(&mut self) -> Result<(), String> {
+        let mut guest = self.0.lock().unwrap();
+        if let Some(why) = guest.cannot_freeze.clone() {
+            return Err(why);
+        }
+        guest.frozen = true;
+        guest.freezes += 1;
+        Ok(())
+    }
+
+    fn thaw(&mut self) -> Result<(), String> {
+        let mut guest = self.0.lock().unwrap();
+        guest.frozen = false;
+        guest.thaws += 1;
+        Ok(())
+    }
 }
 
 /// A session that checks the agent with the real control protocol handshake.
@@ -121,6 +146,7 @@ fn session_with(launcher: FakeLauncher, connect_timeout: Duration) -> (Session, 
     let config = SessionConfig {
         connect_timeout,
         stop_timeout: WAIT,
+        ..SessionConfig::default()
     };
     (
         Session::new(launcher, Box::new(listener), handshake, config),
@@ -1135,6 +1161,7 @@ fn fr5_pointer_input_does_not_wait_for_the_session_to_stop_reading_the_channel()
         SessionConfig {
             connect_timeout: WAIT,
             stop_timeout: WAIT,
+            ..SessionConfig::default()
         },
     );
     session.start();
@@ -1169,4 +1196,307 @@ fn fr5_pointer_input_does_not_wait_for_the_session_to_stop_reading_the_channel()
         took < Duration::from_millis(400),
         "100 events took {took:?}"
     );
+}
+
+const DOZE_DELAY: Duration = Duration::from_millis(200);
+
+/// An active session that lets the guest's screen go off after [`DOZE_DELAY`] with no
+/// window shown, and freezes a dozing guest after `freeze_after` when set.
+fn lifecycle_session(
+    freeze_after: Option<Duration>,
+) -> (Session, Box<dyn Connection>, FakeLauncher) {
+    let launcher = FakeLauncher::default();
+    let (listener, mut connector) = memory::pair();
+    let session = Session::new(
+        launcher.clone(),
+        Box::new(listener),
+        ControlHandshake::new("dsa-host test", WAIT),
+        SessionConfig {
+            connect_timeout: WAIT,
+            stop_timeout: WAIT,
+            doze_delay: DOZE_DELAY,
+            freeze_after,
+        },
+    );
+    session.start();
+    let agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    (session, agent, launcher)
+}
+
+fn next_body(agent: &mut Box<dyn Connection>) -> Body {
+    let frame = agent.recv(Some(WAIT)).expect("a message for the guest");
+    dsa_protocol::decode(&frame)
+        .expect("a well-formed message")
+        .body
+        .expect("a message with a body")
+}
+
+fn screen(on: bool) -> Body {
+    Body::ScreenState(dsa_protocol::control::ScreenState { on })
+}
+
+fn device_idle(idle: bool) -> Body {
+    Body::DeviceIdle(dsa_protocol::control::DeviceIdle { idle })
+}
+
+/// Takes the session into Doze as the guest would: the screen goes off, and the agent says
+/// the device is idle.
+fn dozing(session: &Session, agent: &mut Box<dyn Connection>) {
+    assert_eq!(next_body(agent), screen(false));
+    send_body(agent, device_idle(true));
+    assert!(session.wait_for(SessionState::Dozing, WAIT));
+}
+
+#[test]
+fn fr10_with_every_window_closed_the_session_dozes_once_the_guest_is_idle() {
+    let (session, mut agent, _launcher) = lifecycle_session(None);
+    let started = std::time::Instant::now();
+    // No window has been shown since the agent connected.
+    assert_eq!(next_body(&mut agent), screen(false));
+    assert!(
+        started.elapsed() >= DOZE_DELAY,
+        "the screen went off before the delay"
+    );
+    // The screen is off but the guest is not in Doze yet.
+    assert_eq!(session.state(), SessionState::Active);
+    send_body(&mut agent, device_idle(true));
+    assert!(session.wait_for(SessionState::Dozing, WAIT));
+}
+
+#[test]
+fn fr10_showing_a_window_while_dozing_makes_the_session_active_within_a_second() {
+    let (session, mut agent, _launcher) = lifecycle_session(None);
+    dozing(&session, &mut agent);
+
+    let shown = std::time::Instant::now();
+    session
+        .request(TaskRequest::WindowsShown { shown: true })
+        .expect("the word is taken");
+    assert!(session.wait_for(SessionState::Active, Duration::from_secs(1)));
+    assert!(shown.elapsed() < Duration::from_secs(1));
+    assert_eq!(next_body(&mut agent), screen(true));
+}
+
+#[test]
+fn fr10_a_shown_window_keeps_the_screen_on() {
+    let (session, mut agent, _launcher) = lifecycle_session(None);
+    session.windows_shown(true).unwrap();
+    match agent.recv(Some(DOZE_DELAY * 3)) {
+        Err(TransportError::Timeout) => {}
+        other => panic!("expected nothing for the guest, got {other:?}"),
+    }
+    assert_eq!(session.state(), SessionState::Active);
+
+    // Minimizing the last window starts the delay again.
+    session.windows_shown(false).unwrap();
+    let hidden = std::time::Instant::now();
+    assert_eq!(next_body(&mut agent), screen(false));
+    assert!(hidden.elapsed() >= DOZE_DELAY);
+}
+
+#[test]
+fn fr10_the_word_on_shown_windows_is_kept_while_the_guest_is_stopped() {
+    let launcher = FakeLauncher::default();
+    let (listener, mut connector) = memory::pair();
+    let session = Session::new(
+        launcher.clone(),
+        Box::new(listener),
+        ControlHandshake::new("dsa-host test", WAIT),
+        SessionConfig {
+            connect_timeout: WAIT,
+            stop_timeout: WAIT,
+            doze_delay: DOZE_DELAY,
+            freeze_after: None,
+        },
+    );
+    session
+        .request(TaskRequest::WindowsShown { shown: true })
+        .expect("taken while stopped");
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    match agent.recv(Some(DOZE_DELAY * 3)) {
+        Err(TransportError::Timeout) => {}
+        other => panic!("expected the screen to stay on, got {other:?}"),
+    }
+}
+
+#[test]
+fn fr10_the_guest_leaving_idle_for_maintenance_keeps_the_session_dozing() {
+    let (session, mut agent, _launcher) = lifecycle_session(None);
+    dozing(&session, &mut agent);
+    send_body(&mut agent, device_idle(false));
+    send_body(&mut agent, device_idle(true));
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(session.state(), SessionState::Dozing);
+}
+
+#[test]
+fn fr10_requests_and_input_reach_a_dozing_guest() {
+    let (session, mut agent, _launcher) = lifecycle_session(None);
+    dozing(&session, &mut agent);
+    session
+        .pointer(&pointer_down(7))
+        .expect("input reaches Doze");
+    assert_eq!(
+        next_body(&mut agent),
+        Body::PointerEvent(pointer_down(7).to_control())
+    );
+}
+
+fn on_battery(percent: u8) -> PowerState {
+    PowerState {
+        ac_online: false,
+        battery_present: true,
+        battery_percent: percent,
+        charging: false,
+        power_saver: percent < 20,
+    }
+}
+
+#[test]
+fn fr10_the_hosts_power_reaches_the_guest_when_it_connects_and_when_it_changes() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    // Known before the guest runs: told as soon as the agent connects.
+    session.set_power(on_battery(80));
+    session.windows_shown(true).unwrap();
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(
+        next_body(&mut agent),
+        Body::PowerState(on_battery(80).to_control())
+    );
+    // The same state again is not news; a change is.
+    session.set_power(on_battery(80));
+    session.set_power(on_battery(15));
+    assert_eq!(
+        next_body(&mut agent),
+        Body::PowerState(on_battery(15).to_control())
+    );
+    assert!(on_battery(15).to_control().power_saver);
+}
+
+#[test]
+fn fr10_a_host_without_a_battery_is_a_full_battery_on_ac_power() {
+    let power = PowerState::MAINS_ONLY.to_control();
+    assert!(power.ac_online);
+    assert!(!power.battery_present);
+    assert_eq!(power.battery_percent, 100);
+}
+
+#[test]
+fn fr10_the_power_hub_tells_every_session_and_each_new_one() {
+    let hub = PowerHub::new();
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    let session = Arc::new(session);
+    session.windows_shown(true).unwrap();
+    hub.update(on_battery(50));
+    hub.attach(&session);
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(
+        next_body(&mut agent),
+        Body::PowerState(on_battery(50).to_control())
+    );
+    hub.update(PowerState::MAINS_ONLY);
+    assert_eq!(
+        next_body(&mut agent),
+        Body::PowerState(PowerState::MAINS_ONLY.to_control())
+    );
+    assert_eq!(hub.latest(), Some(PowerState::MAINS_ONLY));
+}
+
+#[test]
+fn fr10_a_dozing_guest_is_never_frozen_by_default() {
+    let (session, mut agent, launcher) = lifecycle_session(None);
+    dozing(&session, &mut agent);
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(session.state(), SessionState::Dozing);
+    assert_eq!(launcher.0.lock().unwrap().freezes, 0);
+}
+
+#[test]
+fn fr10_with_freezing_chosen_a_dozing_guest_is_frozen_and_a_shown_window_thaws_it() {
+    let (session, mut agent, launcher) = lifecycle_session(Some(Duration::from_millis(100)));
+    dozing(&session, &mut agent);
+    assert!(session.wait_for(SessionState::Frozen, WAIT));
+    assert!(launcher.0.lock().unwrap().frozen);
+
+    let shown = std::time::Instant::now();
+    session.windows_shown(true).unwrap();
+    assert!(session.wait_for(SessionState::Active, Duration::from_secs(1)));
+    assert!(shown.elapsed() < Duration::from_secs(1));
+    assert!(!launcher.0.lock().unwrap().frozen);
+    assert_eq!(next_body(&mut agent), screen(true));
+}
+
+#[test]
+fn fr10_a_freeze_the_user_asks_for_turns_the_screen_off_and_input_thaws_it() {
+    let (session, mut agent, launcher) = lifecycle_session(None);
+    session.windows_shown(true).unwrap();
+    session.freeze().expect("the guest is frozen");
+    assert_eq!(session.state(), SessionState::Frozen);
+    assert_eq!(next_body(&mut agent), screen(false));
+    assert_eq!(launcher.0.lock().unwrap().freezes, 1);
+
+    // Input in a window the frozen guest still shows wakes it first.
+    session
+        .pointer(&pointer_down(7))
+        .expect("input thaws the guest");
+    assert_eq!(session.state(), SessionState::Active);
+    assert_eq!(launcher.0.lock().unwrap().thaws, 1);
+    assert_eq!(next_body(&mut agent), screen(true));
+    assert_eq!(
+        next_body(&mut agent),
+        Body::PointerEvent(pointer_down(7).to_control())
+    );
+}
+
+#[test]
+fn fr10_the_users_freeze_setting_turns_freezing_in_doze_off_and_on() {
+    let (session, mut agent, launcher) = lifecycle_session(Some(Duration::from_millis(100)));
+    session.freeze_when_idle(false);
+    dozing(&session, &mut agent);
+    thread::sleep(Duration::from_millis(400));
+    assert_eq!(session.state(), SessionState::Dozing);
+    assert_eq!(launcher.0.lock().unwrap().freezes, 0);
+
+    session.freeze_when_idle(true);
+    assert!(session.wait_for(SessionState::Frozen, WAIT));
+}
+
+#[test]
+fn fr10_a_guest_that_cannot_be_frozen_stays_as_it_was_and_says_why() {
+    let (session, _agent, launcher) = lifecycle_session(None);
+    launcher.0.lock().unwrap().cannot_freeze = Some("no pause on this host".into());
+    match session.freeze() {
+        Err(SessionError::FreezeFailed(why)) => assert!(why.contains("no pause"), "{why}"),
+        other => panic!("expected the freeze to fail, got {other:?}"),
+    }
+    assert_eq!(session.state(), SessionState::Active);
+}
+
+#[test]
+fn fr10_freezing_a_stopped_guest_says_it_is_not_running() {
+    let (session, _connector) = session_with(FakeLauncher::default(), WAIT);
+    assert_eq!(
+        session.freeze(),
+        Err(SessionError::NotActive(SessionState::Stopped))
+    );
+}
+
+#[test]
+fn fr10_stopping_a_frozen_guest_thaws_it_first_and_stops_it() {
+    let (session, _agent, launcher) = lifecycle_session(None);
+    session.freeze().expect("frozen");
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    let guest = launcher.0.lock().unwrap();
+    assert_eq!(guest.thaws, 1);
+    assert_eq!(guest.processes, 0);
 }

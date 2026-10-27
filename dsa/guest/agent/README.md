@@ -38,6 +38,21 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   input method, which shows nothing, puts it into the focused editor, and the agent reports
   where the editor's cursor is (`ImeCursor`) so the host's candidate list appears beside it
   (see below).
+- **Screen and Doze.** The guest has no screen or battery, so Doze never starts by itself.
+  When no task window has been shown on the host for a while, the host sends
+  `ScreenState` off: the agent turns the display off (`PowerManager.goToSleep`) and forces
+  deep idle (the `deviceidle force-idle deep` shell command). `ScreenState` on lets the
+  device out (`deviceidle unforce`) and wakes it (`PowerManager.wakeUp`). The agent reports
+  each change of the deep idle state (`DeviceIdle`), from which the host knows the guest
+  is dozing. A new connection turns a screen left off back on, since the host takes the
+  screen to be on.
+- **Battery.** The host sends its power (`PowerState`): AC or battery, the charge, whether
+  it charges, battery saver. The agent sets the battery service to it (the `battery set`
+  shell command) and battery saver with it (`PowerManager.setPowerSaveModeEnabled`). A host
+  without a battery is a full battery on AC power. Both shell commands go over binder to
+  the service with the agent's `DEVICE_POWER` permission, which they check; they need no
+  shell or debuggable build. The image's `sepolicy/agent.cil` lets system_server use the
+  descriptors the call hands it.
 - **The channel.** It reaches the host through the control daemon's binder service,
   `io.github.thisisthepy.dsa.channel.IChannel/default` (`dsa/guest/aidl/`). It looks for
   the service every second until the daemon is up, subscribes, and sends every app task
@@ -325,7 +340,8 @@ The release APK, `build/outputs/apk/release/dsa-agent-release-unsigned.apk`, is 
 | Path | What it is |
 |---|---|
 | `src/main/kotlin/.../agent/` | The agent: task reports, requests, pointer, key and text input, the channel client, the freeform setup, task placement |
-| `src/main/kotlin/.../agent/platform/` | The framework side: the application, task source, actions, windowing, input injection, the input method, binder channel |
+| `src/main/kotlin/.../agent/power/` | The screen, Doze and the battery, as the host asks |
+| `src/main/kotlin/.../agent/platform/` | The framework side: the application, task source, actions, windowing, input injection, the input method, binder channel, power controls |
 | `src/test/` | The unit tests |
 | `hidden-api/` | Compile-only declarations of framework classes outside the SDK |
 | `privapp-permissions-dsa-agent.xml` | The agent's privileged permissions |

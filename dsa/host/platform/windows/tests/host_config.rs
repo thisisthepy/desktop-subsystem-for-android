@@ -30,6 +30,24 @@ fn fr2_a_minimal_configuration_gets_working_defaults() {
 }
 
 #[test]
+fn fr10_android_dozes_after_half_a_minute_without_a_window_and_never_freezes_by_default() {
+    let session = HostConfig::parse(MINIMAL).unwrap().session_config();
+    assert_eq!(session.doze_delay, Duration::from_secs(30));
+    assert_eq!(session.freeze_after, None);
+}
+
+#[test]
+fn fr10_freezing_after_a_time_in_doze_is_a_setting() {
+    let json = MINIMAL.replace(
+        "\n}",
+        ",\n  \"doze_delay_secs\": 5,\n  \"freeze_after_minutes\": 60\n}",
+    );
+    let session = HostConfig::parse(&json).unwrap().session_config();
+    assert_eq!(session.doze_delay, Duration::from_secs(5));
+    assert_eq!(session.freeze_after, Some(Duration::from_secs(3600)));
+}
+
+#[test]
 fn nfr2_free_pages_are_reported_in_the_smallest_pieces_the_host_takes() {
     assert_eq!(page_reporting_order_for_build(None), 9);
     assert_eq!(page_reporting_order_for_build(Some(19045)), 9);

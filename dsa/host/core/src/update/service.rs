@@ -235,6 +235,12 @@ impl UserAndroid for UpdatingAndroid {
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
         UserAndroid::request(&*self.session, request)
     }
+    fn freeze(&self) -> Result<(), TaskRequestError> {
+        UserAndroid::freeze(&*self.session)
+    }
+    fn freeze_when_idle(&self, on: bool) {
+        UserAndroid::freeze_when_idle(&*self.session, on)
+    }
     fn guest_memory(&self) -> Option<GuestMemoryReport> {
         UserAndroid::guest_memory(&*self.session)
     }

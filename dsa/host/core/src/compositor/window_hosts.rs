@@ -117,6 +117,8 @@ pub enum FromHost {
     Focus { task_id: i32, focused: bool },
     /// The user started dragging the window, to move or resize it, or let go.
     Dragging { task_id: i32, dragging: bool },
+    /// The window was minimized (`shown` false), or shown again after it was.
+    Shown { task_id: i32, shown: bool },
 }
 
 impl FromHost {
@@ -126,7 +128,8 @@ impl FromHost {
             | FromHost::Resized { task_id, .. }
             | FromHost::Dpi { task_id, .. }
             | FromHost::Focus { task_id, .. }
-            | FromHost::Dragging { task_id, .. } => *task_id,
+            | FromHost::Dragging { task_id, .. }
+            | FromHost::Shown { task_id, .. } => *task_id,
         }
     }
 }
@@ -707,7 +710,7 @@ pub fn to_host_from_wire(body: &Body) -> Option<ToHost> {
 /// The frame body that carries `report`.
 pub fn report_to_wire(report: &FromHost) -> Body {
     use dsa_protocol::window_host::types::{
-        WindowClosed, WindowDpi, WindowDragging, WindowFocus, WindowResized,
+        WindowClosed, WindowDpi, WindowDragging, WindowFocus, WindowResized, WindowShown,
     };
     match *report {
         FromHost::Closed { task_id } => Body::WindowClosed(WindowClosed { task_id }),
@@ -725,6 +728,7 @@ pub fn report_to_wire(report: &FromHost) -> Body {
         FromHost::Dragging { task_id, dragging } => {
             Body::WindowDragging(WindowDragging { task_id, dragging })
         }
+        FromHost::Shown { task_id, shown } => Body::WindowShown(WindowShown { task_id, shown }),
     }
 }
 
@@ -750,6 +754,10 @@ pub fn report_from_wire(body: &Body) -> Option<FromHost> {
         Body::WindowDragging(ref dragging) => FromHost::Dragging {
             task_id: dragging.task_id,
             dragging: dragging.dragging,
+        },
+        Body::WindowShown(ref shown) => FromHost::Shown {
+            task_id: shown.task_id,
+            shown: shown.shown,
         },
         _ => return None,
     })
@@ -1219,6 +1227,10 @@ mod tests {
             FromHost::Dragging {
                 task_id: 7,
                 dragging: true,
+            },
+            FromHost::Shown {
+                task_id: 8,
+                shown: false,
             },
         ] {
             assert_eq!(report_from_wire(&report_to_wire(&report)), Some(report));

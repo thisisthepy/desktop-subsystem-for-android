@@ -213,6 +213,7 @@ fn updating_android(
         SessionConfig {
             connect_timeout: WAIT,
             stop_timeout: WAIT,
+            ..SessionConfig::default()
         },
     ));
     let done = Arc::new(AtomicBool::new(false));

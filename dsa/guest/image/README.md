@@ -18,7 +18,7 @@ them with the project's keys.
 | `dsa-channeld.rc` | The service that runs the control channel daemon, and the trigger that drops the guest's caches when it asks |
 | `dsa-memory.rc` | Turns on the zram swap and tunes the kernel for it |
 | `dsa-channel-manifest.xml` | The vendor manifest entry declaring the daemon's binder service |
-| `sepolicy/` | Policy added to the image: vsock for graphics, the control daemon's domain and binder service, and the memory controls (`memory.cil`) |
+| `sepolicy/` | Policy added to the image: vsock for graphics, the control daemon's domain and binder service, the memory controls (`memory.cil`), and what the agent needs to force Doze and set the battery (`agent.cil`) |
 
 ```
 dsa/guest/image/fetch.sh 17

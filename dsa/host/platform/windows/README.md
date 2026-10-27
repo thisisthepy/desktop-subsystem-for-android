@@ -287,6 +287,23 @@ why.
 `dsa launch <package>` starts an app in a window of its own, and `dsa tasks` lists the
 tasks that have one.
 
+## Sleep
+
+When every Android window is closed or minimized for `doze_delay_secs` (30 seconds by
+default, in `dsa-hostd.json`), Android's screen goes off and Android goes into Doze, as a
+phone does in a pocket: notifications, alarms and widgets keep working in Doze's short
+maintenance windows, and the CPU is idle in between. `dsa status` then says `Dozing`.
+Showing any Android window turns the screen on again at once.
+
+Android's battery follows the computer's: on AC power or on battery, the charge, and
+battery saver.
+
+Freezing stops Android's processes altogether, which also stops its notifications,
+alarms and widget updates, so it is never done by default. `dsa freeze` freezes Android
+now. Turning on "freeze when idle" (Advanced in DSA Settings, or `dsa settings set freeze
+on`) freezes it after 30 minutes in Doze, or after `freeze_after_minutes` from
+`dsa-hostd.json`. Showing a window, or input in one, resumes it.
+
 ## Memory
 
 `dsa memory` shows how much memory the user's Android takes. On the host: the VM's `vmmem`

@@ -787,6 +787,25 @@ class ImageLayoutTests(unittest.TestCase):
                     fs_config,
                 )
 
+    def test_fr10_the_agent_may_put_the_guest_into_doze_and_set_its_battery(self):
+        # The agent calls the deviceidle and battery shell commands over binder, handing
+        # system_server the descriptors the commands write to.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = self._target_files_with_system_ext(root)
+            with zipfile.ZipFile(source, "a") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type platform_app)\n")
+            agent = root / "agent.apk"
+            agent.write_bytes(b"PK agent")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, agent=agent)
+            with zipfile.ZipFile(modified) as archive:
+                policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+                self.assertIn("(allow platform_app deviceidle_service (service_manager (find)))", policy)
+                self.assertIn("(allow platform_app battery_service (service_manager (find)))", policy)
+                self.assertIn("(allow system_server platform_app (fd (use)))", policy)
+                self.assertIn("(allow system_server platform_app (fifo_file (write getattr)))", policy)
+
     def test_fr3_the_agent_is_signed_with_the_platform_key(self):
         # A platform app may use the framework interfaces the agent needs. sign_target_files_apks
         # signs each app with the key apkcerts.txt names, and refuses an app it names none for.

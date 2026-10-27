@@ -26,6 +26,7 @@ class AgentApplication : Application() {
             editor = { HostInputMethod.connection },
             textKeys = AndroidTextKeys(),
             inputMethods = AndroidInputMethodSetup(this),
+            power = AndroidDevicePower(this, log),
             // `setprop log.tag.DsaResizeTrace D` turns on the per-stage resize trace lines.
             trace = io.github.thisisthepy.dsa.agent.trace.ResizeTrace(log, detailed = {
                 android.util.Log.isLoggable("DsaResizeTrace", android.util.Log.DEBUG)

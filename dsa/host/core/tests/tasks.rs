@@ -68,6 +68,7 @@ fn setup() -> Setup {
         SessionConfig {
             connect_timeout: WAIT,
             stop_timeout: WAIT,
+            ..SessionConfig::default()
         },
     ));
     let (api_listener, api) = local::pair();

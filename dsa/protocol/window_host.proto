@@ -212,6 +212,13 @@ message ImeCursor {
   int32 bottom = 5;
 }
 
+// Window host to window manager: the task's window was minimized (`shown` false), or shown
+// again after it was. A window that opens is shown until it says otherwise.
+message WindowShown {
+  int32 task_id = 1;
+  bool shown = 2;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -234,5 +241,6 @@ message Envelope {
     WindowDragging window_dragging = 17;
     TaskSize task_size = 18;
     ImeCursor ime_cursor = 19;
+    WindowShown window_shown = 30;
   }
 }

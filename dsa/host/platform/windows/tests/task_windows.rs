@@ -43,10 +43,10 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsWindow,
     IsWindowVisible, IsZoomed, PostMessageW, SendMessageW, SetWindowPos, ShowWindow, SWP_NOMOVE,
-    SWP_NOZORDER, SW_MAXIMIZE, SW_RESTORE, WM_CHAR, WM_CLOSE, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
-    WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
-    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL, WM_RBUTTONDOWN,
-    WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    SWP_NOZORDER, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, WM_CHAR, WM_CLOSE, WM_ENTERSIZEMOVE,
+    WM_EXITSIZEMOVE, WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
+    WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -1414,4 +1414,51 @@ fn fr6_the_window_places_the_input_method_at_the_cursor_the_guest_reports() {
     wait_for("the window to place the input method at the cursor", || {
         (running.windows().first()?.ime_cursor == Some(cursor)).then_some(())
     });
+}
+
+/// Each word the guest was given on whether any task window is shown, in order.
+fn shown_words(running: &Running) -> Vec<bool> {
+    running.android.shown.lock().unwrap().clone()
+}
+
+fn wait_for_shown(running: &Running, shown: bool) {
+    wait_for(
+        &format!("the guest to hear whether a window is shown ({shown})"),
+        || (shown_words(running).last() == Some(&shown)).then_some(()),
+    );
+}
+
+#[test]
+fn fr10_minimizing_and_closing_every_task_window_tells_the_guest_none_is_shown() {
+    let running = start(None);
+    running.android.start();
+    // No window yet.
+    wait_for_shown(&running, false);
+    running
+        .android
+        .publish(TaskEvent::Updated(task(7, "Clock", 400, 300)));
+    running
+        .android
+        .publish(TaskEvent::Updated(task(8, "Maps", 400, 300)));
+    let open = windows_of(&running, 2);
+    wait_for_shown(&running, true);
+
+    // One window minimized leaves the other shown.
+    unsafe { ShowWindow(open[0].hwnd as HWND, SW_MINIMIZE) };
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(shown_words(&running).last(), Some(&true));
+    unsafe { ShowWindow(open[1].hwnd as HWND, SW_MINIMIZE) };
+    wait_for_shown(&running, false);
+
+    // Restoring a window shows it again, which wakes the guest.
+    unsafe { ShowWindow(open[1].hwnd as HWND, SW_RESTORE) };
+    wait_for_shown(&running, true);
+
+    // Closing the shown window leaves only a minimized one.
+    unsafe { PostMessageW(open[1].hwnd as HWND, WM_CLOSE, 0, 0) };
+    wait_for_shown(&running, false);
+    unsafe { ShowWindow(open[0].hwnd as HWND, SW_RESTORE) };
+    wait_for_shown(&running, true);
+    unsafe { PostMessageW(open[0].hwnd as HWND, WM_CLOSE, 0, 0) };
+    wait_for_shown(&running, false);
 }

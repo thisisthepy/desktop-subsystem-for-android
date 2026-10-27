@@ -739,6 +739,12 @@ impl UserAndroid for WithProgramStatus {
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
         self.android.request(request)
     }
+    fn freeze(&self) -> Result<(), TaskRequestError> {
+        self.android.freeze()
+    }
+    fn freeze_when_idle(&self, on: bool) {
+        self.android.freeze_when_idle(on)
+    }
     fn guest_memory(&self) -> Option<GuestMemoryReport> {
         self.android.guest_memory()
     }
