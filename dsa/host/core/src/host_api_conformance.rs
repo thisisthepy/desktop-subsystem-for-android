@@ -1065,8 +1065,8 @@ pub fn settings_round_trip(make: MakeLocal<'_>) {
     let (listener, mut connector, user) = make();
     let store = Arc::new(MemorySettings::default());
     let androids = Arc::new(FakeAndroids::default());
-    let service = HostApiService::new(androids.clone(), "test service")
-        .with_settings(store.clone(), facts());
+    let service =
+        HostApiService::new(androids.clone(), "test service").with_settings(store.clone(), facts());
     let _service = RunningService::start_service(listener, service);
     let mut client = connect(&mut *connector);
     let report = client.settings().expect("the settings");
