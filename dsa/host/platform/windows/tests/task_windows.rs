@@ -524,6 +524,107 @@ fn fr4_frames_of_a_resizing_task_reuse_one_texture_and_each_is_shown() {
     windows_of(&running, 0);
 }
 
+/// Drags the window one step to `outer` and returns how long the step took and when the
+/// fake guest started sending the frame of the new size, if it did: it answers `after` the
+/// window's client area took the new size, or never when `after` is `None`.
+fn drag_step(
+    sink: &Arc<dyn DisplaySink>,
+    hwnd: isize,
+    outer: (i32, i32),
+    after: Option<Duration>,
+) -> (Duration, Option<Instant>) {
+    let before = client_size(hwnd);
+    let guest = {
+        let sink = Arc::clone(sink);
+        thread::spawn(move || {
+            let deadline = Instant::now() + WAIT;
+            while client_size(hwnd) == before {
+                if Instant::now() > deadline {
+                    return None;
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+            let after = after?;
+            thread::sleep(after);
+            let (width, height) = client_size(hwnd);
+            let sent = Instant::now();
+            sink.frame(3, (width as u32, height as u32));
+            Some(sent)
+        })
+    };
+    let started = Instant::now();
+    resize_to(hwnd, outer.0, outer.1);
+    let took = started.elapsed();
+    (took, guest.join().unwrap())
+}
+
+#[test]
+fn fr4_a_dragged_window_keeps_a_new_size_back_until_the_frame_of_that_size_is_shown() {
+    let presenter = Arc::new(CapturingPresenter::default());
+    let running = start(Some(Arc::clone(&presenter)));
+    let Some(sink) = presenter.sink.lock().unwrap().clone() else {
+        eprintln!("skipping: no Direct3D 11 device on this machine");
+        return;
+    };
+    running
+        .android
+        .publish(TaskEvent::Updated(task(1, "Clock", 400, 300)));
+    running.android.publish(TaskEvent::Frames {
+        task_id: 1,
+        display_id: 3,
+    });
+    let open = windows_of(&running, 1);
+    let hwnd = open[0].hwnd;
+    wait_for("display 3 to reach task 1's window", || {
+        sink.target(3, 1280, 720)
+    });
+    // The window has a frame of its size on the screen before the drag.
+    let (width, height) = client_size(hwnd);
+    sink.frame(3, (width as u32, height as u32));
+    unsafe { SendMessageW(hwnd as HWND, WM_ENTERSIZEMOVE, 0, 0) };
+
+    // The guest answers 40 ms after the window took the size: the size is not on the
+    // screen, so the resize does not return, before the frame is sent.
+    let (took, sent) = drag_step(&sink, hwnd, (560, 450), Some(Duration::from_millis(40)));
+    let sent = sent.expect("the window never took the new size");
+    assert!(
+        took >= Duration::from_millis(35),
+        "the resize returned after {took:?}, before the guest's frame"
+    );
+    assert!(
+        Instant::now() >= sent,
+        "the resize returned before the frame was sent"
+    );
+    assert!(
+        took < Duration::from_millis(400),
+        "the resize waited {took:?} for a frame that came in 40 ms"
+    );
+
+    // A guest that never answers holds the step back for the wait's budget and no longer.
+    let (took, _) = drag_step(&sink, hwnd, (600, 480), None);
+    assert!(
+        took >= Duration::from_millis(55),
+        "the resize returned after {took:?} without a frame, before the wait's budget"
+    );
+    assert!(
+        took < Duration::from_millis(400),
+        "the resize waited {took:?} for a frame that never came"
+    );
+
+    // After steps in a row without a frame the drag stops waiting: the next is not held back.
+    drag_step(&sink, hwnd, (610, 490), None);
+    drag_step(&sink, hwnd, (620, 500), None);
+    let (took, _) = drag_step(&sink, hwnd, (630, 510), None);
+    assert!(
+        took < Duration::from_millis(40),
+        "a drag whose guest never answers still waited {took:?} on its fourth step"
+    );
+
+    unsafe { SendMessageW(hwnd as HWND, WM_EXITSIZEMOVE, 0, 0) };
+    running.android.publish(TaskEvent::Removed { task_id: 1 });
+    windows_of(&running, 0);
+}
+
 fn resize_to(hwnd: isize, width: i32, height: i32) {
     unsafe {
         SetWindowPos(
