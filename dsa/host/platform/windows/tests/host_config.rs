@@ -23,7 +23,7 @@ fn fr2_a_minimal_configuration_gets_working_defaults() {
     assert_eq!(session.stop_timeout, Duration::from_secs(30));
     let vm = config.vm_config(Some("S-1-5-21-1-2-3-1001")).unwrap();
     assert_eq!(vm.kernel, PathBuf::from(r"C:\Program Files\DSA\vm\bzImage"));
-    assert_eq!(vm.memory_mb, 4096);
+    assert_eq!(vm.memory_mb, 3072);
     assert!([5, 9].contains(&vm.page_reporting_order));
     assert_eq!(vm.socket_sids, ["S-1-5-21-1-2-3-1001"]);
     vm.to_hcs_document().expect("the defaults make a valid VM");
