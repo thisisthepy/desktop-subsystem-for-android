@@ -61,6 +61,20 @@ fn pr5_the_service_learns_the_clients_user_from_windows() {
 }
 
 #[test]
+fn fr17_the_service_learns_whether_the_client_is_an_administrator() {
+    let name = fresh_name();
+    let mut listener = NamedPipeListener::bind(&name, TEST_SDDL).unwrap();
+    let _client = NamedPipeConnector { name }
+        .connect(Duration::from_secs(5))
+        .unwrap();
+    let (_, peer) = listener.accept(Duration::from_secs(5)).unwrap();
+    assert_eq!(
+        peer.administrator,
+        dsa_host_windows::pipe::current_process_is_administrator()
+    );
+}
+
+#[test]
 fn pr5_a_second_server_cannot_take_over_the_name() {
     let name = fresh_name();
     let _first = NamedPipeListener::bind(&name, TEST_SDDL).unwrap();

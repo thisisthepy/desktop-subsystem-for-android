@@ -29,26 +29,26 @@ class AndroidAppInfoSource(
         }
         val label = app.loadLabel(pm).toString().ifEmpty { packageName }
         val icon = try {
-            png(pm.getApplicationIcon(app))
+            iconPng(pm.getApplicationIcon(app))
         } catch (e: Exception) {
             log.warn("could not draw the icon of $packageName", e)
             ByteArray(0)
         }
         return AppDetails(label, icon)
     }
+}
 
-    private fun png(drawable: android.graphics.drawable.Drawable): ByteArray {
-        val bitmap = Bitmap.createBitmap(ICON_SIZE, ICON_SIZE, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        drawable.setBounds(0, 0, ICON_SIZE, ICON_SIZE)
-        drawable.draw(canvas)
-        val out = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-        bitmap.recycle()
-        return out.toByteArray()
-    }
+/** The largest size the host's taskbar, task list and start menu show an icon at. */
+private const val ICON_SIZE = 256
 
-    private companion object {
-        const val ICON_SIZE = 256
-    }
+/** [drawable] drawn as a square PNG image of [ICON_SIZE] pixels on a side. */
+internal fun iconPng(drawable: android.graphics.drawable.Drawable): ByteArray {
+    val bitmap = Bitmap.createBitmap(ICON_SIZE, ICON_SIZE, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    drawable.setBounds(0, 0, ICON_SIZE, ICON_SIZE)
+    drawable.draw(canvas)
+    val out = ByteArrayOutputStream()
+    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+    bitmap.recycle()
+    return out.toByteArray()
 }

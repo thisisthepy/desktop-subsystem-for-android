@@ -19,7 +19,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -36,6 +36,7 @@ use crate::host_api::{ProgramUpdate, UpdateProgram, UserAndroid, UserAndroids};
 use crate::ime::ImeEvent;
 use crate::input::PointerEvent;
 use crate::keys::KeyEvent;
+use crate::memory::GuestMemoryReport;
 use crate::session::SessionState;
 use crate::tasks::{TaskRequest, TaskRequestError, TaskWatch};
 
@@ -156,6 +157,8 @@ pub struct ProgramUpdates {
     name: String,
     /// This, for the thread that watches setup.
     me: Weak<ProgramUpdates>,
+    /// The user's setting that turns updates off while the service runs, if it follows one.
+    switch: OnceLock<Box<dyn Fn() -> bool + Send + Sync>>,
 }
 
 /// When the service checks and installs.
@@ -188,6 +191,7 @@ impl ProgramUpdates {
             busy: Mutex::new(()),
             name: name.to_string(),
             me: me.clone(),
+            switch: OnceLock::new(),
         });
         if let Err(error) = updates.report_last_install() {
             updates.log(&error.to_string());
@@ -197,6 +201,16 @@ impl ProgramUpdates {
 
     fn log(&self, line: &str) {
         eprintln!("{}: {line}", self.name);
+    }
+
+    /// Follows a setting the user changes while the service runs: when `switch` answers
+    /// false, nothing is checked or installed, as when the configuration turns updates off.
+    pub fn follow_switch(&self, switch: Box<dyn Fn() -> bool + Send + Sync>) {
+        let _ = self.switch.set(switch);
+    }
+
+    fn switched_off(&self) -> bool {
+        self.switch.get().is_some_and(|switch| !switch())
     }
 
     fn tell(&self, notice: String) {
@@ -310,6 +324,11 @@ impl ProgramUpdates {
         if !self.settings.enabled {
             return Err(ProgramError::Off(
                 "program updates are turned off in the service's configuration".into(),
+            ));
+        }
+        if self.switched_off() {
+            return Err(ProgramError::Off(
+                "program updates are turned off in the settings".into(),
             ));
         }
         self.settings
@@ -467,7 +486,7 @@ impl ProgramUpdates {
     /// version setup is installing, or `None` when there is nothing to install yet or an
     /// Android is running, in which case it waits.
     pub fn install_when_idle(&self) -> Result<Option<String>, ProgramError> {
-        if !self.settings.enabled {
+        if !self.settings.enabled || self.switched_off() {
             return Ok(None);
         }
         let _busy = self.busy.lock().unwrap_or_else(|e| e.into_inner());
@@ -633,14 +652,18 @@ impl ProgramUpdates {
     /// Checks at `timing` and installs a downloaded update whenever no Android is
     /// running, until `stop` is set.
     pub fn run(&self, stop: &AtomicBool, timing: Timing) {
-        if self.list_url().is_err() {
+        // The configuration cannot change while the service runs; the settings can, so a
+        // loop that the settings turned off keeps waiting for them to turn it on again.
+        if !self.settings.enabled || self.settings.list_url.is_none() {
             return;
         }
         let mut next_check = Instant::now() + timing.first_check;
         let mut next_install = Instant::now();
         while !stop.load(Ordering::Relaxed) {
             let now = Instant::now();
-            if now >= next_check {
+            if now >= next_check && self.switched_off() {
+                next_check = Instant::now() + timing.retry;
+            } else if now >= next_check {
                 match self.check() {
                     Ok(CheckOutcome::Downloaded(_)) => {}
                     Ok(CheckOutcome::NotNewer(why) | CheckOutcome::FailedBefore(why)) => {
@@ -715,6 +738,12 @@ impl UserAndroid for WithProgramStatus {
     }
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
         self.android.request(request)
+    }
+    fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        self.android.guest_memory()
+    }
+    fn request_guest_memory(&self) -> Result<(), TaskRequestError> {
+        self.android.request_guest_memory()
     }
     fn pointer(&self, event: &PointerEvent) -> Result<(), TaskRequestError> {
         self.android.pointer(event)

@@ -63,6 +63,8 @@ fn nfr2_the_vm_memory_is_set_up_to_return_to_the_host() {
     assert_eq!(memory["AllowOvercommit"], true);
     assert_eq!(memory["EnableDeferredCommit"], true);
     assert_eq!(memory["EnableColdDiscardHint"], true);
+    assert_eq!(memory["EnableColdHint"], true);
+    assert_eq!(memory.get("EnableHotHint"), None);
     assert_eq!(
         memory["SizeInMB"], 4096,
         "rounded down to the 2 MiB granularity"

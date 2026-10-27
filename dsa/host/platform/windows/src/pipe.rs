@@ -24,8 +24,9 @@ use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
 use windows_sys::Win32::Security::{
-    GetTokenInformation, RevertToSelf, TokenUser, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
-    TOKEN_QUERY, TOKEN_USER,
+    CheckTokenMembership, CreateWellKnownSid, DuplicateToken, GetTokenInformation, RevertToSelf,
+    SecurityIdentification, TokenUser, WinBuiltinAdministratorsSid, PSECURITY_DESCRIPTOR,
+    SECURITY_ATTRIBUTES, TOKEN_DUPLICATE, TOKEN_QUERY, TOKEN_USER,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
@@ -245,7 +246,7 @@ impl StreamSocket for PipeStream {
 /// Windows may refuse to impersonate before anything has been read from the pipe; then the
 /// user is read from the client process's token instead, which the service, running as
 /// SYSTEM, may always open.
-fn client_sid(pipe: HANDLE) -> io::Result<String> {
+fn client_sid(pipe: HANDLE) -> io::Result<(String, bool)> {
     // SAFETY: a connected pipe; impersonation is undone below on every path.
     if unsafe { ImpersonateNamedPipeClient(pipe) } == 0 {
         let error = last_error();
@@ -263,17 +264,72 @@ fn client_sid(pipe: HANDLE) -> io::Result<String> {
     if opened == 0 {
         return Err(open_error);
     }
-    token_user_sid(&OwnedHandle(token))
+    let token = OwnedHandle(token);
+    // The thread's token is an impersonation token, which a membership check takes as it is.
+    Ok((token_user_sid(&token)?, is_administrator(token.0)))
 }
 
-/// The user SID of the process at the client end of `pipe`.
-fn client_process_sid(pipe: HANDLE) -> io::Result<String> {
+/// Whether `token` (an impersonation or identification token) is a member of
+/// BUILTIN\Administrators. A token that UAC filtered has that group for deny only, so this
+/// is true for an elevated process only.
+fn is_administrator(token: HANDLE) -> bool {
+    let mut sid = [0u8; 68];
+    let mut size = sid.len() as u32;
+    // SAFETY: the buffer holds `size` bytes, enough for any SID.
+    if unsafe {
+        CreateWellKnownSid(
+            WinBuiltinAdministratorsSid,
+            std::ptr::null_mut(),
+            sid.as_mut_ptr().cast(),
+            &mut size,
+        )
+    } == 0
+    {
+        return false;
+    }
+    let mut member = 0;
+    // SAFETY: a valid token and SID.
+    let checked = unsafe { CheckTokenMembership(token, sid.as_mut_ptr().cast(), &mut member) };
+    checked != 0 && member != 0
+}
+
+/// The user SID of the process at the client end of `pipe`, and whether it runs as an
+/// administrator.
+fn client_process_sid(pipe: HANDLE) -> io::Result<(String, bool)> {
     let mut pid = 0u32;
     // SAFETY: a connected pipe.
     if unsafe { GetNamedPipeClientProcessId(pipe, &mut pid) } == 0 {
         return Err(last_error());
     }
-    process_sid(pid)
+    Ok((process_sid(pid)?, process_is_administrator(pid)))
+}
+
+/// Whether the process `pid` runs as an administrator. False when that cannot be read.
+fn process_is_administrator(pid: u32) -> bool {
+    // SAFETY: opened for query only, closed by OwnedHandle.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return false;
+    }
+    let process = OwnedHandle(process);
+    let mut token: HANDLE = std::ptr::null_mut();
+    // SAFETY: a process handle with query access.
+    if unsafe { OpenProcessToken(process.0, TOKEN_QUERY | TOKEN_DUPLICATE, &mut token) } == 0 {
+        return false;
+    }
+    let token = OwnedHandle(token);
+    // A membership check needs an impersonation token; an identification copy is enough.
+    let mut copy: HANDLE = std::ptr::null_mut();
+    // SAFETY: a primary token opened for duplication; the copy is closed by OwnedHandle.
+    if unsafe { DuplicateToken(token.0, SecurityIdentification, &mut copy) } == 0 {
+        return false;
+    }
+    is_administrator(OwnedHandle(copy).0)
+}
+
+/// Whether this process runs as an administrator, as the service would see it as a client.
+pub fn current_process_is_administrator() -> bool {
+    process_is_administrator(std::process::id())
 }
 
 /// The user SID of the process `pid`.
@@ -303,7 +359,7 @@ pub fn current_user_sid() -> io::Result<String> {
 }
 
 /// The user SID in `token`, as an `S-1-...` string.
-fn token_user_sid(token: &OwnedHandle) -> io::Result<String> {
+pub(crate) fn token_user_sid(token: &OwnedHandle) -> io::Result<String> {
     let mut needed = 0u32;
     // SAFETY: a size query.
     unsafe { GetTokenInformation(token.0, TokenUser, std::ptr::null_mut(), 0, &mut needed) };
@@ -469,9 +525,15 @@ impl LocalListener for NamedPipeListener {
         if let Ok(next) = self.create_instance() {
             self.pending = Some(next);
         }
-        let sid = client_sid(instance.0)?;
+        let (sid, administrator) = client_sid(instance.0)?;
         let stream = PipeStream::new(instance)?;
-        Ok((Box::new(FramedConnection::new(stream)), Peer { user: sid }))
+        Ok((
+            Box::new(FramedConnection::new(stream)),
+            Peer {
+                user: sid,
+                administrator,
+            },
+        ))
     }
 }
 

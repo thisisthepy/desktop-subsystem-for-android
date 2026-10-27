@@ -32,18 +32,21 @@ use dsa_transport::local::{self, MemoryLocalConnector, Peer};
 use dsa_transport::memory::{self, MemoryConnector};
 use dsa_transport::{Connection, Connector, Listener, TransportError};
 use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
-use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
+use windows_sys::Win32::Graphics::Gdi::{
+    ClientToScreen, GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Input::Ime::{GCS_COMPSTR, GCS_CURSORPOS};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_A, VK_BACK, VK_CONTROL, VK_MENU, VK_OEM_1, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_TAB,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, GetWindowTextW, GetWindowThreadProcessId, IsWindow, IsWindowVisible,
-    PostMessageW, SendMessageW, SetWindowPos, SWP_NOMOVE, SWP_NOZORDER, WM_CHAR, WM_CLOSE,
-    WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
-    WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    GetClientRect, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsWindow,
+    IsWindowVisible, IsZoomed, PostMessageW, SendMessageW, SetWindowPos, ShowWindow, SWP_NOMOVE,
+    SWP_NOZORDER, SW_MAXIMIZE, SW_RESTORE, WM_CHAR, WM_CLOSE, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
+    WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION, WM_IME_STARTCOMPOSITION, WM_KEYDOWN,
+    WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEWHEEL, WM_RBUTTONDOWN,
+    WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -54,7 +57,10 @@ struct AsUser(MemoryLocalConnector);
 
 impl Connector for AsUser {
     fn connect(&mut self, _: Duration) -> Result<Box<dyn Connection>, TransportError> {
-        self.0.connect_as(Peer { user: USER.into() })
+        self.0.connect_as(Peer {
+            user: USER.into(),
+            administrator: false,
+        })
     }
 }
 
@@ -704,8 +710,8 @@ fn fr4_a_dragged_window_resizes_its_task_live_and_reconfigures_it_when_let_go() 
         "a size asked while the window was dragged was not live: {asked:?}"
     );
 
-    // A drag that only moves the window asks nothing at its end, and a resize outside a
-    // drag is not live.
+    // A drag that only moves the window asks nothing at its end. A resize outside a drag is
+    // live too, and reconfigures the task once the task has the size.
     unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
     unsafe { SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0) };
     let after_move = running.android.requests.lock().unwrap().len();
@@ -713,8 +719,145 @@ fn fr4_a_dragged_window_resizes_its_task_live_and_reconfigures_it_when_let_go() 
     let (width, height) = client_size(open[0].hwnd);
     let size = (width as u32, height as u32);
     wait_for("the resize to reach the guest", || {
-        (resizes_since(&running, after_move, 1) == vec![(size, false)]).then_some(())
+        (resizes_since(&running, after_move, 1) == vec![(size, true)]).then_some(())
     });
+    let taken = task_at_monitor_density(1, width, height);
+    running.android.publish(TaskEvent::Updated(taken));
+    let reconfigured = vec![(size, true), (size, false)];
+    wait_for("the task to be reconfigured", || {
+        (resizes_since(&running, after_move, 1) == reconfigured).then_some(())
+    });
+}
+
+/// The window's outer rectangle and its monitor's work area.
+fn window_and_work_area(hwnd: isize) -> (RECT, RECT) {
+    let mut window = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    unsafe { GetWindowRect(hwnd as HWND, &mut window) };
+    let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
+    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    unsafe {
+        GetMonitorInfoW(
+            MonitorFromWindow(hwnd as HWND, MONITOR_DEFAULTTONEAREST),
+            &mut info,
+        )
+    };
+    (window, info.rcWork)
+}
+
+#[test]
+fn fr4_a_maximised_task_window_shows_its_task_1_to_1_without_a_new_texture_or_a_stray_size() {
+    let presenter = Arc::new(CapturingPresenter::default());
+    let running = start(Some(Arc::clone(&presenter)));
+    running.android.start();
+    // The guest draws at most 640x480: less than any monitor's work area, as 1920x1080 is
+    // on a 4K monitor at 200%.
+    let max = (640u32, 480u32);
+    let mut clock = task_at_monitor_density(1, 400, 300);
+    clock.max_width = max.0;
+    clock.max_height = max.1;
+    running.android.publish(TaskEvent::Updated(clock.clone()));
+    running.android.publish(TaskEvent::Frames {
+        task_id: 1,
+        display_id: 3,
+    });
+    let open = windows_of(&running, 1);
+    let hwnd = open[0].hwnd;
+    let sink = presenter.sink.lock().unwrap().clone();
+    let texture = sink.as_ref().map(|sink| {
+        let handle = wait_for("display 3 to reach task 1's window", || {
+            sink.target(3, 1280, 720)
+        });
+        sink.frame(3, (400, 300));
+        handle
+    });
+
+    // Only the requests the maximise makes count, not the ones the window made opening.
+    thread::sleep(Duration::from_millis(200));
+    let before = running.android.requests.lock().unwrap().len();
+    unsafe { ShowWindow(hwnd as HWND, SW_MAXIMIZE) };
+    assert_ne!(unsafe { IsZoomed(hwnd as HWND) }, 0);
+    let (width, height) = client_size(hwnd);
+    assert_eq!(
+        (width as u32, height as u32),
+        max,
+        "a maximised window takes the most the guest can draw, and no more"
+    );
+    // Centred on the work area, not left in its corner.
+    let (window, work) = window_and_work_area(hwnd);
+    let off_centre = |start: i32, end: i32, work_start: i32, work_end: i32| {
+        ((start - work_start) - (work_end - end)).abs()
+    };
+    assert!(
+        off_centre(window.left, window.right, work.left, work.right) <= 1
+            && off_centre(window.top, window.bottom, work.top, work.bottom) <= 1,
+        "the maximised window at {}x{}..{}x{} is not centred on the work area {}x{}..{}x{}",
+        window.left,
+        window.top,
+        window.right,
+        window.bottom,
+        work.left,
+        work.top,
+        work.right,
+        work.bottom
+    );
+
+    // The task is given the size live, so its app lays itself out again instead of being
+    // recreated at a size it has not drawn at.
+    wait_for("the maximised size to reach the guest", || {
+        (resizes_since(&running, before, 1) == vec![(max, true)]).then_some(())
+    });
+    // The guest's frames keep coming in the same texture, the first ones still of the old
+    // size, then of the new one.
+    if let (Some(sink), Some(texture)) = (&sink, texture) {
+        assert_eq!(sink.target(3, 1280, 720), Some(texture), "a new texture");
+        sink.frame(3, (400, 300));
+        sink.frame(3, max);
+    }
+    // Once the task has the size, it is reconfigured once, at that size.
+    let mut maximised = clock.clone();
+    maximised.bounds.right = maximised.bounds.left + max.0 as i32;
+    maximised.bounds.bottom = maximised.bounds.top + max.1 as i32;
+    running.android.publish(TaskEvent::Updated(maximised));
+    let reconfigured = vec![(max, true), (max, false)];
+    wait_for("the task to be reconfigured", || {
+        (resizes_since(&running, before, 1) == reconfigured).then_some(())
+    });
+    if let (Some(sink), Some(texture)) = (&sink, texture) {
+        assert_eq!(sink.target(3, 1280, 720), Some(texture), "a new texture");
+        sink.frame(3, max);
+    }
+    // The window keeps its size: nothing larger than the guest draws, nothing of size zero.
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(client_size(hwnd), (max.0 as i32, max.1 as i32));
+    let asked = resizes_since(&running, 0, 1);
+    let within = |((width, height), _): &((u32, u32), bool)| {
+        (1..=max.0).contains(width) && (1..=max.1).contains(height)
+    };
+    assert!(
+        asked.iter().all(within),
+        "a size outside 1x1..{}x{} was asked for: {asked:?}",
+        max.0,
+        max.1
+    );
+
+    // Restoring it gives the task its old size back the same way.
+    let restored_from = running.android.requests.lock().unwrap().len();
+    unsafe { ShowWindow(hwnd as HWND, SW_RESTORE) };
+    assert_eq!(unsafe { IsZoomed(hwnd as HWND) }, 0);
+    let (width, height) = client_size(hwnd);
+    let restored = (width as u32, height as u32);
+    assert_ne!(restored, max);
+    wait_for("the restored size to reach the guest", || {
+        (resizes_since(&running, restored_from, 1) == vec![(restored, true)]).then_some(())
+    });
+
+    running.android.publish(TaskEvent::Removed { task_id: 1 });
+    windows_of(&running, 0);
 }
 
 #[test]

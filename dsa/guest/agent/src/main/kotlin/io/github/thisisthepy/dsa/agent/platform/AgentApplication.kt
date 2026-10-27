@@ -30,6 +30,8 @@ class AgentApplication : Application() {
             trace = io.github.thisisthepy.dsa.agent.trace.ResizeTrace(log, detailed = {
                 android.util.Log.isLoggable("DsaResizeTrace", android.util.Log.DEBUG)
             }),
+            launcherApps = AndroidLauncherApps(this, log),
+            memory = AndroidMemorySource(this),
         )
         HostInputMethod.onCursor = { rect -> agent.cursorMoved(rect.left, rect.top, rect.right, rect.bottom) }
         agent.start()

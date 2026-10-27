@@ -214,6 +214,19 @@ std::map<std::string, v1::Envelope> Cases() {
     rejected->set_reason(v1::REJECT_REASON_AUTHENTICATION_FAILED);
     rejected->set_detail("no proof");
   }
+  cases["request_guest_memory"].mutable_request_guest_memory();
+  {
+    v1::GuestMemory* memory = cases["guest_memory"].mutable_guest_memory();
+    memory->set_mem_total_kb(4015356);
+    memory->set_cached_kb(1503112);
+    memory->set_zram_used_kb(30720);
+    memory->set_total_pss_kb(330000);
+    v1::ProcessMemory* process = memory->add_top_processes();
+    process->set_pid(500);
+    process->set_name("system");
+    process->set_pss_kb(180000);
+    process->set_swap_pss_kb(1000);
+  }
   return cases;
 }
 

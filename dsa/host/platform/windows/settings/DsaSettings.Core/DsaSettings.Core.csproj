@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    What the settings app knows apart from its screens: how to ask the dsa command for the
+    state, the settings and the memory report, and the view models the pages show. It has no
+    WinUI dependency, so its tests run with a plain `dotnet test`.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Dsa.Settings.Core</RootNamespace>
+    <AssemblyName>DsaSettings.Core</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>

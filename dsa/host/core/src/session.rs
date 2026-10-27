@@ -10,6 +10,9 @@
 //! the task messages the guest sends, and hands every change to [`Session::watch_tasks`]
 //! subscribers. When the guest goes away, every task it had is removed.
 //!
+//! It also keeps the guest's last memory report ([`Session::guest_memory`]), which the agent
+//! sends every few minutes and when the host asks ([`Session::request_guest_memory`]).
+//!
 //! The states are those of the lifecycle: `Stopped`, `Starting`, `Active`, `Dozing`,
 //! `Frozen` and `Stopping`. This module moves between `Stopped`, `Starting`, `Active` and
 //! `Stopping`. Entering `Dozing` and `Frozen` belongs to the lifecycle policy, which is not
@@ -28,6 +31,7 @@ use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::PointerEvent;
 use crate::keys::KeyEvent;
+use crate::memory::{GuestMemory, GuestMemoryReport};
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskTable, TaskWatch};
 
 /// Where the session is in its life.
@@ -256,6 +260,8 @@ struct Shared {
     /// at once instead of waiting for the worker to stop waiting on the channel, and frames
     /// from different threads never interleave.
     sender: Mutex<Option<Box<dyn FrameSender>>>,
+    /// The guest's last memory report, and when it arrived. Cleared when the guest stops.
+    guest_memory: Mutex<Option<(GuestMemory, Instant)>>,
 }
 
 /// The guest's tasks and who is watching them, under one lock, so a new watcher's starting
@@ -290,6 +296,10 @@ impl Shared {
         *self.vm_id.lock().unwrap_or_else(|e| e.into_inner()) = vm_id;
     }
 
+    fn set_guest_memory(&self, memory: Option<(GuestMemory, Instant)>) {
+        *self.guest_memory.lock().unwrap_or_else(|e| e.into_inner()) = memory;
+    }
+
     /// Records a task message and hands it to the watchers, unless it changes nothing.
     fn publish_task(&self, event: TaskEvent) {
         let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
@@ -298,6 +308,22 @@ impl Shared {
         }
         hub.watchers
             .retain(|watcher| watcher.send(event.clone()).is_ok());
+    }
+
+    /// Records the name and icon of an installed app, for the list that names it next.
+    fn describe_installed(&self, app: AppInfo) {
+        let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        hub.table.describe_installed(&app);
+    }
+
+    /// Makes `packages` the installed apps and hands the list to the watchers, unless it
+    /// changes nothing.
+    fn publish_installed(&self, packages: &[String]) {
+        let event = {
+            let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+            hub.table.installed_event(packages)
+        };
+        self.publish_task(event);
     }
 
     fn set_sender(&self, sender: Option<Box<dyn FrameSender>>) {
@@ -351,6 +377,7 @@ impl Session {
             subscribers: Mutex::new(Vec::new()),
             tasks: Mutex::new(TaskHub::default()),
             sender: Mutex::new(None),
+            guest_memory: Mutex::new(None),
         });
         let (commands, command_rx) = mpsc::channel();
         let incoming = Arc::new(Mutex::new(None));
@@ -448,6 +475,28 @@ impl Session {
         let (tx, rx) = mpsc::channel();
         *self.incoming.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
         rx
+    }
+
+    /// The guest's last memory report and how old it is. `None` until the agent has sent one
+    /// since the guest started.
+    pub fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        self.shared
+            .guest_memory
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|(memory, at)| GuestMemoryReport {
+                memory: memory.clone(),
+                age: at.elapsed(),
+            })
+    }
+
+    /// Asks the agent for a memory report now; it arrives in [`guest_memory`](Self::guest_memory).
+    /// Needs an active session.
+    pub fn request_guest_memory(&self) -> Result<(), SessionError> {
+        self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::RequestGuestMemory(control::RequestGuestMemory {})),
+        }))
     }
 
     /// Sends a frame to the agent. Needs an active session.
@@ -839,6 +888,16 @@ impl Worker {
                     icon_png: app.icon_png,
                 }));
             }
+            Some(Body::InstalledApp(app)) => {
+                self.shared.describe_installed(AppInfo {
+                    package_name: app.package_name,
+                    label: app.label,
+                    icon_png: app.icon_png,
+                });
+            }
+            Some(Body::InstalledApps(apps)) => {
+                self.shared.publish_installed(&apps.package_names);
+            }
             Some(Body::ImeCursor(cursor)) => {
                 let rect = cursor.cursor.unwrap_or_default();
                 self.shared.publish_task(TaskEvent::ImeCursor {
@@ -851,6 +910,10 @@ impl Worker {
                     },
                 });
             }
+            Some(Body::GuestMemory(memory)) => {
+                let memory = GuestMemory::from_control(memory);
+                self.shared.set_guest_memory(Some((memory, Instant::now())));
+            }
             Some(Body::CloseTask(_))
             | Some(Body::LaunchApp(_))
             | Some(Body::ResizeTask(_))
@@ -858,7 +921,8 @@ impl Worker {
             | Some(Body::PointerEvent(_))
             | Some(Body::KeyEvent(_))
             | Some(Body::ImeComposition(_))
-            | Some(Body::ImeCommit(_)) => {
+            | Some(Body::ImeCommit(_))
+            | Some(Body::RequestGuestMemory(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
             }
             None => {
@@ -887,6 +951,7 @@ impl Worker {
         }
         // The guest's tasks end with it, so their windows close even when it died.
         self.shared.clear_tasks();
+        self.shared.set_guest_memory(None);
         match self.launcher.stop(self.config.stop_timeout) {
             Ok(()) => {
                 let reason = reason(self.launcher.as_mut());

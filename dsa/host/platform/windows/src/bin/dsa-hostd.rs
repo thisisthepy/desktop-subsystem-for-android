@@ -6,6 +6,7 @@
 //! dsa-hostd service <config.json>  the same, as a Windows service
 //! dsa-hostd remove-images <folder> removes the downloaded images (the uninstaller runs it)
 //! dsa-hostd remove-updates <folder> removes the downloaded setup files (the same)
+//! dsa-hostd remove-start-menu      removes every user's app shortcuts DSA made (the same)
 //! ```
 //!
 //! Without a mode it starts one VM, waits for the guest's channel daemon to connect and
@@ -64,7 +65,8 @@ mod windows_host {
     use dsa_transport::Listener;
 
     const USAGE: &str = "usage: dsa-hostd [serve | service] <config.json> | \
-                         dsa-hostd remove-images <folder> | dsa-hostd remove-updates <folder>";
+                         dsa-hostd remove-images <folder> | dsa-hostd remove-updates <folder> | \
+                         dsa-hostd remove-start-menu";
 
     fn build() -> String {
         format!("dsa-hostd {}", dsa_host_windows::VERSION)
@@ -97,6 +99,28 @@ mod windows_host {
             [mode, path] if mode == "remove-updates" => {
                 use dsa_host_windows::uninstall::{installer_folder, remove_downloaded_updates};
                 remove_downloaded_updates(&installer_folder(path))
+            }
+            [mode] if mode == "remove-start-menu" => {
+                use dsa_host_windows::uninstall::remove_start_menu_shortcuts;
+                // Every user's, as the window manager made them in each profile.
+                for profile in dsa_host_windows::profile::profile_folders() {
+                    let note = profile
+                        .join("AppData")
+                        .join("Local")
+                        .join("DSA")
+                        .join(dsa_host_windows::start_menu::NOTE_NAME);
+                    let programs = profile
+                        .join("AppData")
+                        .join("Roaming")
+                        .join("Microsoft")
+                        .join("Windows")
+                        .join("Start Menu")
+                        .join("Programs");
+                    if let Err(why) = remove_start_menu_shortcuts(&note, &programs) {
+                        eprintln!("{}: {why}", profile.display());
+                    }
+                }
+                Ok(())
             }
             [path] if path != "serve" && path != "service" => one_vm(read_config(path)?),
             _ => Err(USAGE.into()),

@@ -11,10 +11,12 @@
 //! users reach the daemon, so they run and are tested on any Linux, over the in-memory
 //! transport and over vsock. The binder service (`binder`, Android only) is the thin layer
 //! that lets those users in; [`aidl`] holds the values it shares with their generated code.
+//! [`reclaim`] decides when the guest drops its caches so the host gets the memory back.
 
 pub mod aidl;
 #[cfg(target_os = "android")]
 pub mod binder;
+pub mod reclaim;
 pub mod router;
 
 use std::sync::atomic::{AtomicBool, Ordering};

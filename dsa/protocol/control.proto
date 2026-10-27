@@ -179,6 +179,28 @@ message AppInfo {
   bytes icon_png = 3;
 }
 
+// Guest to host, from the agent: an app a launcher lists is installed in the guest, or its
+// name or icon changed. The host shows it in its own start menu. The agent sends it on each
+// connection for every such app, and again whenever the app is installed again or updated;
+// the InstalledApps that follows says which apps are still there.
+message InstalledApp {
+  string package_name = 1;
+  // The app's own name, as a launcher shows it.
+  string label = 2;
+  // The app's launcher icon, as a square PNG image of at most 256 pixels on a side. Empty
+  // when the app has no icon the agent could draw.
+  bytes icon_png = 3;
+}
+
+// Guest to host, from the agent: every app a launcher lists, by package, in package order.
+// It follows the InstalledApp of each app it names that the host has not been told about on
+// this connection. The agent sends it on each connection and whenever an app is installed,
+// updated or removed; an app it no longer names has been removed. Each app goes in a message
+// of its own, so no message has to carry every icon at once.
+message InstalledApps {
+  repeated string package_names = 1;
+}
+
 // What a pointer did.
 enum PointerAction {
   POINTER_ACTION_UNSPECIFIED = 0;
@@ -294,6 +316,50 @@ message ImeCursor {
   Rect cursor = 2;
 }
 
+// Host to guest: asks the agent for a GuestMemory report now, instead of at its next
+// periodic one.
+message RequestGuestMemory {}
+
+// One guest process's share of the guest's memory.
+message ProcessMemory {
+  int32 pid = 1;
+  // The process name, as the guest's process list shows it.
+  string name = 2;
+  // Its proportional set size in KiB: its private pages plus its share of the pages it
+  // shares with other processes.
+  uint64 pss_kb = 3;
+  // How much of it is swapped out to compressed memory, proportionally, in KiB.
+  uint64 swap_pss_kb = 4;
+}
+
+// Guest to host, from the agent: how the guest uses its memory. Sent every few minutes, and
+// in answer to RequestGuestMemory. Sizes are in KiB, as the guest kernel counts them, and 0
+// when the guest cannot read the value.
+message GuestMemory {
+  uint64 mem_total_kb = 1;
+  uint64 mem_free_kb = 2;
+  uint64 mem_available_kb = 3;
+  uint64 buffers_kb = 4;
+  // The page cache: file contents kept in memory, which the guest can drop when clean.
+  uint64 cached_kb = 5;
+  // Process memory that no file backs.
+  uint64 anon_pages_kb = 6;
+  uint64 shmem_kb = 7;
+  // Kernel caches the kernel can free on demand.
+  uint64 slab_reclaimable_kb = 8;
+  uint64 swap_total_kb = 9;
+  uint64 swap_free_kb = 10;
+  // Compressed swap (zram): the size of the pages stored in it, and the memory it takes to
+  // hold them compressed.
+  uint64 zram_original_kb = 11;
+  uint64 zram_used_kb = 12;
+  // The proportional set size of the processes the guest's activity manager runs (the apps
+  // and the system server) together. Native daemons are not counted.
+  uint64 total_pss_kb = 13;
+  // The processes with the largest proportional set size, largest first, at most 10.
+  repeated ProcessMemory top_processes = 14;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -315,5 +381,9 @@ message Envelope {
     ImeComposition ime_composition = 17;
     ImeCommit ime_commit = 18;
     ImeCursor ime_cursor = 19;
+    RequestGuestMemory request_guest_memory = 20;
+    GuestMemory guest_memory = 21;
+    InstalledApp installed_app = 22;
+    InstalledApps installed_apps = 23;
   }
 }
