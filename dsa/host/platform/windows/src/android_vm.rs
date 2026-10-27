@@ -305,7 +305,10 @@ fn windows_build() -> Option<(u32, u32)> {
         return None;
     }
     let len = build.iter().position(|&c| c == 0).unwrap_or(build.len());
-    let build: u32 = String::from_utf16_lossy(&build[..len]).trim().parse().ok()?;
+    let build: u32 = String::from_utf16_lossy(&build[..len])
+        .trim()
+        .parse()
+        .ok()?;
     let mut ubr = 0u32;
     let mut size = std::mem::size_of::<u32>() as u32;
     // SAFETY: as above, for a DWORD. A build without UBR reads as revision 0.
