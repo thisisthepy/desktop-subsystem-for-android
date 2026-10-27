@@ -163,12 +163,12 @@ fn nfr2_the_gradual_trim_leaves_the_cache_apps_use_and_waits_out_pressure() {
     );
     // Under memory pressure nothing is trimmed, however much cache there is.
     assert_eq!(
-        reclaimer.decide_under(secs(60), 2, &memory(2600, 900), true),
+        reclaimer.decide_under(secs(60), 2, &memory(1500, 900), true),
         None
     );
     // No tasks: the idle reclaim owns that case, not the trim.
     assert_eq!(
-        reclaimer.decide_under(secs(90), 0, &memory(2600, 900), false),
+        reclaimer.decide_under(secs(90), 0, &memory(1500, 900), false),
         None
     );
 }

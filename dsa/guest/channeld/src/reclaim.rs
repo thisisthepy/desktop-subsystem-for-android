@@ -215,6 +215,8 @@ impl Reclaimer {
         };
         if reason.is_some() {
             self.last_reclaim = Some(now);
+            // A full reclaim also counts as the latest trim: no second one right behind it.
+            self.last_trim = Some(now);
         }
         reason
     }
