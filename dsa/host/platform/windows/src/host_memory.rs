@@ -38,7 +38,7 @@ fn file_name(image: &str) -> &str {
 
 /// Whether `name` is a VM's memory process: `vmmem` with any suffix (`vmmemDSA`, `vmmemWSL`)
 /// and with or without `.exe`. Whose VM it is stays the VM ID check's job.
-fn is_vmmem(name: &str) -> bool {
+pub(crate) fn is_vmmem(name: &str) -> bool {
     name.to_ascii_lowercase().starts_with("vmmem")
 }
 
@@ -148,7 +148,7 @@ mod system {
     /// process, or a program (an app's window host has the app's name). Anything else is
     /// passed over without being opened.
     fn interesting(name: &str) -> bool {
-        is_vmmem(name) || name.to_ascii_lowercase().ends_with(".exe")
+        crate::host_memory::is_vmmem(name) || name.to_ascii_lowercase().ends_with(".exe")
     }
 
     /// The account of a process's token: `<domain>\<name>` for a VM, whose name is its ID,
