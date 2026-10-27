@@ -72,6 +72,28 @@ pub struct AndroidVmConfig {
     pub console_pipe: Option<String>,
     /// The version of the image booted, for the console log. It does not change the VM.
     pub image_version: Option<String>,
+    /// Appended to the name of the process that holds the VM's memory, so Task Manager
+    /// shows `vmmem` followed by it (`VmmemDSA` for `DSA`). `None` leaves the name plain
+    /// `vmmem`, which is what Windows builds without the setting need: they reject a
+    /// document that names it. See [`hosting_process_name_suffix_supported`].
+    pub hosting_process_name_suffix: Option<String>,
+}
+
+/// The suffix DSA gives its memory process, which Task Manager then shows as `VmmemDSA`.
+pub const HOSTING_PROCESS_NAME_SUFFIX: &str = "DSA";
+
+/// Whether HCS on this Windows build accepts `HostingProcessNameSuffix`. The setting came
+/// with Windows 11 21H2 update 22000.71, the 22138 to 22349 refresh builds, and 22420 and
+/// later; these are the same build numbers WSL checks before it sets the same field.
+pub fn hosting_process_name_suffix_supported(build: u32, update_revision: u32) -> bool {
+    const COBALT: u32 = 22000;
+    const COBALT_RELEASE_UBR: u32 = 71;
+    const COBALT_REFRESH: u32 = 22138;
+    const NICKEL_FLOOR: u32 = 22350;
+    const NICKEL: u32 = 22420;
+    build >= NICKEL
+        || (COBALT_REFRESH..NICKEL_FLOOR).contains(&build)
+        || (build == COBALT && update_revision >= COBALT_RELEASE_UBR)
 }
 
 /// Why a configuration cannot describe a VM.
@@ -224,6 +246,18 @@ impl AndroidVmConfig {
             None => json!({ "0": data }),
         };
         devices["Scsi"]["0"]["Attachments"] = attachments;
+        let mut memory = json!({
+            "SizeInMB": memory_mb,
+            "AllowOvercommit": true,
+            "EnableDeferredCommit": true,
+            "EnableColdDiscardHint": true,
+            // Lets the guest also hand back pages it has zeroed, which the host then trims
+            // from the VM's working set. A guest without support for it is unaffected.
+            "EnableColdHint": true,
+        });
+        if let Some(suffix) = &self.hosting_process_name_suffix {
+            memory["HostingProcessNameSuffix"] = Value::String(suffix.clone());
+        }
         Ok(json!({
             "Owner": self.owner,
             "SchemaVersion": { "Major": 2, "Minor": 3 },
@@ -235,22 +269,7 @@ impl AndroidVmConfig {
                     "LinuxKernelDirect": kernel,
                 },
                 "ComputeTopology": {
-                    "Memory": {
-                        "SizeInMB": memory_mb,
-                        // Backed by the host's pagefile instead of reserved RAM, so the host
-                        // can page out and take back what the guest does not touch.
-                        "AllowOvercommit": true,
-                        // Committed on first touch, so memory the guest never uses costs
-                        // the host nothing.
-                        "EnableDeferredCommit": true,
-                        // The pages the guest frees and reports (free page reporting) are
-                        // discarded from the VM's memory and return to the host.
-                        "EnableColdDiscardHint": true,
-                        // Lets the guest also hand back pages it has zeroed, which the host
-                        // then trims from the VM's working set. A guest without support for
-                        // it is unaffected.
-                        "EnableColdHint": true,
-                    },
+                    "Memory": memory,
                     "Processor": { "Count": self.processors },
                 },
                 "Devices": devices,

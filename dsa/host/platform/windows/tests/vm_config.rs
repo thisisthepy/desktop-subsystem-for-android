@@ -3,7 +3,10 @@
 use std::path::PathBuf;
 
 use dsa_host_windows::guid::Guid;
-use dsa_host_windows::vm::{runtime_id_from_properties, AndroidVmConfig};
+use dsa_host_windows::vm::{
+    hosting_process_name_suffix_supported, runtime_id_from_properties, AndroidVmConfig,
+    HOSTING_PROCESS_NAME_SUFFIX,
+};
 use serde_json::Value;
 
 const USER_SID: &str = "S-1-5-21-1004336348-1177238915-682003330-1001";
@@ -22,6 +25,7 @@ fn config() -> AndroidVmConfig {
         page_reporting_order: 5,
         console_pipe: Some(r"\\.\pipe\dsa-console-dsa-android-S-1-5-21-1".into()),
         image_version: Some("17.0.0-1".into()),
+        hosting_process_name_suffix: None,
     }
 }
 
@@ -228,4 +232,35 @@ fn fr2_a_console_pipe_that_is_not_a_local_pipe_is_refused() {
         let error = broken.to_hcs_document().unwrap_err().to_string();
         assert!(error.contains("console pipe"), "{bad:?}: {error}");
     }
+}
+
+#[test]
+fn the_memory_process_is_named_vmmem_dsa_when_a_suffix_is_set() {
+    let mut config = config();
+    config.hosting_process_name_suffix = Some(HOSTING_PROCESS_NAME_SUFFIX.into());
+    let doc = document(&config);
+    let memory = &doc["VirtualMachine"]["ComputeTopology"]["Memory"];
+    assert_eq!(memory["HostingProcessNameSuffix"], "DSA");
+}
+
+#[test]
+fn the_memory_process_keeps_its_plain_name_without_a_suffix() {
+    let doc = document(&config());
+    let memory = &doc["VirtualMachine"]["ComputeTopology"]["Memory"];
+    assert!(
+        memory.get("HostingProcessNameSuffix").is_none(),
+        "a build that does not know the field rejects the whole document"
+    );
+}
+
+#[test]
+fn the_memory_process_suffix_is_only_used_where_hcs_accepts_it() {
+    assert!(!hosting_process_name_suffix_supported(19045, 5000));
+    assert!(!hosting_process_name_suffix_supported(22000, 70));
+    assert!(hosting_process_name_suffix_supported(22000, 71));
+    assert!(hosting_process_name_suffix_supported(22138, 0));
+    assert!(!hosting_process_name_suffix_supported(22350, 0));
+    assert!(!hosting_process_name_suffix_supported(22419, 0));
+    assert!(hosting_process_name_suffix_supported(22420, 0));
+    assert!(hosting_process_name_suffix_supported(26100, 0));
 }
