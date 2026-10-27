@@ -200,8 +200,11 @@ void ComposerClient::present(int64_t displayId, std::vector<CommandResultPayload
     if (mDisplay.powerMode() != composer3::PowerMode::OFF) {
         mTasks->present(frame);
     }
-    // The host has finished with every buffer by now, so there are no fences to hand back:
-    // an empty release list tells SurfaceFlinger each buffer is free already.
+    // present() returned once the host had finished with the previous frame, and the
+    // buffers SurfaceFlinger releases now are that frame's, so there are no fences to hand
+    // back: an empty release list tells SurfaceFlinger each of them is free already. This
+    // frame's buffers are released only after the next present, which waits for the host to
+    // finish with them first.
     composer3::ReleaseFences releases;
     releases.display = displayId;
     results->emplace_back(std::move(releases));

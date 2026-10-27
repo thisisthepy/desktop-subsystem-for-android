@@ -25,6 +25,7 @@
 
 #include "channel_messages.h"
 #include "compose_request.h"
+#include "frame_pipeline.h"
 #include "host_renderer.h"
 #include "resize_trace.h"
 #include "task_layout.h"
@@ -68,7 +69,8 @@ class TaskComposer {
     static constexpr uint32_t kFirstTaskDisplay = 1;
     static constexpr uint32_t kTaskDisplays = 63;
 
-    TaskComposer();
+    // onPresentStart runs once on the thread that sends frames to the host.
+    explicit TaskComposer(std::function<void()> onPresentStart = {});
     ~TaskComposer();
 
     // Where TaskFrames go (the control channel), and how to ask SurfaceFlinger for a new frame.
@@ -81,9 +83,14 @@ class TaskComposer {
     // have missed them.
     void channelConnected();
 
-    // Composes and posts every task's frame. Returns when the host has finished with the
-    // frame's buffers, so none needs a release fence.
+    // Hands the frame to the thread that composes and posts every task's frame on the host,
+    // and returns without waiting for the host. It first waits for the frame before, so by
+    // the time it returns the host has finished with that frame's buffers: SurfaceFlinger
+    // gives a buffer back to its app only when the present after the one that showed it
+    // returns, so none needs a release fence.
     void present(Frame& frame);
+    // Returns once the host has finished with every frame handed over.
+    void drain();
 
    private:
     struct Output {
@@ -102,6 +109,8 @@ class TaskComposer {
         int next = 0;
     };
 
+    // Composes and posts every task's frame, on the pipeline's thread.
+    void compose(Frame& frame);
     uint32_t sharedHandleLocked(const BufferRef& buffer);
     void releaseOutputLocked(Output& output);
     void syncGenerationLocked();
@@ -137,6 +146,8 @@ class TaskComposer {
     // Starts true: the first connection is made in the background too.
     std::atomic<bool> mDisconnected{true};
     std::thread mReconnector;
+    // Last, so it is stopped, and its frame finished, before anything it uses goes.
+    FramePipeline mPipeline;
 };
 
 }  // namespace dsa::hwc

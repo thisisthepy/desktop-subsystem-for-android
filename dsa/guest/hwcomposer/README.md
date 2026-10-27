@@ -29,8 +29,14 @@ nothing else.
    one (`rcSetDisplayColorBuffer`), which is when the host copies it into the window. Two
    ColorBuffers per task alternate, so the host can show one while the next is composed.
 
-Composition finishes before `presentDisplay` returns, so the hwcomposer hands back no
-release fences and declares `PRESENT_FENCE_IS_NOT_RELIABLE`.
+`presentDisplay` does not wait for the host. It hands the frame to a thread of its own,
+which composes and posts it, and waits only until the frame before has gone out. That is
+enough without release fences: SurfaceFlinger gives a buffer back to its app when the
+present after the one that showed it returns, and by then the host has finished with it.
+SurfaceFlinger latches and composes the next frame while the host composes this one,
+instead of spending every round trip to the host on its main thread, where a late answer
+held back the release of every app's buffers. The hwcomposer hands back no release fences
+and declares `PRESENT_FENCE_IS_NOT_RELIABLE`.
 
 ## Which layers belong to which task
 
@@ -124,7 +130,8 @@ the NDK's libc++ is not the platform's. `dsa/graphics/check-guest-driver.py --ex
 checks every import resolves against the image.
 
 `test.sh` runs the task rules (`tests/task_layout_test.cpp`) and the channel messages
-against the protocol vectors (`tests/channel_messages_test.cpp`) on the build machine. It
+against the protocol vectors (`tests/channel_messages_test.cpp`), and the present
+pipeline (`tests/frame_pipeline_test.cpp`) on the build machine. It
 needs a C++17 compiler and protobuf-lite 3.21 (Debian: `libprotobuf-dev`).
 
 The composer is DSA's own code, written after ranchu's hwc3
@@ -140,6 +147,7 @@ composition paths (DRM, guest composition) do not apply to a VM without a displa
 | `src/compose_request.*` | The `ComposeDevice_v2` request renderControl's `rcCompose` takes |
 | `src/channel_messages.*` | `TaskUpdated`, `TaskRemoved` and `TaskFrames`, through the generated codec |
 | `src/task_composer.*` | Per-task composition and posting, display lifetimes, shared ColorBuffers |
+| `src/frame_pipeline.*` | The thread a frame goes to the host on, one frame in flight |
 | `src/host_renderer.*`, `src/host_stream.*` | renderControl over vsock to the host renderer |
 | `src/channel_client.*` | The binder client of `dsa-channeld` |
 | `src/composer*.*`, `src/display.*`, `src/vsync_thread.*`, `src/main.cpp` | The composer HAL SurfaceFlinger talks to |
