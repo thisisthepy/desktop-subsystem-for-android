@@ -590,6 +590,7 @@ impl HostConfig {
                 (None, Some(first)) => Some(first.version.clone()),
                 _ => None,
             },
+            hosting_process_name_suffix: None,
         }
     }
 

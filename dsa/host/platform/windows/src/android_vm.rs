@@ -19,7 +19,9 @@ use crate::console_log::{boot_header, ConsoleLog};
 use crate::console_pipe::ConsoleCapture;
 use crate::guid::Guid;
 use crate::hcs::{grant_vm_access, ComputeSystem};
-use crate::vm::AndroidVmConfig;
+use crate::vm::{
+    hosting_process_name_suffix_supported, AndroidVmConfig, HOSTING_PROCESS_NAME_SUFFIX,
+};
 use crate::vm_listener::VmIdSlot;
 
 /// How long a single HCS call (create, start, terminate) may take.
@@ -194,6 +196,11 @@ impl GuestLauncher for AndroidVmLauncher {
         config.initrd = Some(boot_initrd.0.clone());
         config.kernel_cmdline = format!("{} {}", config.kernel_cmdline, bootconfig::CMDLINE_FLAG);
         config.console_pipe = self.begin_console(&config);
+        if windows_build()
+            .is_some_and(|(build, ubr)| hosting_process_name_suffix_supported(build, ubr))
+        {
+            config.hosting_process_name_suffix = Some(HOSTING_PROCESS_NAME_SUFFIX.into());
+        }
         let document = config
             .to_hcs_document()
             .map_err(|e| e.to_string())?
@@ -288,4 +295,57 @@ impl GuestLauncher for AndroidVmLauncher {
             .resume(CALL_TIMEOUT)
             .map_err(|e| format!("the Android VM could not be resumed: {e}"))
     }
+}
+
+/// This Windows build's number and update revision, as the registry records them.
+fn windows_build() -> Option<(u32, u32)> {
+    use std::ptr::null_mut;
+    use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+    use windows_sys::Win32::System::Registry::{
+        RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
+    };
+    let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let key = wide(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
+    let build_name = wide("CurrentBuildNumber");
+    let ubr_name = wide("UBR");
+    let mut build = [0u16; 16];
+    let mut size = std::mem::size_of_val(&build) as u32;
+    // SAFETY: the buffer and its size in bytes describe the same memory.
+    let code = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            build_name.as_ptr(),
+            RRF_RT_REG_SZ,
+            null_mut(),
+            build.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if code != ERROR_SUCCESS {
+        return None;
+    }
+    let len = build.iter().position(|&c| c == 0).unwrap_or(build.len());
+    let build: u32 = String::from_utf16_lossy(&build[..len])
+        .trim()
+        .parse()
+        .ok()?;
+    let mut ubr = 0u32;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    // SAFETY: as above, for a DWORD. A build without UBR reads as revision 0.
+    let code = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            ubr_name.as_ptr(),
+            RRF_RT_REG_DWORD,
+            null_mut(),
+            (&mut ubr as *mut u32).cast(),
+            &mut size,
+        )
+    };
+    if code != ERROR_SUCCESS {
+        ubr = 0;
+    }
+    Some((build, ubr))
 }
