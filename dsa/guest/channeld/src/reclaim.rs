@@ -84,7 +84,10 @@ pub fn memory_pressure(text: &str, threshold: f64) -> bool {
     let avg10 = text
         .lines()
         .find_map(|line| line.strip_prefix("some "))
-        .and_then(|rest| rest.split_whitespace().find_map(|f| f.strip_prefix("avg10=")))
+        .and_then(|rest| {
+            rest.split_whitespace()
+                .find_map(|f| f.strip_prefix("avg10="))
+        })
         .and_then(|v| v.parse::<f64>().ok());
     avg10.is_none_or(|v| v >= threshold)
 }
@@ -203,8 +206,7 @@ impl Reclaimer {
             && self
                 .last_trim
                 .is_none_or(|last| now.saturating_sub(last) >= self.policy.trim_gap)
-            && memory.droppable_kb()
-                >= self.policy.keep_cache_kb + self.policy.min_trim_kb
+            && memory.droppable_kb() >= self.policy.keep_cache_kb + self.policy.min_trim_kb
         {
             self.last_trim = Some(now);
             return Some(Reason::Gradual);

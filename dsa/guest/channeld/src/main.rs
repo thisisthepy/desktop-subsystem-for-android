@@ -127,7 +127,7 @@ mod daemon {
     #[cfg(target_os = "android")]
     fn reclaim_idle_memory(router: Arc<Router>) {
         use dsa_guest_channeld::reclaim::{
-            memory_pressure, MemInfo, ReclaimPolicy, Reclaimer, Reason, CHECK_INTERVAL,
+            memory_pressure, MemInfo, Reason, ReclaimPolicy, Reclaimer, CHECK_INTERVAL,
             RECLAIM_PROPERTY, TRIM_PROPERTY,
         };
         let start = std::time::Instant::now();

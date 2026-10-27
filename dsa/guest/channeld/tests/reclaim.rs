@@ -157,11 +157,20 @@ fn nfr2_open_tasks_get_a_gradual_trim_of_cold_cache_every_so_often() {
 fn nfr2_the_gradual_trim_leaves_the_cache_apps_use_and_waits_out_pressure() {
     let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
     // 300 MiB of cache is under what the trim keeps plus its least slice.
-    assert_eq!(reclaimer.decide_under(secs(30), 2, &memory(2600, 300), false), None);
+    assert_eq!(
+        reclaimer.decide_under(secs(30), 2, &memory(2600, 300), false),
+        None
+    );
     // Under memory pressure nothing is trimmed, however much cache there is.
-    assert_eq!(reclaimer.decide_under(secs(60), 2, &memory(2600, 900), true), None);
+    assert_eq!(
+        reclaimer.decide_under(secs(60), 2, &memory(2600, 900), true),
+        None
+    );
     // No tasks: the idle reclaim owns that case, not the trim.
-    assert_eq!(reclaimer.decide_under(secs(90), 0, &memory(2600, 900), false), None);
+    assert_eq!(
+        reclaimer.decide_under(secs(90), 0, &memory(2600, 900), false),
+        None
+    );
 }
 
 #[test]

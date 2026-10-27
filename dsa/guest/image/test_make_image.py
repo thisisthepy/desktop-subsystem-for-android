@@ -1241,10 +1241,9 @@ class GuestMemoryTests(unittest.TestCase):
             contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
             self.assertEqual(contexts[0], existing.strip())
             self.assertEqual(contexts.count(make_image.RECLAIM_PROPERTY_CONTEXT), 1)
-        self.assertEqual(
-            make_image.update_vendor_property_contexts(make_image.RECLAIM_PROPERTY_CONTEXT + "\n"),
-            make_image.RECLAIM_PROPERTY_CONTEXT + "\n",
-        )
+            self.assertEqual(contexts.count(make_image.TRIM_PROPERTY_CONTEXT), 1)
+        both = make_image.RECLAIM_PROPERTY_CONTEXT + "\n" + make_image.TRIM_PROPERTY_CONTEXT + "\n"
+        self.assertEqual(make_image.update_vendor_property_contexts(both), both)
 
     def test_nfr1_apps_a_desktop_has_no_use_for_are_removed_and_the_ones_apps_need_are_kept(self):
         removed = ["Dialer", "messaging", "Stk", "BasicDreams", "LiveWallpapersPicker", "QuickSearchBox"]
