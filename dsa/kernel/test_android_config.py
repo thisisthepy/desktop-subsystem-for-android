@@ -94,6 +94,7 @@ class AndroidKernelConfigTests(unittest.TestCase):
             "CONFIG_ZRAM_BACKEND_LZ4=y",
             "CONFIG_ZRAM_DEF_COMP_LZ4=y",
             "CONFIG_PSI=y",
+            "CONFIG_MEMCG=y",
         ]:
             self.assertIn(option, config)
 

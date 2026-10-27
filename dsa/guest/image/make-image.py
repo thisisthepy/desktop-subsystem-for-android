@@ -446,6 +446,9 @@ MEMORY_RC = "VENDOR/etc/init/dsa-memory.rc"
 VENDOR_PROPERTY_CONTEXTS = "VENDOR/etc/selinux/vendor_property_contexts"
 RECLAIM_PROPERTY = "vendor.dsa.memory.reclaim"
 RECLAIM_PROPERTY_CONTEXT = f"{RECLAIM_PROPERTY} u:object_r:dsa_memory_prop:s0 exact bool"
+# The gentler property for the gradual trim while apps are open: init drops only the page cache.
+TRIM_PROPERTY = "vendor.dsa.memory.trim"
+TRIM_PROPERTY_CONTEXT = f"{TRIM_PROPERTY} u:object_r:dsa_memory_prop:s0 exact bool"
 # Features the VM lacks; SystemConfig drops them wherever else they are declared.
 UNAVAILABLE_FEATURES = "VENDOR/etc/permissions/dsa-unavailable-features.xml"
 
@@ -523,6 +526,8 @@ def update_vendor_property_contexts(text):
     lines = text.splitlines()
     if not any(line.split()[:1] == [RECLAIM_PROPERTY] for line in lines):
         lines.append(RECLAIM_PROPERTY_CONTEXT)
+    if not any(line.split()[:1] == [TRIM_PROPERTY] for line in lines):
+        lines.append(TRIM_PROPERTY_CONTEXT)
     return "\n".join(lines) + "\n"
 
 

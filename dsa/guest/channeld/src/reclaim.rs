@@ -19,6 +19,11 @@ use std::time::Duration;
 /// back to `0`.
 pub const RECLAIM_PROPERTY: &str = "vendor.dsa.memory.reclaim";
 
+/// The property init watches for the gradual trim: set to `1`, init asks the kernel to
+/// reclaim a bounded slice of the coldest pages (cgroup `memory.reclaim`) and sets it back
+/// to `0`.
+pub const TRIM_PROPERTY: &str = "vendor.dsa.memory.trim";
+
 /// How often the daemon looks at the guest's memory.
 pub const CHECK_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -73,6 +78,21 @@ impl MemInfo {
     }
 }
 
+/// Whether `/proc/pressure/memory` shows the guest short of memory: tasks stalled on it for
+/// `threshold` percent or more of the last 10 seconds (the `some` line's `avg10`). Text that
+/// cannot be read counts as pressure, so the trim stays out of the way when unsure.
+pub fn memory_pressure(text: &str, threshold: f64) -> bool {
+    let avg10 = text
+        .lines()
+        .find_map(|line| line.strip_prefix("some "))
+        .and_then(|rest| {
+            rest.split_whitespace()
+                .find_map(|f| f.strip_prefix("avg10="))
+        })
+        .and_then(|v| v.parse::<f64>().ok());
+    avg10.is_none_or(|v| v >= threshold)
+}
+
 /// Why the daemon asks for a reclaim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reason {
@@ -80,6 +100,9 @@ pub enum Reason {
     Idle,
     /// Most of the memory in use is cache the guest can drop.
     MostlyCache,
+    /// Tasks are open and cold cache has piled up past what the guest keeps for itself: a
+    /// slice of page cache goes back to the host, as WSL's gradual reclaim does.
+    Gradual,
 }
 
 /// The decision's settings.
@@ -95,6 +118,14 @@ pub struct ReclaimPolicy {
     /// The least droppable cache worth a reclaim, in KiB: below it the cost of reading the
     /// files again outweighs what the host gets back.
     pub min_droppable_kb: u64,
+    /// The time between two gradual trims while tasks are open.
+    pub trim_gap: Duration,
+    /// The page cache the gradual trim leaves alone, in KiB: warm files of the open apps.
+    /// A trim happens only when the droppable memory is this much plus `min_trim_kb`.
+    pub keep_cache_kb: u64,
+    /// The least cache above `keep_cache_kb` worth a trim, in KiB. It is also the amount a
+    /// trim asks for (init's script), so a trim never takes the cache below `keep_cache_kb`.
+    pub min_trim_kb: u64,
 }
 
 impl Default for ReclaimPolicy {
@@ -104,6 +135,9 @@ impl Default for ReclaimPolicy {
             min_gap: Duration::from_secs(10 * 60),
             cache_percent: 50,
             min_droppable_kb: 128 * 1024,
+            trim_gap: Duration::from_secs(45),
+            keep_cache_kb: 256 * 1024,
+            min_trim_kb: 64 * 1024,
         }
     }
 }
@@ -117,6 +151,7 @@ pub struct Reclaimer {
     /// Whether the current idle stretch has had its reclaim.
     idle_reclaimed: bool,
     last_reclaim: Option<Duration>,
+    last_trim: Option<Duration>,
 }
 
 impl Reclaimer {
@@ -126,12 +161,25 @@ impl Reclaimer {
             idle_since: None,
             idle_reclaimed: false,
             last_reclaim: None,
+            last_trim: None,
         }
     }
 
     /// Whether to reclaim at `now` (any monotonic clock), with `tasks` app tasks open and
     /// memory as `memory` says. A `Some` counts as done: the next one waits for its turn.
     pub fn decide(&mut self, now: Duration, tasks: usize, memory: &MemInfo) -> Option<Reason> {
+        self.decide_under(now, tasks, memory, false)
+    }
+
+    /// Like [`Reclaimer::decide`], told whether the guest is under memory pressure. Under
+    /// pressure the gradual trim waits, so it never competes with an app for memory.
+    pub fn decide_under(
+        &mut self,
+        now: Duration,
+        tasks: usize,
+        memory: &MemInfo,
+        pressure: bool,
+    ) -> Option<Reason> {
         if tasks > 0 {
             self.idle_since = None;
             self.idle_reclaimed = false;
@@ -155,11 +203,22 @@ impl Reclaimer {
             Some(Reason::Idle)
         } else if gap_passed && worth_it && mostly_cache {
             Some(Reason::MostlyCache)
+        } else if tasks > 0
+            && !pressure
+            && self
+                .last_trim
+                .is_none_or(|last| now.saturating_sub(last) >= self.policy.trim_gap)
+            && memory.droppable_kb() >= self.policy.keep_cache_kb + self.policy.min_trim_kb
+        {
+            self.last_trim = Some(now);
+            return Some(Reason::Gradual);
         } else {
             None
         };
         if reason.is_some() {
             self.last_reclaim = Some(now);
+            // A full reclaim also counts as the latest trim: no second one right behind it.
+            self.last_trim = Some(now);
         }
         reason
     }

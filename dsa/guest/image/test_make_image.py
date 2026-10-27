@@ -1221,6 +1221,21 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertIn("write /proc/sys/vm/compact_memory 1", trigger)
             self.assertIn("setprop vendor.dsa.memory.reclaim 0", trigger)
 
+    def test_nfr2_a_gradual_trim_reclaims_a_bounded_slice_from_the_coldest_pages_and_reads_memory_pressure(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
+            contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
+            self.assertIn("vendor.dsa.memory.trim u:object_r:dsa_memory_prop:s0 exact bool", contexts)
+            rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
+            trigger = rc[rc.index("on property:vendor.dsa.memory.trim=1"):]
+            self.assertIn("write /sys/fs/cgroup/apps/memory.reclaim 48M", trigger)
+            self.assertIn("write /sys/fs/cgroup/system/memory.reclaim 16M", trigger)
+            self.assertNotIn("drop_caches", trigger)
+            self.assertNotIn("compact_memory", trigger)
+            self.assertIn("(allow vendor_init cgroup_v2 (file (write open getattr)))", archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode())
+            self.assertIn("setprop vendor.dsa.memory.trim 0", trigger)
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            self.assertIn("(allow dsa_channeld proc_pressure_mem (file (read open getattr)))", policy)
+
     def test_nfr2_the_reclaim_property_keeps_the_existing_vendor_contexts(self):
         existing = "vendor.example u:object_r:vendor_default_prop:s0\n"
         with tempfile.TemporaryDirectory() as tmp, self._modify(
@@ -1229,10 +1244,9 @@ class GuestMemoryTests(unittest.TestCase):
             contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
             self.assertEqual(contexts[0], existing.strip())
             self.assertEqual(contexts.count(make_image.RECLAIM_PROPERTY_CONTEXT), 1)
-        self.assertEqual(
-            make_image.update_vendor_property_contexts(make_image.RECLAIM_PROPERTY_CONTEXT + "\n"),
-            make_image.RECLAIM_PROPERTY_CONTEXT + "\n",
-        )
+            self.assertEqual(contexts.count(make_image.TRIM_PROPERTY_CONTEXT), 1)
+        both = make_image.RECLAIM_PROPERTY_CONTEXT + "\n" + make_image.TRIM_PROPERTY_CONTEXT + "\n"
+        self.assertEqual(make_image.update_vendor_property_contexts(both), both)
 
     def test_nfr1_apps_a_desktop_has_no_use_for_are_removed_and_the_ones_apps_need_are_kept(self):
         removed = ["Dialer", "messaging", "Stk", "BasicDreams", "LiveWallpapersPicker", "QuickSearchBox"]

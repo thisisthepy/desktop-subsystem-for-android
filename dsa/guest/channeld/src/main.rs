@@ -127,7 +127,8 @@ mod daemon {
     #[cfg(target_os = "android")]
     fn reclaim_idle_memory(router: Arc<Router>) {
         use dsa_guest_channeld::reclaim::{
-            MemInfo, ReclaimPolicy, Reclaimer, CHECK_INTERVAL, RECLAIM_PROPERTY,
+            memory_pressure, MemInfo, Reason, ReclaimPolicy, Reclaimer, CHECK_INTERVAL,
+            RECLAIM_PROPERTY, TRIM_PROPERTY,
         };
         let start = std::time::Instant::now();
         let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
@@ -141,14 +142,24 @@ mod daemon {
                 }
             };
             let tasks = router.task_count();
-            if let Some(reason) = reclaimer.decide(start.elapsed(), tasks, &memory) {
+            // Pressure stall information is optional in the kernel: unreadable counts as busy.
+            let pressure = std::fs::read_to_string("/proc/pressure/memory")
+                .map(|text| memory_pressure(&text, 5.0))
+                .unwrap_or(true);
+            if let Some(reason) = reclaimer.decide_under(start.elapsed(), tasks, &memory, pressure)
+            {
+                let property = if reason == Reason::Gradual {
+                    TRIM_PROPERTY
+                } else {
+                    RECLAIM_PROPERTY
+                };
                 say!(
                     "dropping the guest's caches ({reason:?}, {tasks} tasks): {} MiB droppable \
                      of {} MiB in use",
                     memory.droppable_kb() / 1024,
                     memory.used_kb() / 1024
                 );
-                if let Err(why) = set_property(RECLAIM_PROPERTY, "1") {
+                if let Err(why) = set_property(property, "1") {
                     say!("could not ask init to drop the caches: {why}");
                 }
             }
