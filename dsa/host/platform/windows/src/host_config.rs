@@ -270,6 +270,20 @@ pub struct HostConfig {
     pub connect_timeout_secs: u64,
     #[serde(default = "default_stop_timeout_secs")]
     pub stop_timeout_secs: u64,
+    /// How long no Android window may be shown before Android's screen goes off and it goes
+    /// into Doze.
+    #[serde(default = "default_doze_delay_secs")]
+    pub doze_delay_secs: u64,
+    /// How long Android stays in Doze before it is frozen, for a user who turned freezing on
+    /// in their settings (30 minutes when absent). The service freezes only such a user's
+    /// Android: a frozen Android gets no notifications, alarms or widget updates. Run by hand
+    /// (`dsa-hostd <config.json>`), the setting alone turns freezing on.
+    #[serde(default)]
+    pub freeze_after_minutes: Option<u64>,
+}
+
+fn default_doze_delay_secs() -> u64 {
+    dsa_host_core::session::DEFAULT_DOZE_DELAY.as_secs()
 }
 
 fn default_check_interval_hours() -> u64 {
@@ -583,6 +597,10 @@ impl HostConfig {
         SessionConfig {
             connect_timeout: Duration::from_secs(self.connect_timeout_secs),
             stop_timeout: Duration::from_secs(self.stop_timeout_secs),
+            doze_delay: Duration::from_secs(self.doze_delay_secs),
+            freeze_after: self
+                .freeze_after_minutes
+                .map(|minutes| Duration::from_secs(minutes.saturating_mul(60))),
         }
     }
 }

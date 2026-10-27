@@ -10,6 +10,8 @@ import io.github.thisisthepy.dsa.agent.input.KeyInput
 import io.github.thisisthepy.dsa.agent.input.PointerInput
 import io.github.thisisthepy.dsa.agent.input.TextInput
 import io.github.thisisthepy.dsa.agent.input.TextKeys
+import io.github.thisisthepy.dsa.agent.power.DevicePower
+import io.github.thisisthepy.dsa.agent.power.Lifecycle
 import io.github.thisisthepy.dsa.agent.memory.MemoryReporter
 import io.github.thisisthepy.dsa.agent.memory.MemorySource
 import io.github.thisisthepy.dsa.agent.requests.HostRequests
@@ -39,7 +41,9 @@ import io.github.thisisthepy.dsa.control.v1.Envelope
  * guest's at boot, and the editor's cursor goes back to the host. The apps a launcher lists
  * go to the host too, on each connection and whenever one is installed, updated or removed,
  * so the host's start menu can show them. With a [MemorySource], it also reports the guest's
- * memory every few minutes and whenever the host asks.
+ * memory every few minutes and whenever the host asks. When the host says no task window is
+ * shown the agent turns the screen off and puts the device into Doze, and the host's battery
+ * becomes the guest's ([Lifecycle]).
  */
 class Agent(
     private val ownPackage: String,
@@ -55,6 +59,7 @@ class Agent(
     textKeys: TextKeys = TextKeys { null },
     private val inputMethods: InputMethodSetup = InputMethodSetup.NONE,
     private val trace: ResizeTrace = ResizeTrace(log),
+    power: DevicePower = DevicePower.NONE,
     private val launcherApps: LauncherApps = LauncherApps.NONE,
     memory: MemorySource? = null,
 ) {
@@ -81,6 +86,7 @@ class Agent(
         send = { frame -> channel.send(frame) },
         log = log,
     )
+    private val lifecycle = Lifecycle(power, { frame -> channel.send(frame) }, log)
     private val memoryReporter = memory?.let {
         MemoryReporter(it, scheduler, log, isConnected = { channel.connected }, send = { frame -> channel.send(frame) })
     }
@@ -100,6 +106,7 @@ class Agent(
                 log.warn("could not make the agent's input method the guest's; typed text may not reach editors", e)
             }
             listen()
+            lifecycle.start { work -> scheduler.post(work) }
             listenToApps()
             channel.start()
             requestRefresh()
@@ -157,6 +164,7 @@ class Agent(
 
     private fun onConnected() {
         reporter.resend()
+        lifecycle.connected()
         installed.resend()
         memoryReporter?.connected()
         requestRefresh()
@@ -199,6 +207,7 @@ class Agent(
         } catch (e: InvalidProtocolBufferException) {
             return false
         }
+        if (lifecycle.handle(envelope)) return true
         when (envelope.bodyCase) {
             Envelope.BodyCase.POINTER_EVENT -> try {
                 pointer.handle(envelope.pointerEvent)

@@ -149,6 +149,19 @@ message SetTaskDensity {
 // fast is not held back by the answers.
 message StreamInput {}
 
+// Says whether any task window of the caller's Android is shown: open and not minimized. The
+// window manager sends it on each change. Once no window has been shown for a while, the
+// caller's Android turns its screen off and goes into Doze; it wakes as soon as a window is
+// shown again. The service keeps the latest value while the Android is not running, for its
+// next start.
+message SetWindowsShown {
+  bool shown = 1;
+}
+
+// Freezes the caller's Android: its processes stop until a task window is shown again. Its
+// notifications, alarms and widgets stop with them. Returns at once with the status.
+message FreezeSession {}
+
 // What a pointer did.
 enum PointerAction {
   POINTER_ACTION_UNSPECIFIED = 0;
@@ -507,6 +520,8 @@ message Request {
     ListApps list_apps = 15;
     GetSettings get_settings = 16;
     SetSettings set_settings = 17;
+    SetWindowsShown set_windows_shown = 20;
+    FreezeSession freeze_session = 21;
   }
 }
 

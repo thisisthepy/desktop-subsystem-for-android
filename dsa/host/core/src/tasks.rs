@@ -134,6 +134,10 @@ pub enum TaskRequest {
     },
     /// The task's window is on a monitor of another scale: the task draws at this density.
     SetDensity { task_id: i32, density_dpi: u32 },
+    /// Whether any task window is shown: open and not minimized. Once none has been shown for
+    /// a while the guest's screen goes off and the guest goes into Doze; it wakes as soon as
+    /// a window is shown again.
+    WindowsShown { shown: bool },
 }
 
 impl TaskRequest {
@@ -158,6 +162,10 @@ impl TaskRequest {
                 task_id,
                 density_dpi,
             } => format!("draw task {task_id} at {density_dpi} dpi"),
+            TaskRequest::WindowsShown { shown: true } => "wake for a shown window".into(),
+            TaskRequest::WindowsShown { shown: false } => {
+                "let the screen go off with no window shown".into()
+            }
         }
     }
 }
@@ -184,6 +192,7 @@ pub fn coalesce(requests: Vec<TaskRequest>) -> Vec<TaskRequest> {
                     TaskRequest::SetDensity { task_id: a, .. },
                     TaskRequest::SetDensity { task_id: b, .. },
                 ) => a == b,
+                (TaskRequest::WindowsShown { .. }, TaskRequest::WindowsShown { .. }) => true,
                 _ => false,
             })
     };
@@ -601,6 +610,20 @@ mod tests {
             coalesce(requests),
             vec![close.clone(), launch, close, resize(1, 500)]
         );
+    }
+
+    #[test]
+    fn fr10_only_the_latest_word_on_shown_windows_is_sent() {
+        let hidden = TaskRequest::WindowsShown { shown: false };
+        let shown = TaskRequest::WindowsShown { shown: true };
+        let requests = vec![
+            hidden.clone(),
+            resize(1, 500),
+            shown.clone(),
+            hidden.clone(),
+        ];
+        assert_eq!(coalesce(requests), vec![resize(1, 500), hidden]);
+        assert_eq!(coalesce(vec![shown.clone()]), vec![shown]);
     }
 
     #[test]

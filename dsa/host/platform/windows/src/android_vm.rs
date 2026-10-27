@@ -267,4 +267,25 @@ impl GuestLauncher for AndroidVmLauncher {
     fn vm_id(&self) -> Option<String> {
         self.runtime_id().ok().map(|g| g.to_string())
     }
+
+    /// Pauses the whole VM. Its memory stays allocated to the VM process, where Windows can
+    /// page it out like any process's, and nothing in the guest runs until the thaw.
+    fn freeze(&mut self) -> Result<(), String> {
+        let system = self
+            .system
+            .as_ref()
+            .ok_or("the Android VM is not running")?;
+        system
+            .pause(CALL_TIMEOUT)
+            .map_err(|e| format!("the Android VM could not be paused: {e}"))
+    }
+
+    fn thaw(&mut self) -> Result<(), String> {
+        let Some(system) = self.system.as_ref() else {
+            return Ok(());
+        };
+        system
+            .resume(CALL_TIMEOUT)
+            .map_err(|e| format!("the Android VM could not be resumed: {e}"))
+    }
 }

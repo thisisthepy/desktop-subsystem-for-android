@@ -22,6 +22,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::frame_buffers::texture_fits;
+use dsa_host_core::compositor::shown_windows::ShownWindows;
 use dsa_host_core::compositor::task_windows::{TaskWindows, WindowChange};
 use dsa_host_core::compositor::window_hosts::{
     accept_window_host, answer_attached, report_from_wire, to_wire, FromHost, HostAction, HostId,
@@ -509,6 +510,7 @@ struct Manager {
     hosts: WindowHosts,
     links: HashMap<HostId, Arc<HostLink>>,
     remotes: HashMap<i32, Arc<RemoteWindow>>,
+    shown: ShownWindows,
     setup: ManagerSetup,
 }
 
@@ -520,6 +522,7 @@ pub fn manage(setup: ManagerSetup) {
         hosts: WindowHosts::new(),
         links: HashMap::new(),
         remotes: HashMap::new(),
+        shown: ShownWindows::new(),
         setup,
     };
     let mut last_tick = Instant::now();
@@ -553,6 +556,9 @@ impl Manager {
         let now = Instant::now();
         match event {
             ManagerEvent::Sync(current) => {
+                // A new watch may follow a restart of the service, which forgot the word on
+                // shown windows.
+                self.shown.retell();
                 for event in &current {
                     if let TaskEvent::App(app) = event {
                         let actions = self.hosts.app(app, now);
@@ -646,6 +652,7 @@ impl Manager {
                 self.request(requests);
             }
             FromHost::Focus { .. } => {}
+            FromHost::Shown { task_id, shown } => self.shown.reported(task_id, shown),
         }
     }
 
@@ -763,8 +770,13 @@ impl Manager {
         }
     }
 
-    /// Tells the frame router which display goes to which window, and lists the windows.
-    fn publish(&self) {
+    /// Tells the frame router which display goes to which window, lists the windows, and
+    /// tells the guest when whether any window is shown changed, so it can sleep or wake.
+    fn publish(&mut self) {
+        let windows = self.windows.windows();
+        if let Some(request) = self.shown.update(&windows) {
+            self.request(vec![request]);
+        }
         let routes: Vec<(u32, Arc<RemoteWindow>)> = self
             .windows
             .routes()
@@ -775,6 +787,6 @@ impl Manager {
             })
             .collect();
         self.setup.router.set_routes(routes);
-        *self.setup.listing.lock().unwrap_or_else(|e| e.into_inner()) = self.windows.windows();
+        *self.setup.listing.lock().unwrap_or_else(|e| e.into_inner()) = windows;
     }
 }

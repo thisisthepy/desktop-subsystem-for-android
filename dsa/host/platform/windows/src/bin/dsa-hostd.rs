@@ -11,7 +11,8 @@
 //!
 //! Without a mode it starts one VM, waits for the guest's channel daemon to connect and
 //! pass the protocol handshake, and prints every state change. Commands on standard input:
-//! `start`, `stop`, `status`, `quit`. End of input also quits; quitting stops the VM first.
+//! `start`, `stop`, `freeze`, `status`, `quit`. End of input also quits; quitting stops the
+//! VM first.
 //!
 //! `serve` and `service` answer the local API on a named pipe and run each caller's own
 //! VM. `serve` stops on Ctrl+C. `service` is what the installer registers; it writes its
@@ -54,6 +55,7 @@ mod windows_host {
     };
 
     use dsa_host_core::handshake::ControlHandshake;
+    use dsa_host_core::power::PowerHub;
     use dsa_host_core::session::{Session, SessionState};
     use dsa_host_windows::account::current_user_sid;
     use dsa_host_windows::android_vm::AndroidVmLauncher;
@@ -201,7 +203,20 @@ mod windows_host {
         let session_config = config.session_config();
         let build = build();
         let handshake = ControlHandshake::new(&build, session_config.connect_timeout);
-        let session = Session::new(launcher, Box::new(listener), handshake, session_config);
+        let session = Arc::new(Session::new(
+            launcher,
+            Box::new(listener),
+            handshake,
+            session_config,
+        ));
+        // The guest's battery follows the computer's power.
+        let power = Arc::new(PowerHub::new());
+        power.attach(&session);
+        let power_stop = Arc::new(AtomicBool::new(false));
+        {
+            let (power, stop) = (Arc::clone(&power), Arc::clone(&power_stop));
+            thread::spawn(move || dsa_host_windows::power::follow(power, stop));
+        }
 
         let events = session.events();
         thread::spawn(move || {
@@ -214,7 +229,7 @@ mod windows_host {
         });
 
         println!(
-            "{build}: starting the Android VM {:?}; commands: start, stop, status, quit",
+            "{build}: starting the Android VM {:?}; commands: start, stop, freeze, status, quit",
             config.vm_name
         );
         session.start();
@@ -222,16 +237,24 @@ mod windows_host {
             match line.map_err(|e| e.to_string())?.trim() {
                 "start" => session.start(),
                 "stop" => session.stop(),
+                "freeze" => {
+                    if let Err(why) = session.freeze() {
+                        println!("not frozen: {why}");
+                    }
+                }
                 "status" => match session.last_reason() {
                     Some(reason) => println!("status: {} (last: {reason})", session.state()),
                     None => println!("status: {}", session.state()),
                 },
                 "quit" => break,
                 "" => {}
-                other => println!("unknown command {other:?}; commands: start, stop, status, quit"),
+                other => println!(
+                    "unknown command {other:?}; commands: start, stop, freeze, status, quit"
+                ),
             }
         }
 
+        power_stop.store(true, Ordering::Relaxed);
         session.stop();
         let grace = Duration::from_secs(config.stop_timeout_secs + 15);
         if !session.wait_for(SessionState::Stopped, grace) {

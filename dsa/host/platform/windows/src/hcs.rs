@@ -105,6 +105,8 @@ struct Api {
     start_compute_system: SystemOperation,
     shut_down_compute_system: SystemOperation,
     terminate_compute_system: SystemOperation,
+    pause_compute_system: SystemOperation,
+    resume_compute_system: SystemOperation,
     get_compute_system_properties: SystemOperation,
     close_compute_system: CloseComputeSystem,
     set_compute_system_callback: SetComputeSystemCallback,
@@ -162,6 +164,8 @@ fn load() -> Result<Api, HcsError> {
         start_compute_system: function!("HcsStartComputeSystem", SystemOperation),
         shut_down_compute_system: function!("HcsShutDownComputeSystem", SystemOperation),
         terminate_compute_system: function!("HcsTerminateComputeSystem", SystemOperation),
+        pause_compute_system: function!("HcsPauseComputeSystem", SystemOperation),
+        resume_compute_system: function!("HcsResumeComputeSystem", SystemOperation),
         get_compute_system_properties: function!("HcsGetComputeSystemProperties", SystemOperation),
         close_compute_system: function!("HcsCloseComputeSystem", CloseComputeSystem),
         set_compute_system_callback: function!(
@@ -350,6 +354,28 @@ impl ComputeSystem {
         self.system_operation(
             "HcsTerminateComputeSystem",
             self.api.terminate_compute_system,
+            None,
+            timeout,
+        )
+        .map(drop)
+    }
+
+    /// Pauses the VM: its virtual processors stop where they are and its memory is kept.
+    pub fn pause(&self, timeout: Duration) -> Result<(), HcsError> {
+        self.system_operation(
+            "HcsPauseComputeSystem",
+            self.api.pause_compute_system,
+            None,
+            timeout,
+        )
+        .map(drop)
+    }
+
+    /// Lets a paused VM run again.
+    pub fn resume(&self, timeout: Duration) -> Result<(), HcsError> {
+        self.system_operation(
+            "HcsResumeComputeSystem",
+            self.api.resume_compute_system,
             None,
             timeout,
         )

@@ -104,6 +104,20 @@ pub struct SetTaskDensity {
 /// fast is not held back by the answers.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct StreamInput {}
+/// Says whether any task window of the caller's Android is shown: open and not minimized. The
+/// window manager sends it on each change. Once no window has been shown for a while, the
+/// caller's Android turns its screen off and goes into Doze; it wakes as soon as a window is
+/// shown again. The service keeps the latest value while the Android is not running, for its
+/// next start.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetWindowsShown {
+    #[prost(bool, tag = "1")]
+    pub shown: bool,
+}
+/// Freezes the caller's Android: its processes stop until a task window is shown again. Its
+/// notifications, alarms and widgets stop with them. Returns at once with the status.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct FreezeSession {}
 /// Pointer input in a task's window, sent on a connection that streams input.
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct PointerEvent {
@@ -494,7 +508,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -534,6 +548,10 @@ pub mod request {
         GetSettings(super::GetSettings),
         #[prost(message, tag = "17")]
         SetSettings(super::SetSettings),
+        #[prost(message, tag = "20")]
+        SetWindowsShown(super::SetWindowsShown),
+        #[prost(message, tag = "21")]
+        FreezeSession(super::FreezeSession),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]

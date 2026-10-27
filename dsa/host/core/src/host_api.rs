@@ -87,6 +87,17 @@ pub trait UserAndroid: Send + Sync {
             "this Android does not report its memory".into(),
         ))
     }
+    /// Lets this Android be frozen once it has been in Doze a while (`on`), or never, as the
+    /// user's freeze setting says.
+    fn freeze_when_idle(&self, on: bool) {
+        let _ = on;
+    }
+    /// Freezes this Android until a task window is shown again.
+    fn freeze(&self) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed(
+            "this Android cannot be frozen".into(),
+        ))
+    }
 }
 
 impl UserAndroid for Session {
@@ -126,6 +137,12 @@ impl UserAndroid for Session {
     }
     fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError> {
         Session::ime(self, event).map_err(request_error)
+    }
+    fn freeze(&self) -> Result<(), TaskRequestError> {
+        Session::freeze(self).map_err(request_error)
+    }
+    fn freeze_when_idle(&self, on: bool) {
+        Session::freeze_when_idle(self, on)
     }
     fn guest_memory(&self) -> Option<GuestMemoryReport> {
         Session::guest_memory(self)
@@ -850,6 +867,17 @@ impl HostApiService {
                     density_dpi: density.density_dpi,
                 },
             ),
+            Some(request::Body::SetWindowsShown(shown)) => {
+                self.request(peer, TaskRequest::WindowsShown { shown: shown.shown })
+            }
+            Some(request::Body::FreezeSession(_)) => match self.androids.android(&peer.user) {
+                Err(why) => error(ErrorCode::Unavailable, why),
+                Ok(android) => match android.freeze() {
+                    Ok(()) => status(android.as_ref()),
+                    Err(TaskRequestError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+                    Err(TaskRequestError::Failed(why)) => error(ErrorCode::Unavailable, why),
+                },
+            },
             Some(body) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => {
@@ -866,16 +894,14 @@ impl HostApiService {
                         | request::Body::LaunchApp(_)
                         | request::Body::ResizeTask(_)
                         | request::Body::SetTaskDensity(_)
+                        | request::Body::SetWindowsShown(_)
+                        | request::Body::FreezeSession(_)
                         | request::Body::GetSettings(_)
                         | request::Body::SetSettings(_)
                         | request::Body::GetMemory(_)
                         | request::Body::StreamInput(_) => unreachable!("answered above"),
                     }
-                    response::Body::Status(types::Status {
-                        state: to_wire(android.state()) as i32,
-                        last_reason: android.last_reason().unwrap_or_default(),
-                        update_notice: android.update_notice().unwrap_or_default(),
-                    })
+                    status(android.as_ref())
                 }
             },
         };
@@ -1043,6 +1069,10 @@ impl HostApiService {
         }
         match store.set(&peer.user, &wanted) {
             Ok(settings) => {
+                // The caller's Android follows the freeze setting at once.
+                if let Ok(android) = self.androids.android(&peer.user) {
+                    android.freeze_when_idle(settings.freeze);
+                }
                 eprintln!(
                     "local API: {} changed the settings: render GPU {}, freeze {}, program \
                      updates {}, image updates {}",
@@ -1101,6 +1131,14 @@ fn error(code: ErrorCode, detail: String) -> response::Body {
     response::Body::Error(types::Error {
         code: code as i32,
         detail,
+    })
+}
+
+fn status(android: &dyn UserAndroid) -> response::Body {
+    response::Body::Status(types::Status {
+        state: to_wire(android.state()) as i32,
+        last_reason: android.last_reason().unwrap_or_default(),
+        update_notice: android.update_notice().unwrap_or_default(),
     })
 }
 
@@ -1213,6 +1251,19 @@ impl HostApiClient {
     /// Asks for the caller's Android to stop. Returns the state right after the request.
     pub fn stop(&mut self) -> Result<Status, ClientError> {
         self.call(request::Body::StopSession(types::StopSession {}))
+    }
+
+    /// Freezes the caller's Android until a task window is shown again. Returns the state
+    /// right after the request.
+    pub fn freeze(&mut self) -> Result<Status, ClientError> {
+        self.call(request::Body::FreezeSession(types::FreezeSession {}))
+    }
+
+    /// Says whether any task window of the caller's Android is shown.
+    pub fn set_windows_shown(&mut self, shown: bool) -> Result<(), ClientError> {
+        self.done(request::Body::SetWindowsShown(types::SetWindowsShown {
+            shown,
+        }))
     }
 
     /// Asks the service to install the newest version of DSA now. Downloading it can take
@@ -1394,6 +1445,7 @@ impl HostApiClient {
                 task_id,
                 density_dpi,
             } => self.set_task_density(*task_id, *density_dpi),
+            TaskRequest::WindowsShown { shown } => self.set_windows_shown(*shown),
         }
     }
 

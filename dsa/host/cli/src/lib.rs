@@ -4,6 +4,7 @@
 //! dsa status
 //! dsa start [--wait]
 //! dsa stop [--wait]
+//! dsa freeze
 //! dsa update [--wait]
 //! dsa launch <package>
 //! dsa tasks
@@ -17,6 +18,9 @@
 //!
 //! `dsa launch` starts an app in a window of its own, named by its package (such as
 //! `com.android.settings`). `dsa tasks` lists the app tasks Android shows as windows.
+//!
+//! `dsa freeze` stops every process of the Android until one of its windows is shown
+//! again. Its notifications, alarms and widgets stop with it.
 //!
 //! `dsa settings` shows the settings the service keeps: the GPU the window manager renders on
 //! (`render-gpu`: `display`, `integrated`, `discrete` or part of a GPU's name), whether
@@ -50,9 +54,9 @@ use dsa_host_core::session::SessionState;
 use dsa_transport::Connector;
 use serde_json::{json, Value};
 
-pub const USAGE: &str = "usage: dsa <status | start | stop | update | launch <package> | tasks | \
-     settings [set <name> <value>] | memory | gpus> [--wait] [--timeout <seconds>] [--json] \
-     [--pipe <name> | --socket <path>]";
+pub const USAGE: &str = "usage: dsa <status | start | stop | freeze | update | launch <package> | \
+     tasks | settings [set <name> <value>] | memory | gpus> [--wait] [--timeout <seconds>] \
+     [--json] [--pipe <name> | --socket <path>]";
 
 /// What to ask the service.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +64,8 @@ pub enum Command {
     Status,
     Start,
     Stop,
+    /// Freeze the Android until one of its windows is shown again.
+    Freeze,
     Update,
     /// Start an app in a window of its own; the package is in [`Invocation::package`].
     Launch,
@@ -176,13 +182,14 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "status" | "start" | "stop" | "update" | "launch" | "tasks" | "settings" | "memory"
-            | "gpus"
+            "status" | "start" | "stop" | "freeze" | "update" | "launch" | "tasks" | "settings"
+            | "memory" | "gpus"
                 if command.is_none() =>
             {
                 command = Some(match arg.as_str() {
                     "status" => Command::Status,
                     "start" => Command::Start,
+                    "freeze" => Command::Freeze,
                     "update" => Command::Update,
                     "launch" => Command::Launch,
                     "tasks" => Command::Tasks,
@@ -580,7 +587,8 @@ pub fn run_with_starter(
             describe_gpus(&gpus)
         });
     }
-    let can_start = invocation.command != Command::Stop;
+    // Stopping or freezing needs an Android that runs, so neither starts the service.
+    let can_start = !matches!(invocation.command, Command::Stop | Command::Freeze);
     let mut client = connect(connector, starter, can_start, Duration::from_secs(10))?;
     let show = |status: &Status| {
         if invocation.json {
@@ -593,6 +601,7 @@ pub fn run_with_starter(
         Command::Status => client.status(),
         Command::Start => client.start(),
         Command::Stop => client.stop(),
+        Command::Freeze => client.freeze(),
         Command::Update => return update(invocation, client, connector),
         Command::Launch => {
             let package = invocation.package.as_deref().unwrap_or_default();
@@ -615,7 +624,7 @@ pub fn run_with_starter(
         Command::Gpus => unreachable!("answered before connecting"),
     }
     .map_err(|e| e.to_string())?;
-    if !invocation.wait || invocation.command == Command::Status {
+    if !invocation.wait || matches!(invocation.command, Command::Status | Command::Freeze) {
         return Ok(show(&status));
     }
     let deadline = Instant::now() + invocation.timeout;

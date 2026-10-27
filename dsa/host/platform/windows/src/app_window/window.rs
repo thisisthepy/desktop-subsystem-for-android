@@ -192,6 +192,8 @@ struct WindowData {
     max_client: Cell<Option<(u32, u32)>>,
     /// Whether the window reports its size: not until it has been given the task's.
     reporting: Cell<bool>,
+    /// Whether the window is minimized, so a restore is reported once.
+    minimized: Cell<bool>,
 }
 
 /// The UI thread's state, reached from the message window's procedure.
@@ -372,6 +374,17 @@ unsafe extern "system" fn task_window_proc(
             DefWindowProcW(hwnd, message, wparam, lparam)
         }
         WM_SIZE => {
+            // Minimizing hides the window, and restoring it shows it again: the window manager
+            // lets Android sleep once no window is shown.
+            if let Some(data) = window_data(hwnd) {
+                let minimized = wparam as u32 == SIZE_MINIMIZED;
+                if data.reporting.get() && data.minimized.replace(minimized) != minimized {
+                    (data.report)(FromHost::Shown {
+                        task_id: data.task_id,
+                        shown: !minimized,
+                    });
+                }
+            }
             if wparam as u32 != SIZE_MINIMIZED {
                 let width = (lparam & 0xffff) as u32;
                 let height = ((lparam >> 16) & 0xffff) as u32;
@@ -687,6 +700,7 @@ impl Ui {
             ime: ImeWindow::new(task_id, self.setup.input.clone()),
             max_client: Cell::new(None),
             reporting: Cell::new(false),
+            minimized: Cell::new(false),
         }));
         let class = wide(TASK_CLASS);
         let hwnd = CreateWindowExW(

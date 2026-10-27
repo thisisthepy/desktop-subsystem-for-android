@@ -27,6 +27,11 @@
     <uses-permission android:name="android.permission.INJECT_EVENTS" />
     <!-- Reading the label and launcher activity of any app. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!--
+      Turning the screen off and on, forcing Doze while no task window is shown on the host,
+      and setting the battery and battery saver to the host's.
+    -->
+    <uses-permission android:name="android.permission.DEVICE_POWER" />
 
     <application
         android:name=".platform.AgentApplication"
