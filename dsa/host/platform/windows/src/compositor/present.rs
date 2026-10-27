@@ -21,13 +21,14 @@
 //! warning when a window is left showing a stretched frame.
 
 use std::ffi::c_void;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::frame_buffers::{
     content_region, swapchain_change, visual_scale, SwapchainChange,
 };
 use dsa_host_core::compositor::resize_latency::ResizeLatency;
+use dsa_host_core::compositor::resize_sync::{self, Step};
 use dsa_host_core::compositor::task_windows::fill_scale;
 use windows::core::{Interface, BOOL, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HMODULE, HWND, LUID};
@@ -304,6 +305,10 @@ pub struct WindowPresenter {
     task_id: i32,
     gpu: Arc<Gpu>,
     state: Mutex<State>,
+    /// The size of the last frame shown, apart from the state so a window can wait for a
+    /// frame while the frame is being shown.
+    shown: Mutex<(u32, u32)>,
+    arrived: Condvar,
     logger: Option<Arc<CompositorLogger>>,
 }
 
@@ -354,15 +359,26 @@ impl WindowPresenter {
                 closed: false,
                 latency: ResizeLatency::new(),
             }),
+            shown: Mutex::new((0, 0)),
+            arrived: Condvar::new(),
             logger,
         }))
     }
 
     /// The client area is now `view` pixels: the last frame is stretched over it.
     pub fn view_resized(&self, view: (u32, u32)) {
+        if self.take_view(view) {
+            self.fit_view();
+        }
+    }
+
+    /// Notes that the client area is now `view` pixels without touching what is shown, so
+    /// the last frame stays 1:1 at the top left until a frame arrives or [`Self::fit_view`]
+    /// stretches it. Returns whether the size changed.
+    pub fn take_view(&self, view: (u32, u32)) -> bool {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.closed || state.view == view {
-            return;
+            return false;
         }
         state.view = view;
         state.latency.view_changed(view, Instant::now());
@@ -374,8 +390,41 @@ impl WindowPresenter {
             view,
             &format!("frame={}x{}", state.frame.0, state.frame.1),
         );
-        if state.swapchain.is_some() {
+        true
+    }
+
+    /// Fits what is shown to the client area and returns once the compositor has taken it,
+    /// so a live resize shows it with the new window size.
+    pub fn fit_view(&self) {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if !state.closed && state.swapchain.is_some() {
             self.scale(&state, true);
+        }
+    }
+
+    /// Whether a frame has been shown.
+    pub fn has_frame(&self) -> bool {
+        *self.shown.lock().unwrap_or_else(|e| e.into_inner()) != (0, 0)
+    }
+
+    /// Waits until a frame of `view` pixels has been shown and committed, for as long as
+    /// [`resize_sync::BUDGET`] allows from `since`. Returns whether it came in time. Called
+    /// on the window's thread, which holds no lock of the presenter while it waits, so the
+    /// connection thread shows frames meanwhile.
+    pub fn wait_for_frame(&self, view: (u32, u32), since: Instant) -> bool {
+        let mut shown = self.shown.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            match resize_sync::step(view, *shown, since.elapsed()) {
+                Step::Show => return true,
+                Step::GiveUp => return false,
+                Step::Wait(left) => {
+                    shown = self
+                        .arrived
+                        .wait_timeout(shown, left)
+                        .unwrap_or_else(|e| e.into_inner())
+                        .0;
+                }
+            }
         }
     }
 
@@ -449,6 +498,10 @@ impl WindowPresenter {
                 ),
             );
         }
+        // After the frame is committed (present_locked scales a new size), so a window that
+        // waits for this frame shows it as soon as it wakes.
+        *self.shown.lock().unwrap_or_else(|e| e.into_inner()) = region;
+        self.arrived.notify_all();
         let resized = shown.resize_buffers;
         if let Some(waited) = state.latency.frame_shown(region, presented) {
             // One line per resize that ended in a frame of the window's size, a few a
