@@ -48,7 +48,7 @@ fn nfr1_the_vms_memory_process_matches_with_any_suffix() {
         assert_eq!(role_of(&vmmem, USER, Some(&vm_id)), Some(HostRole::Vm), "{name}");
     }
     // WSL's VM has its own ID, so its suffix does not matter.
-    let wsl = process(5, "VmmemWSL", "NT VIRTUAL MACHINE\AAAA", 900);
+    let wsl = process(5, "VmmemWSL", "NT VIRTUAL MACHINE\\AAAA", 900);
     assert_eq!(role_of(&wsl, USER, Some(&vm_id)), None);
 }
 
