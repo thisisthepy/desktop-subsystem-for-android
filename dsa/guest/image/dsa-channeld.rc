@@ -16,9 +16,11 @@ on property:vendor.dsa.memory.reclaim=1
     setprop vendor.dsa.memory.reclaim 0
 
 # The gradual trim while apps are open: dsa-channeld sets this every so often when cold page
-# cache has piled up and the guest is not under memory pressure. Only the clean page cache is
-# dropped (no slab, no compaction pass over live memory), so free page reporting can return it
-# without the cost of a full reclaim.
+# cache has piled up and the guest is not under memory pressure. The kernel is asked for 64 MiB
+# in all, 48 MiB from the apps' cgroup and 16 MiB from the system's, and takes it from the
+# coldest pages first, so the hot pages of running apps and system_server stay. A cgroup that
+# is missing or reclaims less only makes the write fail; nothing else depends on it.
 on property:vendor.dsa.memory.trim=1
-    write /proc/sys/vm/drop_caches 1
+    write /sys/fs/cgroup/apps/memory.reclaim 48M
+    write /sys/fs/cgroup/system/memory.reclaim 16M
     setprop vendor.dsa.memory.trim 0

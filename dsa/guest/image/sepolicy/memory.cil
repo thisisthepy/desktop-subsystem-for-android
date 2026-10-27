@@ -26,6 +26,10 @@
 (allow vendor_init dsa_memory_prop (property_service (set)))
 (allow vendor_init dsa_memory_prop (file (read open getattr map)))
 
+; The gradual trim writes memory.reclaim in the unified cgroup hierarchy (labelled cgroup_v2).
+(allow vendor_init cgroup_v2 (dir (search getattr)))
+(allow vendor_init cgroup_v2 (file (write open getattr)))
+
 ; The agent reports how much compressed swap holds (zram's mm_stat) with the rest of the
 ; guest's memory.
 (allow system_app sysfs_zram (dir (search)))

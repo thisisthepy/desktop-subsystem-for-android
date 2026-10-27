@@ -19,8 +19,9 @@ use std::time::Duration;
 /// back to `0`.
 pub const RECLAIM_PROPERTY: &str = "vendor.dsa.memory.reclaim";
 
-/// The property init watches for the gradual trim: set to `1`, init drops only the page
-/// cache and sets it back to `0`.
+/// The property init watches for the gradual trim: set to `1`, init asks the kernel to
+/// reclaim a bounded slice of the coldest pages (cgroup `memory.reclaim`) and sets it back
+/// to `0`.
 pub const TRIM_PROPERTY: &str = "vendor.dsa.memory.trim";
 
 /// How often the daemon looks at the guest's memory.
@@ -122,7 +123,8 @@ pub struct ReclaimPolicy {
     /// The page cache the gradual trim leaves alone, in KiB: warm files of the open apps.
     /// A trim happens only when the droppable memory is this much plus `min_trim_kb`.
     pub keep_cache_kb: u64,
-    /// The least cache above `keep_cache_kb` worth a trim, in KiB.
+    /// The least cache above `keep_cache_kb` worth a trim, in KiB. It is also the amount a
+    /// trim asks for (init's script), so a trim never takes the cache below `keep_cache_kb`.
     pub min_trim_kb: u64,
 }
 
