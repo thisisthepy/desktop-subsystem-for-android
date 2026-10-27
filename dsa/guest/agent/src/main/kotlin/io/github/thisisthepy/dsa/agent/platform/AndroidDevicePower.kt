@@ -51,7 +51,18 @@ class AndroidDevicePower(private val context: Context, private val log: Log) : D
     }
 
     override fun forceIdle() {
+        // Deep idle may be off on a device with no battery; `force-idle` then only prints
+        // that it cannot and exits 0, so it is turned on first and the result is checked.
+        shell("deviceidle", "enable", "deep")
         shell("deviceidle", "force-idle", "deep")
+        val deadline = SystemClock.uptimeMillis() + IDLE_WAIT_MILLIS
+        while (!isDeviceIdle()) {
+            if (SystemClock.uptimeMillis() >= deadline) {
+                error("deviceidle force-idle deep was accepted but the device is not idle after $IDLE_WAIT_MILLIS ms")
+            }
+            Thread.sleep(100)
+        }
+        log.info("device is in deep idle")
     }
 
     override fun unforceIdle() {
@@ -143,7 +154,7 @@ class AndroidDevicePower(private val context: Context, private val log: Log) : D
         read.close()
         done.await(RESULT_WAIT_MILLIS, TimeUnit.MILLISECONDS)
         // The commands print "Unknown option" and the like, and some exit 0 all the same.
-        if (code.get() != 0 || output.startsWith("Error") || output.contains("Unknown")) {
+        if (code.get() != 0 || output.startsWith("Error") || output.contains("Unknown") || output.contains("Unable")) {
             error("$service ${args.joinToString(" ")} failed (code ${code.get()}): $output")
         }
         if (output.isNotEmpty()) log.info("$service ${args.joinToString(" ")}: $output")
@@ -154,5 +165,6 @@ class AndroidDevicePower(private val context: Context, private val log: Log) : D
         const val WAKE_REASON_APPLICATION = 2
         const val WAKE_DETAILS = "io.github.thisisthepy.dsa.agent:window shown"
         const val RESULT_WAIT_MILLIS = 2000L
+        const val IDLE_WAIT_MILLIS = 3000L
     }
 }

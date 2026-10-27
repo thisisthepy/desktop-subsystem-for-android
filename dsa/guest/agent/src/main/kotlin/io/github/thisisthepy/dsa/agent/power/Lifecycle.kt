@@ -61,7 +61,10 @@ class Lifecycle(
             log.info("screen on: a task window is shown")
         } else {
             attempt("turning the screen off") { power.screenOff() }
-            attempt("putting the device into Doze") { power.forceIdle() }
+            attempt("putting the device into Doze") {
+                power.forceIdle()
+                log.info("putting the device into Doze: done")
+            }
             log.info("screen off: no task window is shown")
         }
         screenOn = on
