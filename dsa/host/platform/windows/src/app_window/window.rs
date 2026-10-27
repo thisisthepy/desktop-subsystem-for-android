@@ -17,7 +17,9 @@
 //! into the task's size and density. It never grows past the size the window manager says
 //! Android can draw, not even when maximised: on a monitor larger than that, a maximised
 //! window takes that size, centred on the work area, so the task stays 1:1. It shows its
-//! last frame stretched over a new size only until a frame of that size arrives.
+//! last frame stretched over a new size only until a frame of that size arrives. While the
+//! user drags an edge it holds a new size back for up to 60 ms until that frame is in, so
+//! the stretch is rarely seen at all.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -25,6 +27,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
+use dsa_host_core::compositor::resize_sync::ResizeSync;
 use dsa_host_core::compositor::task_windows::fit_within;
 use dsa_host_core::compositor::window_hosts::{FromHost, ToHost};
 use dsa_host_core::compositor::window_sizing::maximized_position;
@@ -194,6 +197,8 @@ struct WindowData {
     reporting: Cell<bool>,
     /// Whether the window is minimized, so a restore is reported once.
     minimized: Cell<bool>,
+    /// Whether a step of a drag waits for its frame.
+    sync: Cell<ResizeSync>,
 }
 
 /// The UI thread's state, reached from the message window's procedure.
@@ -389,18 +394,47 @@ unsafe extern "system" fn task_window_proc(
                 let width = (lparam & 0xffff) as u32;
                 let height = ((lparam >> 16) & 0xffff) as u32;
                 if let Some(data) = window_data(hwnd) {
-                    if let Some(presenter) = data.presenter.borrow().as_ref() {
-                        // During a live resize this runs inside Windows' sizing loop; the
-                        // last frame is stretched to the new size before it is shown.
-                        presenter.view_resized((width, height));
-                    }
-                    // Not while the window is being made, when its size is not yet the task's.
-                    if data.reporting.get() {
-                        (data.report)(FromHost::Resized {
-                            task_id: data.task_id,
-                            width,
-                            height,
-                        });
+                    let presenter = data.presenter.borrow().clone();
+                    let report = |data: &WindowData| {
+                        // Not while the window is being made, when its size is not yet the
+                        // task's.
+                        if data.reporting.get() {
+                            (data.report)(FromHost::Resized {
+                                task_id: data.task_id,
+                                width,
+                                height,
+                            });
+                        }
+                    };
+                    let view = (width, height);
+                    match presenter {
+                        // Dragged: the guest is told, then the size is held back from the
+                        // screen until its frame is in, so Windows shows the new size
+                        // together with content of that size. The last frame stays 1:1 at
+                        // the top left meanwhile, and is stretched only if the frame does
+                        // not come in time.
+                        Some(presenter)
+                            if data.sync.get().should_wait()
+                                && data.reporting.get()
+                                && presenter.has_frame() =>
+                        {
+                            let since = std::time::Instant::now();
+                            if presenter.take_view(view) {
+                                report(data);
+                                let in_time = presenter.wait_for_frame(view, since);
+                                presenter.fit_view();
+                                let mut sync = data.sync.get();
+                                sync.step_ended(in_time);
+                                data.sync.set(sync);
+                            }
+                        }
+                        Some(presenter) => {
+                            // Inside Windows' sizing loop the last frame is stretched to the
+                            // new size before it is shown.
+                            presenter.view_resized(view);
+                            report(data);
+                        }
+                        None => report(data),
                     }
                 }
             }
@@ -408,6 +442,13 @@ unsafe extern "system" fn task_window_proc(
         }
         WM_ENTERSIZEMOVE | WM_EXITSIZEMOVE => {
             if let Some(data) = window_data(hwnd) {
+                let mut sync = data.sync.get();
+                if message == WM_ENTERSIZEMOVE {
+                    sync.drag_started();
+                } else {
+                    sync.drag_ended();
+                }
+                data.sync.set(sync);
                 (data.report)(FromHost::Dragging {
                     task_id: data.task_id,
                     dragging: message == WM_ENTERSIZEMOVE,
@@ -701,6 +742,7 @@ impl Ui {
             max_client: Cell::new(None),
             reporting: Cell::new(false),
             minimized: Cell::new(false),
+            sync: Cell::new(ResizeSync::new()),
         }));
         let class = wide(TASK_CLASS);
         let hwnd = CreateWindowExW(
