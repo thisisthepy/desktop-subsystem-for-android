@@ -108,6 +108,14 @@ class LifecycleTest {
     }
 
     @Test
+    fun fr10_doze_that_took_hold_is_logged_and_reported_in_the_same_turn() {
+        started()
+        screen(false)
+        assertTrue(log.lines.any { it.contains("putting the device into Doze: done") })
+        assertEquals(listOf(true), idleReports())
+    }
+
+    @Test
     fun fr10_screen_on_from_the_host_lets_the_device_out_of_doze_and_wakes_it() {
         started()
         screen(false)

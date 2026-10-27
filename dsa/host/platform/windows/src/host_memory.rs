@@ -36,11 +36,17 @@ fn file_name(image: &str) -> &str {
     image.rsplit(['\\', '/']).next().unwrap_or(image)
 }
 
+/// Whether `name` is a VM's memory process: `vmmem` with any suffix (`vmmemDSA`, `vmmemWSL`)
+/// and with or without `.exe`. Whose VM it is stays the VM ID check's job.
+fn is_vmmem(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with("vmmem")
+}
+
 /// What `process` does for the Android of the user `user_sid`, whose VM has the ID `vm_id`
 /// while it runs. `None` for any other process, and for another user's or another VM's.
 pub fn role_of(process: &ProcessInfo, user_sid: &str, vm_id: Option<&str>) -> Option<HostRole> {
     let name = file_name(&process.image);
-    if name.eq_ignore_ascii_case("vmmem") || name.eq_ignore_ascii_case("vmmem.exe") {
+    if is_vmmem(name) {
         let vm_id = vm_id?.trim_matches(['{', '}']);
         let (domain, account) = process.account.split_once('\\')?;
         let matches = domain.eq_ignore_ascii_case(VM_DOMAIN)
@@ -142,7 +148,7 @@ mod system {
     /// process, or a program (an app's window host has the app's name). Anything else is
     /// passed over without being opened.
     fn interesting(name: &str) -> bool {
-        name.eq_ignore_ascii_case("vmmem") || name.to_ascii_lowercase().ends_with(".exe")
+        is_vmmem(name) || name.to_ascii_lowercase().ends_with(".exe")
     }
 
     /// The account of a process's token: `<domain>\<name>` for a VM, whose name is its ID,

@@ -41,6 +41,18 @@ fn nfr1_the_vms_memory_process_is_told_apart_by_its_vm_id() {
 }
 
 #[test]
+fn nfr1_the_vms_memory_process_matches_with_any_suffix() {
+    let vm_id = VM.to_ascii_lowercase();
+    for name in ["vmmemDSA", "vmmemDSA.exe", "VmmemDSA"] {
+        let vmmem = process(4, name, &format!("NT VIRTUAL MACHINE\{VM}"), 2444);
+        assert_eq!(role_of(&vmmem, USER, Some(&vm_id)), Some(HostRole::Vm), "{name}");
+    }
+    // WSL's VM has its own ID, so its suffix does not matter.
+    let wsl = process(5, "VmmemWSL", "NT VIRTUAL MACHINE\AAAA", 900);
+    assert_eq!(role_of(&wsl, USER, Some(&vm_id)), None);
+}
+
+#[test]
 fn nfr1_the_window_processes_are_the_users_own() {
     assert_eq!(
         role_of(&process(10, WINDOW_MANAGER, USER, 508), USER, Some(VM)),
