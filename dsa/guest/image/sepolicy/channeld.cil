@@ -72,3 +72,7 @@
 (allow dsa_channeld init (unix_stream_socket (connectto)))
 (allow dsa_channeld dsa_memory_prop (property_service (set)))
 (allow dsa_channeld dsa_memory_prop (file (read open getattr map)))
+
+; The gradual trim skips a guest under memory pressure, which the daemon reads from the
+; kernel's pressure stall information.
+(allow dsa_channeld proc_pressure_mem (file (read open getattr)))

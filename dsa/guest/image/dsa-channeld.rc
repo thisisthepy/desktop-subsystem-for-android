@@ -14,3 +14,11 @@ on property:vendor.dsa.memory.reclaim=1
     write /proc/sys/vm/drop_caches 3
     write /proc/sys/vm/compact_memory 1
     setprop vendor.dsa.memory.reclaim 0
+
+# The gradual trim while apps are open: dsa-channeld sets this every so often when cold page
+# cache has piled up and the guest is not under memory pressure. Only the clean page cache is
+# dropped (no slab, no compaction pass over live memory), so free page reporting can return it
+# without the cost of a full reclaim.
+on property:vendor.dsa.memory.trim=1
+    write /proc/sys/vm/drop_caches 1
+    setprop vendor.dsa.memory.trim 0

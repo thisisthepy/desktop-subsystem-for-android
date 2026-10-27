@@ -133,3 +133,43 @@ fn nfr2_the_router_counts_the_open_tasks_the_reclaim_waits_for() {
         .unwrap();
     assert_eq!(router.task_count(), 1);
 }
+
+#[test]
+fn nfr2_open_tasks_get_a_gradual_trim_of_cold_cache_every_so_often() {
+    use dsa_guest_channeld::reclaim::TRIM_PROPERTY;
+    assert!(TRIM_PROPERTY.starts_with("vendor."));
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    // 1.4 GiB used, 600 MiB of it cache: mostly not cache, but 344 MiB above what is kept.
+    let busy = memory(2600, 600);
+    assert_eq!(
+        reclaimer.decide_under(secs(30), 2, &busy, false),
+        Some(Reason::Gradual)
+    );
+    // Not again before the gap.
+    assert_eq!(reclaimer.decide_under(secs(60), 2, &busy, false), None);
+    assert_eq!(
+        reclaimer.decide_under(secs(75), 2, &busy, false),
+        Some(Reason::Gradual)
+    );
+}
+
+#[test]
+fn nfr2_the_gradual_trim_leaves_the_cache_apps_use_and_waits_out_pressure() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    // 300 MiB of cache is under what the trim keeps plus its least slice.
+    assert_eq!(reclaimer.decide_under(secs(30), 2, &memory(2600, 300), false), None);
+    // Under memory pressure nothing is trimmed, however much cache there is.
+    assert_eq!(reclaimer.decide_under(secs(60), 2, &memory(2600, 900), true), None);
+    // No tasks: the idle reclaim owns that case, not the trim.
+    assert_eq!(reclaimer.decide_under(secs(90), 0, &memory(2600, 900), false), None);
+}
+
+#[test]
+fn nfr2_memory_pressure_is_read_from_the_some_line_and_unreadable_counts_as_busy() {
+    use dsa_guest_channeld::reclaim::memory_pressure;
+    let calm = "some avg10=0.50 avg60=0.20 avg300=0.10 total=1234\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n";
+    let busy = "some avg10=7.25 avg60=1.00 avg300=0.10 total=1234\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n";
+    assert!(!memory_pressure(calm, 5.0));
+    assert!(memory_pressure(busy, 5.0));
+    assert!(memory_pressure("", 5.0));
+}

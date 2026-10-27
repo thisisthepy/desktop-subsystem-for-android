@@ -6,7 +6,7 @@
   "data_disk_size_gb": 64,
   "pipe_name": "dsa-host",
   "kernel_cmdline": "",
-  "memory_mb": 4096,
+  "memory_mb": 3072,
   "processors": 4,
   "page_reporting_order": 9,
   "control_port": 5000,

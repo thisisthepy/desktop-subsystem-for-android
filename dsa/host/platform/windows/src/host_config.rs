@@ -7,7 +7,7 @@
 //! {
 //!   "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
 //!   "system_image": "C:\\Program Files\\DSA\\vm\\system.vhdx",
-//!   "memory_mb": 4096
+//!   "memory_mb": 3072
 //! }
 //! ```
 //!
@@ -126,7 +126,7 @@ fn default_vm_name() -> String {
     "dsa-android".into()
 }
 fn default_memory_mb() -> u32 {
-    4096
+    3072
 }
 fn default_processors() -> u32 {
     4
