@@ -5,7 +5,7 @@
 //! to a [`GraphicsRenderer`]. [`task_windows`] decides which window each task has and
 //! which window each display's frames go to, [`window_hosts`] which app window host
 //! shows each window, [`window_sizing`] how a window's size and scale reach its task,
-//! [`resize_sync`] holds a dragged window back until a frame of its new size is in,
+//! [`resize_sync`] says how long a dragged window waits for a frame of its new size,
 //! [`resize_latency`] measures how long a resized window waits for a frame of its new
 //! size, [`frame_buffers`] keeps a window's buffers at one size while it is resized, and
 //! [`shown_windows`] says whether any window is shown, which lets the guest sleep;

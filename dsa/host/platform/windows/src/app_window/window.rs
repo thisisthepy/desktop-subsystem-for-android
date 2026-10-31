@@ -16,10 +16,12 @@
 //! move to another monitor) and the start and end of a drag; the window manager turns them
 //! into the task's size and density. It never grows past the size the window manager says
 //! Android can draw, not even when maximised: on a monitor larger than that, a maximised
-//! window takes that size, centred on the work area, so the task stays 1:1. It shows its
-//! last frame stretched over a new size only until a frame of that size arrives. While the
-//! user drags an edge it holds a new size back for up to 60 ms until that frame is in, so
-//! the stretch is rarely seen at all.
+//! window takes that size, centred on the work area, so the task stays 1:1, and it never
+//! shrinks below the smallest size an Android task is given. It shows its last frame stretched
+//! over a new size only until a frame of that size arrives. While the user drags an edge, each
+//! new size goes to the guest before the window takes it (`WM_WINDOWPOSCHANGING`), and the
+//! window takes it when the frame is in or a short wait runs out, so the stretch is rarely
+//! seen at all and the picture never slides with a left or top edge.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -27,10 +29,9 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-use dsa_host_core::compositor::resize_sync::ResizeSync;
 use dsa_host_core::compositor::task_windows::fit_within;
 use dsa_host_core::compositor::window_hosts::{FromHost, ToHost};
-use dsa_host_core::compositor::window_sizing::maximized_position;
+use dsa_host_core::compositor::window_sizing::{maximized_position, min_client_size};
 use dsa_host_core::input::InputEvent;
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
@@ -46,14 +47,15 @@ use windows_sys::Win32::UI::HiDpi::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-    GetWindowLongPtrW, IsZoomed, KillTimer, LoadCursorW, LoadIconW, PostMessageW, PostQuitMessage,
-    RegisterClassExW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
-    TranslateMessage, CREATESTRUCTW, CW_USEDEFAULT, GWLP_USERDATA, HWND_MESSAGE, IDC_ARROW,
-    MINMAXINFO, MSG, SIZE_MINIMIZED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_SHOW,
-    SW_SHOWNOACTIVATE, WA_INACTIVE, WINDOWPOS, WINDOW_EX_STYLE, WINDOW_STYLE, WM_ACTIVATE, WM_APP,
-    WM_CLOSE, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
-    WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SIZE, WM_TIMER, WM_WINDOWPOSCHANGING, WNDCLASSEXW,
-    WS_EX_APPWINDOW, WS_EX_NOREDIRECTIONBITMAP, WS_OVERLAPPEDWINDOW,
+    GetWindowLongPtrW, IsIconic, IsZoomed, KillTimer, LoadCursorW, LoadIconW, PostMessageW,
+    PostQuitMessage, RegisterClassExW, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
+    ShowWindow, TranslateMessage, CREATESTRUCTW, CW_USEDEFAULT, GWLP_USERDATA, HWND_MESSAGE,
+    IDC_ARROW, MINMAXINFO, MSG, SIZE_MINIMIZED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, SW_SHOW, SW_SHOWNOACTIVATE, WA_INACTIVE, WINDOWPOS, WINDOW_EX_STYLE,
+    WINDOW_STYLE, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND,
+    WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SIZE, WM_TIMER,
+    WM_WINDOWPOSCHANGED, WM_WINDOWPOSCHANGING, WNDCLASSEXW, WS_EX_APPWINDOW,
+    WS_EX_NOREDIRECTIONBITMAP, WS_OVERLAPPEDWINDOW,
 };
 
 use crate::compositor::log::{note, CompositorLogger};
@@ -197,8 +199,9 @@ struct WindowData {
     reporting: Cell<bool>,
     /// Whether the window is minimized, so a restore is reported once.
     minimized: Cell<bool>,
-    /// Whether a step of a drag waits for its frame.
-    sync: Cell<ResizeSync>,
+    /// Whether the window is taking the size of a monitor of another scale: the app is drawing
+    /// at a new density, which no short wait can cover.
+    rescaling: Cell<bool>,
 }
 
 /// The UI thread's state, reached from the message window's procedure.
@@ -406,49 +409,23 @@ unsafe extern "system" fn task_window_proc(
                             });
                         }
                     };
-                    let view = (width, height);
-                    match presenter {
-                        // Dragged: the guest is told, then the size is held back from the
-                        // screen until its frame is in, so Windows shows the new size
-                        // together with content of that size. The last frame stays 1:1 at
-                        // the top left meanwhile, and is stretched only if the frame does
-                        // not come in time.
-                        Some(presenter)
-                            if data.sync.get().should_wait()
-                                && data.reporting.get()
-                                && presenter.has_frame() =>
-                        {
-                            let since = std::time::Instant::now();
-                            if presenter.take_view(view) {
-                                report(data);
-                                let in_time = presenter.wait_for_frame(view, since);
-                                presenter.fit_view();
-                                let mut sync = data.sync.get();
-                                sync.step_ended(in_time);
-                                data.sync.set(sync);
-                            }
-                        }
-                        Some(presenter) => {
-                            // Inside Windows' sizing loop the last frame is stretched to the
-                            // new size before it is shown.
-                            presenter.view_resized(view);
-                            report(data);
-                        }
-                        None => report(data),
+                    if let Some(presenter) = presenter {
+                        // The frame held for this size goes up with it; without one, the last
+                        // frame is stretched over the new size before it is shown.
+                        presenter.view_resized((width, height));
                     }
+                    // A size the window asked for before taking it asks nothing here.
+                    report(data);
                 }
             }
             0
         }
         WM_ENTERSIZEMOVE | WM_EXITSIZEMOVE => {
             if let Some(data) = window_data(hwnd) {
-                let mut sync = data.sync.get();
-                if message == WM_ENTERSIZEMOVE {
-                    sync.drag_started();
-                } else {
-                    sync.drag_ended();
+                if let Some(presenter) = data.presenter.borrow().as_ref() {
+                    presenter.dragging(message == WM_ENTERSIZEMOVE);
+                    presenter.release_hold();
                 }
-                data.sync.set(sync);
                 (data.report)(FromHost::Dragging {
                     task_id: data.task_id,
                     dragging: message == WM_ENTERSIZEMOVE,
@@ -457,11 +434,16 @@ unsafe extern "system" fn task_window_proc(
             0
         }
         WM_GETMINMAXINFO => {
+            let Some(data) = window_data(hwnd) else {
+                return DefWindowProcW(hwnd, message, wparam, lparam);
+            };
+            let dpi = GetDpiForWindow(hwnd).max(96);
+            let info = &mut *(lparam as *mut MINMAXINFO);
+            let max = data.max_client.get();
             // Never larger than Android can draw: a larger window could only show the
             // task's frames stretched. Maximising takes this size too.
-            if let Some(max) = window_data(hwnd).and_then(|data| data.max_client.get()) {
-                let info = &mut *(lparam as *mut MINMAXINFO);
-                let (width, height) = outer_size(max, GetDpiForWindow(hwnd).max(96));
+            if let Some(max) = max {
+                let (width, height) = outer_size(max, dpi);
                 info.ptMaxTrackSize = POINT {
                     x: width.min(info.ptMaxTrackSize.x),
                     y: height.min(info.ptMaxTrackSize.y),
@@ -471,6 +453,13 @@ unsafe extern "system" fn task_window_proc(
                     y: height.min(info.ptMaxSize.y),
                 };
             }
+            // Never smaller than Android gives a task: the guest would keep the task larger
+            // than the window, and no frame could show 1:1.
+            let (width, height) = outer_size(min_client_size(dpi, max), dpi);
+            info.ptMinTrackSize = POINT {
+                x: width.max(info.ptMinTrackSize.x),
+                y: height.max(info.ptMinTrackSize.y),
+            };
             0
         }
         WM_WINDOWPOSCHANGING => {
@@ -490,6 +479,43 @@ unsafe extern "system" fn task_window_proc(
                     pos.x = maximized_position(pos.x, work.left, work.right - work.left, pos.cx);
                     pos.y = maximized_position(pos.y, work.top, work.bottom - work.top, pos.cy);
                 }
+            }
+            // A step of a drag: ask the guest for the size while the window still has the
+            // old one, and take it when the frame is in. Whatever Windows then shows first,
+            // nothing on the screen disagrees meanwhile. DefWindowProc above has already kept
+            // the proposed size to WM_GETMINMAXINFO.
+            if pos.flags & SWP_NOSIZE == 0 && IsIconic(hwnd) == 0 {
+                if let Some(data) = window_data(hwnd) {
+                    let presenter = data.presenter.borrow().clone();
+                    if let (Some(presenter), true, false) =
+                        (presenter, data.reporting.get(), data.rescaling.get())
+                    {
+                        let (frame_width, frame_height) =
+                            outer_size((0, 0), GetDpiForWindow(hwnd).max(96));
+                        let width = (pos.cx - frame_width).max(0) as u32;
+                        let height = (pos.cy - frame_height).max(0) as u32;
+                        let since = std::time::Instant::now();
+                        if width > 0 && height > 0 && presenter.hold_view((width, height)) {
+                            (data.report)(FromHost::Resized {
+                                task_id: data.task_id,
+                                width,
+                                height,
+                            });
+                            presenter.wait_for_hold((width, height), since);
+                        }
+                    }
+                }
+            }
+            result
+        }
+        WM_WINDOWPOSCHANGED => {
+            // Sends WM_SIZE, where a new size ends its hold. A position that kept the size
+            // ends it here.
+            let result = DefWindowProcW(hwnd, message, wparam, lparam);
+            if let Some(presenter) =
+                window_data(hwnd).and_then(|data| data.presenter.borrow().clone())
+            {
+                presenter.release_hold();
             }
             result
         }
@@ -517,6 +543,9 @@ unsafe extern "system" fn task_window_proc(
                 width = width.min(max_width);
                 height = height.min(max_height);
             }
+            if let Some(data) = data {
+                data.rescaling.set(true);
+            }
             SetWindowPos(
                 hwnd,
                 std::ptr::null_mut(),
@@ -526,6 +555,9 @@ unsafe extern "system" fn task_window_proc(
                 height,
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
+            if let Some(data) = data {
+                data.rescaling.set(false);
+            }
             0
         }
         WM_ACTIVATE => {
@@ -742,7 +774,7 @@ impl Ui {
             max_client: Cell::new(None),
             reporting: Cell::new(false),
             minimized: Cell::new(false),
-            sync: Cell::new(ResizeSync::new()),
+            rescaling: Cell::new(false),
         }));
         let class = wide(TASK_CLASS);
         let hwnd = CreateWindowExW(
