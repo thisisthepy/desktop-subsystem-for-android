@@ -775,6 +775,28 @@ class AgentTest {
     }
 
     @Test
+    fun fr5_a_touch_is_injected_while_the_agents_own_thread_is_busy() {
+        tasks.running = listOf(appTask(4))
+        locator.up = daemon
+        val input = FakeScheduler()
+        val agent = Agent(
+            AGENT, tasks, actions, locator, windowing, injector, scheduler, log,
+            inputMethods = { hostInputMethodSelected++ },
+            inputScheduler = input,
+        )
+        agent.start()
+        scheduler.runDue()
+        input.runDue()
+
+        // The agent's own thread does not run from here on, as when a binder call holds it.
+        daemon.deliver(pointerFrame(4, PointerAction.POINTER_ACTION_DOWN, 10f, 30f, buttons = 1))
+        input.runDue()
+
+        assertEquals(MotionEvent.ACTION_DOWN, injector.injected.first().action)
+        assertEquals(50f, injector.injected.first().pointers.single().x)
+    }
+
+    @Test
     fun fr5_input_for_a_task_the_host_was_never_told_about_is_dropped() {
         tasks.running = listOf(appTask(4), appTask(5, packageName = AGENT))
         started()

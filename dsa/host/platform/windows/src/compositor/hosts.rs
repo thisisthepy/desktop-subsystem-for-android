@@ -37,7 +37,8 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcess, PROC
 
 use super::frames::{FrameRouter, FrameTarget};
 use super::log::{
-    note, trace_detailed, trace_forget, trace_stage, trace_summary, CompositorLogger,
+    input_trace, input_trace_on, note, trace_detailed, trace_forget, trace_stage, trace_summary,
+    CompositorLogger,
 };
 use super::present::{Gpu, SharedTexture};
 use dsa_host_core::resize_trace::millis;
@@ -358,6 +359,16 @@ impl FrameTarget for RemoteWindow {
             && self
                 .link
                 .wait_presented(self.task_id, sequence, PRESENT_WAIT);
+        if input_trace_on() {
+            input_trace(
+                "wm.frame",
+                self.task_id,
+                &format!(
+                    "sequence={sequence} round_trip={}",
+                    millis(started.elapsed())
+                ),
+            );
+        }
         if trace_detailed() {
             trace_stage(
                 self.logger.as_deref(),

@@ -78,6 +78,13 @@ class AndroidKernelConfigTests(unittest.TestCase):
         config = CONFIG.read_text()
         self.assertIn("CONFIG_DRM_VKMS=y", config)
 
+    def test_fr5_real_time_display_and_input_threads_preempt_the_kernel(self):
+        # config-wsl has PREEMPT_NONE; a woken vsync thread would wait for kernel code to
+        # reach a voluntary reschedule.
+        config = CONFIG.read_text()
+        self.assertIn("# CONFIG_PREEMPT_NONE is not set", config)
+        self.assertIn("CONFIG_PREEMPT=y", config)
+
     def test_nfr2_free_guest_pages_are_reported_to_hyper_v(self):
         # The host gets the guest's freed memory back only through the balloon driver's free
         # page reporting, in the blocks compaction makes.

@@ -48,6 +48,23 @@ bool traceDetailRequested() {
     return value[0] == '1';
 }
 
+// Whether this boot traces where input latency goes (androidboot.hardware.dsa_input_trace=1
+// on the kernel command line).
+bool inputTraceRequested() {
+    static const bool requested = [] {
+        char value[PROP_VALUE_MAX] = {};
+        __system_property_get("ro.boot.hardware.dsa_input_trace", value);
+        return value[0] == '1';
+    }();
+    return requested;
+}
+
+// One line per frame sent to the host: how long the host took to compose it and to take it.
+void logInputTrace(int32_t task, double composeMs, double postMs, int64_t wallMs) {
+    HWC_LOGI("input-trace stage=hwc.frame task=%d utc=%s mono=%.3f compose=%.1f post=%.1f", task,
+             ResizeTrace::utcStamp(wallMs).c_str(), traceMonoMs(), composeMs, postMs);
+}
+
 void logTrace(const std::vector<std::string>& lines) {
     for (const std::string& line : lines) {
         HWC_LOGI("%s", line.c_str());
@@ -380,8 +397,14 @@ void TaskComposer::compose(Frame& frame) {
             // task's display only once it is whole (post).
             const std::vector<uint8_t> request =
                 buildComposeRequest(kNoDisplay, target, task.bounds, inputs);
+            const double composeStart = traceMonoMs();
             if (mHost.compose(request)) {
+                const double postStart = traceMonoMs();
                 mHost.post(output.display, target);
+                if (inputTraceRequested()) {
+                    logInputTrace(task.task, postStart - composeStart, traceMonoMs() - postStart,
+                                  traceWallMs());
+                }
                 output.next ^= 1;
                 logTrace(mTrace.posted(task.task, width, height,
                                        decision == ResizeGate::Decision::PostLate, traceMonoMs(),

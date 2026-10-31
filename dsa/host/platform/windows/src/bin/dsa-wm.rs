@@ -32,9 +32,18 @@ fn main() {
     let log_file = default_log_file();
     let logger = CompositorLogger::open(&log_file).ok().map(Arc::new);
 
+    dsa_host_windows::compositor::log::input_trace_to(logger.clone());
+
     let config = CompositorConfig::default();
 
     // Enforce single instance per user session.
+    // No window of its own, yet every frame passes through this process.
+    if let Err(why) = dsa_host_windows::scheduling::raise_this_process() {
+        if let Some(log) = &logger {
+            log.log(&why);
+        }
+    }
+
     let _instance_guard = match SingleInstanceMutex::acquire(&config.mutex_name) {
         Ok(guard) => guard,
         Err(why) => {

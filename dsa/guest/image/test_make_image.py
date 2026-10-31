@@ -592,7 +592,7 @@ class ImageLayoutTests(unittest.TestCase):
 
             with zipfile.ZipFile(modified) as archive:
                 rc = archive.read("VENDOR/etc/init/dsa-console-logcat.rc").decode()
-                self.assertIn("/system/bin/logcat -b all -v threadtime -f /dev/ttyS0", rc)
+                self.assertIn("/system/bin/logcat -b main,system,crash -v threadtime -f /dev/ttyS0 *:I", rc)
                 self.assertIn("seclabel u:r:logpersist:s0", rc)
                 self.assertIn("user logd", rc)
                 ueventd = archive.read("VENDOR/etc/ueventd.rc").decode()
@@ -620,6 +620,7 @@ class ImageLayoutTests(unittest.TestCase):
             with zipfile.ZipFile(modified) as archive:
                 self.assertEqual(archive.read("VENDOR/bin/dsa-channeld"), b"\x7fELF daemon")
                 rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
+                self.assertIn("priority -10", rc)
                 self.assertIn("service dsa_channeld /vendor/bin/dsa-channeld", rc)
                 self.assertIn("stdio_to_kmsg", rc)
                 fs_config = archive.read("META/vendor_filesystem_config.txt").decode()

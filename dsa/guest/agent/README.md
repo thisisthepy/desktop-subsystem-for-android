@@ -173,7 +173,11 @@ been removed. The agent's own package is never listed.
 The host sends one `PointerEvent` per pointer as it happens, with the position relative to
 the task. The agent adds the task's origin on the display, as it last reported it to the
 host, and injects a `MotionEvent` with `InputManager.injectInputEvent`, without waiting
-for the app (`input/PointerInput.kt`). Input for a task the host was not told about is
+for the app (`input/PointerInput.kt`). This happens on a thread of its own, at the priority of
+the framework's input threads, because the agent's other thread makes binder calls that can
+take hundreds of milliseconds while the framework is busy. A move still waiting there is
+replaced by a newer one of the same pointer, so a press never waits behind a queue of moves
+(`input/PointerQueue.kt`). Input for a task the host was not told about is
 dropped.
 
 - The mouse is `SOURCE_MOUSE`. A press is `ACTION_DOWN`, then `ACTION_BUTTON_PRESS` for

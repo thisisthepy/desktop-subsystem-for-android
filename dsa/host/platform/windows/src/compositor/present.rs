@@ -34,7 +34,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::frame_buffers::{
-    content_region, swapchain_change, visual_scale, SwapchainChange,
+    content_region, swapchain_buffers, swapchain_change, visual_scale, SwapchainChange,
 };
 use dsa_host_core::compositor::resize_latency::ResizeLatency;
 use dsa_host_core::compositor::resize_sync::{self, ResizeSync, Step};
@@ -757,7 +757,7 @@ impl WindowPresenter {
                             Quality: 0,
                         },
                         BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
-                        BufferCount: 2,
+                        BufferCount: swapchain_buffers(),
                         // The only scaling a composition swapchain takes; the visual's
                         // transform does the scaling.
                         Scaling: DXGI_SCALING_STRETCH,

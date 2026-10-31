@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dsa_protocol::host_api::types::{ErrorCode, Role};
 use dsa_protocol::host_api::{client_connect, local_hello, HandshakeError};
@@ -331,6 +331,16 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::late_watcher_starts_from_current_tasks(&mut || $make);
         }
         #[test]
+        fn fr3_a_watch_made_while_android_is_stopped_receives_the_tasks_after_it_starts() {
+            $crate::host_api_conformance::watch_made_while_stopped_receives_tasks_after_start(
+                &mut || $make,
+            );
+        }
+        #[test]
+        fn fr3_waiting_for_a_task_change_returns_within_its_timeout() {
+            $crate::host_api_conformance::waiting_for_a_change_returns_in_time(&mut || $make);
+        }
+        #[test]
         fn fr3_closing_a_task_and_launching_an_app_reach_the_callers_android() {
             $crate::host_api_conformance::close_and_launch_reach_the_caller(&mut || $make);
         }
@@ -609,6 +619,61 @@ pub fn watcher_receives_task_changes(make: MakeLocal<'_>) {
             .expect("still watching"),
         None
     );
+}
+
+/// How long the tests below leave a watch idle before anything happens: long enough for
+/// many rounds of the service's and the client's timed-out reads.
+const IDLE: Duration = Duration::from_secs(3);
+
+/// How much later than its timeout a wait for a task change may return.
+const LATE: Duration = Duration::from_millis(500);
+
+/// Waits on `stream` for `IDLE`, one short wait after another, as the compositor does.
+fn idle(stream: &mut crate::host_api::TaskStream) {
+    let deadline = Instant::now() + IDLE;
+    while Instant::now() < deadline {
+        assert_eq!(
+            stream
+                .next(Duration::from_millis(200))
+                .expect("the watch goes on"),
+            None
+        );
+    }
+}
+
+pub fn watch_made_while_stopped_receives_tasks_after_start(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut stream = connect(&mut *connector).watch_tasks().expect("watching");
+    let android = androids.of(&user).unwrap();
+    assert_eq!(android.state(), SessionState::Stopped);
+    idle(&mut stream);
+
+    let mut client = connect(&mut *connector);
+    assert_eq!(client.start().unwrap().state, SessionState::Active);
+    idle(&mut stream);
+    android.publish(TaskEvent::Updated(sample_task(7, "Settings")));
+
+    assert_eq!(
+        next_event(&mut stream),
+        TaskEvent::Updated(sample_task(7, "Settings"))
+    );
+}
+
+pub fn waiting_for_a_change_returns_in_time(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let mut stream = connect(&mut *connector).watch_tasks().expect("watching");
+    for timeout in [1, 50, 200, 500].map(Duration::from_millis) {
+        let started = Instant::now();
+        assert_eq!(stream.next(timeout).expect("the watch goes on"), None);
+        let waited = started.elapsed();
+        assert!(
+            waited < timeout + LATE,
+            "a wait of {timeout:?} for a task change took {waited:?}"
+        );
+    }
 }
 
 pub fn late_watcher_starts_from_current_tasks(make: MakeLocal<'_>) {
