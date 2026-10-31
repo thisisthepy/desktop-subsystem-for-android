@@ -7,14 +7,24 @@
 //! host refuses it, it stops, because a guest built from a different protocol definition
 //! cannot become acceptable by retrying.
 //!
-//! This crate is the connection half, independent of how the guest's users reach it, so
-//! it runs and is tested on any Linux, over the in-memory transport and over vsock.
+//! The connection half and the routing ([`router`]) are independent of how the guest's
+//! users reach the daemon, so they run and are tested on any Linux, over the in-memory
+//! transport and over vsock. The binder service (`binder`, Android only) is the thin layer
+//! that lets those users in; [`aidl`] holds the values it shares with their generated code.
+//! [`reclaim`] decides when the guest drops its caches so the host gets the memory back.
+
+pub mod aidl;
+#[cfg(target_os = "android")]
+pub mod binder;
+pub mod reclaim;
+pub mod router;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{Hello, RejectReason};
 use dsa_protocol::handshake::{guest_connect, HandshakeError};
 use dsa_transport::{Connection, Connector, TransportError};
@@ -38,6 +48,14 @@ impl Default for RetryPolicy {
             attempt_timeout: Duration::from_secs(10),
         }
     }
+}
+
+/// What the daemon shows the host: this build's `Hello`, and the secret the host gave this
+/// boot, which answers the host's challenge.
+#[derive(Debug, Clone)]
+pub struct Credentials {
+    pub hello: Hello,
+    pub secret: BootSecret,
 }
 
 /// Why the daemon stopped trying.
@@ -82,7 +100,7 @@ fn pause(delay: Duration, stop: &AtomicBool) -> bool {
 /// `Hello`.
 pub fn connect(
     connector: &mut dyn Connector,
-    local: &Hello,
+    credentials: &Credentials,
     policy: RetryPolicy,
     stop: &AtomicBool,
 ) -> Result<(Box<dyn Connection>, Hello), ChannelError> {
@@ -95,8 +113,13 @@ pub fn connect(
             .connect(policy.attempt_timeout)
             .map_err(HandshakeError::Transport)
             .and_then(|mut connection| {
-                guest_connect(connection.as_mut(), local, policy.attempt_timeout)
-                    .map(|host| (connection, host))
+                guest_connect(
+                    connection.as_mut(),
+                    &credentials.hello,
+                    &credentials.secret,
+                    policy.attempt_timeout,
+                )
+                .map(|host| (connection, host))
             });
         match attempt {
             Ok(connected) => return Ok(connected),
@@ -114,15 +137,80 @@ pub fn connect(
     }
 }
 
+/// How long the threads of [`pump`] wait before looking whether they should stop.
+const POLL: Duration = Duration::from_millis(20);
+
 /// Carries frames over one connection until it is lost or `stop` is set: frames from the
 /// host go to `to_guest`, frames on `from_guest` go to the host. Returns why it ended.
+///
+/// Each direction has a thread, so a frame for the host goes the moment it is handed over
+/// rather than when the wait for the host's next frame times out.
 pub fn pump(
     connection: &mut dyn Connection,
     to_guest: &Sender<Vec<u8>>,
     from_guest: &Receiver<Vec<u8>>,
     stop: &AtomicBool,
 ) -> TransportError {
-    const POLL: Duration = Duration::from_millis(20);
+    let Some(mut sender) = connection.try_clone_sender() else {
+        return pump_in_turns(connection, to_guest, from_guest, stop);
+    };
+    let ended = AtomicBool::new(false);
+    let send_failed = AtomicBool::new(false);
+    thread::scope(|scope| {
+        let reader = scope.spawn(|| {
+            let why = read_until_lost(connection, to_guest, stop, &send_failed);
+            ended.store(true, Ordering::Relaxed);
+            why
+        });
+        let mut send_error = None;
+        while !ended.load(Ordering::Relaxed) {
+            match from_guest.recv_timeout(POLL) {
+                Ok(frame) => {
+                    if let Err(error) = sender.send(&frame) {
+                        send_error = Some(error);
+                        send_failed.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                // Nobody in the guest can send any more; keep delivering the host's frames.
+                Err(RecvTimeoutError::Disconnected) => thread::sleep(POLL),
+            }
+        }
+        let read_error = reader.join().unwrap_or(TransportError::Closed);
+        send_error.unwrap_or(read_error)
+    })
+}
+
+fn read_until_lost(
+    connection: &mut dyn Connection,
+    to_guest: &Sender<Vec<u8>>,
+    stop: &AtomicBool,
+    send_failed: &AtomicBool,
+) -> TransportError {
+    loop {
+        if stop.load(Ordering::Relaxed) || send_failed.load(Ordering::Relaxed) {
+            connection.close();
+            return TransportError::Closed;
+        }
+        match connection.recv(Some(POLL)) {
+            Ok(frame) => {
+                // A guest side that has gone away just stops receiving.
+                let _ = to_guest.send(frame);
+            }
+            Err(TransportError::Timeout) => {}
+            Err(error) => return error,
+        }
+    }
+}
+
+/// [`pump`] on a transport that cannot share its connection between two threads.
+fn pump_in_turns(
+    connection: &mut dyn Connection,
+    to_guest: &Sender<Vec<u8>>,
+    from_guest: &Receiver<Vec<u8>>,
+    stop: &AtomicBool,
+) -> TransportError {
     loop {
         if stop.load(Ordering::Relaxed) {
             connection.close();
@@ -164,7 +252,7 @@ pub enum ChannelEvent {
 /// lost, until the host refuses this guest or `stop` is set.
 pub fn run(
     connector: &mut dyn Connector,
-    local: &Hello,
+    credentials: &Credentials,
     policy: RetryPolicy,
     to_guest: &Sender<Vec<u8>>,
     from_guest: &Receiver<Vec<u8>>,
@@ -172,7 +260,7 @@ pub fn run(
     stop: &AtomicBool,
 ) -> ChannelError {
     loop {
-        let (mut connection, host) = match connect(connector, local, policy, stop) {
+        let (mut connection, host) = match connect(connector, credentials, policy, stop) {
             Ok(connected) => connected,
             Err(error) => return error,
         };

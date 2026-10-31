@@ -51,13 +51,19 @@ pub struct State {
     /// Set while `current` has not yet booted here.
     #[serde(default)]
     pub on_trial: bool,
-    /// Versions that failed to boot here and are not tried again.
+    /// Versions that failed to boot here and are not tried again by the same build.
     #[serde(default)]
     pub failed: Vec<String>,
+    /// The DSA build that saw them fail. A failure can be the host's fault rather than the
+    /// image's, so a new build of the host tries those images again.
+    #[serde(default)]
+    pub failed_build: Option<String>,
 }
 
 pub struct ImageStore {
     root: PathBuf,
+    /// The DSA build using the store, recorded with each failure.
+    build: Option<String>,
 }
 
 fn store_error(what: &str, path: &Path, error: impl std::fmt::Display) -> UpdateError {
@@ -68,8 +74,34 @@ impl ImageStore {
     /// Opens a store whose first image is already in `images/<version>/`, as the installer
     /// leaves it. Creates the state when there is none.
     pub fn open(root: &Path, installed: &InstalledImage) -> Result<ImageStore, UpdateError> {
+        Self::open_with(root, installed, None)
+    }
+
+    /// [`open`](Self::open) for the DSA build `build`. Images that failed under another
+    /// build, or under one that did not record itself, may be tried again.
+    pub fn open_as(
+        root: &Path,
+        installed: &InstalledImage,
+        build: &str,
+    ) -> Result<ImageStore, UpdateError> {
+        let store = Self::open_with(root, installed, Some(build.to_string()))?;
+        let mut state = store.state()?;
+        if !state.failed.is_empty() && state.failed_build.as_deref() != Some(build) {
+            state.failed.clear();
+            state.failed_build = None;
+            store.write_state(&state)?;
+        }
+        Ok(store)
+    }
+
+    fn open_with(
+        root: &Path,
+        installed: &InstalledImage,
+        build: Option<String>,
+    ) -> Result<ImageStore, UpdateError> {
         let store = ImageStore {
             root: root.to_path_buf(),
+            build,
         };
         if !store.state_path().exists() {
             if !is_plain_name(&installed.version) {
@@ -83,6 +115,7 @@ impl ImageStore {
                 previous: None,
                 on_trial: false,
                 failed: Vec::new(),
+                failed_build: None,
             })?;
         }
         store.state()?;
@@ -96,6 +129,12 @@ impl ImageStore {
     /// The folder of the image named `version`.
     pub fn image_dir(&self, version: &str) -> PathBuf {
         self.root.join("images").join(version)
+    }
+
+    /// Whether the image named `version` has its files here. An installer that bundles no
+    /// image records a first image by name only, and nothing can boot from that.
+    pub fn has_image(&self, version: &str) -> bool {
+        self.image_dir(version).is_dir()
     }
 
     pub fn state(&self) -> Result<State, UpdateError> {
@@ -126,6 +165,18 @@ impl ImageStore {
         manifest: &Manifest,
         fetch: &dyn Fetch,
     ) -> Result<(), UpdateError> {
+        self.stage_reporting(image, manifest, fetch, &mut |_| {})
+    }
+
+    /// [`stage`](Self::stage), telling `progress` how many bytes of the image's files have
+    /// been downloaded so far, after every write.
+    pub fn stage_reporting(
+        &self,
+        image: &ImageEntry,
+        manifest: &Manifest,
+        fetch: &dyn Fetch,
+        progress: &mut dyn FnMut(u64),
+    ) -> Result<(), UpdateError> {
         let mut state = self.state()?;
         if state.on_trial {
             return Err(UpdateError::Refused(format!(
@@ -140,10 +191,14 @@ impl ImageStore {
             .join(format!(".staging-{}", image.version));
         let _ = fs::remove_dir_all(&staging);
         fs::create_dir_all(&staging).map_err(|e| store_error("creating", &staging, e))?;
-        let result = image
-            .files
-            .iter()
-            .try_for_each(|file| download(file, &staging, fetch));
+        let mut before = 0;
+        let result = image.files.iter().try_for_each(|file| {
+            download(file, &staging, fetch, &mut |written| {
+                progress(before + written)
+            })?;
+            before += file.size;
+            Ok(())
+        });
         if let Err(error) = result {
             let _ = fs::remove_dir_all(&staging);
             return Err(error);
@@ -182,6 +237,7 @@ impl ImageStore {
         })?;
         let failed = std::mem::replace(&mut state.current, previous);
         state.failed.push(failed.version.clone());
+        state.failed_build = self.build.clone();
         state.on_trial = false;
         self.write_state(&state)?;
         let _ = fs::remove_dir_all(self.image_dir(&failed.version));
@@ -205,21 +261,29 @@ impl ImageStore {
 }
 
 /// A writer that hashes and counts what passes through it.
-struct Hashing<W> {
+struct Hashing<'a, W> {
     inner: W,
     hash: Sha256,
     written: u64,
     limit: u64,
+    /// The list the expected size comes from, for the error.
+    list: &'a str,
+    /// Told the bytes written so far, after every write.
+    progress: &'a mut dyn FnMut(u64),
 }
 
-impl<W: Write> Write for Hashing<W> {
+impl<W: Write> Write for Hashing<'_, W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.written + buf.len() as u64 > self.limit {
-            return Err(io::Error::other("longer than the release list says"));
+            return Err(io::Error::other(format!(
+                "longer than the {} says",
+                self.list
+            )));
         }
         let n = self.inner.write(buf)?;
         self.hash.update(&buf[..n]);
         self.written += n as u64;
+        (self.progress)(self.written);
         Ok(n)
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -227,42 +291,96 @@ impl<W: Write> Write for Hashing<W> {
     }
 }
 
-fn download(
-    file: &super::manifest::FileEntry,
-    folder: &Path,
+/// Why [`download_checked`] failed.
+pub(crate) enum DownloadFailure {
+    /// The download failed, or what arrived is not what the list describes.
+    Download(String),
+    /// Writing the file failed.
+    Store(String),
+}
+
+/// What a signed list says about one file: where it is, its size and its SHA-256.
+pub(crate) struct Expected<'a> {
+    /// The file's name in messages.
+    pub name: &'a str,
+    pub url: &'a str,
+    pub size: u64,
+    /// SHA-256 in hexadecimal, already checked to be well formed.
+    pub sha256: &'a str,
+    /// The list that describes the file, for messages: "release list", "program list".
+    pub list: &'a str,
+}
+
+/// Downloads `file` to `path`, refusing it as soon as it is longer than the list says and
+/// at the end when its size or SHA-256 differs. The file is left behind on failure; the
+/// caller removes it.
+pub(crate) fn download_checked(
+    file: &Expected,
+    path: &Path,
     fetch: &dyn Fetch,
-) -> Result<(), UpdateError> {
-    let path = folder.join(&file.name);
-    let out = fs::File::create(&path).map_err(|e| store_error("creating", &path, e))?;
+    progress: &mut dyn FnMut(u64),
+) -> Result<(), DownloadFailure> {
+    let stored = |what: &str, e: &dyn std::fmt::Display| {
+        DownloadFailure::Store(format!("{what} {}: {e}", path.display()))
+    };
+    let out = fs::File::create(path).map_err(|e| stored("creating", &e))?;
     let mut writer = Hashing {
         inner: io::BufWriter::new(out),
         hash: Sha256::new(),
         written: 0,
         limit: file.size,
+        list: file.list,
+        progress,
     };
     fetch
-        .fetch(&file.url, &mut writer)
-        .map_err(|e| UpdateError::Download(format!("{}: {e}", file.name)))?;
-    writer
-        .flush()
-        .map_err(|e| store_error("writing", &path, e))?;
-    if writer.written != file.size {
-        return Err(UpdateError::Download(format!(
-            "{} is {} bytes; the release list says {}",
-            file.name, writer.written, file.size
+        .fetch(file.url, &mut writer)
+        .map_err(|e| DownloadFailure::Download(format!("{}: {e}", file.name)))?;
+    writer.flush().map_err(|e| stored("writing", &e))?;
+    let written = writer.written;
+    let actual: [u8; 32] = writer.hash.finalize().into();
+    let file_handle = writer
+        .inner
+        .into_inner()
+        .map_err(|e| stored("writing", &e.into_error()))?;
+    file_handle.sync_all().map_err(|e| stored("writing", &e))?;
+    if written != file.size {
+        return Err(DownloadFailure::Download(format!(
+            "{} is {written} bytes; the {} says {}",
+            file.name, file.list, file.size
         )));
     }
-    let actual: [u8; 32] = writer.hash.finalize().into();
-    let expected = from_hex::<32>(&file.sha256).expect("checked when the list was verified");
+    let expected = from_hex::<32>(file.sha256).expect("checked when the list was verified");
     if actual != expected {
-        return Err(UpdateError::Download(format!(
-            "{} has SHA-256 {}; the release list says {}",
+        return Err(DownloadFailure::Download(format!(
+            "{} has SHA-256 {}; the {} says {}",
             file.name,
             to_hex(&actual),
+            file.list,
             file.sha256
         )));
     }
     Ok(())
+}
+
+fn download(
+    file: &super::manifest::FileEntry,
+    folder: &Path,
+    fetch: &dyn Fetch,
+    progress: &mut dyn FnMut(u64),
+) -> Result<(), UpdateError> {
+    let expected = Expected {
+        name: &file.name,
+        url: &file.url,
+        size: file.size,
+        sha256: &file.sha256,
+        list: "release list",
+    };
+    download_checked(&expected, &folder.join(&file.name), fetch, progress).map_err(|failure| {
+        match failure {
+            DownloadFailure::Download(why) => UpdateError::Download(why),
+            DownloadFailure::Store(why) => UpdateError::Store(why),
+        }
+    })
 }
 
 /// Reads all of a `Read`, for small files such as the release list.

@@ -34,7 +34,8 @@ enum Role {
   ROLE_GUEST = 2;
 }
 
-// The first frame on a new connection, sent by the guest.
+// The first frame on a new connection, sent by the guest. The host checks it, then asks the
+// guest to prove it knows this boot's secret (AuthChallenge, AuthProof) before it answers.
 message Hello {
   // ProtocolVersion.PROTOCOL_VERSION_CURRENT of the sender's build.
   uint32 protocol_version = 1;
@@ -57,6 +58,8 @@ enum RejectReason {
   REJECT_REASON_SCHEMA_HASH_MISMATCH = 2;
   REJECT_REASON_UNEXPECTED_ROLE = 3;
   REJECT_REASON_MALFORMED_HELLO = 4;
+  // The guest did not prove it knows this boot's secret.
+  REJECT_REASON_AUTHENTICATION_FAILED = 5;
 }
 
 // The host's answer when it refuses the guest. The host closes the connection after it.
@@ -67,11 +70,361 @@ message HelloRejected {
   Hello host = 3;
 }
 
+// The host's second frame, once the guest's Hello matches: a fresh random value for this
+// connection alone.
+message AuthChallenge {
+  // 32 random bytes.
+  bytes nonce = 1;
+}
+
+// The guest's answer to AuthChallenge. The secret itself never crosses the connection.
+message AuthProof {
+  // HMAC-SHA256 of the challenge's nonce, keyed with the secret the host gave this boot
+  // (32 bytes).
+  bytes mac = 1;
+}
+
+// A rectangle in guest display pixels: left and top inclusive, right and bottom exclusive.
+message Rect {
+  int32 left = 1;
+  int32 top = 2;
+  int32 right = 3;
+  int32 bottom = 4;
+}
+
+// Guest to host, from the agent: an app task the host shows as one window appeared, or
+// something the window shows about it changed. Every field is sent each time, so the host
+// keeps only the latest.
+message TaskUpdated {
+  // The guest's task ID, unique while the task lives.
+  int32 task_id = 1;
+  // Where the task's window is on the guest's freeform display.
+  Rect bounds = 2;
+  // The package of the task's root activity, for the window's icon and grouping.
+  string package_name = 3;
+  // The title the window shows.
+  string label = 4;
+  // Whether the task has input focus in the guest.
+  bool focused = 5;
+  // The density the task's app draws at, in dots per inch (160 draws one pixel per
+  // density-independent pixel). 0 when the agent cannot read it.
+  uint32 density_dpi = 6;
+  // The largest size the guest can give the task, in guest display pixels: its display's.
+  // A window larger than this could only show the task's frames stretched. 0 when unknown.
+  uint32 max_width = 7;
+  uint32 max_height = 8;
+  // The smallest size the guest gives the task, in guest display pixels: what its activity
+  // declares, else the framework's default. A window smaller than this could only show the
+  // task's frames stretched. 0 when unknown.
+  uint32 min_width = 9;
+  uint32 min_height = 10;
+}
+
+// Guest to host, from the agent: the task ended; the host closes its window.
+message TaskRemoved {
+  int32 task_id = 1;
+}
+
+// Guest to host, from the hwcomposer: the frames of the task now arrive on the graphics
+// stream as posts to `display_id`. Sent when the pairing begins or changes.
+message TaskFrames {
+  int32 task_id = 1;
+  uint32 display_id = 2;
+}
+
+// Host to guest: the user closed the task's window; the agent ends the task.
+message CloseTask {
+  int32 task_id = 1;
+}
+
+// Host to guest: start the app's launcher activity as a new task in its own window. The
+// agent answers with TaskUpdated once the task is there.
+message LaunchApp {
+  string package_name = 1;
+}
+
+// Host to guest: the user resized the task's window; the task takes the window's client
+// size, in guest display pixels. Only the latest size counts: during a live resize the host
+// sends the size it has now, not every size it passed through. The agent keeps the task
+// clear of other tasks, moving it if the new size would overlap one, and reports the
+// result with TaskUpdated.
+//
+// `live` is true while the user is still dragging the window's edge. The task then takes
+// the new size in pixels but keeps the configuration (screen size in dp, smallest width,
+// orientation) it had when the drag began, so its activities lay out again in the same
+// frame instead of being recreated for every step. The first ResizeTask with `live`
+// false, sent when the drag ends even if the size did not change, gives the task the
+// configuration of its final size.
+message ResizeTask {
+  int32 task_id = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  bool live = 4;
+}
+
+// Host to guest: the task's window is on a monitor of another scale; the task's app draws
+// at `density_dpi` (160 at a scale of 100%). The host sends the matching ResizeTask right
+// after it, and the agent applies both together, so the app relays out once.
+message SetTaskDensity {
+  int32 task_id = 1;
+  uint32 density_dpi = 2;
+}
+
+// Guest to host, from the agent: the name and launcher icon of an app the host shows a task
+// of. The host's window for the app carries them, in the taskbar and the task list. The
+// agent sends it before the first TaskUpdated of the app's package on each connection, and
+// again before the next one once the app has had no task, which is how an updated app's new
+// name and icon arrive.
+message AppInfo {
+  string package_name = 1;
+  // The app's own name, as a launcher shows it.
+  string label = 2;
+  // The app's launcher icon, as a square PNG image of at most 256 pixels on a side. Empty
+  // when the app has no icon the agent could draw.
+  bytes icon_png = 3;
+}
+
+// Guest to host, from the agent: an app a launcher lists is installed in the guest, or its
+// name or icon changed. The host shows it in its own start menu. The agent sends it on each
+// connection for every such app, and again whenever the app is installed again or updated;
+// the InstalledApps that follows says which apps are still there.
+message InstalledApp {
+  string package_name = 1;
+  // The app's own name, as a launcher shows it.
+  string label = 2;
+  // The app's launcher icon, as a square PNG image of at most 256 pixels on a side. Empty
+  // when the app has no icon the agent could draw.
+  bytes icon_png = 3;
+}
+
+// Guest to host, from the agent: every app a launcher lists, by package, in package order.
+// It follows the InstalledApp of each app it names that the host has not been told about on
+// this connection. The agent sends it on each connection and whenever an app is installed,
+// updated or removed; an app it no longer names has been removed. Each app goes in a message
+// of its own, so no message has to carry every icon at once.
+message InstalledApps {
+  repeated string package_names = 1;
+}
+
+// What a pointer did.
+enum PointerAction {
+  POINTER_ACTION_UNSPECIFIED = 0;
+  // The pointer touched down, or a mouse's first button went down.
+  POINTER_ACTION_DOWN = 1;
+  // The pointer moved while down, or a mouse's buttons changed while one stays down.
+  POINTER_ACTION_MOVE = 2;
+  // The pointer lifted, or a mouse's last button went up.
+  POINTER_ACTION_UP = 3;
+  // The gesture ended without completing, as when the host window lost the pointer. The
+  // guest drops it rather than acting on it.
+  POINTER_ACTION_CANCEL = 4;
+  // The wheel turned; `scroll_x` and `scroll_y` say how far.
+  POINTER_ACTION_SCROLL = 5;
+  // The pointer moved over the window without touching it (a mouse with no button down,
+  // or a pen in range).
+  POINTER_ACTION_HOVER_MOVE = 6;
+  // The pointer left the window, or a pen went out of range.
+  POINTER_ACTION_HOVER_EXIT = 7;
+}
+
+// What kind of pointer it is.
+enum PointerTool {
+  POINTER_TOOL_UNSPECIFIED = 0;
+  POINTER_TOOL_MOUSE = 1;
+  POINTER_TOOL_TOUCH = 2;
+  POINTER_TOOL_PEN = 3;
+  // A pen's eraser end.
+  POINTER_TOOL_ERASER = 4;
+}
+
+// Host to guest: pointer input in a task's window. One message per event, sent as it
+// happens; the agent injects it into the task at once.
+message PointerEvent {
+  int32 task_id = 1;
+  PointerAction action = 2;
+  PointerTool tool = 3;
+  // Tells the fingers of one touch apart. Stays the same from DOWN to UP.
+  uint32 pointer_id = 4;
+  // The position relative to the task's top left corner, in guest display pixels.
+  float x = 5;
+  float y = 6;
+  // The buttons held down after this event, as a set of bits: 1 primary, 2 secondary,
+  // 4 tertiary (middle), 8 back, 16 forward, 32 a pen's first barrel button, 64 its second.
+  uint32 buttons = 7;
+  // From 0 to 1. A mouse sends 1 while a button is down; a pen sends what it measures.
+  float pressure = 8;
+  // For SCROLL: how far the wheel turned, in notches. Positive `scroll_y` scrolls up,
+  // positive `scroll_x` scrolls right.
+  float scroll_x = 9;
+  float scroll_y = 10;
+}
+
+// What a key did.
+enum KeyAction {
+  KEY_ACTION_UNSPECIFIED = 0;
+  // The key went down, or, with a `repeat_count` above 0, the host repeats it while it is held.
+  KEY_ACTION_DOWN = 1;
+  // The key came up.
+  KEY_ACTION_UP = 2;
+}
+
+// Host to guest: a key pressed or released in a task's window while the window has the
+// keyboard focus. One message per event, sent as it happens; the agent injects it into the
+// task at once.
+message KeyEvent {
+  int32 task_id = 1;
+  KeyAction action = 2;
+  // The guest's key code (android.view.KeyEvent.KEYCODE_*), which the host maps its own keys
+  // to, so the guest passes it through unchanged.
+  uint32 key_code = 3;
+  // How many times the host has repeated the key since it went down: 0 for the press itself.
+  uint32 repeat_count = 4;
+  // The modifiers and locks in effect after this event, as the guest's meta state bits
+  // (android.view.KeyEvent.META_*): Shift, Ctrl, Alt and Meta, each with its left or right
+  // side, and Caps Lock, Num Lock and Scroll Lock.
+  uint32 meta_state = 5;
+  // When the host saw the event, in milliseconds of the host's own clock, which wraps around.
+  // Only the difference between two events means anything.
+  uint32 event_time_ms = 6;
+  // Set on an UP the user did not make: the window lost the keyboard focus while the key was
+  // held. The guest releases the key without acting on it.
+  bool canceled = 7;
+}
+
+// Host to guest: the text the host's input method is composing in a task's window, while the
+// window has the keyboard focus. Each message replaces the whole composition: the agent puts
+// `text` into the focused editor as its composing text (underlined, not yet typed), in place
+// of the previous composition. An empty `text` removes the composition: the user deleted it
+// or the input method canceled it.
+message ImeComposition {
+  int32 task_id = 1;
+  string text = 2;
+  // Where the cursor is in `text`, in UTF-16 code units from its start: 0 before the first
+  // character, the length of `text` after the last.
+  uint32 cursor = 3;
+}
+
+// Host to guest: text the user typed in a task's window: what the host's input method
+// committed, or a character a key typed without one. The agent commits it to the focused
+// editor, in place of the composition if there is one, and the composition ends.
+message ImeCommit {
+  int32 task_id = 1;
+  string text = 2;
+}
+
+// Guest to host, from the agent: where the cursor of the editor focused in a task is, in the
+// task's own pixels from its top left corner (where a pointer event's place is measured from),
+// so the host can put its input method's windows (the candidate list, say) beside it. Sent
+// when the editor gains the focus and when its cursor moves.
+message ImeCursor {
+  int32 task_id = 1;
+  Rect cursor = 2;
+}
+
+// Host to guest: whether the guest's screen is on. The host turns it off once no task window
+// has been shown (every window closed or minimized) for the time the host is configured to
+// wait, and on again as soon as a window is shown. While it is off the agent turns the
+// guest's display off and puts the device into Doze; when it is on again the agent wakes the
+// device and the display. The agent takes the screen to be on when it connects; the host
+// sends this on each change after that.
+message ScreenState {
+  bool on = 1;
+}
+
+// Host to guest: the host computer's power, which the agent makes the guest's battery state
+// match. Sent once after the connection opens, when the host knows it, and on each change.
+message PowerState {
+  // Whether the host runs on AC power; false while it runs on its battery.
+  bool ac_online = 1;
+  // Whether the host has a battery. A host without one is reported to the guest as a full
+  // battery on AC power.
+  bool battery_present = 2;
+  // The battery's charge, from 0 to 100.
+  uint32 battery_percent = 3;
+  // Whether the battery is charging.
+  bool charging = 4;
+  // Whether the host's battery saver is on; the guest's battery saver follows it.
+  bool power_saver = 5;
+}
+
+// Guest to host, from the agent: whether the guest's device is in Doze (the device idle
+// controller's deep idle state). The host takes the device not to be in Doze when the agent
+// connects; the agent sends this on each change after that.
+message DeviceIdle {
+  bool idle = 1;
+}
+
+// Host to guest: asks the agent for a GuestMemory report now, instead of at its next
+// periodic one.
+message RequestGuestMemory {}
+
+// One guest process's share of the guest's memory.
+message ProcessMemory {
+  int32 pid = 1;
+  // The process name, as the guest's process list shows it.
+  string name = 2;
+  // Its proportional set size in KiB: its private pages plus its share of the pages it
+  // shares with other processes.
+  uint64 pss_kb = 3;
+  // How much of it is swapped out to compressed memory, proportionally, in KiB.
+  uint64 swap_pss_kb = 4;
+}
+
+// Guest to host, from the agent: how the guest uses its memory. Sent every few minutes, and
+// in answer to RequestGuestMemory. Sizes are in KiB, as the guest kernel counts them, and 0
+// when the guest cannot read the value.
+message GuestMemory {
+  uint64 mem_total_kb = 1;
+  uint64 mem_free_kb = 2;
+  uint64 mem_available_kb = 3;
+  uint64 buffers_kb = 4;
+  // The page cache: file contents kept in memory, which the guest can drop when clean.
+  uint64 cached_kb = 5;
+  // Process memory that no file backs.
+  uint64 anon_pages_kb = 6;
+  uint64 shmem_kb = 7;
+  // Kernel caches the kernel can free on demand.
+  uint64 slab_reclaimable_kb = 8;
+  uint64 swap_total_kb = 9;
+  uint64 swap_free_kb = 10;
+  // Compressed swap (zram): the size of the pages stored in it, and the memory it takes to
+  // hold them compressed.
+  uint64 zram_original_kb = 11;
+  uint64 zram_used_kb = 12;
+  // The proportional set size of the processes the guest's activity manager runs (the apps
+  // and the system server) together. Native daemons are not counted.
+  uint64 total_pss_kb = 13;
+  // The processes with the largest proportional set size, largest first, at most 10.
+  repeated ProcessMemory top_processes = 14;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
     Hello hello = 1;
     HelloAccepted hello_accepted = 2;
     HelloRejected hello_rejected = 3;
+    AuthChallenge auth_challenge = 4;
+    AuthProof auth_proof = 5;
+    TaskUpdated task_updated = 6;
+    TaskRemoved task_removed = 7;
+    TaskFrames task_frames = 8;
+    CloseTask close_task = 9;
+    LaunchApp launch_app = 10;
+    ResizeTask resize_task = 11;
+    SetTaskDensity set_task_density = 12;
+    PointerEvent pointer_event = 13;
+    AppInfo app_info = 15;
+    KeyEvent key_event = 16;
+    ImeComposition ime_composition = 17;
+    ImeCommit ime_commit = 18;
+    ImeCursor ime_cursor = 19;
+    RequestGuestMemory request_guest_memory = 20;
+    GuestMemory guest_memory = 21;
+    InstalledApp installed_app = 22;
+    InstalledApps installed_apps = 23;
+    ScreenState screen_state = 40;
+    PowerState power_state = 41;
+    DeviceIdle device_idle = 42;
   }
 }

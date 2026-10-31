@@ -1,0 +1,53 @@
+<Page
+    x:Class="Dsa.Settings.Pages.AdvancedPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:l="clr-namespace:Dsa.Settings">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="36,8,36,24" MaxWidth="1000">
+            <TextBlock Text="{l:Text AdvancedTitle.Text}" Style="{StaticResource PageTitle}" />
+
+            <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
+                        IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
+
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Snooze24}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="{l:Text FreezeCard.Header}" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{l:Text FreezeCard.Description}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <ui:ToggleSwitch x:Name="FreezeSwitch" IsChecked="{Binding Freeze, Mode=OneWay}"
+                                 IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnFreezeToggled" />
+            </ui:CardControl>
+
+            <TextBlock Text="{l:Text LogsHeader.Text}" Style="{StaticResource SectionHeader}" />
+            <ui:CardAction Icon="{ui:SymbolIcon Folder24}" Click="OnOpenUserLogs" Margin="0,0,0,4">
+                <StackPanel>
+                    <TextBlock Text="{l:Text UserLogsCard.Header}" Style="{StaticResource CardTitle}" />
+                    <TextBlock Text="{l:Text UserLogsCard.Description}" Style="{StaticResource CardDescription}" />
+                </StackPanel>
+            </ui:CardAction>
+            <ui:CardAction Icon="{ui:SymbolIcon FolderPeople24}" Click="OnOpenServiceLogs"
+                           IsEnabled="{Binding HasLogDir, Mode=OneWay}">
+                <StackPanel>
+                    <TextBlock Text="{l:Text ServiceLogsCard.Header}" Style="{StaticResource CardTitle}" />
+                    <TextBlock Text="{Binding LogDir, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                </StackPanel>
+            </ui:CardAction>
+
+            <TextBlock Text="{l:Text CommandLineHeader.Text}" Style="{StaticResource SectionHeader}" />
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon WindowConsole20}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="{l:Text CommandLineCard.Header}" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{l:Text CommandLineCard.Description}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <TextBox Text="dsa status | dsa settings | dsa memory" FontFamily="Consolas" IsReadOnly="True"
+                         BorderThickness="0" Background="Transparent" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            </ui:CardControl>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

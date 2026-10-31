@@ -1,0 +1,13 @@
+# Android's log goes to the serial console, which the host keeps as the VM's console log.
+# Cuttlefish's own seriallogging writes to a virtio console Hyper-V does not have.
+#
+# Every byte written to the emulated serial port traps out of the VM, with the port's lock
+# held, so a chatty log takes processor time from whatever else runs on that processor,
+# vsync and input among them, and an interaction is when the guest logs most. So only what
+# a report needs goes there: informational messages and above, without the events and radio
+# buffers.
+service dsa_console_logcat /system/bin/logcat -b main,system,crash -v threadtime -f /dev/ttyS0 *:I
+    class core
+    user logd
+    group root logd
+    seclabel u:r:logpersist:s0

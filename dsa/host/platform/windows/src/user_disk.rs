@@ -1,9 +1,11 @@
-//! Each user's data disk: a folder only the system and VMs may open, and a growing VHDX.
+//! Each user's Android disk, and the folder it is in.
 //!
-//! The service creates both the first time a user asks for Android. The folder's access
-//! list is protected (it inherits nothing), so other users cannot read someone's Android
-//! data, and it lets Hyper-V's virtual machine processes in, which is what a VM needs to
-//! open its disk.
+//! The service creates both the first time a user asks for Android. A disk in the user's
+//! own profile is protected by the profile, which admits only them, SYSTEM and
+//! administrators, and the VM is given access to the disk file alone when it starts. A
+//! disk in a shared `data_dir` gets a folder whose access list is protected (it inherits
+//! nothing), so other users cannot read someone's Android data, and which lets Hyper-V's
+//! virtual machine processes in.
 
 use std::io;
 use std::path::Path;
@@ -47,31 +49,32 @@ fn win32(code: u32, what: &str) -> Result<(), String> {
     }
 }
 
-/// Makes sure `disk` exists and its folder carries [`USER_FOLDER_SDDL`]. A new disk is a
-/// dynamic VHDX that may grow to `size_gb`; an existing one is left as it is.
+/// Makes sure `disk` exists. A new disk is a dynamic VHDX that may grow to `size_gb`; an
+/// existing one is left as it is.
 pub fn prepare_user_data_disk(disk: &Path, size_gb: u32) -> Result<(), String> {
     prepare_user_disk(disk, size_gb, None)
 }
 
 /// The partitions of a user's Android disk that hold Android itself. They come from the
 /// image; every other partition holds the user's data.
-pub const ANDROID_PARTITIONS: [&str; 5] = [
+pub const ANDROID_PARTITIONS: [&str; 8] = [
     "super",
     "vbmeta_a",
     "vbmeta_system_a",
     "vbmeta_system_dlkm_a",
     "vbmeta_vendor_dlkm_a",
+    "boot_a",
+    "init_boot_a",
+    "vendor_boot_a",
 ];
 
-/// Makes sure the user's disk exists, in a folder that carries [`USER_FOLDER_SDDL`]. A new
-/// disk is a copy of `template` (an image's `disk.vhdx`, holding Android and empty data
+/// Makes sure the user's disk exists. A new disk is a copy of `template` (an image's `disk.vhdx`, holding Android and empty data
 /// partitions) or, without one, an empty dynamic VHDX that may grow to `size_gb`.
 pub fn prepare_user_disk(disk: &Path, size_gb: u32, template: Option<&Path>) -> Result<(), String> {
     let folder = disk
         .parent()
         .ok_or_else(|| format!("{} has no folder", disk.display()))?;
     std::fs::create_dir_all(folder).map_err(|e| format!("creating {}: {e}", folder.display()))?;
-    protect_folder(folder)?;
     if disk.exists() {
         return Ok(());
     }
@@ -91,13 +94,18 @@ pub fn prepare_user_disk(disk: &Path, size_gb: u32, template: Option<&Path>) -> 
     }
 }
 
-/// Creates the folder of a user's disk with [`USER_FOLDER_SDDL`], without the disk.
-pub fn prepare_user_disk_folder(disk: &Path) -> Result<(), String> {
+/// Creates the folder of a user's disk, without the disk. With `protect`, for a folder in a
+/// shared `data_dir`, its access list becomes [`USER_FOLDER_SDDL`]; a folder in the user's
+/// profile keeps what it inherits from the profile.
+pub fn prepare_user_disk_folder(disk: &Path, protect: bool) -> Result<(), String> {
     let folder = disk
         .parent()
         .ok_or_else(|| format!("{} has no folder", disk.display()))?;
     std::fs::create_dir_all(folder).map_err(|e| format!("creating {}: {e}", folder.display()))?;
-    protect_folder(folder)
+    if protect {
+        protect_folder(folder)?;
+    }
+    Ok(())
 }
 
 /// The image version a user's disk holds Android from, recorded beside it.
@@ -119,13 +127,28 @@ pub fn record_disk_image_version(disk: &Path, version: &str) -> Result<(), Strin
 
 /// Brings the user's disk to `version`: a new disk is copied from `template`; a disk that
 /// holds Android from another version gets the template's Android partitions, and keeps
-/// its misc, metadata and userdata partitions, which hold the user's data.
+/// its misc, metadata and userdata partitions, which hold the user's data. A disk that was
+/// never given Android and was never written to holds nothing, and is replaced by a copy.
 pub fn bring_disk_to(disk: &Path, template: &Path, version: &str) -> Result<(), String> {
+    let held = disk_image_version(disk);
+    if disk.exists() && held.is_none() && is_blank_disk(disk)? {
+        std::fs::remove_file(disk)
+            .map_err(|e| format!("replacing the empty {}: {e}", disk.display()))?;
+    }
     if !disk.exists() {
         prepare_user_disk(disk, 0, Some(template))?;
         return record_disk_image_version(disk, version);
     }
-    if disk_image_version(disk).as_deref() == Some(version) {
+    if template.file_name().and_then(|n| n.to_str()) == Some("data.vhdx") {
+        // Even at the version it holds: a disk brought to a two-disk image before stale
+        // partitions were removed is recorded at that image already.
+        fit_to_data_template(disk, template, version)?;
+        if held.as_deref() == Some(version) {
+            return Ok(());
+        }
+        return record_disk_image_version(disk, version);
+    }
+    if held.as_deref() == Some(version) {
         return Ok(());
     }
     let from = AttachedDisk::attach(template, true)?;
@@ -141,6 +164,30 @@ pub fn bring_disk_to(disk: &Path, template: &Path, version: &str) -> Result<(), 
             .filter(|n| have.iter().any(|p| p.name == *n))
             .collect()
     };
+    let fits = crate::gpt::fits(&mut source, &mut target, &names)
+        .map_err(|e| format!("reading {}: {e}", disk.display()))?;
+    if !fits {
+        // The image's disk has a partition this one lacks (a newer layout). A disk Android
+        // never booted from holds no data, so it becomes a copy of the new template; one
+        // with data cannot be relaid without losing it.
+        let unused = crate::gpt::partition_is_blank(&mut target, "userdata")
+            .map_err(|e| format!("reading {}: {e}", disk.display()))?;
+        if !unused {
+            return Err(format!(
+                "Android {version} needs a disk layout that {} does not have, and the disk \
+                 holds Android data, so it is left as it is",
+                disk.display()
+            ));
+        }
+        drop(target);
+        drop(source);
+        drop(to);
+        drop(from);
+        std::fs::remove_file(disk)
+            .map_err(|e| format!("replacing the unused {}: {e}", disk.display()))?;
+        prepare_user_disk(disk, 0, Some(template))?;
+        return record_disk_image_version(disk, version);
+    }
     crate::gpt::copy_partitions(&mut source, &mut target, &names)
         .map_err(|e| format!("writing Android {version} into {}: {e}", disk.display()))?;
     drop(target);
@@ -148,6 +195,79 @@ pub fn bring_disk_to(disk: &Path, template: &Path, version: &str) -> Result<(), 
     drop(to);
     drop(from);
     record_disk_image_version(disk, version)
+}
+
+/// Gives the user's disk the partitions of the image's data template, and only those.
+///
+/// A disk made for an image that kept Android on it still holds Android's partitions, and
+/// Android, which finds partitions by name, would boot from those instead of the image's
+/// own disk: they are taken out, and the data partitions stay where they are, with the
+/// user's data. A disk that lacks a partition the template has (made from an older
+/// template) becomes a copy of the template if Android never wrote to it; one with data
+/// cannot be relaid without losing it, and is left as it is.
+fn fit_to_data_template(disk: &Path, template: &Path, version: &str) -> Result<(), String> {
+    if !is_vhdx(disk)? || !is_vhdx(template)? {
+        return Ok(());
+    }
+    let wanted: Vec<String> = {
+        let from = AttachedDisk::attach(template, true)?;
+        let mut source = from.open(false)?;
+        crate::gpt::partitions(&mut source)
+            .map_err(|e| format!("reading {}: {e}", template.display()))?
+            .into_iter()
+            .map(|p| p.name)
+            .collect()
+    };
+    let to = AttachedDisk::attach(disk, false)?;
+    let mut target = to.open(true)?;
+    let have = crate::gpt::partitions(&mut target)
+        .map_err(|e| format!("reading {}: {e}", disk.display()))?;
+    let missing: Vec<&str> = wanted
+        .iter()
+        .filter(|name| !have.iter().any(|p| &p.name == *name))
+        .map(String::as_str)
+        .collect();
+    if !missing.is_empty() {
+        let unused = crate::gpt::partition_is_blank(&mut target, "userdata")
+            .map_err(|e| format!("reading {}: {e}", disk.display()))?;
+        if !unused {
+            return Err(format!(
+                "Android {version} needs a disk with a {} partition, which {} does not                  have, and the disk holds Android data, so it is left as it is",
+                missing.join(", "),
+                disk.display()
+            ));
+        }
+        drop(target);
+        drop(to);
+        std::fs::remove_file(disk)
+            .map_err(|e| format!("replacing the unused {}: {e}", disk.display()))?;
+        return prepare_user_disk(disk, 0, Some(template));
+    }
+    if have.iter().all(|p| wanted.contains(&p.name)) {
+        return Ok(());
+    }
+    let keep: Vec<&str> = wanted.iter().map(String::as_str).collect();
+    crate::gpt::keep_only(&mut target, &keep).map_err(|e| {
+        format!(
+            "removing the old Android partitions from {}: {e}",
+            disk.display()
+        )
+    })?;
+    Ok(())
+}
+
+/// Whether `path` is a VHDX file, which starts with its signature.
+fn is_vhdx(path: &Path) -> Result<bool, String> {
+    let mut signature = [0u8; 8];
+    let mut file =
+        std::fs::File::open(path).map_err(|e| format!("opening {}: {e}", path.display()))?;
+    Ok(io::Read::read_exact(&mut file, &mut signature).is_ok() && &signature == b"vhdxfile")
+}
+
+fn is_blank_disk(disk: &Path) -> Result<bool, String> {
+    let attached = AttachedDisk::attach(disk, true)?;
+    let mut device = attached.open(false)?;
+    crate::gpt::is_blank(&mut device).map_err(|e| format!("reading {}: {e}", disk.display()))
 }
 
 /// A VHDX attached to the host as a disk without a drive letter, detached on drop.

@@ -19,6 +19,13 @@ import java.util.TreeMap;
 public final class VectorsTest {
     private static final List<String> failures = new ArrayList<>();
 
+    /** {@code count} bytes counting up from {@code first}. */
+    private static byte[] bytes(int first, int count) {
+        byte[] out = new byte[count];
+        for (int i = 0; i < count; i++) out[i] = (byte) (first + i);
+        return out;
+    }
+
     private static Hello guestHello() {
         byte[] hash = new byte[32];
         for (int i = 0; i < 32; i++) hash[i] = (byte) i;
@@ -57,6 +64,186 @@ public final class VectorsTest {
                         .setReason(RejectReason.REJECT_REASON_SCHEMA_HASH_MISMATCH)
                         .setDetail("스키마가 다릅니다 (schema differs)")
                         .setHost(hostHello()))
+                .build());
+        cases.put("auth_challenge", Envelope.newBuilder()
+                .setAuthChallenge(AuthChallenge.newBuilder().setNonce(ByteString.copyFrom(bytes(0x40, 32))))
+                .build());
+        cases.put("auth_proof", Envelope.newBuilder()
+                .setAuthProof(AuthProof.newBuilder().setMac(ByteString.copyFrom(bytes(0x60, 32))))
+                .build());
+        cases.put("task_updated", Envelope.newBuilder()
+                .setTaskUpdated(TaskUpdated.newBuilder()
+                        .setTaskId(42)
+                        .setBounds(Rect.newBuilder().setLeft(100).setTop(80).setRight(1180).setBottom(800))
+                        .setPackageName("com.example.notes")
+                        .setLabel("메모 (Notes)")
+                        .setFocused(true))
+                .build());
+        cases.put("task_updated_density", Envelope.newBuilder()
+                .setTaskUpdated(TaskUpdated.newBuilder()
+                        .setTaskId(42)
+                        .setBounds(Rect.newBuilder().setLeft(0).setTop(0).setRight(1096).setBottom(1948))
+                        .setPackageName("com.example.notes")
+                        .setDensityDpi(320)
+                        .setMaxWidth(3840)
+                        .setMaxHeight(2160))
+                .build());
+        cases.put("resize_task", Envelope.newBuilder()
+                .setResizeTask(ResizeTask.newBuilder().setTaskId(42).setWidth(1280).setHeight(720))
+                .build());
+        cases.put("set_task_density", Envelope.newBuilder()
+                .setSetTaskDensity(SetTaskDensity.newBuilder().setTaskId(42).setDensityDpi(240))
+                .build());
+        cases.put("task_updated_negative_origin", Envelope.newBuilder()
+                .setTaskUpdated(TaskUpdated.newBuilder()
+                        .setTaskId(7)
+                        .setBounds(Rect.newBuilder().setLeft(-40).setTop(-10).setRight(600).setBottom(400)))
+                .build());
+        cases.put("task_removed", Envelope.newBuilder()
+                .setTaskRemoved(TaskRemoved.newBuilder().setTaskId(42))
+                .build());
+        cases.put("task_frames", Envelope.newBuilder()
+                .setTaskFrames(TaskFrames.newBuilder().setTaskId(42).setDisplayId(3))
+                .build());
+        cases.put("close_task", Envelope.newBuilder()
+                .setCloseTask(CloseTask.newBuilder().setTaskId(42))
+                .build());
+        cases.put("launch_app", Envelope.newBuilder()
+                .setLaunchApp(LaunchApp.newBuilder().setPackageName("com.example.notes"))
+                .build());
+        cases.put("app_info", Envelope.newBuilder()
+                .setAppInfo(AppInfo.newBuilder()
+                        .setPackageName("com.example.notes")
+                        .setLabel("Notes")
+                        .setIconPng(ByteString.copyFrom(
+                                new byte[] {(byte) 0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a})))
+                .build());
+        cases.put("pointer_event_mouse_secondary_down", Envelope.newBuilder()
+                .setPointerEvent(PointerEvent.newBuilder()
+                        .setTaskId(42)
+                        .setAction(PointerAction.POINTER_ACTION_DOWN)
+                        .setTool(PointerTool.POINTER_TOOL_MOUSE)
+                        .setPointerId(0)
+                        .setX(120.5f)
+                        .setY(64.25f)
+                        .setButtons(2)
+                        .setPressure(1.0f))
+                .build());
+        cases.put("pointer_event_touch_move", Envelope.newBuilder()
+                .setPointerEvent(PointerEvent.newBuilder()
+                        .setTaskId(7)
+                        .setAction(PointerAction.POINTER_ACTION_MOVE)
+                        .setTool(PointerTool.POINTER_TOOL_TOUCH)
+                        .setPointerId(3)
+                        .setX(10.0f)
+                        .setY(1023.75f)
+                        .setPressure(0.5f))
+                .build());
+        cases.put("pointer_event_scroll", Envelope.newBuilder()
+                .setPointerEvent(PointerEvent.newBuilder()
+                        .setTaskId(42)
+                        .setAction(PointerAction.POINTER_ACTION_SCROLL)
+                        .setTool(PointerTool.POINTER_TOOL_MOUSE)
+                        .setX(300.0f)
+                        .setY(200.0f)
+                        .setScrollX(0.5f)
+                        .setScrollY(-1.0f))
+                .build());
+        cases.put("pointer_event_pen_hover", Envelope.newBuilder()
+                .setPointerEvent(PointerEvent.newBuilder()
+                        .setTaskId(42)
+                        .setAction(PointerAction.POINTER_ACTION_HOVER_MOVE)
+                        .setTool(PointerTool.POINTER_TOOL_PEN)
+                        .setPointerId(1)
+                        .setX(0.0f)
+                        .setY(599.0f)
+                        .setButtons(32))
+                .build());
+        cases.put("key_event_ctrl_a_down", Envelope.newBuilder()
+                .setKeyEvent(KeyEvent.newBuilder()
+                        .setTaskId(42)
+                        .setAction(KeyAction.KEY_ACTION_DOWN)
+                        .setKeyCode(29)
+                        .setMetaState(0x3000)
+                        .setEventTimeMs(123456))
+                .build());
+        cases.put("key_event_backspace_repeat", Envelope.newBuilder()
+                .setKeyEvent(KeyEvent.newBuilder()
+                        .setTaskId(42)
+                        .setAction(KeyAction.KEY_ACTION_DOWN)
+                        .setKeyCode(67)
+                        .setRepeatCount(3)
+                        .setEventTimeMs(500))
+                .build());
+        cases.put("key_event_canceled_up", Envelope.newBuilder()
+                .setKeyEvent(KeyEvent.newBuilder()
+                        .setTaskId(7)
+                        .setAction(KeyAction.KEY_ACTION_UP)
+                        .setKeyCode(66)
+                        .setMetaState(0x100000)
+                        .setEventTimeMs((int) 4294967000L)
+                        .setCanceled(true))
+                .build());
+        cases.put("ime_composition_korean", Envelope.newBuilder()
+                .setImeComposition(ImeComposition.newBuilder()
+                        .setTaskId(42)
+                        .setText("\ud55c")
+                        .setCursor(1))
+                .build());
+        cases.put("ime_composition_removed", Envelope.newBuilder()
+                .setImeComposition(ImeComposition.newBuilder()
+                        .setTaskId(7))
+                .build());
+        cases.put("ime_commit_korean", Envelope.newBuilder()
+                .setImeCommit(ImeCommit.newBuilder()
+                        .setTaskId(42)
+                        .setText("\ud55c\uae00"))
+                .build());
+        cases.put("ime_cursor", Envelope.newBuilder()
+                .setImeCursor(ImeCursor.newBuilder()
+                        .setTaskId(42)
+                        .setCursor(Rect.newBuilder()
+                                .setLeft(100)
+                                .setTop(200)
+                                .setRight(102)
+                                .setBottom(240)))
+                .build());
+        cases.put("screen_state_off", Envelope.newBuilder()
+                .setScreenState(ScreenState.newBuilder().setOn(false))
+                .build());
+        cases.put("screen_state_on", Envelope.newBuilder()
+                .setScreenState(ScreenState.newBuilder().setOn(true))
+                .build());
+        cases.put("power_state_on_battery", Envelope.newBuilder()
+                .setPowerState(PowerState.newBuilder()
+                        .setAcOnline(false)
+                        .setBatteryPresent(true)
+                        .setBatteryPercent(57)
+                        .setCharging(false)
+                        .setPowerSaver(true))
+                .build());
+        cases.put("device_idle", Envelope.newBuilder()
+                .setDeviceIdle(DeviceIdle.newBuilder().setIdle(true))
+                .build());
+        cases.put("hello_rejected_authentication", Envelope.newBuilder()
+                .setHelloRejected(HelloRejected.newBuilder()
+                        .setReason(RejectReason.REJECT_REASON_AUTHENTICATION_FAILED)
+                        .setDetail("no proof"))
+                .build());
+        cases.put("request_guest_memory", Envelope.newBuilder()
+                .setRequestGuestMemory(RequestGuestMemory.getDefaultInstance())
+                .build());
+        cases.put("guest_memory", Envelope.newBuilder()
+                .setGuestMemory(GuestMemory.newBuilder()
+                        .setMemTotalKb(4015356)
+                        .setCachedKb(1503112)
+                        .setZramUsedKb(30720)
+                        .setTotalPssKb(330000)
+                        .addTopProcesses(ProcessMemory.newBuilder()
+                                .setPid(500)
+                                .setName("system")
+                                .setPssKb(180000)
+                                .setSwapPssKb(1000)))
                 .build());
         return cases;
     }

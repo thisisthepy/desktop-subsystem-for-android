@@ -7,6 +7,7 @@ kernel, and the user's WSL kernel is not touched.
 |---|---|
 | `wsl-kernel.tag` | The WSL kernel tag the source comes from |
 | `android.config` | The options merged on top of that tag's `Microsoft/config-wsl` |
+| `patches/` | Small patches applied to the pinned source before configuration |
 | `build.sh` | Fetches the source into `.scratch/`, merges the configuration, checks it and builds `bzImage` |
 
 ## Why the WSL kernel
@@ -16,19 +17,23 @@ The WSL kernel is already tuned for this kind of VM: it carries the Hyper-V driv
 the configuration Microsoft maintains for a lightweight Linux VM on Windows. Android's
 needs come on top as one fragment, so following a new WSL tag is a one-line change.
 
-The source is used unmodified. Only the configuration differs, which keeps the difference
-from Microsoft's kernel small enough to read in one file.
+The source is configured from Microsoft's baseline. A small checked-in patch extends the
+command-line partition parser so Hyper-V can provide Android the partition UUID and name
+metadata its virtual SCSI uevents omit.
 
 ## What the fragment adds
 
 - **Binder and binderfs, built in.** Built in, binder uses the kernel's internal symbols
-  directly, which an out-of-tree module on the stock WSL kernel cannot (see
-  `experiments/wsl-binder-module/` on `develop`).
+  directly and creates `/dev/binder`, `/dev/hwbinder` and `/dev/vndbinder` for Android's
+  early services. An out-of-tree module on the stock WSL kernel cannot: the driver needs
+  about a dozen kernel symbols that the WSL kernel does not export to modules.
 - **What Android's userspace expects:** wake locks, dma-buf heaps for graphics buffers,
   utilisation clamps, uinput and evdev, file-based encryption and fs-verity, erofs and f2fs,
   dm-crypt, quotas, and the eBPF and netfilter pieces netd uses.
 - **Everything built in.** The VM boots one image with no modules, so options
   `config-wsl` builds as modules, and their dependencies, are set to `y`.
+- **Bootconfig**, which carries each boot's control channel secret from the host. The
+  guest reads it from `/proc/bootconfig`, which apps cannot read.
 - **Its own release name** (`-dsa`), so it is never mistaken for the WSL kernel.
 
 ashmem is not enabled and does not exist in this kernel; Android uses memfd.

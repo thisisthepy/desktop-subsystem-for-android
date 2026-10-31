@@ -25,6 +25,25 @@ fn invalid(why: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, why.into())
 }
 
+/// How much of the start of a disk [`is_blank`] reads: the partition table, or the
+/// superblock of a file system written straight onto the disk, is well within it.
+const BLANK_PROBE: usize = 1 << 20;
+
+/// Whether nothing was ever written to the start of `disk`: no partition table and no file
+/// system. A disk created before any image was there to copy is blank, and holds no data.
+pub fn is_blank(disk: &mut (impl Read + Seek)) -> io::Result<bool> {
+    let mut start = vec![0u8; BLANK_PROBE];
+    disk.seek(SeekFrom::Start(0))?;
+    let mut read = 0;
+    while read < start.len() {
+        match disk.read(&mut start[read..])? {
+            0 => break,
+            n => read += n,
+        }
+    }
+    Ok(start[..read].iter().all(|&b| b == 0))
+}
+
 /// Reads the partition table of `disk`.
 pub fn partitions(disk: &mut (impl Read + Seek)) -> io::Result<Vec<Partition>> {
     let mut header = [0u8; SECTOR as usize];
@@ -44,7 +63,10 @@ pub fn partitions(disk: &mut (impl Read + Seek)) -> io::Result<Vec<Partition>> {
     // Read whole sectors, which raw disk devices require.
     let bytes = (count * entry_size).div_ceil(SECTOR as usize) * SECTOR as usize;
     let mut table = vec![0u8; bytes];
-    disk.seek(SeekFrom::Start(entries_lba * SECTOR))?;
+    let entries_offset = entries_lba
+        .checked_mul(SECTOR)
+        .ok_or_else(|| invalid("partition table location overflows"))?;
+    disk.seek(SeekFrom::Start(entries_offset))?;
     disk.read_exact(&mut table)?;
     let mut found = Vec::new();
     for entry in table.chunks(entry_size).take(count) {
@@ -53,6 +75,19 @@ pub fn partitions(disk: &mut (impl Read + Seek)) -> io::Result<Vec<Partition>> {
         }
         let first = u64::from_le_bytes(entry[32..40].try_into().unwrap());
         let last = u64::from_le_bytes(entry[40..48].try_into().unwrap());
+        if last < first {
+            return Err(invalid("partition last sector is before first sector"));
+        }
+        let sectors = last
+            .checked_sub(first)
+            .and_then(|diff| diff.checked_add(1))
+            .ok_or_else(|| invalid("partition sector count overflows"))?;
+        let len = sectors
+            .checked_mul(SECTOR)
+            .ok_or_else(|| invalid("partition length in bytes overflows"))?;
+        let start = first
+            .checked_mul(SECTOR)
+            .ok_or_else(|| invalid("partition start in bytes overflows"))?;
         let units: Vec<u16> = entry[56..128]
             .chunks(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
@@ -60,11 +95,41 @@ pub fn partitions(disk: &mut (impl Read + Seek)) -> io::Result<Vec<Partition>> {
             .collect();
         found.push(Partition {
             name: String::from_utf16_lossy(&units),
-            start: first * SECTOR,
-            len: (last + 1 - first) * SECTOR,
+            start,
+            len,
         });
     }
     Ok(found)
+}
+
+/// Whether `to` can take the partitions named in `names` from `from`: every one of them on
+/// `from` is on `to` too, at least as large.
+pub fn fits(
+    from: &mut (impl Read + Seek),
+    to: &mut (impl Read + Seek),
+    names: &[&str],
+) -> io::Result<bool> {
+    let source = partitions(from)?;
+    let target = partitions(to)?;
+    Ok(names
+        .iter()
+        .all(|name| match source.iter().find(|p| p.name == *name) {
+            None => true,
+            Some(src) => target.iter().any(|p| p.name == *name && p.len >= src.len),
+        }))
+}
+
+/// Whether nothing was ever written to the start of the partition `name`: Android formats
+/// userdata on its first boot, so a blank one means Android never ran from this disk.
+pub fn partition_is_blank(disk: &mut (impl Read + Seek), name: &str) -> io::Result<bool> {
+    let part = partitions(disk)?
+        .into_iter()
+        .find(|p| p.name == name)
+        .ok_or_else(|| invalid(format!("the disk has no {name} partition")))?;
+    let mut start = vec![0u8; part.len.min(BLANK_PROBE as u64) as usize];
+    disk.seek(SeekFrom::Start(part.start))?;
+    disk.read_exact(&mut start)?;
+    Ok(start.iter().all(|&b| b == 0))
 }
 
 /// Copies the partitions named in `names` from `from` to `to`, which must both have them,
@@ -111,4 +176,99 @@ pub fn copy_partitions(
         }
     }
     to.flush()
+}
+
+/// CRC-32 (IEEE, reflected), the checksum of a GPT header and of its entries.
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for &b in bytes {
+        crc ^= b as u32;
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+/// Removes every partition of `disk` not named in `names` from its partition table, the
+/// primary one and the backup, and returns the names it removed. The partitions it keeps
+/// stay where they are, with what they hold.
+///
+/// A disk made for an image that kept Android on the user's disk still has Android's
+/// partitions after its image moves Android to a disk of its own. Android finds partitions
+/// by name, so the stale ones would stand in for the image's.
+pub fn keep_only(disk: &mut (impl Read + Write + Seek), names: &[&str]) -> io::Result<Vec<String>> {
+    let mut header = [0u8; SECTOR as usize];
+    disk.seek(SeekFrom::Start(SECTOR))?;
+    disk.read_exact(&mut header)?;
+    if &header[0..8] != b"EFI PART" {
+        return Err(invalid("the disk has no GUID partition table"));
+    }
+    partitions(disk)?;
+    let entries_lba = u64::from_le_bytes(header[72..80].try_into().unwrap());
+    let count = u32::from_le_bytes(header[80..84].try_into().unwrap()) as usize;
+    let entry_size = u32::from_le_bytes(header[84..88].try_into().unwrap()) as usize;
+    let bytes = (count * entry_size).div_ceil(SECTOR as usize) * SECTOR as usize;
+    let mut table = vec![0u8; bytes];
+    disk.seek(SeekFrom::Start(entries_lba * SECTOR))?;
+    disk.read_exact(&mut table)?;
+
+    let mut dropped = Vec::new();
+    for entry in table.chunks_mut(entry_size).take(count) {
+        if entry[0..16].iter().all(|&b| b == 0) {
+            continue;
+        }
+        let units: Vec<u16> = entry[56..128]
+            .chunks(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .take_while(|&u| u != 0)
+            .collect();
+        let name = String::from_utf16_lossy(&units);
+        if !names.contains(&name.as_str()) {
+            entry.fill(0);
+            dropped.push(name);
+        }
+    }
+    if dropped.is_empty() {
+        return Ok(dropped);
+    }
+    let entries_crc = crc32(&table[..count * entry_size]);
+
+    // The primary header names where its backup is; a table without one (only ever made
+    // by hand) has only the primary to change.
+    let backup_lba = u64::from_le_bytes(header[32..40].try_into().unwrap());
+    let mut headers = vec![(SECTOR, header)];
+    if backup_lba > 1 {
+        let mut backup = [0u8; SECTOR as usize];
+        let at = backup_lba
+            .checked_mul(SECTOR)
+            .ok_or_else(|| invalid("backup partition table location overflows"))?;
+        disk.seek(SeekFrom::Start(at))?;
+        if disk.read_exact(&mut backup).is_ok() && &backup[0..8] == b"EFI PART" {
+            headers.push((at, backup));
+        }
+    }
+    for (at, mut header) in headers {
+        let entries_at = u64::from_le_bytes(header[72..80].try_into().unwrap())
+            .checked_mul(SECTOR)
+            .ok_or_else(|| invalid("partition table location overflows"))?;
+        disk.seek(SeekFrom::Start(entries_at))?;
+        disk.write_all(&table)?;
+        let size = match u32::from_le_bytes(header[12..16].try_into().unwrap()) as usize {
+            0 => 92,
+            n => n.min(SECTOR as usize),
+        };
+        header[88..92].copy_from_slice(&entries_crc.to_le_bytes());
+        header[16..20].fill(0);
+        let crc = crc32(&header[..size]);
+        header[16..20].copy_from_slice(&crc.to_le_bytes());
+        disk.seek(SeekFrom::Start(at))?;
+        disk.write_all(&header)?;
+    }
+    disk.flush()?;
+    Ok(dropped)
 }

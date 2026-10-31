@@ -30,6 +30,9 @@ jobs:
           # The release sync test builds throwaway repositories; it needs git, not history.
           fetch-depth: 1
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Run the repository checks
         run: |
           git config --global user.email "ci@example.invalid"
@@ -54,6 +57,12 @@ jobs:
 
       - name: Lint
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Check license policy with cargo-deny
+        if: runner.os == 'Linux'
+        run: |
+          curl -sSL https://github.com/EmbarkStudios/cargo-deny/releases/download/0.16.4/cargo-deny-0.16.4-x86_64-unknown-linux-musl.tar.gz | tar -xz --strip-components=1 -C /usr/local/bin cargo-deny-0.16.4-x86_64-unknown-linux-musl/cargo-deny
+          cargo deny --all-features check --config deny.toml licenses
 
       # On Windows this includes the transport suite over real Hyper-V sockets (host to
       # host through the loopback partition).
@@ -89,6 +98,26 @@ jobs:
       - name: Run the tests
         run: cargo test --no-fail-fast -p dsa-transport -p dsa-host-unix -p dsa-cli
 
+  agent:
+    name: Test the guest agent (ubuntu-latest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dsa/guest/agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up a JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # The unit tests, and the release build, which compiles the agent against the
+      # generated protocol and channel code.
+      - name: Run the tests and build the agent
+        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+
   protocol:
     name: Check the generated protocol code (ubuntu-latest)
     runs-on: ubuntu-latest
@@ -111,12 +140,63 @@ jobs:
           if [[ -n "$(git status --porcelain -- protocol)" ]]; then
             git status --short -- protocol
             git diff -- protocol | head -200
-            echo "::error::the generated protocol code does not match control.proto or host_api.proto; run dsa-protocol-codegen and commit the result"
+            # The whole difference, as a patch to apply, because the generated Java and C++
+            # sources are too long to read from the log.
+            git add -N -- protocol
+            git diff --binary -- protocol > "$RUNNER_TEMP/generated-protocol.patch"
+            echo "::error::the generated protocol code does not match control.proto, host_api.proto or window_host.proto; run dsa-protocol-codegen and commit the result"
             exit 1
           fi
+
+      - name: Keep the generated protocol code that differs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-protocol
+          path: ${{ runner.temp }}/generated-protocol.patch
+          if-no-files-found: ignore
 
       - name: Check the Java codec against the vectors
         run: dsa/protocol/java/test.sh
 
       - name: Check the C++ codec against the vectors
         run: dsa/protocol/cpp/test.sh
+
+  settings-app:
+    name: Test and build the settings app (windows-latest)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: dsa/host/platform/windows/settings
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # The view models and the reading of dsa's JSON, against a fake dsa.
+      - name: Run the view model tests
+        run: dotnet test DsaSettings.Core.Tests/DsaSettings.Core.Tests.csproj -c Release
+
+      # The WPF app itself, as the installer publishes it.
+      - name: Build the app
+        run: dotnet publish DsaSettings/DsaSettings.csproj -c Release -r win-x64 -o ../../../../target/settings-app
+
+  hwcomposer:
+    name: Test the guest hwcomposer's task rules (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The channel messages go through the generated protobuf-lite codec, built against the
+      # 3.21 runtime Ubuntu 24.04 ships.
+      - name: Install the protobuf runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libprotobuf-dev g++
+
+      - name: Run the tests
+        run: dsa/guest/hwcomposer/test.sh

@@ -1,22 +1,27 @@
 [package]
 name = "dsa-host-windows"
 version = "0.1.0"
-description = "The Windows host: WSL launch and the hvsocket transport"
+description = "The Windows host: the Android VM and the hvsocket transport"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+dsa-exe-resources = { path = "resources" }
 dsa-transport.workspace = true
 dsa-host-core.workspace = true
+dsa-protocol.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ed25519-dalek = "2"
+sha2 = "0.11"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Devices_Display",
+    "Win32_Graphics_Gdi",
     "Win32_Networking_WinHttp",
     "Win32_Networking_WinSock",
     "Win32_Security",
@@ -25,15 +30,49 @@ windows-sys = { version = "0.61", features = [
     "Win32_Storage_Vhd",
     "Win32_System_HostComputeSystem",
     "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_IO",
     "Win32_System_LibraryLoader",
     "Win32_System_Pipes",
+    "Win32_System_Power",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Registry",
+    "Win32_System_RemoteDesktop",
     "Win32_System_Services",
+    "Win32_System_Performance",
     "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
+    "Win32_UI_Input_Ime",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Input_Pointer",
+    "Win32_UI_Input_Touch",
 ] }
+# Direct3D 11, DXGI and DirectComposition, which present each task's frames in its window.
+# They are COM interfaces, which windows-sys does not describe.
+windows-numerics = "0.3"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_DirectComposition",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Security",
+    # Start menu shortcuts: the shell's ShellLink object and its properties.
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+
+[build-dependencies]
+dsa-exe-resources = { path = "resources" }
 
 [dev-dependencies]
 dsa-transport = { workspace = true, features = ["conformance"] }
-dsa-protocol.workspace = true
 dsa-host-core = { workspace = true, features = ["conformance"] }
-sha2 = "0.11"

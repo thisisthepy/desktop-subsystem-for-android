@@ -11,14 +11,18 @@ use std::mem::{size_of, zeroed};
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use dsa_transport::stream::{accept_with_timeout, FramedConnection, StreamSocket};
+use dsa_transport::stream::{
+    accept_with_timeout, FramedConnection, RawStreamConnection, StreamSocket,
+};
 use dsa_transport::{Connection, Connector, Listener, TransportError};
 use windows_sys::Win32::Networking::WinSock::{
     accept, bind, closesocket, connect, ioctlsocket, listen, recv, send, setsockopt, shutdown,
-    socket, WSAGetLastError, WSAPoll, WSAStartup, FIONBIO, INVALID_SOCKET, POLLRDNORM, SD_BOTH,
-    SOCKADDR, SOCKET, SOCKET_ERROR, SOCK_STREAM, SOMAXCONN, WSADATA, WSAEAFNOSUPPORT,
-    WSAEPROTONOSUPPORT, WSAESOCKTNOSUPPORT, WSAPOLLFD,
+    socket, WSADuplicateSocketW, WSAGetLastError, WSAPoll, WSASocketW, WSAStartup, FIONBIO,
+    FROM_PROTOCOL_INFO, INVALID_SOCKET, POLLRDNORM, SD_BOTH, SOCKADDR, SOCKET, SOCKET_ERROR,
+    SOCK_STREAM, SOMAXCONN, WSADATA, WSAEAFNOSUPPORT, WSAEPROTONOSUPPORT, WSAESOCKTNOSUPPORT,
+    WSAPOLLFD, WSAPROTOCOL_INFOW,
 };
+use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 
 use crate::guid::Guid;
 
@@ -201,6 +205,35 @@ impl StreamSocket for HvSocket {
         // SAFETY: shutting down an owned socket.
         unsafe { shutdown(self.raw, SD_BOTH) };
     }
+
+    fn try_clone(&self) -> io::Result<HvSocket> {
+        // SAFETY: an all-zero WSAPROTOCOL_INFOW is a valid out-parameter.
+        let mut info: WSAPROTOCOL_INFOW = unsafe { zeroed() };
+        // SAFETY: duplicating an owned socket into this same process.
+        if unsafe { WSADuplicateSocketW(self.raw, GetCurrentProcessId(), &mut info) }
+            == SOCKET_ERROR
+        {
+            return Err(last_error());
+        }
+        // SAFETY: info describes the socket duplicated above.
+        let raw = unsafe {
+            WSASocketW(
+                FROM_PROTOCOL_INFO,
+                FROM_PROTOCOL_INFO,
+                FROM_PROTOCOL_INFO,
+                &info,
+                0,
+                0,
+            )
+        };
+        if raw == INVALID_SOCKET {
+            return Err(last_error());
+        }
+        Ok(HvSocket {
+            raw,
+            read_timeout: self.read_timeout,
+        })
+    }
 }
 
 /// Listens for connections from a VM (or from the host, with [`Guid::LOOPBACK`]).
@@ -249,6 +282,39 @@ impl Listener for HvSocketListener {
         // An accepted socket inherits non-blocking mode; reads use timeouts instead.
         accepted.set_nonblocking(false)?;
         Ok(Box::new(FramedConnection::new(accepted)))
+    }
+}
+
+/// Listens on Hyper-V sockets and yields [RawStreamConnection]s without framing.
+pub struct RawHvSocketListener {
+    socket: HvSocket,
+}
+
+impl RawHvSocketListener {
+    /// Listens on service_id for connections from the partition m_id.
+    pub fn bind(vm_id: Guid, service_id: Guid) -> Result<RawHvSocketListener, TransportError> {
+        let listener = HvSocketListener::bind(vm_id, service_id)?;
+        Ok(RawHvSocketListener {
+            socket: listener.socket,
+        })
+    }
+}
+
+impl Listener for RawHvSocketListener {
+    fn accept(&mut self, timeout: Duration) -> Result<Box<dyn Connection>, TransportError> {
+        let accepted = accept_with_timeout(timeout, || {
+            // SAFETY: the peer address is not requested.
+            let raw =
+                unsafe { accept(self.socket.raw, std::ptr::null_mut(), std::ptr::null_mut()) };
+            if raw == INVALID_SOCKET {
+                Err(last_error())
+            } else {
+                Ok(HvSocket::from_raw(raw))
+            }
+        })?;
+        // An accepted socket inherits non-blocking mode; reads use timeouts instead.
+        accepted.set_nonblocking(false)?;
+        Ok(Box::new(RawStreamConnection::new(accepted)))
     }
 }
 

@@ -5,10 +5,19 @@
 //! - memory backed by the pagefile and committed on first touch (`AllowOvercommit`,
 //!   `EnableDeferredCommit`), and free guest pages handed back to the host
 //!   (`EnableColdDiscardHint` plus `page_reporting.page_reporting_order` on the kernel
-//!   command line);
+//!   command line, and `EnableColdHint` for zeroed pages). `EnableHotHint` is left off: it
+//!   lets the guest pull pages in ahead of use, which returns nothing to the host;
+//! - on Windows builds that can take it, small backing pages and 64 KiB fault clusters
+//!   (`BackingPageSize`, `FaultClusterSizeShift`, `DirectMapFaultClusterSizeShift`). Without
+//!   them one touched guest page can commit far more than itself on the host, and a freed
+//!   128 KiB block need not free anything there;
 //! - the kernel booted directly (`LinuxKernelDirect`), straight into Android's init;
 //! - the system image attached read only, the user data on a disk that may stay sparse;
-//! - Hyper-V sockets limited to SYSTEM and the user the VM belongs to.
+//! - Hyper-V sockets limited to SYSTEM and the user the VM belongs to;
+//! - the guest's console on the first serial port, which HCS connects to a named pipe the
+//!   host serves, as WSL does for its debug console. A Linux guest prints there from the
+//!   first instruction (`earlycon`), so a boot that fails before Android's agent connects
+//!   still leaves a record of why.
 //!
 //! This module only builds the document, so it is tested on every platform. Creating the
 //! VM from it is `hcs` (Windows only).
@@ -22,6 +31,19 @@ use crate::guid::Guid;
 
 /// HCS allocates VM memory in 2 MiB units.
 const MEMORY_GRANULARITY_MB: u32 = 2;
+
+/// The kernel's console: the first serial port (COM1, I/O port 0x3f8) from the first
+/// instruction through `earlycon`, then the 8250 driver. HCS connects that port to the
+/// console pipe.
+pub const CONSOLE_CMDLINE: &str = "earlycon=uart8250,io,0x3f8,115200 console=ttyS0,115200";
+
+const PIPE_PREFIX: &str = r"\\.\pipe\";
+
+/// The pipe the console of VM `vm_name` is served on: `\\.\pipe\dsa-console-<vm_name>`.
+/// Each user's VM has its own name, so each has its own pipe.
+pub fn console_pipe_path(vm_name: &str) -> String {
+    format!("{PIPE_PREFIX}dsa-console-{vm_name}")
+}
 
 /// Everything needed to describe the Android VM.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +71,55 @@ pub struct AndroidVmConfig {
     /// Free page reporting granularity, as a page order (5 is 128 KiB, 9 is 2 MiB). WSL uses
     /// 5 on recent Windows builds and 9 on older ones.
     pub page_reporting_order: u8,
+    /// The named pipe (`\\.\pipe\...`) HCS connects the guest's serial console to. The
+    /// host must serve it before the VM starts; without it the VM has no serial port.
+    pub console_pipe: Option<String>,
+    /// The version of the image booted, for the console log. It does not change the VM.
+    pub image_version: Option<String>,
+    /// Appended to the name of the process that holds the VM's memory, so Task Manager
+    /// shows `vmmem` followed by it (`VmmemDSA` for `DSA`). `None` leaves the name plain
+    /// `vmmem`, which is what Windows builds without the setting need: they reject a
+    /// document that names it. See [`hosting_process_name_suffix_supported`].
+    pub hosting_process_name_suffix: Option<String>,
+    /// Back the VM with small pages and fault 64 KiB at a time, which keeps the host's share
+    /// close to what the guest uses. Only for builds where
+    /// [`fine_grained_memory_supported`] says so.
+    pub fine_grained_memory: bool,
+}
+
+/// The fault cluster for fine-grained memory, as a power of two of 4 KiB pages: 64 KiB. Free
+/// page reporting's order must be at least this, which its least value, 5, is.
+const FAULT_CLUSTER_SHIFT: u32 = 4;
+
+/// Whether this Windows build can back a VM with small pages and short fault clusters: those
+/// with the fix for the deadlock such a VM can hit when it is torn down. These are the same
+/// builds and revisions WSL checks before it sets the same fields.
+pub fn fine_grained_memory_supported(build: u32, update_revision: u32) -> bool {
+    const GERMANIUM: u32 = 26100;
+    const COBALT: u32 = 22000;
+    const IRON: u32 = 20348;
+    const VIBRANIUM_22H2: u32 = 19045;
+    build >= GERMANIUM
+        || (build >= COBALT && update_revision >= 2360)
+        || (build >= IRON && update_revision >= 1970)
+        || (build >= VIBRANIUM_22H2 && update_revision >= 3393)
+}
+
+/// The suffix DSA gives its memory process, which Task Manager then shows as `VmmemDSA`.
+pub const HOSTING_PROCESS_NAME_SUFFIX: &str = "DSA";
+
+/// Whether HCS on this Windows build accepts `HostingProcessNameSuffix`. The setting came
+/// with Windows 11 21H2 update 22000.71, the 22138 to 22349 refresh builds, and 22420 and
+/// later; these are the same build numbers WSL checks before it sets the same field.
+pub fn hosting_process_name_suffix_supported(build: u32, update_revision: u32) -> bool {
+    const COBALT: u32 = 22000;
+    const COBALT_RELEASE_UBR: u32 = 71;
+    const COBALT_REFRESH: u32 = 22138;
+    const NICKEL_FLOOR: u32 = 22350;
+    const NICKEL: u32 = 22420;
+    build >= NICKEL
+        || (COBALT_REFRESH..NICKEL_FLOOR).contains(&build)
+        || (build == COBALT && update_revision >= COBALT_RELEASE_UBR)
 }
 
 /// Why a configuration cannot describe a VM.
@@ -124,6 +195,15 @@ impl AndroidVmConfig {
         if let Some(bad) = self.socket_sids.iter().find(|sid| !is_sid(sid)) {
             return Err(ConfigError(format!("{bad:?} is not a SID (S-1-...)")));
         }
+        if let Some(pipe) = &self.console_pipe {
+            let name = pipe.strip_prefix(PIPE_PREFIX).unwrap_or_default();
+            if name.is_empty() || name.contains(['\\', '/', '"']) {
+                return Err(ConfigError(format!(
+                    "the console pipe {pipe:?} must be {PIPE_PREFIX}<name>, with no slashes \
+                     or quotes in the name"
+                )));
+            }
+        }
         Ok(memory_mb)
     }
 
@@ -140,7 +220,7 @@ impl AndroidVmConfig {
     /// The kernel command line: the settings the VM needs, then [`kernel_cmdline`](Self::kernel_cmdline).
     pub fn full_kernel_cmdline(&self) -> String {
         let mut cmdline = format!(
-            "console=hvc0 panic=-1 page_reporting.page_reporting_order={}",
+            "{CONSOLE_CMDLINE} panic=-1 page_reporting.page_reporting_order={}",
             self.page_reporting_order
         );
         if !self.kernel_cmdline.trim().is_empty() {
@@ -167,6 +247,23 @@ impl AndroidVmConfig {
             "ReadOnly": false,
             "AlwaysAllowSparseFiles": true,
         });
+        let mut devices = json!({
+            "Scsi": {
+                "0": {
+                    "Attachments": Value::Null,
+                },
+            },
+            "HvSocket": {
+                "HvSocketConfig": {
+                    "DefaultBindSecurityDescriptor": sddl,
+                    "DefaultConnectSecurityDescriptor": sddl,
+                },
+            },
+        });
+        if let Some(pipe) = &self.console_pipe {
+            // Port "0" is COM1, the port CONSOLE_CMDLINE names.
+            devices["ComPorts"] = json!({ "0": { "NamedPipe": pipe } });
+        }
         let attachments = match &self.system_image {
             Some(system) => json!({
                 "0": { "Type": "VirtualDisk", "Path": path_string(system), "ReadOnly": true },
@@ -174,6 +271,24 @@ impl AndroidVmConfig {
             }),
             None => json!({ "0": data }),
         };
+        devices["Scsi"]["0"]["Attachments"] = attachments;
+        let mut memory = json!({
+            "SizeInMB": memory_mb,
+            "AllowOvercommit": true,
+            "EnableDeferredCommit": true,
+            "EnableColdDiscardHint": true,
+            // Lets the guest also hand back pages it has zeroed, which the host then trims
+            // from the VM's working set. A guest without support for it is unaffected.
+            "EnableColdHint": true,
+        });
+        if self.fine_grained_memory {
+            memory["BackingPageSize"] = json!("Small");
+            memory["FaultClusterSizeShift"] = json!(FAULT_CLUSTER_SHIFT);
+            memory["DirectMapFaultClusterSizeShift"] = json!(FAULT_CLUSTER_SHIFT);
+        }
+        if let Some(suffix) = &self.hosting_process_name_suffix {
+            memory["HostingProcessNameSuffix"] = Value::String(suffix.clone());
+        }
         Ok(json!({
             "Owner": self.owner,
             "SchemaVersion": { "Major": 2, "Minor": 3 },
@@ -185,27 +300,10 @@ impl AndroidVmConfig {
                     "LinuxKernelDirect": kernel,
                 },
                 "ComputeTopology": {
-                    "Memory": {
-                        "SizeInMB": memory_mb,
-                        "AllowOvercommit": true,
-                        "EnableDeferredCommit": true,
-                        "EnableColdDiscardHint": true,
-                    },
+                    "Memory": memory,
                     "Processor": { "Count": self.processors },
                 },
-                "Devices": {
-                    "Scsi": {
-                        "0": {
-                            "Attachments": attachments,
-                        },
-                    },
-                    "HvSocket": {
-                        "HvSocketConfig": {
-                            "DefaultBindSecurityDescriptor": sddl,
-                            "DefaultConnectSecurityDescriptor": sddl,
-                        },
-                    },
-                },
+                "Devices": devices,
             },
         }))
     }

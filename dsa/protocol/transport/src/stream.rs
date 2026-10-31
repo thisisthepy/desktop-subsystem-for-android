@@ -9,7 +9,7 @@ use std::io::{self, Read, Write};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::{check_frame_len, Connection, TransportError};
+use crate::{check_frame_len, Connection, FrameSender, TransportError};
 
 const HEADER_LEN: usize = 4;
 
@@ -20,6 +20,14 @@ pub trait StreamSocket: Read + Write + Send {
 
     /// Shuts the socket down in both directions, so the peer sees end of stream.
     fn shutdown(&mut self);
+
+    /// A second handle on the same socket, for a writer on another thread than the reader.
+    fn try_clone(&self) -> io::Result<Self>
+    where
+        Self: Sized,
+    {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
 }
 
 /// A [`Connection`] that frames messages over a [`StreamSocket`].
@@ -37,6 +45,13 @@ impl<S: StreamSocket> FramedConnection<S> {
             socket,
             pending: Vec::new(),
             broken: false,
+        }
+    }
+
+    fn shut_down(&mut self) {
+        if !self.broken {
+            self.socket.shutdown();
+            self.broken = true;
         }
     }
 
@@ -62,19 +77,22 @@ impl<S: StreamSocket> FramedConnection<S> {
     }
 }
 
-impl<S: StreamSocket> Connection for FramedConnection<S> {
+/// One frame as it goes on the wire: its length, then its bytes, written in one piece so a
+/// second handle's frames never land in the middle of it.
+fn write_frame(socket: &mut impl Write, frame: &[u8]) -> io::Result<()> {
+    let mut wire = Vec::with_capacity(HEADER_LEN + frame.len());
+    wire.extend_from_slice(&(frame.len() as u32).to_le_bytes());
+    wire.extend_from_slice(frame);
+    socket.write_all(&wire).and_then(|()| socket.flush())
+}
+
+impl<S: StreamSocket + 'static> Connection for FramedConnection<S> {
     fn send(&mut self, frame: &[u8]) -> Result<(), TransportError> {
         check_frame_len(frame.len())?;
         if self.broken {
             return Err(TransportError::Closed);
         }
-        let mut wire = Vec::with_capacity(HEADER_LEN + frame.len());
-        wire.extend_from_slice(&(frame.len() as u32).to_le_bytes());
-        wire.extend_from_slice(frame);
-        let result = self
-            .socket
-            .write_all(&wire)
-            .and_then(|()| self.socket.flush());
+        let result = write_frame(&mut self.socket, frame);
         result.map_err(|error| {
             let error = TransportError::from(error);
             if error == TransportError::Closed {
@@ -144,16 +162,145 @@ impl<S: StreamSocket> Connection for FramedConnection<S> {
     }
 
     fn close(&mut self) {
-        if !self.broken {
-            self.socket.shutdown();
-            self.broken = true;
+        self.shut_down();
+    }
+
+    /// A sender on a second handle to the socket. Whoever holds both must not send on
+    /// both at once from different threads: each sends whole frames, but two writers could
+    /// still interleave theirs.
+    fn try_clone_sender(&self) -> Option<Box<dyn FrameSender>> {
+        if self.broken {
+            return None;
         }
+        let socket = self.socket.try_clone().ok()?;
+        Some(Box::new(FramedSender { socket }))
+    }
+}
+
+/// The sending half of a [`FramedConnection`], on a second handle to its socket. Dropping
+/// it leaves the connection open.
+pub struct FramedSender<S: StreamSocket> {
+    socket: S,
+}
+
+impl<S: StreamSocket> FrameSender for FramedSender<S> {
+    fn send(&mut self, frame: &[u8]) -> Result<(), TransportError> {
+        check_frame_len(frame.len())?;
+        write_frame(&mut self.socket, frame).map_err(TransportError::from)
     }
 }
 
 impl<S: StreamSocket> Drop for FramedConnection<S> {
     fn drop(&mut self) {
-        self.close();
+        self.shut_down();
+    }
+}
+
+/// A [Connection] that carries raw byte sequences over a [StreamSocket].
+///
+/// Unlike [FramedConnection], frames are sent without length prefixes, and receives
+/// return whatever byte chunks arrive from the underlying socket.
+pub struct RawStreamConnection<S: StreamSocket> {
+    socket: S,
+    closed: bool,
+}
+
+impl<S: StreamSocket> RawStreamConnection<S> {
+    pub fn new(socket: S) -> Self {
+        RawStreamConnection {
+            socket,
+            closed: false,
+        }
+    }
+
+    fn shut_down(&mut self) {
+        if !self.closed {
+            self.socket.shutdown();
+            self.closed = true;
+        }
+    }
+}
+
+impl<S: StreamSocket + 'static> Connection for RawStreamConnection<S> {
+    fn send(&mut self, frame: &[u8]) -> Result<(), TransportError> {
+        if self.closed {
+            return Err(TransportError::Closed);
+        }
+        self.socket
+            .write_all(frame)
+            .and_then(|()| self.socket.flush())
+            .map_err(|error| {
+                let error = TransportError::from(error);
+                if error == TransportError::Closed {
+                    self.closed = true;
+                }
+                error
+            })
+    }
+
+    fn recv(&mut self, timeout: Option<Duration>) -> Result<Vec<u8>, TransportError> {
+        if self.closed {
+            return Err(TransportError::Closed);
+        }
+        match self.socket.set_read_timeout(timeout) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {}
+            Err(error) => return Err(error.into()),
+        }
+        let mut chunk = vec![0u8; 64 * 1024];
+        loop {
+            match self.socket.read(&mut chunk) {
+                Ok(0) => {
+                    self.closed = true;
+                    return Err(TransportError::Closed);
+                }
+                Ok(read) => {
+                    chunk.truncate(read);
+                    return Ok(chunk);
+                }
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => {
+                    let error = TransportError::from(error);
+                    if error == TransportError::Closed {
+                        self.closed = true;
+                    }
+                    return Err(error);
+                }
+            }
+        }
+    }
+
+    fn close(&mut self) {
+        self.shut_down();
+    }
+
+    fn try_clone_sender(&self) -> Option<Box<dyn FrameSender>> {
+        if self.closed {
+            return None;
+        }
+        let socket = self.socket.try_clone().ok()?;
+        Some(Box::new(RawStreamSender { socket }))
+    }
+}
+
+/// The sending half of a [`RawStreamConnection`], on a second handle to its socket.
+/// Dropping it leaves the connection open.
+pub struct RawStreamSender<S: StreamSocket> {
+    socket: S,
+}
+
+impl<S: StreamSocket> FrameSender for RawStreamSender<S> {
+    fn send(&mut self, frame: &[u8]) -> Result<(), TransportError> {
+        self.socket
+            .write_all(frame)
+            .and_then(|()| self.socket.flush())
+            .map_err(TransportError::from)
+    }
+}
+
+impl<S: StreamSocket> Drop for RawStreamConnection<S> {
+    fn drop(&mut self) {
+        self.shut_down();
     }
 }
 

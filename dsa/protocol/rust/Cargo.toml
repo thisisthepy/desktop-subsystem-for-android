@@ -9,7 +9,9 @@ publish.workspace = true
 
 [dependencies]
 dsa-transport.workspace = true
+getrandom = "0.2"
 prost.workspace = true
+sha2 = "0.11"
 
 [dev-dependencies]
 dsa-protocol-schema.workspace = true

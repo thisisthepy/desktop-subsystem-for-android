@@ -1,0 +1,182 @@
+diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations.cpp
+--- a/host/vulkan/VkCommonOperations.cpp
++++ b/host/vulkan/VkCommonOperations.cpp
+@@ -1737,6 +1737,8 @@ void VkEmulation::initFeatures(Features features) {
+ VkEmulation::~VkEmulation() {
+     std::lock_guard<std::mutex> lock(mMutex);
+ 
++    freeRetiredLocked(/*wait=*/true);
++
+     mCompositorVk.reset();
+     mDisplayVk.reset();
+ 
+@@ -2866,6 +2868,7 @@ bool VkEmulation::createVkColorBuffer(uint32_t width, uint32_t height, GLenum in
+                                       FrameworkFormat frameworkFormat, uint32_t colorBufferHandle,
+                                       bool vulkanOnly, uint32_t memoryProperty) {
+     std::lock_guard<std::mutex> lock(mMutex);
++    freeRetiredLocked(/*wait=*/false);
+     auto infoPtr = android::base::find(mColorBuffers, colorBufferHandle);
+     if (infoPtr) {
+         VERBOSE("ColorBuffer already exists for handle: %d", colorBufferHandle);
+@@ -2928,25 +2931,90 @@ bool VkEmulation::teardownVkColorBufferLocked(uint32_t colorBufferHandle) {
+ 
+     if (!infoPtr) return false;
+ 
++    (void)vk;
+     if (infoPtr->initialized) {
+         auto& info = *infoPtr;
+-        {
+-            android::base::AutoLock queueLock(*mQueueLock);
+-            VK_CHECK(vk->vkQueueWaitIdle(mQueue));
+-        }
+-        vk->vkDestroyImageView(mDevice, info.imageView, nullptr);
++        RetiredResource retired;
++        retired.imageView = info.imageView;
+         if (mDeviceInfo.hasSamplerYcbcrConversionExtension) {
+-            vk->vkDestroySamplerYcbcrConversion(mDevice, info.ycbcrConversion, nullptr);
++            retired.ycbcrConversion = info.ycbcrConversion;
+         }
+-        vk->vkDestroyImage(mDevice, info.image, nullptr);
+-        freeExternalMemoryLocked(vk, &info.memory);
++        retired.image = info.image;
++        retired.memory = info.memory;
++        retireLocked(std::move(retired));
+     }
+ 
+     mColorBuffers.erase(colorBufferHandle);
++    freeRetiredLocked(/*wait=*/false);
+ 
+     return true;
+ }
+ 
++void VkEmulation::retireLocked(RetiredResource resource) {
++    auto vk = mDvk;
++    // An empty submission's fence signals once all work submitted to the queue before it
++    // is done: exactly the work that may still use the resource.
++    VkFenceCreateInfo fenceInfo = {};
++    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
++    VkResult result = vk->vkCreateFence(mDevice, &fenceInfo, nullptr, &resource.fence);
++    if (result == VK_SUCCESS) {
++        android::base::AutoLock queueLock(*mQueueLock);
++        result = vk->vkQueueSubmit(mQueue, 0, nullptr, resource.fence);
++    }
++    if (result != VK_SUCCESS) {
++        // Without a fence the only safe point is an idle queue.
++        if (resource.fence != VK_NULL_HANDLE) {
++            vk->vkDestroyFence(mDevice, resource.fence, nullptr);
++            resource.fence = VK_NULL_HANDLE;
++        }
++        {
++            android::base::AutoLock queueLock(*mQueueLock);
++            VK_CHECK(vk->vkQueueWaitIdle(mQueue));
++        }
++        destroyRetiredLocked(&resource);
++        return;
++    }
++    mRetired.push_back(std::move(resource));
++}
++
++void VkEmulation::freeRetiredLocked(bool wait) {
++    auto vk = mDvk;
++    auto it = mRetired.begin();
++    while (it != mRetired.end()) {
++        const VkResult status =
++            wait ? vk->vkWaitForFences(mDevice, 1, &it->fence, VK_TRUE, UINT64_MAX)
++                 : vk->vkGetFenceStatus(mDevice, it->fence);
++        if (status == VK_NOT_READY || status == VK_TIMEOUT) {
++            ++it;
++            continue;
++        }
++        // Signaled, or the device is lost and nothing will use the resource again.
++        destroyRetiredLocked(&*it);
++        it = mRetired.erase(it);
++    }
++}
++
++void VkEmulation::destroyRetiredLocked(RetiredResource* resource) {
++    auto vk = mDvk;
++    if (resource->imageView != VK_NULL_HANDLE) {
++        vk->vkDestroyImageView(mDevice, resource->imageView, nullptr);
++    }
++    if (resource->ycbcrConversion != VK_NULL_HANDLE) {
++        vk->vkDestroySamplerYcbcrConversion(mDevice, resource->ycbcrConversion, nullptr);
++    }
++    if (resource->image != VK_NULL_HANDLE) {
++        vk->vkDestroyImage(mDevice, resource->image, nullptr);
++    }
++    if (resource->buffer != VK_NULL_HANDLE) {
++        vk->vkDestroyBuffer(mDevice, resource->buffer, nullptr);
++    }
++    freeExternalMemoryLocked(vk, &resource->memory);
++    if (resource->fence != VK_NULL_HANDLE) {
++        vk->vkDestroyFence(mDevice, resource->fence, nullptr);
++    }
++    *resource = RetiredResource{};
++}
++
+ bool VkEmulation::teardownVkColorBuffer(uint32_t colorBufferHandle) {
+     std::lock_guard<std::mutex> lock(mMutex);
+     return teardownVkColorBufferLocked(colorBufferHandle);
+@@ -3725,15 +3793,15 @@ bool VkEmulation::teardownVkBuffer(uint32_t bufferHandle) {
+ 
+     auto infoPtr = android::base::find(mBuffers, bufferHandle);
+     if (!infoPtr) return false;
+-    {
+-        android::base::AutoLock queueLock(*mQueueLock);
+-        VK_CHECK(vk->vkQueueWaitIdle(mQueue));
+-    }
++    (void)vk;
+     auto& info = *infoPtr;
+ 
+-    vk->vkDestroyBuffer(mDevice, info.buffer, nullptr);
+-    freeExternalMemoryLocked(vk, &info.memory);
++    RetiredResource retired;
++    retired.buffer = info.buffer;
++    retired.memory = info.memory;
++    retireLocked(std::move(retired));
+     mBuffers.erase(bufferHandle);
++    freeRetiredLocked(/*wait=*/false);
+ 
+     return true;
+ }
+diff --git a/host/vulkan/VkCommonOperations.h b/host/vulkan/VkCommonOperations.h
+--- a/host/vulkan/VkCommonOperations.h
++++ b/host/vulkan/VkCommonOperations.h
+@@ -499,6 +499,28 @@ class VkEmulation {
+ 
+     bool teardownVkColorBufferLocked(uint32_t colorBufferHandle) REQUIRES(mMutex);
+ 
++    // The Vulkan objects of a destroyed ColorBuffer or Buffer. Work already submitted to the
++    // queue may still use them, so they are freed only once `fence`, submitted after that
++    // work, has signaled. Waiting for the queue to go idle instead would hold mMutex, and
++    // through the ColorBuffer's destructor the FrameBuffer lock, for as long as every guest
++    // process's GPU work takes, and every ColorBuffer creation would wait behind it.
++    struct RetiredResource {
++        VkFence fence = VK_NULL_HANDLE;
++        VkImageView imageView = VK_NULL_HANDLE;
++        VkSamplerYcbcrConversion ycbcrConversion = VK_NULL_HANDLE;
++        VkImage image = VK_NULL_HANDLE;
++        VkBuffer buffer = VK_NULL_HANDLE;
++        ExternalMemoryInfo memory;
++    };
++
++    // Frees `resource` once the work submitted to the queue so far is done, without waiting.
++    void retireLocked(RetiredResource resource) REQUIRES(mMutex);
++
++    // Frees the retired resources whose work is done; with `wait`, waits for all of them.
++    void freeRetiredLocked(bool wait) REQUIRES(mMutex);
++
++    void destroyRetiredLocked(RetiredResource* resource) REQUIRES(mMutex);
++
+     bool colorBufferNeedsUpdateBetweenGlAndVk(const VkEmulation::ColorBufferInfo& colorBufferInfo);
+ 
+     bool readColorBufferToBytesLocked(uint32_t colorBufferHandle, uint32_t x, uint32_t y,
+@@ -630,6 +652,8 @@ class VkEmulation {
+     // Buffers are intended to back the guest's shareable Vulkan buffers.
+     std::unordered_map<uint32_t, BufferInfo> mBuffers GUARDED_BY(mMutex);
+ 
++    std::vector<RetiredResource> mRetired GUARDED_BY(mMutex);
++
+     // In order to support VK_KHR_external_memory_(fd|win32) we need also to
+     // support the concept of plain external memories that are just memory and
+     // not necessarily images. These are then intended to pass through to the

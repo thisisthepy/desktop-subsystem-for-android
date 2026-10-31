@@ -1,0 +1,111 @@
+"""Tests for the check that the guest Vulkan driver can load on the image it ships in."""
+
+import importlib.util
+import io
+import unittest
+import zipfile
+from pathlib import Path
+
+
+SPEC = importlib.util.spec_from_file_location(
+    "check_guest_driver", Path(__file__).with_name("check-guest-driver.py")
+)
+check = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(check)
+
+
+def library(needed=(), defined=(), undefined=(), weak=()):
+    return check.Library(needed=list(needed), defined=set(defined), undefined=set(undefined), weak=set(weak))
+
+
+class GuestDriverCheckTests(unittest.TestCase):
+    def test_pr3_guest_vulkan_driver_imports_resolve_against_the_image(self):
+        driver = library(
+            needed=["libc.so", "libnativewindow.so"],
+            defined={"HMI"},
+            undefined={"malloc", "AHardwareBuffer_lock"},
+        )
+        image = {
+            "libc.so": library(defined={"malloc"}),
+            "libnativewindow.so": library(defined={"AHardwareBuffer_lock"}),
+        }
+        self.assertEqual(check.problems(driver, image), [])
+
+    def test_pr3_guest_vulkan_driver_with_an_unresolved_import_is_rejected(self):
+        driver = library(
+            needed=["libc.so"],
+            defined={"HMI"},
+            undefined={"malloc", "renderControlGetTransport"},
+        )
+        image = {"libc.so": library(defined={"malloc"})}
+        self.assertEqual(
+            check.problems(driver, image),
+            ["renderControlGetTransport is not defined by any library the driver loads"],
+        )
+
+    def test_pr3_guest_vulkan_driver_built_against_another_libcxx_is_rejected(self):
+        ndk_string = "_ZN7android4base11GetPropertyERKNSt6__ndk112basic_stringIcEES5_"
+        platform_string = "_ZN7android4base11GetPropertyERKNSt3__112basic_stringIcEES5_"
+        driver = library(needed=["libbase.so"], defined={"HMI"}, undefined={ndk_string})
+        image = {"libbase.so": library(defined={platform_string})}
+        self.assertEqual(
+            check.problems(driver, image),
+            [f"{ndk_string} is not defined by any library the driver loads"],
+        )
+
+    def test_pr3_guest_vulkan_driver_needs_a_library_the_image_has(self):
+        driver = library(needed=["libmissing.so"], defined={"HMI"})
+        self.assertEqual(check.problems(driver, {}), ["the image has no libmissing.so"])
+
+    def test_pr3_guest_vulkan_driver_must_export_the_hal_module(self):
+        driver = library(defined={"vk_icdGetInstanceProcAddr"})
+        self.assertEqual(
+            check.problems(driver, {}),
+            ["the driver does not export HMI, the module the Android Vulkan loader looks up"],
+        )
+
+    def test_fr3_an_executable_needs_no_hal_module(self):
+        hwcomposer = library(
+            needed=["libbinder_ndk.so"],
+            defined={"main"},
+            undefined={"AServiceManager_addService"},
+        )
+        image = {"libbinder_ndk.so": library(defined={"AServiceManager_addService"})}
+        self.assertEqual(check.problems(hwcomposer, image, module=None), [])
+
+    def test_fr3_an_executable_with_a_call_the_platform_lacks_is_rejected(self):
+        hwcomposer = library(needed=["libbinder_ndk.so"], undefined={"AServiceManager_addServiceSomeday"})
+        image = {"libbinder_ndk.so": library(defined={"AServiceManager_addService"})}
+        self.assertEqual(
+            check.problems(hwcomposer, image, module=None),
+            ["AServiceManager_addServiceSomeday is not defined by any library the driver loads"],
+        )
+
+    def test_pr3_weak_imports_may_stay_unresolved(self):
+        driver = library(defined={"HMI"}, undefined={"__cxa_thread_atexit_impl"}, weak={"__cxa_thread_atexit_impl"})
+        self.assertEqual(check.problems(driver, {}), [])
+
+    def test_pr3_imports_resolve_through_dependencies_of_dependencies(self):
+        driver = library(needed=["libcutils.so"], defined={"HMI"}, undefined={"__android_log_print"})
+        image = {
+            "libcutils.so": library(needed=["liblog.so"]),
+            "liblog.so": library(defined={"__android_log_print"}),
+        }
+        self.assertEqual(check.problems(driver, image), [])
+
+    def test_pr3_symlinked_libraries_are_looked_up_where_they_really_are(self):
+        # target_files stores a symlink as its target path, so SYSTEM/lib64/libc.so is
+        # text pointing into the runtime APEX; bionic's real copy is in bootstrap/.
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as z:
+            z.writestr("SYSTEM/lib64/libc.so", "/apex/com.android.runtime/lib64/bionic/libc.so")
+            z.writestr("SYSTEM/lib64/bootstrap/libc.so", b"\x7fELF-bionic")
+            z.writestr("VENDOR/lib64/libdrm.so", b"\x7fELF-drm")
+        with zipfile.ZipFile(buffer) as z:
+            self.assertEqual(check.find_library(z, "libc.so"), b"\x7fELF-bionic")
+            self.assertEqual(check.find_library(z, "libdrm.so"), b"\x7fELF-drm")
+            self.assertIsNone(check.find_library(z, "libmissing.so"))
+
+
+if __name__ == "__main__":
+    unittest.main()

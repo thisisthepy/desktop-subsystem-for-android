@@ -1,0 +1,12 @@
+# The guest's memory, kept small so the host gets back what the guest is not using.
+#
+# Compressed swap: fstab.dsa declares a zram device of half the guest's memory. Idle apps'
+# pages are kept there compressed (about a third of their size) instead of resident, and the
+# memory they leave is free for page reporting to hand back to Hyper-V. Swapping to zram is
+# cheap, so the kernel is told to prefer it over dropping file pages it would read again.
+# Reading one swapped page reads only that page: zram has no seek to save by reading ahead, and
+# the neighbours would be resident again for nothing.
+on boot
+    swapon_all /vendor/etc/fstab.dsa
+    write /proc/sys/vm/swappiness 100
+    write /proc/sys/vm/page-cluster 0

@@ -1,0 +1,249 @@
+// The connection between the window manager and the app window hosts in a user's session.
+//
+// The window manager receives every Android task's frames and owns no window. Each app has
+// its own small program, its window host, which carries the app's name and icon, so the
+// taskbar and the task list show the app as itself. The window host opens the app's task
+// windows and shows the frames the window manager hands it on the GPU. This file is the only
+// definition of the messages between the two; the codecs are generated from it (see
+// README.md).
+//
+// The window host dials the window manager and sends the Hello, the window manager answers,
+// and the window host says which app it is (Attach). From then on the window manager tells
+// it which windows to open and what to show in them, and the window host reports what the
+// user does to them.
+//
+// The same rules as control.proto keep the handshake readable across versions: Envelope
+// fields 1 to 3, and every field of Hello, HelloAccepted, HelloRejected and RejectReason,
+// keep their numbers and types forever.
+
+syntax = "proto3";
+
+package dsa.windowhost.v1;
+
+option java_package = "io.github.thisisthepy.dsa.windowhost.v1";
+option java_multiple_files = true;
+option optimize_for = LITE_RUNTIME;
+
+// The protocol version. CURRENT goes up when the meaning of existing messages changes.
+enum ProtocolVersion {
+  PROTOCOL_VERSION_UNSPECIFIED = 0;
+  PROTOCOL_VERSION_CURRENT = 1;
+}
+
+// Which end of the connection a peer is.
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_WINDOW_MANAGER = 1;
+  ROLE_WINDOW_HOST = 2;
+}
+
+// The first frame on a new connection, sent by the window host.
+message Hello {
+  // ProtocolVersion.PROTOCOL_VERSION_CURRENT of the sender's build.
+  uint32 protocol_version = 1;
+  // SHA-256 of the normalised definition the sender was generated from (32 bytes).
+  bytes schema_hash = 2;
+  Role role = 3;
+  // Free text naming the sender's build, for error reports only.
+  string build = 4;
+}
+
+// The window manager's answer when the window host's Hello matches.
+message HelloAccepted {
+  Hello window_manager = 1;
+}
+
+// Why the window manager refused a connection.
+enum RejectReason {
+  REJECT_REASON_UNSPECIFIED = 0;
+  REJECT_REASON_PROTOCOL_VERSION_MISMATCH = 1;
+  REJECT_REASON_SCHEMA_HASH_MISMATCH = 2;
+  REJECT_REASON_UNEXPECTED_ROLE = 3;
+  REJECT_REASON_MALFORMED_HELLO = 4;
+}
+
+// The window manager's answer when it refuses the window host. It closes the connection
+// after it.
+message HelloRejected {
+  RejectReason reason = 1;
+  // A sentence a person can act on, naming both sides' values.
+  string detail = 2;
+  Hello window_manager = 3;
+}
+
+// Window host to window manager, right after the handshake: which app this window host
+// shows.
+message Attach {
+  // The Android package of the app.
+  string package_name = 1;
+  // The window host's process ID, which the window manager hands the frames' textures to.
+  uint32 process_id = 2;
+  // Whether the user started the window host (from the Start menu, say) rather than the
+  // window manager: the app is then started in Android if it has no task yet.
+  bool launch = 3;
+}
+
+// Window manager to window host: the answer to Attach.
+message Attached {
+  // The locally unique ID of the GPU the frames' textures are on (8 bytes, little endian),
+  // so the window host shows them on the same GPU. Empty when the window manager has no
+  // frames to show.
+  bytes adapter_luid = 1;
+}
+
+// Window manager to window host: open a window for an Android task of the app.
+message ShowWindow {
+  int32 task_id = 1;
+  // The window's title.
+  string title = 2;
+  // The size of the window's client area in pixels.
+  uint32 width = 3;
+  uint32 height = 4;
+  // Whether the task has input focus in Android, so the window opens active.
+  bool focused = 5;
+}
+
+// Window manager to window host: the title of a task's window changed.
+message SetTitle {
+  int32 task_id = 1;
+  string title = 2;
+}
+
+// Window manager to window host: Android resized the task; the window's client area follows.
+message SetSize {
+  int32 task_id = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+}
+
+// Window manager to window host: the task ended; close its window.
+message CloseWindow {
+  int32 task_id = 1;
+}
+
+// Window manager to window host: from now on the task's frames arrive in this texture. The
+// texture is a Direct3D 11 texture on the GPU Attached named, shared by an NT handle that the
+// window manager has already placed in the window host's process. The window host opens
+// it, then closes the handle.
+message FrameTexture {
+  int32 task_id = 1;
+  // Names the texture in later Frame messages.
+  uint64 texture_id = 2;
+  // The handle's value in the window host's process.
+  uint64 handle = 3;
+  uint32 width = 4;
+  uint32 height = 5;
+}
+
+// Window manager to window host: a new frame of the task is in the texture. The window
+// manager does not write the texture again until the window host answers FramePresented.
+message Frame {
+  int32 task_id = 1;
+  uint64 texture_id = 2;
+  // Goes up by one with each frame of the task.
+  uint64 sequence = 3;
+  // The frame fills only the top-left width x height pixels of the texture, which stays at
+  // the largest size the task can have so that resizing the window does not remake it. 0
+  // means the frame fills the whole texture.
+  uint32 width = 4;
+  uint32 height = 5;
+}
+
+// Window host to window manager: the frame has been copied out of the texture, so the
+// texture may be written again.
+message FramePresented {
+  int32 task_id = 1;
+  uint64 sequence = 2;
+}
+
+// Window host to window manager: the user closed the task's window.
+message WindowClosed {
+  int32 task_id = 1;
+}
+
+// Window host to window manager: the user resized the task's window; the size of its client
+// area in pixels.
+message WindowResized {
+  int32 task_id = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+}
+
+// Window host to window manager: the task's window moved to a monitor of another scale.
+message WindowDpi {
+  int32 task_id = 1;
+  // The monitor's dots per inch; 96 is 100%.
+  uint32 dpi = 2;
+}
+
+// Window host to window manager: the task's window became the active window, or stopped
+// being it.
+message WindowFocus {
+  int32 task_id = 1;
+  bool focused = 2;
+}
+
+// Window host to window manager: the user started dragging the task's window, to move or
+// resize it, or let go. While a drag lasts the window manager never resizes the window.
+message WindowDragging {
+  int32 task_id = 1;
+  bool dragging = 2;
+}
+
+// Window manager to window host: the task's size in Android, which its frames and its pointer
+// input are measured in, the largest client area its window may have (what Android can draw;
+// 0 when unknown), and the smallest (what Android gives the task; 0 when unknown). Sent when
+// any of them changes, which a resize the window asked for does without the window itself
+// changing.
+message TaskSize {
+  int32 task_id = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  uint32 max_width = 4;
+  uint32 max_height = 5;
+  uint32 min_width = 6;
+  uint32 min_height = 7;
+}
+
+// Window manager to window host: where the cursor of the editor focused in the task is, in the
+// window's client pixels, so the window puts the input method's windows beside it.
+message ImeCursor {
+  int32 task_id = 1;
+  int32 left = 2;
+  int32 top = 3;
+  int32 right = 4;
+  int32 bottom = 5;
+}
+
+// Window host to window manager: the task's window was minimized (`shown` false), or shown
+// again after it was. A window that opens is shown until it says otherwise.
+message WindowShown {
+  int32 task_id = 1;
+  bool shown = 2;
+}
+
+// The one message type on the wire. Each frame carries exactly one.
+message Envelope {
+  oneof body {
+    Hello hello = 1;
+    HelloAccepted hello_accepted = 2;
+    HelloRejected hello_rejected = 3;
+    Attach attach = 4;
+    Attached attached = 5;
+    ShowWindow show_window = 6;
+    SetTitle set_title = 7;
+    SetSize set_size = 8;
+    CloseWindow close_window = 9;
+    FrameTexture frame_texture = 10;
+    Frame frame = 11;
+    FramePresented frame_presented = 12;
+    WindowClosed window_closed = 13;
+    WindowResized window_resized = 14;
+    WindowDpi window_dpi = 15;
+    WindowFocus window_focus = 16;
+    WindowDragging window_dragging = 17;
+    TaskSize task_size = 18;
+    ImeCursor ime_cursor = 19;
+    WindowShown window_shown = 30;
+  }
+}

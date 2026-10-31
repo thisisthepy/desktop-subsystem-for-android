@@ -40,5 +40,247 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.HelloRejected getHelloRejected();
 
+  /**
+   * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+   * @return Whether the authChallenge field is set.
+   */
+  boolean hasAuthChallenge();
+  /**
+   * <code>.dsa.control.v1.AuthChallenge auth_challenge = 4;</code>
+   * @return The authChallenge.
+   */
+  io.github.thisisthepy.dsa.control.v1.AuthChallenge getAuthChallenge();
+
+  /**
+   * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+   * @return Whether the authProof field is set.
+   */
+  boolean hasAuthProof();
+  /**
+   * <code>.dsa.control.v1.AuthProof auth_proof = 5;</code>
+   * @return The authProof.
+   */
+  io.github.thisisthepy.dsa.control.v1.AuthProof getAuthProof();
+
+  /**
+   * <code>.dsa.control.v1.TaskUpdated task_updated = 6;</code>
+   * @return Whether the taskUpdated field is set.
+   */
+  boolean hasTaskUpdated();
+  /**
+   * <code>.dsa.control.v1.TaskUpdated task_updated = 6;</code>
+   * @return The taskUpdated.
+   */
+  io.github.thisisthepy.dsa.control.v1.TaskUpdated getTaskUpdated();
+
+  /**
+   * <code>.dsa.control.v1.TaskRemoved task_removed = 7;</code>
+   * @return Whether the taskRemoved field is set.
+   */
+  boolean hasTaskRemoved();
+  /**
+   * <code>.dsa.control.v1.TaskRemoved task_removed = 7;</code>
+   * @return The taskRemoved.
+   */
+  io.github.thisisthepy.dsa.control.v1.TaskRemoved getTaskRemoved();
+
+  /**
+   * <code>.dsa.control.v1.TaskFrames task_frames = 8;</code>
+   * @return Whether the taskFrames field is set.
+   */
+  boolean hasTaskFrames();
+  /**
+   * <code>.dsa.control.v1.TaskFrames task_frames = 8;</code>
+   * @return The taskFrames.
+   */
+  io.github.thisisthepy.dsa.control.v1.TaskFrames getTaskFrames();
+
+  /**
+   * <code>.dsa.control.v1.CloseTask close_task = 9;</code>
+   * @return Whether the closeTask field is set.
+   */
+  boolean hasCloseTask();
+  /**
+   * <code>.dsa.control.v1.CloseTask close_task = 9;</code>
+   * @return The closeTask.
+   */
+  io.github.thisisthepy.dsa.control.v1.CloseTask getCloseTask();
+
+  /**
+   * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+   * @return Whether the launchApp field is set.
+   */
+  boolean hasLaunchApp();
+  /**
+   * <code>.dsa.control.v1.LaunchApp launch_app = 10;</code>
+   * @return The launchApp.
+   */
+  io.github.thisisthepy.dsa.control.v1.LaunchApp getLaunchApp();
+
+  /**
+   * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+   * @return Whether the resizeTask field is set.
+   */
+  boolean hasResizeTask();
+  /**
+   * <code>.dsa.control.v1.ResizeTask resize_task = 11;</code>
+   * @return The resizeTask.
+   */
+  io.github.thisisthepy.dsa.control.v1.ResizeTask getResizeTask();
+
+  /**
+   * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+   * @return Whether the setTaskDensity field is set.
+   */
+  boolean hasSetTaskDensity();
+  /**
+   * <code>.dsa.control.v1.SetTaskDensity set_task_density = 12;</code>
+   * @return The setTaskDensity.
+   */
+  io.github.thisisthepy.dsa.control.v1.SetTaskDensity getSetTaskDensity();
+
+  /**
+   * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+   * @return Whether the pointerEvent field is set.
+   */
+  boolean hasPointerEvent();
+  /**
+   * <code>.dsa.control.v1.PointerEvent pointer_event = 13;</code>
+   * @return The pointerEvent.
+   */
+  io.github.thisisthepy.dsa.control.v1.PointerEvent getPointerEvent();
+
+  /**
+   * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+   * @return Whether the appInfo field is set.
+   */
+  boolean hasAppInfo();
+  /**
+   * <code>.dsa.control.v1.AppInfo app_info = 15;</code>
+   * @return The appInfo.
+   */
+  io.github.thisisthepy.dsa.control.v1.AppInfo getAppInfo();
+
+  /**
+   * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+   * @return Whether the keyEvent field is set.
+   */
+  boolean hasKeyEvent();
+  /**
+   * <code>.dsa.control.v1.KeyEvent key_event = 16;</code>
+   * @return The keyEvent.
+   */
+  io.github.thisisthepy.dsa.control.v1.KeyEvent getKeyEvent();
+
+  /**
+   * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+   * @return Whether the imeComposition field is set.
+   */
+  boolean hasImeComposition();
+  /**
+   * <code>.dsa.control.v1.ImeComposition ime_composition = 17;</code>
+   * @return The imeComposition.
+   */
+  io.github.thisisthepy.dsa.control.v1.ImeComposition getImeComposition();
+
+  /**
+   * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+   * @return Whether the imeCommit field is set.
+   */
+  boolean hasImeCommit();
+  /**
+   * <code>.dsa.control.v1.ImeCommit ime_commit = 18;</code>
+   * @return The imeCommit.
+   */
+  io.github.thisisthepy.dsa.control.v1.ImeCommit getImeCommit();
+
+  /**
+   * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+   * @return Whether the imeCursor field is set.
+   */
+  boolean hasImeCursor();
+  /**
+   * <code>.dsa.control.v1.ImeCursor ime_cursor = 19;</code>
+   * @return The imeCursor.
+   */
+  io.github.thisisthepy.dsa.control.v1.ImeCursor getImeCursor();
+
+  /**
+   * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
+   * @return Whether the requestGuestMemory field is set.
+   */
+  boolean hasRequestGuestMemory();
+  /**
+   * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
+   * @return The requestGuestMemory.
+   */
+  io.github.thisisthepy.dsa.control.v1.RequestGuestMemory getRequestGuestMemory();
+
+  /**
+   * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
+   * @return Whether the guestMemory field is set.
+   */
+  boolean hasGuestMemory();
+  /**
+   * <code>.dsa.control.v1.GuestMemory guest_memory = 21;</code>
+   * @return The guestMemory.
+   */
+  io.github.thisisthepy.dsa.control.v1.GuestMemory getGuestMemory();
+
+  /**
+   * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+   * @return Whether the installedApp field is set.
+   */
+  boolean hasInstalledApp();
+  /**
+   * <code>.dsa.control.v1.InstalledApp installed_app = 22;</code>
+   * @return The installedApp.
+   */
+  io.github.thisisthepy.dsa.control.v1.InstalledApp getInstalledApp();
+
+  /**
+   * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+   * @return Whether the installedApps field is set.
+   */
+  boolean hasInstalledApps();
+  /**
+   * <code>.dsa.control.v1.InstalledApps installed_apps = 23;</code>
+   * @return The installedApps.
+   */
+  io.github.thisisthepy.dsa.control.v1.InstalledApps getInstalledApps();
+
+  /**
+   * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+   * @return Whether the screenState field is set.
+   */
+  boolean hasScreenState();
+  /**
+   * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
+   * @return The screenState.
+   */
+  io.github.thisisthepy.dsa.control.v1.ScreenState getScreenState();
+
+  /**
+   * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+   * @return Whether the powerState field is set.
+   */
+  boolean hasPowerState();
+  /**
+   * <code>.dsa.control.v1.PowerState power_state = 41;</code>
+   * @return The powerState.
+   */
+  io.github.thisisthepy.dsa.control.v1.PowerState getPowerState();
+
+  /**
+   * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+   * @return Whether the deviceIdle field is set.
+   */
+  boolean hasDeviceIdle();
+  /**
+   * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
+   * @return The deviceIdle.
+   */
+  io.github.thisisthepy.dsa.control.v1.DeviceIdle getDeviceIdle();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

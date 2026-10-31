@@ -7,19 +7,28 @@
 //! {
 //!   "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
 //!   "system_image": "C:\\Program Files\\DSA\\vm\\system.vhdx",
-//!   "data_dir": "C:\\ProgramData\\DSA\\users",
-//!   "memory_mb": 4096
+//!   "memory_mb": 3072
 //! }
 //! ```
 //!
-//! The service runs one VM per user. Each user's VM is named after the user's SID, keeps
-//! its data on a disk in its own folder under `data_dir`, and lets only that user (and
-//! SYSTEM) use its Hyper-V sockets. `data_disk` names a single disk instead, for running
-//! one VM by hand.
+//! The service runs one VM per user. Each user's VM is named after the user's SID and lets
+//! only that user (and SYSTEM) use its Hyper-V sockets. Its disk is in the user's own
+//! profile, `%LOCALAPPDATA%\DSA\android.vhdx`, as WSL keeps each user's distributions in
+//! theirs. `data_dir` keeps every user's disk in one protected folder instead, as
+//! `<data_dir>\<SID>\data.vhdx`, and `data_disk` names a single disk, for running one VM
+//! by hand.
 //!
 //! With `images_dir`, the Android image comes from the update store there instead of
 //! `system_image`: `first_image` names the image the installer put in it, and `update`
 //! says where the signed release list is and which keys may sign it.
+//!
+//! `update.program_list_url` and `update.program_dir` let the service update DSA itself
+//! from the signed program list, downloading setup files into that folder;
+//! `"program": false` turns that off.
+//!
+//! `settings_dir` is where the service keeps the settings users change from the settings
+//! app (`%ProgramData%\DSA\settings` when absent). The settings can turn either kind of
+//! update off; they cannot turn on what this file leaves out.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -30,9 +39,10 @@ use serde::Deserialize;
 
 use dsa_host_core::update::manifest;
 use dsa_host_core::update::policy::InstalledImage;
+use dsa_host_core::update::program_service::ProgramSettings;
 use ed25519_dalek::VerifyingKey;
 
-use crate::vm::{is_sid, AndroidVmConfig};
+use crate::vm::{console_pipe_path, is_sid, AndroidVmConfig};
 
 /// `<dir>\<sid>\data.vhdx`. Built as text so it is a Windows path on every platform the
 /// tests run on.
@@ -59,19 +69,93 @@ pub struct UserVm {
     pub vm_name: String,
     pub config: AndroidVmConfig,
     pub data_disk_size_gb: u32,
+    /// The disk is in the user's own profile, which already admits only them, SYSTEM and
+    /// administrators. A disk under `data_dir` is in a folder the service protects itself.
+    pub disk_in_profile: bool,
+    /// Where the VM's console output is kept, `android-<SID>.log`.
+    pub console_log: PathBuf,
+}
+
+/// `name` in the folder that holds `path`, a Windows path. Split as text, so it is a
+/// Windows path on every platform the tests run on.
+fn beside(path: &std::path::Path, name: &str) -> Option<PathBuf> {
+    let text = path.to_string_lossy();
+    let end = text.rfind(['\\', '/'])?;
+    Some(PathBuf::from(format!("{}{name}", &text[..=end])))
+}
+
+/// Finds a user's local application data folder from their SID.
+pub type LocalAppData<'a> = &'a dyn Fn(&str) -> Result<PathBuf, String>;
+
+/// The local application data folder of the user with SID `sid`, from the registry.
+pub fn local_app_data(sid: &str) -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        crate::profile::local_app_data(sid)
+    }
+    #[cfg(not(windows))]
+    {
+        Err(format!(
+            "{sid}'s profile can only be found on Windows; set data_dir or data_disk"
+        ))
+    }
+}
+
+/// Replaces `{data}` and `{program}` in the configuration file's text with the folders the
+/// installer put the data and the program in. The user chooses both while installing, so
+/// the file cannot name them when it is built.
+pub fn expand_locations(text: &str, data: &std::path::Path, program: &std::path::Path) -> String {
+    let json = |path: &std::path::Path| {
+        let path = path.to_string_lossy();
+        serde_json::to_string(path.trim_end_matches(['\\', '/']))
+            .expect("a string serialises")
+            .trim_matches('"')
+            .to_string()
+    };
+    text.replace("{data}", &json(data))
+        .replace("{program}", &json(program))
+}
+
+/// Where a user's Android disk is kept in their profile, below their local application data.
+pub fn profile_disk(local_app_data: &std::path::Path) -> PathBuf {
+    let dir = local_app_data.to_string_lossy();
+    PathBuf::from(format!("{}\\DSA\\android.vhdx", dir.trim_end_matches('\\')))
 }
 
 fn default_vm_name() -> String {
     "dsa-android".into()
 }
 fn default_memory_mb() -> u32 {
-    4096
+    3072
 }
 fn default_processors() -> u32 {
     4
 }
 fn default_page_reporting_order() -> u8 {
-    9
+    page_reporting_order_for_build(windows_build())
+}
+
+/// The free page reporting order for a Windows build and update revision, as WSL chooses it:
+/// 5 (128 KiB) where the VM can have fine-grained memory, 9 (2 MiB) elsewhere or when the build
+/// is unknown. A guest's free memory is scattered, so the smaller the pieces it may report,
+/// the more of it the host gets back, but the host can only take pieces as small as it backs.
+pub fn page_reporting_order_for_build(build: Option<(u32, u32)>) -> u8 {
+    match build {
+        Some((build, revision)) if crate::vm::fine_grained_memory_supported(build, revision) => 5,
+        _ => 9,
+    }
+}
+
+/// The build number and update revision of the running Windows, from the registry.
+#[cfg(windows)]
+fn windows_build() -> Option<(u32, u32)> {
+    crate::android_vm::windows_build()
+}
+
+/// Off Windows (in tests) there is no build to read.
+#[cfg(not(windows))]
+fn windows_build() -> Option<(u32, u32)> {
+    None
 }
 fn default_control_port() -> u32 {
     5000
@@ -85,8 +169,13 @@ fn default_stop_timeout_secs() -> u64 {
 fn default_data_disk_size_gb() -> u32 {
     64
 }
+
+/// The local API's named pipe when the configuration names none. The compositor and the
+/// CLI connect to it too.
+pub const DEFAULT_PIPE_NAME: &str = "dsa-host";
+
 fn default_pipe_name() -> String {
-    "dsa-host".into()
+    DEFAULT_PIPE_NAME.into()
 }
 
 /// The host's settings, as written in the configuration file.
@@ -122,7 +211,8 @@ pub struct HostConfig {
     /// One data disk, for running a single VM by hand.
     #[serde(default)]
     pub data_disk: Option<PathBuf>,
-    /// The folder holding each user's data disk, as `<data_dir>\<SID>\data.vhdx`.
+    /// One folder for every user's disk, as `<data_dir>\<SID>\data.vhdx`. Without it each
+    /// user's disk is in their own profile.
     #[serde(default)]
     pub data_dir: Option<PathBuf>,
     /// The size a new user's data disk may grow to. It starts empty and grows as used.
@@ -139,12 +229,16 @@ pub struct HostConfig {
     /// messages are lost.
     #[serde(default)]
     pub log_file: Option<PathBuf>,
+    /// Where the service keeps the settings users change from the settings app.
+    #[serde(default)]
+    pub settings_dir: Option<PathBuf>,
     /// The user allowed to use the VM's Hyper-V sockets besides SYSTEM. When absent, the
     /// user running `dsa-hostd`.
     #[serde(default)]
     pub user_sid: Option<String>,
     /// Free page reporting granularity as a page order: 9 (2 MiB) works on every Windows
-    /// build; 5 (128 KiB) returns memory more finely on recent builds.
+    /// build; 5 (128 KiB) returns memory more finely on recent builds. By default, 5 on
+    /// Windows 11 and later and 9 before.
     #[serde(default = "default_page_reporting_order")]
     pub page_reporting_order: u8,
     /// The vsock port the guest's channel daemon connects to.
@@ -154,6 +248,20 @@ pub struct HostConfig {
     pub connect_timeout_secs: u64,
     #[serde(default = "default_stop_timeout_secs")]
     pub stop_timeout_secs: u64,
+    /// How long no Android window may be shown before Android's screen goes off and it goes
+    /// into Doze.
+    #[serde(default = "default_doze_delay_secs")]
+    pub doze_delay_secs: u64,
+    /// How long Android stays in Doze before it is frozen, for a user who turned freezing on
+    /// in their settings (30 minutes when absent). The service freezes only such a user's
+    /// Android: a frozen Android gets no notifications, alarms or widget updates. Run by hand
+    /// (`dsa-hostd <config.json>`), the setting alone turns freezing on.
+    #[serde(default)]
+    pub freeze_after_minutes: Option<u64>,
+}
+
+fn default_doze_delay_secs() -> u64 {
+    dsa_host_core::session::DEFAULT_DOZE_DELAY.as_secs()
 }
 
 fn default_check_interval_hours() -> u64 {
@@ -161,6 +269,9 @@ fn default_check_interval_hours() -> u64 {
 }
 fn default_boot_timeout_secs() -> u64 {
     300
+}
+fn default_true() -> bool {
+    true
 }
 
 /// Where new images are published and who may sign them.
@@ -176,6 +287,16 @@ pub struct UpdateSettings {
     /// How long a new image may take to finish its first boot before it is undone.
     #[serde(default = "default_boot_timeout_secs")]
     pub boot_timeout_secs: u64,
+    /// The signed program list, for updating DSA itself. Its signature is at the same URL
+    /// plus `.sig`, and the same keys may sign it. Without it DSA is not updated.
+    #[serde(default)]
+    pub program_list_url: Option<String>,
+    /// False turns updating DSA itself off; the program list is then never fetched.
+    #[serde(default = "default_true")]
+    pub program: bool,
+    /// The service's own folder for downloaded setup files.
+    #[serde(default)]
+    pub program_dir: Option<PathBuf>,
 }
 
 impl UpdateSettings {
@@ -221,53 +342,143 @@ impl HostConfig {
             }
             _ => {}
         }
-        if config.data_disk.is_none() && config.data_dir.is_none() {
-            return Err(HostConfigError(
-                "name either data_disk (one VM) or data_dir (one VM per user)".into(),
-            ));
-        }
         if let Some(update) = &config.update {
             if config.images_dir.is_none() {
                 return Err(HostConfigError("update needs images_dir".into()));
             }
             update.keys()?;
+            if update.program_list_url.is_some() && update.program_dir.is_none() {
+                return Err(HostConfigError(
+                    "program_list_url needs program_dir, the folder setup files are \
+                     downloaded to"
+                        .into(),
+                ));
+            }
         }
         Ok(config)
     }
 
+    /// How the service updates DSA itself, running version `running`. `None` when the
+    /// file names no folder for setup files, so DSA does not update itself.
+    pub fn program_settings(
+        &self,
+        running: &str,
+    ) -> Result<Option<ProgramSettings>, HostConfigError> {
+        let Some(update) = &self.update else {
+            return Ok(None);
+        };
+        let Some(dir) = &update.program_dir else {
+            return Ok(None);
+        };
+        let log_dir = self.log_dir().unwrap_or_else(|| dir.clone());
+        Ok(Some(ProgramSettings {
+            list_url: update.program_list_url.clone(),
+            enabled: update.program,
+            keys: update.keys()?,
+            dir: dir.clone(),
+            log_dir,
+            running: running.to_string(),
+            stop_timeout: Duration::from_secs(self.stop_timeout_secs + 15),
+            settle: Duration::from_secs(60),
+        }))
+    }
+
+    /// Whether this installation downloads new Android images at all.
+    pub fn image_updates_available(&self) -> bool {
+        self.update.is_some() && self.images_dir.is_some()
+    }
+
+    /// Whether this installation updates DSA itself at all.
+    pub fn program_updates_available(&self) -> bool {
+        self.update.as_ref().is_some_and(|update| {
+            update.program && update.program_list_url.is_some() && update.program_dir.is_some()
+        })
+    }
+
+    /// The service's log folder: the folder of `log_file`, when there is one. Split as
+    /// text, so it is a Windows path on every platform the tests run on.
+    pub fn log_dir(&self) -> Option<PathBuf> {
+        self.log_file.as_ref().and_then(|log| {
+            let log = log.to_string_lossy();
+            log.rfind(['\\', '/']).map(|end| PathBuf::from(&log[..end]))
+        })
+    }
+
+    /// Where the console of `user`'s VM is kept: `android-<user>.log` in the service's log
+    /// folder, or beside the user's disk `data_disk` when the file names no log.
+    pub fn console_log_path(&self, user: &str, data_disk: &std::path::Path) -> PathBuf {
+        let name = format!("android-{user}.log");
+        self.log_file
+            .as_deref()
+            .and_then(|log| beside(log, &name))
+            .or_else(|| beside(data_disk, &name))
+            .unwrap_or_else(|| PathBuf::from(name))
+    }
+
     /// The VM configuration for running one VM by hand. `fallback_sid` is used when the file
     /// names no user.
-    pub fn vm_config(&self, fallback_sid: Option<&str>) -> AndroidVmConfig {
+    pub fn vm_config(
+        &self,
+        fallback_sid: Option<&str>,
+    ) -> Result<AndroidVmConfig, HostConfigError> {
+        self.vm_config_with(fallback_sid, &local_app_data)
+    }
+
+    /// [`vm_config`](Self::vm_config), finding a profile with `local_app_data`.
+    pub fn vm_config_with(
+        &self,
+        fallback_sid: Option<&str>,
+        local_app_data: LocalAppData,
+    ) -> Result<AndroidVmConfig, HostConfigError> {
         let user = self.user_sid.as_deref().or(fallback_sid);
         let socket_sids = user.map(|sid| vec![sid.to_string()]).unwrap_or_default();
         let data_disk = match (&self.data_disk, &self.data_dir, user) {
             (Some(disk), _, _) => disk.clone(),
             (None, Some(dir), Some(sid)) => user_data_disk(dir, sid),
             (None, Some(dir), None) => dir.join("data.vhdx"),
-            (None, None, _) => unreachable!("parse requires data_disk or data_dir"),
+            (None, None, Some(sid)) => profile_disk(&local_app_data(sid).map_err(HostConfigError)?),
+            (None, None, None) => {
+                return Err(HostConfigError(
+                    "no user to keep the disk for; name data_disk, data_dir or user_sid".into(),
+                ))
+            }
         };
-        self.base_vm_config(&self.vm_name, data_disk, socket_sids)
+        Ok(self.base_vm_config(&self.vm_name, data_disk, socket_sids))
     }
 
     /// The VM of the user with SID `sid`, as the service runs it.
     pub fn user_vm(&self, sid: &str) -> Result<UserVm, HostConfigError> {
+        self.user_vm_with(sid, &local_app_data)
+    }
+
+    /// [`user_vm`](Self::user_vm), finding the user's profile with `local_app_data`.
+    pub fn user_vm_with(
+        &self,
+        sid: &str,
+        local_app_data: LocalAppData,
+    ) -> Result<UserVm, HostConfigError> {
         // The SID becomes part of a path and a VM name, so only a well-formed one is used.
         if !is_sid(sid) {
             return Err(HostConfigError(format!(
                 "{sid:?} is not a Windows SID, so no VM is made for it"
             )));
         }
-        let dir = self.data_dir.as_ref().ok_or_else(|| {
-            HostConfigError(
-                "serving users needs data_dir, the folder for each user's data disk".into(),
-            )
-        })?;
+        let (disk, disk_in_profile) = match &self.data_dir {
+            Some(dir) => (user_data_disk(dir, sid), false),
+            None => (
+                profile_disk(&local_app_data(sid).map_err(HostConfigError)?),
+                true,
+            ),
+        };
         let vm_name = format!("{}-{sid}", self.vm_name);
-        let config = self.base_vm_config(&vm_name, user_data_disk(dir, sid), vec![sid.into()]);
+        let console_log = self.console_log_path(sid, &disk);
+        let config = self.base_vm_config(&vm_name, disk, vec![sid.into()]);
         Ok(UserVm {
             vm_name,
             config,
             data_disk_size_gb: self.data_disk_size_gb,
+            disk_in_profile,
+            console_log,
         })
     }
 
@@ -306,14 +517,22 @@ impl HostConfig {
         match manifest {
             Some(manifest) => {
                 let image_cmdline = manifest["kernel_cmdline"].as_str().unwrap_or_default();
+                let system_vhdx = dir.join("system.vhdx");
+                let has_two_disks =
+                    system_vhdx.exists() || manifest["files"].get("system.vhdx").is_some();
+                let (system_image, disk_template) = if has_two_disks {
+                    (Some(system_vhdx), Some(dir.join("data.vhdx")))
+                } else {
+                    (None, Some(dir.join("disk.vhdx")))
+                };
                 ImageFiles {
                     kernel,
                     initrd: Some(dir.join("initrd.img")),
                     kernel_cmdline: format!("{image_cmdline} {}", self.kernel_cmdline)
                         .trim()
                         .to_string(),
-                    system_image: None,
-                    disk_template: Some(dir.join("disk.vhdx")),
+                    system_image,
+                    disk_template,
                 }
             }
             None => ImageFiles {
@@ -344,6 +563,13 @@ impl HostConfig {
             data_disk,
             socket_sids,
             page_reporting_order: self.page_reporting_order,
+            console_pipe: Some(console_pipe_path(vm_name)),
+            image_version: match (&self.system_image, &self.first_image) {
+                (None, Some(first)) => Some(first.version.clone()),
+                _ => None,
+            },
+            hosting_process_name_suffix: None,
+            fine_grained_memory: false,
         }
     }
 
@@ -351,6 +577,10 @@ impl HostConfig {
         SessionConfig {
             connect_timeout: Duration::from_secs(self.connect_timeout_secs),
             stop_timeout: Duration::from_secs(self.stop_timeout_secs),
+            doze_delay: Duration::from_secs(self.doze_delay_secs),
+            freeze_after: self
+                .freeze_after_minutes
+                .map(|minutes| Duration::from_secs(minutes.saturating_mul(60))),
         }
     }
 }

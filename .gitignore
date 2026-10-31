@@ -31,3 +31,6 @@ bzImage
 # Machine local cargo settings. A target-dir here would make two checkouts share one build
 # directory and run each other's binaries.
 .cargo/config.toml
+# Python
+__pycache__/
+*.pyc

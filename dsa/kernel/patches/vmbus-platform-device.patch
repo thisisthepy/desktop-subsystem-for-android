@@ -1,0 +1,17 @@
+diff --git a/drivers/hv/vmbus_drv.c b/drivers/hv/vmbus_drv.c
+index b1552a2..5ac1bbc 100644
+--- a/drivers/hv/vmbus_drv.c
++++ b/drivers/hv/vmbus_drv.c
+@@ -2550,7 +2550,11 @@ static int vmbus_acpi_add(struct platform_device *pdev)
+ 	struct acpi_device *ancestor;
+ 	struct acpi_device *device = ACPI_COMPANION(&pdev->dev);
+ 
+-	vmbus_root_device = &device->dev;
++	if (device_rename(&pdev->dev, "vmbus"))
++		pr_warn("vmbus: could not rename platform device\n");
++	if (device_move(&pdev->dev, &platform_bus, DPM_ORDER_NONE))
++		pr_warn("vmbus: could not move platform device to platform_bus\n");
++	vmbus_root_device = &pdev->dev;
+ 
+ 	/*
+ 	 * Older versions of Hyper-V for ARM64 fail to include the _CCA

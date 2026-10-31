@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Desktop Subsystem for Android (DSA)
+     Declares the binder service the control channel daemon (/vendor/bin/dsa-channeld)
+     registers, io.github.thisisthepy.dsa.channel.IChannel/default. servicemanager refuses
+     a VINTF-stable service that no manifest declares, and the agent, a system app, can call
+     only a VINTF-stable vendor service. -->
+<manifest version="1.0" type="device">
+    <hal format="aidl">
+        <name>io.github.thisisthepy.dsa.channel</name>
+        <version>1</version>
+        <fqname>IChannel/default</fqname>
+    </hal>
+</manifest>

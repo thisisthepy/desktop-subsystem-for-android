@@ -39,6 +39,387 @@ pub struct StartSession {}
 /// Stops the caller's Android. Returns at once; the state moves on its own.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct StopSession {}
+/// Installs the newest version of DSA now instead of waiting until no Android is running.
+/// It downloads that version first when it has not been downloaded yet, stops every user's
+/// Android, and starts setup, which stops the service and starts the new one. It returns
+/// once setup has started, or says that DSA is up to date.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UpdateProgram {}
+/// Asks for the runtime ID of the caller's Android VM.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetVmId {}
+/// Asks for the app tasks of the caller's Android, each of which the compositor shows as one
+/// window.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListTasks {}
+/// Asks for the app tasks of the caller's Android, and for every change to them from then
+/// on. The service answers with Tasks, then sends a TaskEvent for each change. The watch
+/// lasts across restarts of the Android: when it stops, its tasks are removed.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WatchTasks {}
+/// Asks for the apps installed in the caller's Android that a launcher lists, as the host's
+/// start menu shows them.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListApps {}
+/// The user closed a task's window: asks the caller's Android to end the task.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CloseTask {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+}
+/// Asks the caller's Android to start an app's launcher activity as a new task in its own
+/// window.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LaunchApp {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+}
+/// The user resized a task's window: asks the caller's Android to give the task the
+/// window's client size, in Android display pixels. `live` is true while the user is still
+/// dragging the window's edge: the task takes the size without being reconfigured, and the
+/// request with `live` false at the end of the drag reconfigures it once.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResizeTask {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub width: u32,
+    #[prost(uint32, tag = "3")]
+    pub height: u32,
+    #[prost(bool, tag = "4")]
+    pub live: bool,
+}
+/// A task's window moved to a monitor of another scale: asks the caller's Android to draw
+/// the task at `density_dpi` (160 at a scale of 100%).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetTaskDensity {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub density_dpi: u32,
+}
+/// Turns the connection into a stream of input for the caller's Android: after the answer
+/// (Done), the client sends only PointerEvent, KeyEvent, ImeComposition and ImeCommit frames, which the service passes on
+/// as they come, without answering them. Input is never waited on, so a pointer that moves
+/// fast is not held back by the answers.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct StreamInput {}
+/// Says whether any task window of the caller's Android is shown: open and not minimized. The
+/// window manager sends it on each change. Once no window has been shown for a while, the
+/// caller's Android turns its screen off and goes into Doze; it wakes as soon as a window is
+/// shown again. The service keeps the latest value while the Android is not running, for its
+/// next start.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetWindowsShown {
+    #[prost(bool, tag = "1")]
+    pub shown: bool,
+}
+/// Freezes the caller's Android: its processes stop until a task window is shown again. Its
+/// notifications, alarms and widgets stop with them. Returns at once with the status.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct FreezeSession {}
+/// Pointer input in a task's window, sent on a connection that streams input.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct PointerEvent {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(enumeration = "PointerAction", tag = "2")]
+    pub action: i32,
+    #[prost(enumeration = "PointerTool", tag = "3")]
+    pub tool: i32,
+    /// Tells the fingers of one touch apart. Stays the same from DOWN to UP.
+    #[prost(uint32, tag = "4")]
+    pub pointer_id: u32,
+    /// The position relative to the task's top left corner, in Android display pixels.
+    #[prost(float, tag = "5")]
+    pub x: f32,
+    #[prost(float, tag = "6")]
+    pub y: f32,
+    /// The buttons held down after this event, as a set of bits: 1 primary, 2 secondary,
+    /// 4 tertiary (middle), 8 back, 16 forward, 32 a pen's first barrel button, 64 its second.
+    #[prost(uint32, tag = "7")]
+    pub buttons: u32,
+    /// From 0 to 1.
+    #[prost(float, tag = "8")]
+    pub pressure: f32,
+    /// For SCROLL: how far the wheel turned, in notches. Positive `scroll_y` scrolls up,
+    /// positive `scroll_x` scrolls right.
+    #[prost(float, tag = "9")]
+    pub scroll_x: f32,
+    #[prost(float, tag = "10")]
+    pub scroll_y: f32,
+}
+/// A key pressed or released in a task's window, sent on a connection that streams input.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct KeyEvent {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(enumeration = "KeyAction", tag = "2")]
+    pub action: i32,
+    /// Android's key code (android.view.KeyEvent.KEYCODE_*).
+    #[prost(uint32, tag = "3")]
+    pub key_code: u32,
+    /// How many times the key has been repeated since it went down: 0 for the press itself.
+    #[prost(uint32, tag = "4")]
+    pub repeat_count: u32,
+    /// The modifiers and locks in effect after this event, as Android's meta state bits
+    /// (android.view.KeyEvent.META_*).
+    #[prost(uint32, tag = "5")]
+    pub meta_state: u32,
+    /// When the window saw the event, in milliseconds of the host's clock, which wraps around.
+    #[prost(uint32, tag = "6")]
+    pub event_time_ms: u32,
+    /// Set on an UP the user did not make: the window lost the keyboard focus while the key
+    /// was held.
+    #[prost(bool, tag = "7")]
+    pub canceled: bool,
+}
+/// The text the host's input method is composing in a task's window, sent on a connection that
+/// streams input. It replaces the whole composition; an empty `text` removes it.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImeComposition {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(string, tag = "2")]
+    pub text: ::prost::alloc::string::String,
+    /// Where the cursor is in `text`, in UTF-16 code units from its start.
+    #[prost(uint32, tag = "3")]
+    pub cursor: u32,
+}
+/// Text typed in a task's window, sent on a connection that streams input: what the input
+/// method committed, or a character a key typed without one. It takes the place of the
+/// composition, which ends.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImeCommit {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(string, tag = "2")]
+    pub text: ::prost::alloc::string::String,
+}
+/// Where the cursor of the editor focused in a task is, in the task's own pixels from its top
+/// left corner, which are its window's client pixels.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImeCursor {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(message, optional, tag = "2")]
+    pub cursor: ::core::option::Option<Rect>,
+}
+/// A rectangle in Android display pixels: left and top inclusive, right and bottom
+/// exclusive.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Rect {
+    #[prost(int32, tag = "1")]
+    pub left: i32,
+    #[prost(int32, tag = "2")]
+    pub top: i32,
+    #[prost(int32, tag = "3")]
+    pub right: i32,
+    #[prost(int32, tag = "4")]
+    pub bottom: i32,
+}
+/// One app task of the caller's Android. Every field is sent each time, so the latest one
+/// replaces what came before.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Task {
+    /// Android's task ID, unique while the task lives.
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    /// Where the task is on Android's display.
+    #[prost(message, optional, tag = "2")]
+    pub bounds: ::core::option::Option<Rect>,
+    /// The package of the task's root activity.
+    #[prost(string, tag = "3")]
+    pub package_name: ::prost::alloc::string::String,
+    /// The title the task's window shows.
+    #[prost(string, tag = "4")]
+    pub label: ::prost::alloc::string::String,
+    /// Whether the task has input focus in Android.
+    #[prost(bool, tag = "5")]
+    pub focused: bool,
+    /// The density the task's app draws at, in dots per inch (160 at a scale of 100%). 0 when
+    /// unknown.
+    #[prost(uint32, tag = "6")]
+    pub density_dpi: u32,
+    /// The largest size Android can give the task, in its display pixels. 0 when unknown.
+    #[prost(uint32, tag = "7")]
+    pub max_width: u32,
+    #[prost(uint32, tag = "8")]
+    pub max_height: u32,
+    /// The smallest size Android gives the task, in its display pixels. 0 when unknown.
+    #[prost(uint32, tag = "9")]
+    pub min_width: u32,
+    #[prost(uint32, tag = "10")]
+    pub min_height: u32,
+}
+/// The task ended.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TaskRemoved {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+}
+/// The frames of the task now arrive on the graphics stream as posts to `display_id`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TaskFrames {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub display_id: u32,
+}
+/// The name and launcher icon of an app the caller's Android has a task of. Sent before the
+/// app's first task, and again before the next one once the app has had no task.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AppInfo {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+    /// The app's own name, as a launcher shows it.
+    #[prost(string, tag = "2")]
+    pub label: ::prost::alloc::string::String,
+    /// The app's launcher icon, as a square PNG image of at most 256 pixels on a side. Empty
+    /// when Android gave none.
+    #[prost(bytes = "vec", tag = "3")]
+    pub icon_png: ::prost::alloc::vec::Vec<u8>,
+}
+/// The apps installed in the caller's Android that a launcher lists. The list is kept while
+/// the Android is stopped, because its apps stay installed.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct InstalledApps {
+    /// False until the caller's Android has said which apps it has since the service started.
+    /// The list is then empty and says nothing about which apps are installed.
+    #[prost(bool, tag = "1")]
+    pub known: bool,
+    /// In package order.
+    #[prost(message, repeated, tag = "2")]
+    pub apps: ::prost::alloc::vec::Vec<AppInfo>,
+}
+/// A change to the tasks of the caller's Android, sent after the answer to WatchTasks.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TaskEvent {
+    #[prost(oneof = "task_event::Body", tags = "1, 2, 3, 4, 5, 6")]
+    pub body: ::core::option::Option<task_event::Body>,
+}
+/// Nested message and enum types in `TaskEvent`.
+pub mod task_event {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Body {
+        #[prost(message, tag = "1")]
+        Updated(super::Task),
+        #[prost(message, tag = "2")]
+        Removed(super::TaskRemoved),
+        #[prost(message, tag = "3")]
+        Frames(super::TaskFrames),
+        #[prost(message, tag = "4")]
+        App(super::AppInfo),
+        #[prost(message, tag = "5")]
+        ImeCursor(super::ImeCursor),
+        /// The apps installed in the caller's Android changed: the whole list, as it is now.
+        #[prost(message, tag = "6")]
+        Installed(super::InstalledApps),
+    }
+}
+/// The answer to ListTasks and WatchTasks: the tasks there are now.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Tasks {
+    /// In task ID order.
+    #[prost(message, repeated, tag = "1")]
+    pub tasks: ::prost::alloc::vec::Vec<Task>,
+    /// The display of each task whose frames have been placed, in task ID order. A task may
+    /// appear here before it appears in `tasks`.
+    #[prost(message, repeated, tag = "2")]
+    pub frames: ::prost::alloc::vec::Vec<TaskFrames>,
+    /// The name and icon of each app that has a task, in package order.
+    #[prost(message, repeated, tag = "3")]
+    pub apps: ::prost::alloc::vec::Vec<AppInfo>,
+    /// The apps installed in the caller's Android. Unset until it has said which apps it has.
+    #[prost(message, optional, tag = "4")]
+    pub installed: ::core::option::Option<InstalledApps>,
+}
+/// Asks how much memory the caller's Android takes: inside the guest, as it last reported,
+/// and on the host, the processes that run it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetMemory {}
+/// One Android process's share of the guest's memory.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GuestProcessMemory {
+    #[prost(int32, tag = "1")]
+    pub pid: i32,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    /// Its proportional set size in KiB: its private pages plus its share of shared pages.
+    #[prost(uint64, tag = "3")]
+    pub pss_kb: u64,
+    /// How much of it is swapped out to compressed memory, proportionally, in KiB.
+    #[prost(uint64, tag = "4")]
+    pub swap_pss_kb: u64,
+}
+/// How Android uses the guest's memory, as it last reported it. Sizes in KiB; 0 when Android
+/// could not read the value.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GuestMemory {
+    #[prost(uint64, tag = "1")]
+    pub mem_total_kb: u64,
+    #[prost(uint64, tag = "2")]
+    pub mem_free_kb: u64,
+    #[prost(uint64, tag = "3")]
+    pub mem_available_kb: u64,
+    #[prost(uint64, tag = "4")]
+    pub buffers_kb: u64,
+    #[prost(uint64, tag = "5")]
+    pub cached_kb: u64,
+    #[prost(uint64, tag = "6")]
+    pub anon_pages_kb: u64,
+    #[prost(uint64, tag = "7")]
+    pub shmem_kb: u64,
+    #[prost(uint64, tag = "8")]
+    pub slab_reclaimable_kb: u64,
+    #[prost(uint64, tag = "9")]
+    pub swap_total_kb: u64,
+    #[prost(uint64, tag = "10")]
+    pub swap_free_kb: u64,
+    #[prost(uint64, tag = "11")]
+    pub zram_original_kb: u64,
+    #[prost(uint64, tag = "12")]
+    pub zram_used_kb: u64,
+    /// The proportional set size of the apps and the system server together; native daemons
+    /// are not counted.
+    #[prost(uint64, tag = "13")]
+    pub total_pss_kb: u64,
+    /// Largest first, at most 10.
+    #[prost(message, repeated, tag = "14")]
+    pub top_processes: ::prost::alloc::vec::Vec<GuestProcessMemory>,
+    /// How long ago Android sent this report, in seconds.
+    #[prost(uint64, tag = "15")]
+    pub age_seconds: u64,
+}
+/// One host process that runs the caller's Android: its VM's memory process, the window
+/// manager, an app window.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct HostProcessMemory {
+    /// What it is: "vm", "window manager" or "app window".
+    #[prost(string, tag = "1")]
+    pub role: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "2")]
+    pub pid: u32,
+    /// The memory of it resident in RAM now, in KiB.
+    #[prost(uint64, tag = "3")]
+    pub working_set_kb: u64,
+    /// The memory committed to it alone, in KiB.
+    #[prost(uint64, tag = "4")]
+    pub private_kb: u64,
+}
+/// The answer to GetMemory.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Memory {
+    /// Absent until Android has sent its first report since it started.
+    #[prost(message, optional, tag = "1")]
+    pub guest: ::core::option::Option<GuestMemory>,
+    /// In the order: the VM, the window manager, the app windows.
+    #[prost(message, repeated, tag = "2")]
+    pub host: ::prost::alloc::vec::Vec<HostProcessMemory>,
+}
+/// The answer to a request that has nothing to report but that it was carried out.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Done {}
 /// The caller's Android as the service sees it.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Status {
@@ -54,6 +435,69 @@ pub struct Status {
     #[prost(string, tag = "3")]
     pub update_notice: ::prost::alloc::string::String,
 }
+/// The answer to UpdateProgram.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ProgramUpdate {
+    /// The version setup is installing. Empty when there is nothing newer to install.
+    #[prost(string, tag = "1")]
+    pub installing: ::prost::alloc::string::String,
+    /// What happens next, in words for the user.
+    #[prost(string, tag = "2")]
+    pub detail: ::prost::alloc::string::String,
+}
+/// The answer to GetVmId.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct VmId {
+    /// The runtime ID of the caller's Android VM. Empty when the VM is not running.
+    #[prost(string, tag = "1")]
+    pub vm_id: ::prost::alloc::string::String,
+}
+/// Asks for the settings of the caller's DSA.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetSettings {}
+/// Changes the settings of the caller's DSA: each value of `settings` that a client may change
+/// replaces the current one. The service answers with the settings as they are now. Changing
+/// an update setting, which applies to every user, needs a caller acting as an administrator
+/// (on Windows, an elevated process); otherwise nothing changes and the answer is
+/// ERROR_CODE_NOT_ALLOWED.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetSettings {
+    #[prost(message, optional, tag = "1")]
+    pub settings: ::core::option::Option<Settings>,
+}
+/// The settings of the caller's DSA. `render_gpu` and `freeze` are the caller's own; the
+/// update settings are the machine's, shared by every user of it.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Settings {
+    /// The GPU the caller's window manager renders on: "display" (the GPU that drives the
+    /// primary monitor, the default), "integrated", "discrete", or part of a GPU's name. The
+    /// window manager reads it when it starts.
+    #[prost(string, tag = "1")]
+    pub render_gpu: ::prost::alloc::string::String,
+    /// Whether the caller's Android may be frozen when it is idle. Off unless the user turns it
+    /// on.
+    #[prost(bool, tag = "2")]
+    pub freeze: bool,
+    /// Whether the service updates DSA itself from the signed program list.
+    #[prost(bool, tag = "3")]
+    pub program_updates: bool,
+    /// Whether the service downloads new Android images from the signed release list.
+    #[prost(bool, tag = "4")]
+    pub image_updates: bool,
+    /// Whether this installation can update DSA itself, or the Android image, at all. A client
+    /// cannot change these.
+    #[prost(bool, tag = "5")]
+    pub program_updates_available: bool,
+    #[prost(bool, tag = "6")]
+    pub image_updates_available: bool,
+    /// The version of DSA the service runs. A client cannot change it.
+    #[prost(string, tag = "7")]
+    pub version: ::prost::alloc::string::String,
+    /// The folder the service writes its log to. Empty when it keeps none. A client cannot
+    /// change it.
+    #[prost(string, tag = "8")]
+    pub log_dir: ::prost::alloc::string::String,
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Error {
     #[prost(enumeration = "ErrorCode", tag = "1")]
@@ -63,16 +507,19 @@ pub struct Error {
 }
 /// A request from the client. The service answers each with one Response carrying the same
 /// id, in the order the requests arrived.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Request {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "request::Body", tags = "2, 3, 4")]
+    #[prost(
+        oneof = "request::Body",
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21"
+    )]
     pub body: ::core::option::Option<request::Body>,
 }
 /// Nested message and enum types in `Request`.
 pub mod request {
-    #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Body {
         #[prost(message, tag = "2")]
         GetStatus(super::GetStatus),
@@ -80,34 +527,78 @@ pub mod request {
         StartSession(super::StartSession),
         #[prost(message, tag = "4")]
         StopSession(super::StopSession),
+        #[prost(message, tag = "5")]
+        UpdateProgram(super::UpdateProgram),
+        #[prost(message, tag = "6")]
+        GetVmId(super::GetVmId),
+        #[prost(message, tag = "7")]
+        ListTasks(super::ListTasks),
+        #[prost(message, tag = "8")]
+        WatchTasks(super::WatchTasks),
+        #[prost(message, tag = "9")]
+        CloseTask(super::CloseTask),
+        #[prost(message, tag = "10")]
+        LaunchApp(super::LaunchApp),
+        #[prost(message, tag = "11")]
+        StreamInput(super::StreamInput),
+        #[prost(message, tag = "12")]
+        ResizeTask(super::ResizeTask),
+        #[prost(message, tag = "13")]
+        SetTaskDensity(super::SetTaskDensity),
+        #[prost(message, tag = "14")]
+        GetMemory(super::GetMemory),
+        #[prost(message, tag = "15")]
+        ListApps(super::ListApps),
+        #[prost(message, tag = "16")]
+        GetSettings(super::GetSettings),
+        #[prost(message, tag = "17")]
+        SetSettings(super::SetSettings),
+        #[prost(message, tag = "20")]
+        SetWindowsShown(super::SetWindowsShown),
+        #[prost(message, tag = "21")]
+        FreezeSession(super::FreezeSession),
     }
 }
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Response {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "response::Body", tags = "2, 3")]
+    #[prost(oneof = "response::Body", tags = "2, 3, 4, 5, 6, 7, 8, 9, 10")]
     pub body: ::core::option::Option<response::Body>,
 }
 /// Nested message and enum types in `Response`.
 pub mod response {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Body {
         #[prost(message, tag = "2")]
         Status(super::Status),
         #[prost(message, tag = "3")]
         Error(super::Error),
+        #[prost(message, tag = "4")]
+        ProgramUpdate(super::ProgramUpdate),
+        #[prost(message, tag = "5")]
+        VmId(super::VmId),
+        #[prost(message, tag = "6")]
+        Tasks(super::Tasks),
+        #[prost(message, tag = "7")]
+        Done(super::Done),
+        #[prost(message, tag = "8")]
+        Memory(super::Memory),
+        #[prost(message, tag = "9")]
+        InstalledApps(super::InstalledApps),
+        #[prost(message, tag = "10")]
+        Settings(super::Settings),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
-    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5")]
+    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10")]
     pub body: ::core::option::Option<envelope::Body>,
 }
 /// Nested message and enum types in `Envelope`.
 pub mod envelope {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Body {
         #[prost(message, tag = "1")]
         Hello(super::Hello),
@@ -119,6 +610,16 @@ pub mod envelope {
         Request(super::Request),
         #[prost(message, tag = "5")]
         Response(super::Response),
+        #[prost(message, tag = "6")]
+        TaskEvent(super::TaskEvent),
+        #[prost(message, tag = "7")]
+        PointerEvent(super::PointerEvent),
+        #[prost(message, tag = "8")]
+        KeyEvent(super::KeyEvent),
+        #[prost(message, tag = "9")]
+        ImeComposition(super::ImeComposition),
+        #[prost(message, tag = "10")]
+        ImeCommit(super::ImeCommit),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -258,6 +759,127 @@ impl SessionState {
         }
     }
 }
+/// What a pointer did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum PointerAction {
+    Unspecified = 0,
+    /// The pointer touched down, or a mouse's first button went down.
+    Down = 1,
+    /// The pointer moved while down, or a mouse's buttons changed while one stays down.
+    Move = 2,
+    /// The pointer lifted, or a mouse's last button went up.
+    Up = 3,
+    /// The gesture ended without completing, as when the window lost the pointer.
+    Cancel = 4,
+    /// The wheel turned; `scroll_x` and `scroll_y` say how far.
+    Scroll = 5,
+    /// The pointer moved over the window without touching it.
+    HoverMove = 6,
+    /// The pointer left the window, or a pen went out of range.
+    HoverExit = 7,
+}
+impl PointerAction {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "POINTER_ACTION_UNSPECIFIED",
+            Self::Down => "POINTER_ACTION_DOWN",
+            Self::Move => "POINTER_ACTION_MOVE",
+            Self::Up => "POINTER_ACTION_UP",
+            Self::Cancel => "POINTER_ACTION_CANCEL",
+            Self::Scroll => "POINTER_ACTION_SCROLL",
+            Self::HoverMove => "POINTER_ACTION_HOVER_MOVE",
+            Self::HoverExit => "POINTER_ACTION_HOVER_EXIT",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "POINTER_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
+            "POINTER_ACTION_DOWN" => Some(Self::Down),
+            "POINTER_ACTION_MOVE" => Some(Self::Move),
+            "POINTER_ACTION_UP" => Some(Self::Up),
+            "POINTER_ACTION_CANCEL" => Some(Self::Cancel),
+            "POINTER_ACTION_SCROLL" => Some(Self::Scroll),
+            "POINTER_ACTION_HOVER_MOVE" => Some(Self::HoverMove),
+            "POINTER_ACTION_HOVER_EXIT" => Some(Self::HoverExit),
+            _ => None,
+        }
+    }
+}
+/// What kind of pointer it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum PointerTool {
+    Unspecified = 0,
+    Mouse = 1,
+    Touch = 2,
+    Pen = 3,
+    /// A pen's eraser end.
+    Eraser = 4,
+}
+impl PointerTool {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "POINTER_TOOL_UNSPECIFIED",
+            Self::Mouse => "POINTER_TOOL_MOUSE",
+            Self::Touch => "POINTER_TOOL_TOUCH",
+            Self::Pen => "POINTER_TOOL_PEN",
+            Self::Eraser => "POINTER_TOOL_ERASER",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "POINTER_TOOL_UNSPECIFIED" => Some(Self::Unspecified),
+            "POINTER_TOOL_MOUSE" => Some(Self::Mouse),
+            "POINTER_TOOL_TOUCH" => Some(Self::Touch),
+            "POINTER_TOOL_PEN" => Some(Self::Pen),
+            "POINTER_TOOL_ERASER" => Some(Self::Eraser),
+            _ => None,
+        }
+    }
+}
+/// What a key did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum KeyAction {
+    Unspecified = 0,
+    /// The key went down, or, with a `repeat_count` above 0, is repeated while it is held.
+    Down = 1,
+    /// The key came up.
+    Up = 2,
+}
+impl KeyAction {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "KEY_ACTION_UNSPECIFIED",
+            Self::Down => "KEY_ACTION_DOWN",
+            Self::Up => "KEY_ACTION_UP",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "KEY_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
+            "KEY_ACTION_DOWN" => Some(Self::Down),
+            "KEY_ACTION_UP" => Some(Self::Up),
+            _ => None,
+        }
+    }
+}
 /// What went wrong with a request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
@@ -267,6 +889,16 @@ pub enum ErrorCode {
     UnknownRequest = 1,
     /// The service could not provide an Android for this user.
     Unavailable = 2,
+    /// DSA could not be updated: updates are off, the program list or the setup file did not
+    /// check out, or setup could not start. The detail says which.
+    UpdateFailed = 3,
+    /// The request needs the caller's Android to be running, and it is not.
+    NotRunning = 4,
+    /// A setting has a value the service does not accept. The detail says which and why.
+    InvalidSetting = 5,
+    /// The request changes something that applies to every user of the machine, and the caller
+    /// is not acting as an administrator.
+    NotAllowed = 6,
 }
 impl ErrorCode {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -278,6 +910,10 @@ impl ErrorCode {
             Self::Unspecified => "ERROR_CODE_UNSPECIFIED",
             Self::UnknownRequest => "ERROR_CODE_UNKNOWN_REQUEST",
             Self::Unavailable => "ERROR_CODE_UNAVAILABLE",
+            Self::UpdateFailed => "ERROR_CODE_UPDATE_FAILED",
+            Self::NotRunning => "ERROR_CODE_NOT_RUNNING",
+            Self::InvalidSetting => "ERROR_CODE_INVALID_SETTING",
+            Self::NotAllowed => "ERROR_CODE_NOT_ALLOWED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -286,6 +922,10 @@ impl ErrorCode {
             "ERROR_CODE_UNSPECIFIED" => Some(Self::Unspecified),
             "ERROR_CODE_UNKNOWN_REQUEST" => Some(Self::UnknownRequest),
             "ERROR_CODE_UNAVAILABLE" => Some(Self::Unavailable),
+            "ERROR_CODE_UPDATE_FAILED" => Some(Self::UpdateFailed),
+            "ERROR_CODE_NOT_RUNNING" => Some(Self::NotRunning),
+            "ERROR_CODE_INVALID_SETTING" => Some(Self::InvalidSetting),
+            "ERROR_CODE_NOT_ALLOWED" => Some(Self::NotAllowed),
             _ => None,
         }
     }

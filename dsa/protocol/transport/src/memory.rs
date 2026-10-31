@@ -8,7 +8,7 @@
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::time::Duration;
 
-use crate::{check_frame_len, Connection, Connector, Listener, TransportError};
+use crate::{check_frame_len, Connection, Connector, FrameSender, Listener, TransportError};
 
 /// Returns a listener and the one connector that reaches it.
 pub fn pair() -> (MemoryListener, MemoryConnector) {
@@ -103,5 +103,25 @@ impl Connection for MemoryConnection {
 
     fn close(&mut self) {
         self.outgoing = None;
+    }
+
+    fn try_clone_sender(&self) -> Option<Box<dyn FrameSender>> {
+        let outgoing = self.outgoing.clone()?;
+        Some(Box::new(MemorySender { outgoing }))
+    }
+}
+
+/// The sending half of a [`MemoryConnection`]. The peer sees the connection end once the
+/// connection and every sender are gone.
+pub struct MemorySender {
+    outgoing: Sender<Vec<u8>>,
+}
+
+impl FrameSender for MemorySender {
+    fn send(&mut self, frame: &[u8]) -> Result<(), TransportError> {
+        check_frame_len(frame.len())?;
+        self.outgoing
+            .send(frame.to_vec())
+            .map_err(|_| TransportError::Closed)
     }
 }

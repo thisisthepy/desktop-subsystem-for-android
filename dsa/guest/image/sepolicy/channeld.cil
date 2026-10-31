@@ -1,0 +1,78 @@
+; Desktop Subsystem for Android (DSA)
+; The guest's control channel daemon (/vendor/bin/dsa-channeld): init starts it in its own
+; domain, it reads the boot's secret from /proc/bootconfig and connects to the host over
+; vsock. It serves the agent and the hwcomposer over binder, so those domains may call it
+; and it may call them back; nothing else is granted to any other domain. Apps in particular
+; still cannot read /proc/bootconfig, which is what keeps the secret the daemon's alone.
+
+(type dsa_channeld)
+(roletype object_r dsa_channeld)
+(typeattributeset domain (dsa_channeld))
+
+(type dsa_channeld_exec)
+(roletype object_r dsa_channeld_exec)
+(typeattributeset file_type (dsa_channeld_exec))
+(typeattributeset exec_type (dsa_channeld_exec))
+(typeattributeset vendor_file_type (dsa_channeld_exec))
+
+; init starts it and it moves into its own domain.
+(typetransition init dsa_channeld_exec process dsa_channeld)
+(allow init dsa_channeld_exec (file (read getattr map execute open)))
+(allow init dsa_channeld (process (transition siginh rlimitinh)))
+(dontaudit init dsa_channeld (process (noatsecure)))
+(allow dsa_channeld dsa_channeld_exec (file (entrypoint read getattr map execute open)))
+(allow dsa_channeld init (fd (use)))
+
+; Its messages go to the kernel log through the descriptor init opens for it
+; (stdio_to_kmsg opens /dev/kmsg_debug).
+(allow dsa_channeld kmsg_device (chr_file (write append getattr)))
+(allow dsa_channeld kmsg_debug_device (chr_file (write append getattr)))
+
+; The boot's secret.
+(allow dsa_channeld proc_bootconfig (file (read open getattr)))
+
+; The control channel.
+(allow dsa_channeld self (vsock_socket (create connect read write getattr setopt getopt shutdown)))
+
+; The binder service the agent and the hwcomposer reach the daemon through,
+; io.github.thisisthepy.dsa.channel.IChannel/default on /dev/binder, which
+; vendor_service_contexts labels dsa_channel_service. Only the daemon may register it.
+(type dsa_channel_service)
+(roletype object_r dsa_channel_service)
+(typeattributeset service_manager_type (dsa_channel_service))
+(typeattributeset hal_service_type (dsa_channel_service))
+
+(allow dsa_channeld binder_device (chr_file (ioctl read write open getattr map)))
+(allow dsa_channeld servicemanager (binder (call transfer)))
+(allow servicemanager dsa_channeld (binder (call transfer)))
+; servicemanager reads the caller's context to check it.
+(allow servicemanager dsa_channeld (dir (search)))
+(allow servicemanager dsa_channeld (file (read open)))
+(allow servicemanager dsa_channeld (process (getattr)))
+(allow dsa_channeld dsa_channel_service (service_manager (add find)))
+
+; Its clients: the agent, a platform-signed system app (system_app with the system user ID,
+; platform_app without), and the hwcomposer. They find the service and call it; the daemon
+; calls back the listeners they hand it.
+(allow system_app dsa_channel_service (service_manager (find)))
+(allow platform_app dsa_channel_service (service_manager (find)))
+(allow hal_graphics_composer_server dsa_channel_service (service_manager (find)))
+(allow system_app dsa_channeld (binder (call transfer)))
+(allow platform_app dsa_channeld (binder (call transfer)))
+(allow hal_graphics_composer_server dsa_channeld (binder (call transfer)))
+(allow dsa_channeld system_app (binder (call transfer)))
+(allow dsa_channeld platform_app (binder (call transfer)))
+(allow dsa_channeld hal_graphics_composer_server (binder (call transfer)))
+
+; Handing idle memory back to the host: the daemon reads how the guest uses its memory and,
+; when it should drop its caches, sets vendor.dsa.memory.reclaim (its type, dsa_memory_prop,
+; is in memory.cil). init's vendor scripts do the rest (dsa-channeld.rc).
+(allow dsa_channeld proc_meminfo (file (read open getattr)))
+(allow dsa_channeld property_socket (sock_file (write)))
+(allow dsa_channeld init (unix_stream_socket (connectto)))
+(allow dsa_channeld dsa_memory_prop (property_service (set)))
+(allow dsa_channeld dsa_memory_prop (file (read open getattr map)))
+
+; The gradual trim skips a guest under memory pressure, which the daemon reads from the
+; kernel's pressure stall information.
+(allow dsa_channeld proc_pressure_mem (file (read open getattr)))

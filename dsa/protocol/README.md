@@ -1,7 +1,8 @@
 # protocol
 
-The control channel between the DSA host and the guest, and the local API between the DSA
-service and the apps in a user's session: their definitions, the code generated from them,
+The control channel between the DSA host and the guest, the local API between the DSA
+service and the apps in a user's session, and the connection between the window manager and
+the app window hosts: their definitions, the code generated from them,
 the checked-in vectors that keep the languages in step, and the transport that carries
 the frames.
 
@@ -11,9 +12,11 @@ the frames.
 | `schema.sha256` | The schema hash of `control.proto`, written by the generator |
 | `host_api.proto` | The only definition of the local API's messages (proto3) |
 | `host_api.sha256` | The schema hash of `host_api.proto`, written by the generator |
+| `window_host.proto` | The only definition of the messages between the window manager and the app window hosts (proto3) |
+| `window_host.sha256` | The schema hash of `window_host.proto`, written by the generator |
 | `schema/` | Rust: computes the schema hash (SHA-256 of the definition's tokens) |
 | `codegen/` | Rust: the generator for every language |
-| `rust/` | Rust: the generated types, the frame codecs and the handshakes of both protocols (`dsa-protocol`) |
+| `rust/` | Rust: the generated types, the frame codecs and the handshakes of every protocol (`dsa-protocol`) |
 | `java/` | Java: the generated protobuf-lite classes and the vector test |
 | `cpp/` | C++: the generated protobuf-lite sources and the vector test |
 | `vectors/control.vectors` | Named messages and their exact bytes, which every language must match |
@@ -22,9 +25,15 @@ the frames.
 ## Rules
 
 - Generated code is never edited by hand. Change `control.proto` and run the generator.
-- Every frame is one `Envelope`. The first frame on a connection is the guest's `Hello`;
-  the host answers `HelloAccepted` or `HelloRejected` and refuses a guest whose protocol
-  version or schema hash differs from its own, saying which values differ.
+- Every frame is one `Envelope`. The first frame on a connection is the guest's `Hello`.
+  The host refuses a guest whose protocol version or schema hash differs from its own with
+  `HelloRejected`, saying which values differ. Otherwise it sends an `AuthChallenge` with a
+  fresh nonce, the guest answers with an `AuthProof` (HMAC-SHA256 of the nonce, keyed with
+  the secret the host gave this boot), and the host answers `HelloAccepted` or
+  `HelloRejected`. Any app in the guest can reach the control port, because the graphics
+  path needs vsock; only the guest's control daemon can read the secret, so only it gets in.
+  The secret itself never crosses the connection, and a proof is never accepted twice
+  because each connection gets its own nonce.
 - No map fields, no `Any`, no extensions, and nothing that depends on unknown fields, so
   the three languages encode the same message to the same bytes.
 - The local API follows the same handshake (the client sends the `Hello`, the service
@@ -32,6 +41,9 @@ the frames.
   operating system, so every request acts on the caller's own Android.
 - Only Rust code is generated from `host_api.proto`, because the service and every client
   are Rust. Another language is added to the generator, never written by hand.
+- The app window hosts follow the same handshake with the window manager (the window host
+  sends the `Hello`), then say which app they show (`Attach`). Only Rust code is generated
+  from `window_host.proto`, because both ends are Rust.
 - The schema hash ignores comments and layout. Any change to a name, number, type or
   option changes it.
 
@@ -44,7 +56,7 @@ PROTOC=$(command -v protoc) cargo run -p dsa-protocol-codegen
 ```
 
 This rewrites everything under `rust/src/generated/`, `java/src/main/java/` and
-`cpp/generated/`, and both `.sha256` files. CI runs it and fails when the result differs from
+`cpp/generated/`, and every `.sha256` file. CI runs it and fails when the result differs from
 what is checked in.
 
 After adding or changing a vector case in `rust/tests/vectors.rs` (and the same case in

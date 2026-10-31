@@ -1,28 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  setup.exe: the DSA package behind this project's own setup screens (theme\).
+  setup.exe: the DSA package behind this project's own setup screens (setup-ui\).
 
-  Build variables (-d): Version, MsiPath.
+  Build variables (-d): Version, MsiPath, SetupUiDir (the built setup-ui\ program), and
+  optionally AndroidMajor (the newest Android the release supports, shown on the first
+  screen) and BundledImage (1 when the package carries an Android image).
+
+  The setup screens are a managed bootstrapper application: the engine starts
+  DsaSetup.exe as its own process. It runs on .NET Framework 4.7.2, which every supported
+  Windows has, so nothing is installed before it.
+
+  The user chooses where the program goes (InstallFolder) and where the service keeps its
+  configuration, logs and Android images (DataFolder), on the first screen or on the
+  command line. Each user's Android disk is in their own profile, under %LOCALAPPDATA%\DSA,
+  whatever is chosen.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
     <Bundle Name="Desktop Subsystem for Android"
-            Manufacturer="thisisthepy"
+            Manufacturer="Thisisthepy"
             Version="$(Version)"
             UpgradeCode="706723c3-776c-4ab2-8402-780943fda74c"
-            IconSourceFile="theme\logo.ico">
-        <BootstrapperApplication>
-            <bal:WixStandardBootstrapperApplication
-                Theme="hyperlinkLicense"
-                ThemeFile="theme\theme.xml"
-                LocalizationFile="theme\theme.wxl"
-                LogoFile="theme\logo.png"
-                LicenseUrl="https://www.apache.org/licenses/LICENSE-2.0"
-                SuppressOptionsUI="yes"
-                ShowVersion="yes" />
+            IconSourceFile="setup-ui\assets\logo.ico">
+        <BootstrapperApplication SourceFile="$(SetupUiDir)\DsaSetup.exe">
+            <Payload SourceFile="$(SetupUiDir)\DsaSetup.exe.config" />
+            <Payload SourceFile="$(SetupUiDir)\mbanative.dll" />
+            <Payload SourceFile="$(SetupUiDir)\WixToolset.BootstrapperApplicationApi.dll" />
         </BootstrapperApplication>
+
+        <!-- Overridable: setup.exe InstallFolder=... DataFolder=... sets them. Persisted, so
+             a later repair or uninstall shows and passes the folders that were chosen. -->
+        <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles64Folder]DSA" Persisted="yes" bal:Overridable="yes" />
+        <Variable Name="DataFolder" Type="formatted" Value="[CommonAppDataFolder]DSA" Persisted="yes" bal:Overridable="yes" />
+        <?ifdef AndroidMajor ?>
+        <Variable Name="AndroidMajor" Type="string" Value="$(AndroidMajor)" />
+        <?endif?>
+        <?ifdef BundledImage ?>
+        <Variable Name="BundledImage" Type="string" Value="1" />
+        <?endif?>
+
         <Chain>
-            <MsiPackage SourceFile="$(MsiPath)" Visible="no" />
+            <MsiPackage Id="DsaPackage" SourceFile="$(MsiPath)" Visible="no">
+                <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
+                <MsiProperty Name="DATAFOLDER" Value="[DataFolder]" />
+            </MsiPackage>
         </Chain>
     </Bundle>
 </Wix>
