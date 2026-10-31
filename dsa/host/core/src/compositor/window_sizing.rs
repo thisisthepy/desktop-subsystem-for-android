@@ -75,6 +75,23 @@ pub fn maximized_position(proposed: i32, start: i32, area: i32, outer: i32) -> i
     start + (area - outer) / 2
 }
 
+/// The smallest a task window's client area gets, in density-independent pixels in each
+/// direction: the smallest task Android's own freeform windows let a user make. Below it the
+/// guest would keep the task larger than the window, so no frame could ever show 1:1, and
+/// apps are not designed to be laid out in less.
+pub const MIN_CLIENT_DP: u32 = 220;
+
+/// The smallest client area a window on a monitor of `dpi` may have, in pixels, within `max`,
+/// the most the guest can draw, when that is smaller.
+pub fn min_client_size(dpi: u32, max: Option<(u32, u32)>) -> (u32, u32) {
+    let dpi = if dpi == 0 { BASE_DPI } else { dpi };
+    let side = MIN_CLIENT_DP * dpi / BASE_DPI;
+    match max {
+        Some((width, height)) => (side.min(width.max(1)), side.min(height.max(1))),
+        None => (side, side),
+    }
+}
+
 /// One task window's size and density, as the host and the guest each see them.
 #[derive(Debug, Clone)]
 pub struct WindowSizing {
@@ -541,6 +558,20 @@ mod tests {
         sizing.view_resized((500, 300), now);
         assert_eq!(sizing.dragging(true, now), None);
         assert_eq!(sizing.dragging(false, now), resize(500, 300));
+    }
+
+    #[test]
+    fn fr4_a_window_stays_at_least_the_smallest_task_size_on_its_monitor() {
+        assert_eq!(min_client_size(96, None), (220, 220));
+        assert_eq!(min_client_size(144, None), (330, 330));
+        assert_eq!(min_client_size(192, Some((1920, 1080))), (440, 440));
+        assert_eq!(
+            min_client_size(0, None),
+            (220, 220),
+            "no DPI counts as 100%"
+        );
+        // A guest that draws less than that decides.
+        assert_eq!(min_client_size(192, Some((300, 1080))), (300, 440));
     }
 
     #[test]
