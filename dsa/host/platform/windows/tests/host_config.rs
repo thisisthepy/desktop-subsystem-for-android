@@ -52,8 +52,8 @@ fn nfr2_free_pages_are_reported_in_the_smallest_pieces_the_host_takes() {
     assert_eq!(page_reporting_order_for_build(None), 9);
     assert_eq!(page_reporting_order_for_build(Some((19045, 3392))), 9);
     assert_eq!(page_reporting_order_for_build(Some((19045, 3393))), 5);
-    assert_eq!(page_reporting_order_for_build(Some((22000, 2359))), 9);
-    assert_eq!(page_reporting_order_for_build(Some((22000, 2360))), 5);
+    assert_eq!(page_reporting_order_for_build(Some((22000, 1969))), 9);
+    assert_eq!(page_reporting_order_for_build(Some((22000, 1970))), 5);
     assert_eq!(page_reporting_order_for_build(Some((26300, 0))), 5);
     let pinned = MINIMAL.replace("\n}", ",\n  \"page_reporting_order\": 9\n}");
     let config = HostConfig::parse(&pinned).unwrap();

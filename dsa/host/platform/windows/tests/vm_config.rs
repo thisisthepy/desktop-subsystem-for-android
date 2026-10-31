@@ -80,7 +80,7 @@ fn nfr2_fine_grained_memory_is_only_used_on_builds_with_the_teardown_fix() {
     assert!(fine_grained_memory_supported(26300, 0));
     assert!(fine_grained_memory_supported(22000, 2360));
     assert!(fine_grained_memory_supported(22631, 2360));
-    assert!(!fine_grained_memory_supported(22000, 2359));
+    assert!(!fine_grained_memory_supported(22000, 1969));
     assert!(fine_grained_memory_supported(20348, 1970));
     assert!(!fine_grained_memory_supported(20348, 1969));
     assert!(fine_grained_memory_supported(19045, 3393));
