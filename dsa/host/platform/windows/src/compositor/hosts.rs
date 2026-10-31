@@ -37,7 +37,8 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcess, PROC
 
 use super::frames::{FrameRouter, FrameTarget};
 use super::log::{
-    input_trace, input_trace_on, note, trace_detailed, trace_forget, trace_stage, trace_summary, CompositorLogger,
+    input_trace, input_trace_on, note, trace_detailed, trace_forget, trace_stage, trace_summary,
+    CompositorLogger,
 };
 use super::present::{Gpu, SharedTexture};
 use dsa_host_core::resize_trace::millis;

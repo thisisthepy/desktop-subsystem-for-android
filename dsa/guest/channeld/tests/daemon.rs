@@ -7,7 +7,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use dsa_guest_channeld::{connect, pump, run, ChannelError, ChannelEvent, Credentials, RetryPolicy};
+use dsa_guest_channeld::{
+    connect, pump, run, ChannelError, ChannelEvent, Credentials, RetryPolicy,
+};
 use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{RejectReason, Role};
 use dsa_protocol::handshake::{host_accept, local_hello};
