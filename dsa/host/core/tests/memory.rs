@@ -322,6 +322,24 @@ fn opened(task_id: i32) -> TaskEvent {
 }
 
 #[test]
+fn nfr1_the_window_manager_gives_memory_back_once_every_window_is_minimized() {
+    let start = Instant::now();
+    let at = |s: u64| start + Duration::from_secs(s);
+    let mut trim = IdleTrim::new(Duration::from_secs(30), start);
+    trim.sync(&[opened(1)], at(0));
+    assert!(!trim.due(at(100)));
+    trim.windows_shown(false, at(100));
+    assert!(!trim.due(at(110)));
+    assert!(trim.due(at(130)));
+    assert!(!trim.due(at(200)));
+    // Shown again, then minimized again: a new idle stretch.
+    trim.windows_shown(true, at(210));
+    assert!(!trim.due(at(300)));
+    trim.windows_shown(false, at(300));
+    assert!(trim.due(at(330)));
+}
+
+#[test]
 fn nfr2_the_window_manager_gives_memory_back_once_no_window_has_been_open_a_while() {
     let start = Instant::now();
     let delay = Duration::from_secs(30);

@@ -36,6 +36,16 @@ fn working_set_kb() -> Option<u64> {
     (ok != 0).then_some(counters.WorkingSetSize as u64 / 1024)
 }
 
+/// Empties this process's working set: for a window host whose window was just minimized,
+/// which shows nothing until it is restored. The pages stay on the standby list, so a restore
+/// faults them back without reading the disk unless Windows has reused them.
+pub fn empty_working_set() {
+    // SAFETY: our own process's pseudo handle.
+    unsafe {
+        K32EmptyWorkingSet(GetCurrentProcess());
+    }
+}
+
 /// Empties this process's working set and logs how much it held before and after.
 pub fn give_back(logger: Option<&CompositorLogger>) {
     let before = working_set_kb();

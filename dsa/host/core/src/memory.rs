@@ -384,6 +384,8 @@ pub const IDLE_TRIM_DELAY: Duration = Duration::from_secs(30);
 pub struct IdleTrim {
     delay: Duration,
     open: BTreeSet<i32>,
+    /// No open window is shown: they are all minimized, and the guest dozes.
+    all_hidden: bool,
     idle_since: Option<Instant>,
     trimmed: bool,
 }
@@ -394,6 +396,7 @@ impl IdleTrim {
         IdleTrim {
             delay,
             open: BTreeSet::new(),
+            all_hidden: false,
             idle_since: Some(now),
             trimmed: false,
         }
@@ -426,8 +429,15 @@ impl IdleTrim {
         self.settle(now);
     }
 
+    /// Takes in whether any window is shown. With every window minimized there is no frame to
+    /// show, so the memory behind them is as idle as if they had closed.
+    pub fn windows_shown(&mut self, shown: bool, now: Instant) {
+        self.all_hidden = !shown;
+        self.settle(now);
+    }
+
     fn settle(&mut self, now: Instant) {
-        if !self.open.is_empty() {
+        if !self.open.is_empty() && !self.all_hidden {
             self.idle_since = None;
             self.trimmed = false;
         } else if self.idle_since.is_none() {
