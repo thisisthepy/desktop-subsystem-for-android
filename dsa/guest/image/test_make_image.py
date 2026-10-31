@@ -1232,7 +1232,7 @@ class GuestMemoryTests(unittest.TestCase):
             start = rc.index("on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1")
             trigger = rc[start:rc.index("on property:vendor.dsa.memory.trim=1")]
             self.assertEqual(trigger.count('write /sys/fs/cgroup/memory.reclaim "256M swappiness=200"'), 4)
-            self.assertLess(trigger.rindex("memory.reclaim"), trigger.index("drop_caches"))
+            self.assertLess(trigger.rindex("cgroup/memory.reclaim"), trigger.index("drop_caches"))
             self.assertLess(trigger.index("drop_caches"), trigger.index("compact_memory"))
 
     def test_nfr1_art_keeps_less_free_heap_without_lowering_what_an_app_may_use(self):

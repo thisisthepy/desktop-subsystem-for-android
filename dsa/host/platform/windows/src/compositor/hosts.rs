@@ -23,12 +23,12 @@ use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::frame_buffers::texture_fits;
 use dsa_host_core::compositor::shown_windows::ShownWindows;
-use dsa_host_core::memory::IdleTrim;
 use dsa_host_core::compositor::task_windows::{TaskWindows, WindowChange};
 use dsa_host_core::compositor::window_hosts::{
     accept_window_host, answer_attached, report_from_wire, to_wire, FromHost, HostAction, HostId,
     ToHost, WindowHosts,
 };
+use dsa_host_core::memory::IdleTrim;
 use dsa_host_core::tasks::{AppInfo, TaskEvent, TaskRequest};
 use dsa_protocol::window_host::types::{envelope::Body, Frame, FrameTexture};
 use dsa_protocol::window_host::{decode, encode_body};
