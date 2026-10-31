@@ -1235,6 +1235,18 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertLess(trigger.rindex("memory.reclaim"), trigger.index("drop_caches"))
             self.assertLess(trigger.index("drop_caches"), trigger.index("compact_memory"))
 
+    def test_nfr1_art_keeps_less_free_heap_without_lowering_what_an_app_may_use(self):
+        props = make_image.edit_props("dalvik.vm.heapmaxfree=32m\ndalvik.vm.heapsize=512m\n").splitlines()
+        self.assertIn("dalvik.vm.heaptargetutilization=0.75", props)
+        self.assertIn("dalvik.vm.heapminfree=512k", props)
+        self.assertIn("dalvik.vm.heapmaxfree=8m", props)
+        self.assertNotIn("dalvik.vm.heapmaxfree=32m", props)
+        self.assertIn("dalvik.vm.heapsize=512m", props)
+        self.assertNotIn("ro.config.low_ram", "\n".join(props))
+
+    def test_nfr1_the_secure_element_service_is_removed(self):
+        self.assertTrue(make_image.removed("SYSTEM/app/SecureElement/SecureElement.apk"))
+
     def test_nfr2_a_gradual_trim_reclaims_a_bounded_slice_from_the_coldest_pages_and_reads_memory_pressure(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
             contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
