@@ -27,6 +27,7 @@ pub mod host_api;
 pub mod host_api_conformance;
 pub mod ime;
 pub mod input;
+pub mod input_trace;
 pub mod keys;
 pub mod memory;
 pub mod power;

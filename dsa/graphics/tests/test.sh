@@ -16,6 +16,10 @@ cxx="${CXX:-c++}"
 rm -rf "$out"
 mkdir -p "$out"
 
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/shadow_blocks_test.cpp" -o "$out/shadow_blocks_test"
+"$out/shadow_blocks_test"
+
 # The upstream headers are not ours to warn about.
 upstream=(
     -isystem "$scratch/gfxstream/guest/OpenglSystemCommon"

@@ -3,9 +3,10 @@
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Instant, SystemTime};
 
+use dsa_host_core::input_trace as input_trace_line;
 use dsa_host_core::resize_trace::{self, ResizeTrace};
 
 /// Returns the default log folder for the current user: `%LOCALAPPDATA%\DSA\logs`.
@@ -96,6 +97,46 @@ pub fn note(logger: Option<&CompositorLogger>, message: &str) {
         Some(logger) => logger.log(message),
         None => eprintln!("dsa-wm: {message}"),
     }
+}
+
+/// Where this process's input trace lines go.
+static INPUT_TRACE_LOG: OnceLock<Arc<CompositorLogger>> = OnceLock::new();
+
+/// Sends this process's input trace lines to `logger`.
+pub fn input_trace_to(logger: Option<Arc<CompositorLogger>>) {
+    if let Some(logger) = logger {
+        let _ = INPUT_TRACE_LOG.set(logger);
+    }
+}
+
+/// Whether this process writes the input trace: the environment variable `DSA_INPUT_TRACE` is
+/// set, or the file `%LOCALAPPDATA%\DSA\input-trace` exists when the process first asks.
+pub fn input_trace_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        let file = default_log_dir()
+            .parent()
+            .map(|dsa| dsa.join(input_trace_line::DETAIL_FILE).exists())
+            .unwrap_or(false);
+        let env = std::env::var(input_trace_line::DETAIL_ENV).ok();
+        resize_trace::detail_requested(env.as_deref(), file)
+    })
+}
+
+/// Writes one input trace line, when the trace is on.
+pub fn input_trace(stage: &str, task_id: i32, detail: &str) {
+    if !input_trace_on() {
+        return;
+    }
+    static START: OnceLock<Instant> = OnceLock::new();
+    let line = input_trace_line::line(
+        stage,
+        task_id,
+        detail,
+        START.get_or_init(Instant::now).elapsed(),
+        resize_trace::wall_now(),
+    );
+    note(INPUT_TRACE_LOG.get().map(|logger| &**logger), &line);
 }
 
 /// The resize trace of this process. Its per-stage lines are on when the environment

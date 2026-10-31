@@ -295,6 +295,10 @@ fn log_memory(androids: &dyn UserAndroids, host: &dyn HostMemory, build: &str, s
 
 /// Serves the local API until `stop` is set, then stops every user's VM.
 pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(), String> {
+    // A service, yet every pointer event passes through this process.
+    if let Err(why) = crate::scheduling::raise_this_process() {
+        eprintln!("{why}");
+    }
     serve_with(config, build, stop, register_graphics_service_guids)
 }
 
