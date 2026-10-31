@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use dsa_host_windows::guid::Guid;
 use dsa_host_windows::vm::{
-    hosting_process_name_suffix_supported, runtime_id_from_properties, AndroidVmConfig,
-    HOSTING_PROCESS_NAME_SUFFIX,
+    fine_grained_memory_supported, hosting_process_name_suffix_supported,
+    runtime_id_from_properties, AndroidVmConfig, HOSTING_PROCESS_NAME_SUFFIX,
 };
 use serde_json::Value;
 
@@ -26,6 +26,7 @@ fn config() -> AndroidVmConfig {
         console_pipe: Some(r"\\.\pipe\dsa-console-dsa-android-S-1-5-21-1".into()),
         image_version: Some("17.0.0-1".into()),
         hosting_process_name_suffix: None,
+        fine_grained_memory: false,
     }
 }
 
@@ -54,6 +55,37 @@ fn fr2_the_vm_boots_its_kernel_directly_with_the_android_command_line() {
     assert!(cmdline.ends_with("androidboot.hardware=dsa"), "{cmdline}");
     assert_eq!(doc["SchemaVersion"]["Major"], 2);
     assert_eq!(doc["ShouldTerminateOnLastHandleClosed"], true);
+}
+
+#[test]
+fn nfr2_the_vm_faults_and_frees_memory_in_small_pieces_where_the_build_can() {
+    let mut fine = config();
+    fine.fine_grained_memory = true;
+    let doc = document(&fine);
+    let memory = &doc["VirtualMachine"]["ComputeTopology"]["Memory"];
+    assert_eq!(memory["BackingPageSize"], "Small");
+    assert_eq!(memory["FaultClusterSizeShift"], 4);
+    assert_eq!(memory["DirectMapFaultClusterSizeShift"], 4);
+
+    let doc = document(&config());
+    let memory = &doc["VirtualMachine"]["ComputeTopology"]["Memory"];
+    assert_eq!(memory.get("BackingPageSize"), None);
+    assert_eq!(memory.get("FaultClusterSizeShift"), None);
+    assert_eq!(memory.get("DirectMapFaultClusterSizeShift"), None);
+}
+
+#[test]
+fn nfr2_fine_grained_memory_is_only_used_on_builds_with_the_teardown_fix() {
+    assert!(fine_grained_memory_supported(26100, 0));
+    assert!(fine_grained_memory_supported(26300, 0));
+    assert!(fine_grained_memory_supported(22000, 2360));
+    assert!(fine_grained_memory_supported(22631, 2360));
+    assert!(!fine_grained_memory_supported(22000, 1969));
+    assert!(fine_grained_memory_supported(20348, 1970));
+    assert!(!fine_grained_memory_supported(20348, 1969));
+    assert!(fine_grained_memory_supported(19045, 3393));
+    assert!(!fine_grained_memory_supported(19045, 3392));
+    assert!(!fine_grained_memory_supported(19041, 9999));
 }
 
 #[test]

@@ -516,6 +516,7 @@ impl Compositor {
         let (events_tx, events_rx) = mpsc::channel();
         let (requests_tx, requests_rx) = mpsc::channel();
         let manager_stop = Arc::new(AtomicBool::new(false));
+        let idle = Arc::new(Mutex::new(IdleTrim::new(IDLE_TRIM_DELAY, Instant::now())));
         let setup = ManagerSetup {
             events: events_rx,
             requests: requests_tx,
@@ -525,6 +526,7 @@ impl Compositor {
             logger: self.logger.clone(),
             listing: Arc::clone(&self.windows),
             stop: Arc::clone(&manager_stop),
+            idle: Arc::clone(&idle),
         };
         let manager = thread::Builder::new()
             .name("dsa-wm-manager".into())
@@ -557,7 +559,6 @@ impl Compositor {
                 .ok();
             installed_tx = Some(tx);
         }
-        let idle = Arc::new(Mutex::new(IdleTrim::new(IDLE_TRIM_DELAY, Instant::now())));
         let trim_idle = Arc::clone(&idle);
         let trim_stop = Arc::clone(&manager_stop);
         let trim_logger = self.logger.clone();

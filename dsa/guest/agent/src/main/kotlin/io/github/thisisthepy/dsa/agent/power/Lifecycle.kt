@@ -15,12 +15,18 @@ import io.github.thisisthepy.dsa.control.v1.PowerState
  * The agent tells the host whether the device is in deep idle whenever it changes, so the
  * host knows when the guest is dozing. The host takes it not to be when the agent connects.
  *
+ * Apps the user has closed stay as cached processes until the guest runs short of memory,
+ * which an idle guest never does. So when it goes to sleep with no task open, the agent ends
+ * them; the next start of such an app is a cold one. A minimized task's app is cached too, and
+ * keeps its state, so nothing is ended while any task is open.
+ *
  * Every method runs on the agent's one thread.
  */
 class Lifecycle(
     private val power: DevicePower,
     private val send: (ByteArray) -> Boolean,
     private val log: Log,
+    private val hasOpenTasks: () -> Boolean = { true },
 ) {
     private var screenOn = true
     private var reported = false
@@ -65,6 +71,7 @@ class Lifecycle(
                 power.forceIdle()
                 log.info("putting the device into Doze: done")
             }
+            if (!hasOpenTasks()) attempt("ending cached apps") { power.killCachedApps() }
             log.info("screen off: no task window is shown")
         }
         screenOn = on

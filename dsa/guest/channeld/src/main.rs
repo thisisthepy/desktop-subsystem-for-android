@@ -122,7 +122,7 @@ mod daemon {
     }
 
     /// Hands idle memory back to the host: every so often, decides whether the guest should
-    /// drop its caches now (see `reclaim`), and has init do it. Only init may write the
+    /// reclaim now (see `reclaim`), and has init do it. Only init may write the
     /// kernel's memory controls; the daemon only asks.
     #[cfg(target_os = "android")]
     fn reclaim_idle_memory(router: Arc<Router>) {
@@ -141,7 +141,7 @@ mod daemon {
                     return;
                 }
             };
-            let tasks = router.task_count();
+            let tasks = router.tasks_in_use();
             // Pressure stall information is optional in the kernel: unreadable counts as busy.
             let pressure = std::fs::read_to_string("/proc/pressure/memory")
                 .map(|text| memory_pressure(&text, 5.0))
@@ -154,13 +154,14 @@ mod daemon {
                     RECLAIM_PROPERTY
                 };
                 say!(
-                    "dropping the guest's caches ({reason:?}, {tasks} tasks): {} MiB droppable \
-                     of {} MiB in use",
+                    "reclaiming the guest's memory ({reason:?}, {tasks} tasks in use): {} MiB \
+                     droppable and {} MiB anonymous of {} MiB in use",
                     memory.droppable_kb() / 1024,
+                    memory.anon_pages_kb / 1024,
                     memory.used_kb() / 1024
                 );
                 if let Err(why) = set_property(property, "1") {
-                    say!("could not ask init to drop the caches: {why}");
+                    say!("could not ask init to reclaim: {why}");
                 }
             }
         }

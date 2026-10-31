@@ -16,6 +16,7 @@
 (allow vendor_init dsa_proc_vm_tunable (file (write open getattr)))
 (allow init dsa_proc_vm_tunable (file (read write open getattr)))
 (allow vendor_init proc_drop_caches (file (write open getattr)))
+(allow vendor_init proc_page_cluster (file (write open getattr)))
 
 ; vendor.dsa.memory.reclaim (vendor_property_contexts): set to 1 by dsa-channeld when the
 ; guest should drop its caches, and back to 0 by init once it has. Nothing else may set it.
@@ -26,7 +27,7 @@
 (allow vendor_init dsa_memory_prop (property_service (set)))
 (allow vendor_init dsa_memory_prop (file (read open getattr map)))
 
-; The gradual trim writes memory.reclaim in the unified cgroup hierarchy (labelled cgroup_v2).
+; The reclaims write memory.reclaim in the unified cgroup hierarchy (labelled cgroup_v2).
 (allow vendor_init cgroup_v2 (dir (search getattr)))
 (allow vendor_init cgroup_v2 (file (write open getattr)))
 

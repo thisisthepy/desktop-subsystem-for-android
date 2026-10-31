@@ -394,6 +394,9 @@ unsafe extern "system" fn task_window_proc(
                         task_id: data.task_id,
                         shown: !minimized,
                     });
+                    if minimized {
+                        crate::compositor::trim::empty_working_set();
+                    }
                 }
             }
             if wparam as u32 != SIZE_MINIMIZED {

@@ -153,7 +153,55 @@
 - 호스트 VM 구성은 SCSI 0번에 `system.vhdx`(ReadOnly: true), SCSI 1번에 사용자 데이터 디스크(ReadOnly: false)를 연결하되, 기존 단일 디스크 이미지 호환성을 유지한다.
 - 실기기 부팅 검증 결과를 확인한 뒤 가설 상태를 검증 완료로 전환한다.
 
-## R4. 창 크기를 끄는 동안 프레임을 기다려도 되는가 (FR-4)
+## R4. 게스트 메모리가 호스트로 돌아오지 않는 원인 (NFR-1, NFR-2)
+
+코드와 이미지 설정, WSL 소스를 대조해 원인을 찾았다. 하드웨어에서 측정하지 않았다. 아래 절감량은 모두 추정치다.
+
+### 확인한 자료
+
+- WSL `master`의 `src/windows/service/exe/WslCoreVm.cpp` 1520-1543행과 `hcs_schema.h`
+- WSL 커널 `linux-msft-wsl-6.18.54.1`의 `mm/vmscan.c` (`memory.reclaim`의 `swappiness=` 인자, 7738행)
+- AOSP `android16-release`의 `libprocessgroup/profiles/cgroups.json` (메모리 컨트롤러는 cgroup v2), `system/sepolicy`의 `genfs_contexts` (`proc_page_cluster`), `ActivityManagerService.killAllBackgroundProcesses` (`CACHED_APP_MIN_ADJ` 이상만 끝낸다)
+- `config-wsl`: `INIT_ON_FREE`, `PAGE_POISONING`은 꺼져 있어 부팅 때 전체 메모리를 건드리는 경로는 없다. THP는 `madvise`다. `LRU_GEN`은 꺼져 있다.
+- 사용 PC의 `dsa-wm.log`: 창을 닫은 뒤 작업 집합을 비우는 동작은 실제로 일어난다 (224 MiB에서 0 MiB).
+
+### 찾은 원인
+
+1. HCS 문서에 `BackingPageSize`, `FaultClusterSizeShift`, `DirectMapFaultClusterSizeShift`가 없었다. WSL은 빌드 조건을 확인하고 이 셋을 설정하며, 메모 그대로 "vmmem을 낮추기 위한" 설정이다. DSA는 보고 단위만 128 KiB로 낮췄다. #136의 vmmem 2444 MB와 #145의 게스트 사용량 1.4-1.7 GiB 사이의 차이(약 700-1000 MB, 측정 시점은 다르다)가 이 원인과 맞는다.
+2. 게스트는 메모리가 남으므로 커널이 스스로 스왑하지 않는다. zram이 켜져 있어도 비어 있고, 쉬는 프로세스의 익명 메모리는 그대로 남는다. 유휴 회수는 `drop_caches`뿐이었고, 캐시가 적으면 아예 건너뛰었다.
+3. 유휴 회수는 데몬 시작 60초 뒤에 한 번뿐이어서 부팅 도중에 쓰이고, 그 뒤에는 작업이 열리기 전까지 다시 돌지 않았다.
+4. 창이 모두 최소화된 `Dozing`에서는 데몬도 창 관리자도 작업이 열려 있다고 보고 아무것도 회수하지 않았다.
+5. 사용자가 닫은 앱은 캐시 프로세스로 남는다. lmkd는 메모리 압박이 있어야 끝내는데, 유휴 게스트에는 압박이 없다.
+6. ART의 힙 여유가 4 GiB 폰 값이다.
+7. `memory.reclaim`을 `apps`, `system` 하위 그룹에 썼다. 이 파일의 소유자는 libprocessgroup이 정하므로 vendor_init이 열 수 있는지 코드만으로 확실하지 않다. 루트 그룹은 항상 존재하고 모든 프로세스를 포함한다.
+
+### 결정과 추정 절감량
+
+| 변경 | 추정 절감 | 근거 |
+| --- | --- | --- |
+| 작은 백킹 페이지와 64 KiB 폴트 | 500-1000 MiB | 위 vmmem과 게스트 사용량의 차이 |
+| 유휴 시 cold 페이지를 zram으로 | 300-600 MiB | 익명 700-1000 MiB, LZ4 압축률 약 3배로 가정 |
+| 닫힌 앱 종료 | 앱 하나당 30-70 MiB | zram으로 옮긴 뒤 남는 몫과 커널 자원 |
+| ART 힙 여유 축소 | 40-100 MiB | 프로세스 약 25개, 각 1-4 MiB |
+| 최소화된 창 작업 집합 비우기 | 창 하나당 약 40 MiB, 창 관리자 100-200 MiB | 앱 창 53 MB, 로그의 224 MiB |
+| SecureElement 제거 | 약 15 MiB | 상주 프로세스 하나 |
+
+`ro.config.low_ram`은 켜지 않는다. 멀티 윈도우가 꺼지는데, 모든 작업이 자유형 창이기 때문이다.
+
+### 대가
+
+- 작은 백킹 페이지는 게스트의 TLB 비용을 늘릴 수 있다. WSL과 같은 선택이다.
+- 앱을 닫고 나면 다음 실행은 콜드 스타트다. `Dozing`에서 깨어날 때 zram 해제 시간이 더해진다. NFR-4에 영향이 있는지 측정해야 한다.
+- 힙 여유가 줄어 할당이 많은 앱의 GC가 잦아진다.
+
+### 코드만으로 확인하지 못한 것
+
+- 위 절감량 전부. 특히 원인 1의 실제 크기. HCS의 기본 폴트 단위는 공개 문서에 없다.
+- 실제 이미지의 `cgroups.json`과 `/sys/fs/cgroup/memory.reclaim`이 존재하는지. Android 17 빌드는 대상 파일을 내려받지 않아 보지 못했다.
+- vendor_init이 그 파일을 쓸 수 있는지. 실패하면 init 로그에 남고 조용히 넘어간다.
+- 재현 시 게스트 측 그래픽 버퍼: vkms dumb 버퍼는 shmem이고 매핑된 동안 스왑되지 않는다. `dsa memory`의 공유 메모리 줄로 크기를 본다.
+
+## R5. 창 크기를 끄는 동안 프레임을 기다려도 되는가 (FR-4)
 
 **기준과 방법.** 소유자 PC의 앱 창 로그(`%LOCALAPPDATA%\DSA\logs\dsa-app-window.log`, 2026-10-26부터 2026-10-29까지, #146 이전 빌드)에서 `stage=app.summary`의 `waited=` 값을 모아 보았다. 태스크 창이 크기를 받은 때부터 그 크기의 첫 프레임이 보일 때까지의 시간이다. 이 줄은 태스크마다 500 ms에 한 번만 남고, 그때는 창이 프레임을 기다리지 않고 앞서 나갔으므로, 드래그의 일부만 담은 표본이다. Intel Arc, Android 16 게스트, Clock과 Settings에서 나온 값이다.
 
