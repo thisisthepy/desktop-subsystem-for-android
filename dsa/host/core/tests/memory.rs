@@ -269,6 +269,7 @@ fn nfr1_the_report_dsa_memory_prints_names_every_part() {
         "page cache 900 MiB",
         "swap 100 of 2048 MiB used; zram holds 100 MiB in 30 MiB",
         "650 MiB PSS in all",
+        "kernel and everything else",
         "system",
     ] {
         assert!(text.contains(part), "{part:?} missing from:\n{text}");

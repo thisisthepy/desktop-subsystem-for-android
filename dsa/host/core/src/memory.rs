@@ -112,6 +112,14 @@ impl GuestMemory {
         self.mem_total_kb.saturating_sub(self.mem_free_kb)
     }
 
+    /// The rest of the memory in use: kernel stacks, page tables, unreclaimable slab, zram's
+    /// own store, and buffers pinned by drivers.
+    pub fn other_kb(&self) -> u64 {
+        self.used_kb().saturating_sub(
+            self.cached_kb + self.buffers_kb + self.anon_pages_kb + self.slab_reclaimable_kb,
+        )
+    }
+
     /// The swap in use.
     pub fn swap_used_kb(&self) -> u64 {
         self.swap_total_kb.saturating_sub(self.swap_free_kb)
@@ -157,6 +165,14 @@ impl MemorySnapshot {
             .iter()
             .filter(|p| p.role == role)
             .fold((0, 0), |(kb, n), p| (kb + p.working_set_kb, n + 1))
+    }
+
+    /// How much more the VM holds on the host than the guest says it uses, in KiB: free guest
+    /// memory the host has not got back. `None` until the guest has reported or without a VM.
+    pub fn vm_beyond_guest_kb(&self) -> Option<u64> {
+        let guest = self.guest.as_ref()?;
+        let (vm, count) = self.role_total_kb(HostRole::Vm);
+        (count > 0).then(|| vm.saturating_sub(guest.memory.used_kb()))
     }
 
     /// One line for the service's log: the host's total and its parts, then what the guest
@@ -241,6 +257,14 @@ impl fmt::Display for MemorySnapshot {
             mib(g.slab_reclaimable_kb)
         )?;
         writeln!(f, "  app memory (anonymous) {} MiB", mib(g.anon_pages_kb))?;
+        writeln!(f, "  kernel and everything else {} MiB", mib(g.other_kb()))?;
+        if let Some(beyond) = self.vm_beyond_guest_kb() {
+            writeln!(
+                f,
+                "  the VM holds {} MiB beyond what Android uses (free memory not yet returned)",
+                mib(beyond)
+            )?;
+        }
         writeln!(
             f,
             "  swap {} of {} MiB used; zram holds {} MiB in {} MiB",
