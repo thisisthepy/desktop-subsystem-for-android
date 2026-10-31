@@ -148,23 +148,67 @@ bool drawnAtSize(const Rect& bounds, const std::vector<LayerFill>& layers) {
     return false;
 }
 
+uint64_t drawnGeometry(const Rect& bounds, const std::vector<LayerFill>& layers) {
+    // FNV-1a.
+    uint64_t hash = 14695981039346656037ull;
+    const auto mix = [&hash](int64_t value) {
+        hash ^= static_cast<uint64_t>(value);
+        hash *= 1099511628211ull;
+    };
+    for (const LayerFill& layer : layers) {
+        if (!layer.drawn) {
+            continue;
+        }
+        mix(layer.frame.left - bounds.left);
+        mix(layer.frame.top - bounds.top);
+        if (layer.bufferWidth > 0 && layer.bufferHeight > 0) {
+            // Not the layer's size: clipping a surface to a task that shrank changes that, and
+            // the app has done nothing. A new layout draws into a buffer of its own size.
+            mix(layer.bufferWidth);
+            mix(layer.bufferHeight);
+        } else {
+            mix(layer.frame.width());
+            mix(layer.frame.height());
+        }
+    }
+    return hash;
+}
+
 ResizeGate::Decision ResizeGate::decide(int32_t task, int64_t postedWidth, int64_t postedHeight,
-                                        const Rect& bounds, bool drawn, int64_t nowMs) {
-    const bool firstFrame = postedWidth <= 0 || postedHeight <= 0;
-    const bool sameSize = postedWidth == bounds.width() && postedHeight == bounds.height();
-    if (firstFrame || sameSize || drawn) {
-        mHeld.erase(task);
+                                        const Rect& bounds, bool drawn, int64_t nowMs,
+                                        uint64_t geometry) {
+    auto found = mTasks.find(task);
+    const bool firstFrame = postedWidth <= 0 || postedHeight <= 0 || found == mTasks.end();
+    if (firstFrame || drawn || !found->second.filled) {
+        // A first frame has nothing to fall back on, a frame that fills is what is waited for,
+        // and a task that was not filling has no full frame to keep.
+        mTasks[task] = TaskState{drawn, geometry, std::nullopt};
         return Decision::Post;
     }
-    auto it = mHeld.find(task);
-    if (it == mHeld.end() || it->second.width != bounds.width() ||
-        it->second.height != bounds.height()) {
-        // A new size starts a new wait: the app cannot have drawn at it yet.
-        mHeld[task] = Held{bounds.width(), bounds.height(), nowMs, false};
-        return Decision::Hold;
+
+    TaskState& state = found->second;
+    if (!state.held || state.held->width != bounds.width() ||
+        state.held->height != bounds.height()) {
+        // A new size starts a new wait: whatever the app did, it was not for this size.
+        state.held = Held{bounds.width(),
+                          bounds.height(),
+                          nowMs,
+                          nowMs,
+                          geometry != state.geometry,
+                          geometry,
+                          false};
     }
-    Held& held = it->second;
-    if (!held.logged && nowMs - held.sinceMs >= kSlowMs) {
+    Held& held = *state.held;
+    if (geometry != held.geometry) {
+        held.geometry = geometry;
+        held.responded = true;
+        held.stableSinceMs = nowMs;
+    } else if (held.responded && nowMs - held.stableSinceMs >= kSettleMs) {
+        // The app has answered and stayed that way: this is its layout, not a stale frame.
+        state = TaskState{false, geometry, std::nullopt};
+        return Decision::PostSettled;
+    }
+    if (!held.responded && !held.logged && nowMs - held.sinceMs >= kSlowMs) {
         held.logged = true;
         return Decision::HoldSlow;
     }
@@ -173,11 +217,16 @@ ResizeGate::Decision ResizeGate::decide(int32_t task, int64_t postedWidth, int64
 
 std::optional<int64_t> ResizeGate::nextDeadline() const {
     std::optional<int64_t> first;
-    for (const auto& [_, held] : mHeld) {
-        if (held.logged) {
+    for (const auto& [_, state] : mTasks) {
+        if (!state.held) {
             continue;
         }
-        const int64_t deadline = held.sinceMs + kSlowMs;
+        const Held& held = *state.held;
+        if (!held.responded && held.logged) {
+            continue;
+        }
+        const int64_t deadline =
+            held.responded ? held.stableSinceMs + kSettleMs : held.sinceMs + kSlowMs;
         if (!first || deadline < *first) {
             first = deadline;
         }

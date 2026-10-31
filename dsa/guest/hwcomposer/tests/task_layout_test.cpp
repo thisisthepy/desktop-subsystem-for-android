@@ -45,48 +45,132 @@ TEST(fr4_an_app_has_drawn_at_its_size_when_a_drawn_layer_fills_the_task) {
     EXPECT_TRUE(!drawnAtSize(bounds, {}));
 }
 
-TEST(fr4_a_resized_task_is_held_until_its_app_draws_at_the_new_size) {
+namespace {
+
+constexpr uint64_t kOldLayout = 7;
+constexpr uint64_t kNewLayout = 8;
+const Rect kOldSize{0, 0, 400, 300};
+const Rect kGrown{0, 0, 600, 500};
+
+// A task whose first frame, at 400x300, filled it.
+ResizeGate filledAt400x300() {
     ResizeGate gate;
-    const Rect grown{0, 0, 600, 500};
-    // The first frame, and frames of the size the host has, always go.
-    EXPECT_TRUE(gate.decide(1, 0, 0, grown, false, 0) == ResizeGate::Decision::Post);
-    EXPECT_TRUE(gate.decide(1, 600, 500, grown, false, 0) == ResizeGate::Decision::Post);
-    // Grown to 600x500 from 400x300: held while the app has not drawn at it.
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 1000) == ResizeGate::Decision::Hold);
-    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(1000 + ResizeGate::kSlowMs));
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 1200) == ResizeGate::Decision::Hold);
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, true, 1250) == ResizeGate::Decision::Post);
+    gate.decide(1, 0, 0, kOldSize, true, 0, kOldLayout);
+    return gate;
+}
+
+}  // namespace
+
+TEST(fr4_a_first_frame_goes_as_it_is) {
+    ResizeGate gate;
+    // Nothing to stretch yet: a dialog's first frame, not filling its task, goes.
+    EXPECT_TRUE(gate.decide(1, 0, 0, kGrown, false, 0, kOldLayout) == ResizeGate::Decision::Post);
+}
+
+TEST(fr4_a_filling_task_is_held_until_its_app_draws_at_the_new_size) {
+    ResizeGate gate = filledAt400x300();
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, 1000, kOldLayout) ==
+                ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, 1200, kOldLayout) ==
+                ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, true, 1250, kNewLayout) ==
+                ResizeGate::Decision::Post);
     EXPECT_TRUE(!gate.nextDeadline());
 }
 
-TEST(fr4_a_task_with_a_frame_never_shows_one_that_does_not_fill_its_new_size) {
-    ResizeGate gate;
-    const Rect grown{0, 0, 600, 500};
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 0) == ResizeGate::Decision::Hold);
-    // However long the app takes, an hour here, its frame does not go.
-    for (int64_t now = 100; now < 3600000; now += 1000) {
-        EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, now) != ResizeGate::Decision::Post);
+TEST(fr4_a_filling_app_that_has_not_responded_stays_stretched_past_3_s) {
+    ResizeGate gate = filledAt400x300();
+    // An hour with its old layers unchanged: its frame, the old picture beside black, never goes.
+    for (int64_t now = 0; now < 3600000; now += 500) {
+        const ResizeGate::Decision decision =
+            gate.decide(1, 400, 300, kGrown, false, now, kOldLayout);
+        EXPECT_TRUE(decision == ResizeGate::Decision::Hold ||
+                    decision == ResizeGate::Decision::HoldSlow);
     }
     // And the moment it fills the size, it does.
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, true, 3600000) == ResizeGate::Decision::Post);
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, true, 3600000, kNewLayout) ==
+                ResizeGate::Decision::Post);
 }
 
-TEST(fr4_a_task_with_no_earlier_frame_may_show_what_it_has) {
+TEST(fr4_a_filling_app_that_lays_out_with_margins_is_shown_after_settling) {
+    ResizeGate gate = filledAt400x300();
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, 1000, kOldLayout) ==
+                ResizeGate::Decision::Hold);
+    // It responds, without filling the task: not at once, in case more is on its way.
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, 1100, kNewLayout) ==
+                ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(1100 + ResizeGate::kSettleMs));
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, 1100 + ResizeGate::kSettleMs - 1,
+                            kNewLayout) == ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, 1100 + ResizeGate::kSettleMs, kNewLayout) ==
+                ResizeGate::Decision::PostSettled);
+    EXPECT_TRUE(!gate.nextDeadline());
+}
+
+TEST(fr4_a_layout_still_changing_has_not_settled) {
+    ResizeGate gate = filledAt400x300();
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, 0, kNewLayout) ==
+                ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, 400, kNewLayout + 1) ==
+                ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, 800, kNewLayout + 1) ==
+                ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, 900, kNewLayout + 1) ==
+                ResizeGate::Decision::PostSettled);
+}
+
+TEST(fr4_a_dialog_style_task_keeps_updating_after_a_resize) {
     ResizeGate gate;
-    const Rect size{0, 0, 600, 500};
-    // Nothing to stretch yet: a dialog's first frame, not filling its task, goes.
-    EXPECT_TRUE(gate.decide(1, 0, 0, size, false, 0) == ResizeGate::Decision::Post);
+    // Its first frame did not fill the task, so there is no full frame to keep.
+    gate.decide(1, 0, 0, kOldSize, false, 0, kOldLayout);
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, 10, kOldLayout) ==
+                ResizeGate::Decision::Post);
+    EXPECT_TRUE(gate.decide(1, 600, 500, kGrown, false, 20, kNewLayout) ==
+                ResizeGate::Decision::Post);
+    EXPECT_TRUE(!gate.nextDeadline());
+}
+
+TEST(fr4_a_task_that_settled_on_margins_keeps_updating_and_can_fill_again) {
+    ResizeGate gate = filledAt400x300();
+    gate.decide(1, 400, 300, kGrown, false, 0, kNewLayout);
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, ResizeGate::kSettleMs, kNewLayout) ==
+                ResizeGate::Decision::PostSettled);
+    EXPECT_TRUE(gate.decide(1, 600, 500, kGrown, false, 1000, kNewLayout) ==
+                ResizeGate::Decision::Post);
+    // It fills the task again, so the next incomplete frame is held.
+    EXPECT_TRUE(gate.decide(1, 600, 500, kGrown, true, 1100, kNewLayout) ==
+                ResizeGate::Decision::Post);
+    EXPECT_TRUE(gate.decide(1, 600, 500, kGrown, false, 1200, kNewLayout + 1) ==
+                ResizeGate::Decision::Hold);
+}
+
+TEST(fr4_an_incomplete_frame_of_the_same_size_does_not_replace_a_full_one_until_it_settles) {
+    ResizeGate gate = filledAt400x300();
+    // An app recreated at the end of a drag: its surface is gone, a small layer remains.
+    EXPECT_TRUE(gate.decide(1, 400, 300, kOldSize, false, 1000, kNewLayout) ==
+                ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.decide(1, 400, 300, kOldSize, false, 1200, kNewLayout) ==
+                ResizeGate::Decision::Hold);
+    // Its full frame arrives before it settles.
+    EXPECT_TRUE(gate.decide(1, 400, 300, kOldSize, true, 1300, kOldLayout) ==
+                ResizeGate::Decision::Post);
+    // One that stays that way is its layout now.
+    gate.decide(1, 400, 300, kOldSize, false, 2000, kNewLayout);
+    EXPECT_TRUE(gate.decide(1, 400, 300, kOldSize, false, 2000 + ResizeGate::kSettleMs,
+                            kNewLayout) == ResizeGate::Decision::PostSettled);
 }
 
 TEST(fr4_a_slow_app_is_logged_once_rather_than_shown) {
-    ResizeGate gate;
-    const Rect grown{0, 0, 600, 500};
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 0) == ResizeGate::Decision::Hold);
-    EXPECT_TRUE(gate.decide(2, 300, 300, grown, false, 100) == ResizeGate::Decision::Hold);
+    ResizeGate gate = filledAt400x300();
+    gate.decide(2, 0, 0, kOldSize, true, 0, kOldLayout);
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, 0, kOldLayout) ==
+                ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.decide(2, 400, 300, kGrown, false, 100, kOldLayout) ==
+                ResizeGate::Decision::Hold);
     EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(ResizeGate::kSlowMs));
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, ResizeGate::kSlowMs) ==
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, ResizeGate::kSlowMs, kOldLayout) ==
                 ResizeGate::Decision::HoldSlow);
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, ResizeGate::kSlowMs + 1) ==
+    EXPECT_TRUE(gate.decide(1, 400, 300, kGrown, false, ResizeGate::kSlowMs + 1, kOldLayout) ==
                 ResizeGate::Decision::Hold);
     // The next look is for the task not logged yet; with none left, nothing is asked for.
     EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(100 + ResizeGate::kSlowMs));
@@ -95,15 +179,45 @@ TEST(fr4_a_slow_app_is_logged_once_rather_than_shown) {
 }
 
 TEST(fr4_each_new_size_of_a_drag_starts_its_wait_anew) {
-    ResizeGate gate;
-    // A drag that keeps moving ahead of a slow app is not called slow, however long it takes.
+    ResizeGate gate = filledAt400x300();
+    // A drag that keeps moving ahead of an app that answers each size late: its answers are
+    // never taken for a settled layout, however long the drag takes.
     int64_t now = 0;
-    for (int32_t step = 0; step < 100; ++step, now += 100) {
+    for (int32_t step = 0; step < 100; ++step, now += 300) {
         const Rect size{0, 0, 600 + step, 500};
-        EXPECT_TRUE(gate.decide(1, 400, 300, size, false, now) == ResizeGate::Decision::Hold);
+        EXPECT_TRUE(gate.decide(1, 400, 300, size, false, now, kNewLayout + step) ==
+                    ResizeGate::Decision::Hold);
     }
     EXPECT_TRUE(now > ResizeGate::kSlowMs);
-    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(now - 100 + ResizeGate::kSlowMs));
+}
+
+TEST(fr4_clipping_or_moving_an_old_surface_is_not_the_app_responding) {
+    LayerFill surface;
+    surface.frame = Rect{100, 100, 900, 700};
+    surface.drawn = true;
+    surface.bufferWidth = 800;
+    surface.bufferHeight = 600;
+    LayerFill colour;
+    colour.frame = Rect{100, 100, 900, 700};
+    const uint64_t before = drawnGeometry(Rect{100, 100, 900, 700}, {surface, colour});
+
+    // The task shrank and SurfaceFlinger clips the surface; a solid colour changes nothing.
+    surface.frame = Rect{100, 100, 500, 400};
+    colour.frame = Rect{100, 100, 500, 400};
+    EXPECT_TRUE(drawnGeometry(Rect{100, 100, 500, 400}, {surface, colour}) == before);
+
+    // The task moved, its surface with it.
+    surface.frame = Rect{300, 300, 700, 600};
+    EXPECT_TRUE(drawnGeometry(Rect{300, 300, 700, 600}, {surface}) == before);
+
+    // The app drew at another size, or moved its window inside the task.
+    surface.bufferWidth = 400;
+    surface.bufferHeight = 300;
+    EXPECT_TRUE(drawnGeometry(Rect{300, 300, 700, 600}, {surface}) != before);
+    LayerFill moved = surface;
+    moved.frame = Rect{320, 300, 720, 600};
+    EXPECT_TRUE(drawnGeometry(Rect{300, 300, 700, 600}, {moved}) !=
+                drawnGeometry(Rect{300, 300, 700, 600}, {surface}));
 }
 
 TEST(fr4_an_old_surface_clipped_to_a_shrunken_task_is_not_drawn_at_its_size) {

@@ -60,11 +60,17 @@ beside it, while the host is already stretching the last frame over the resized 
 So the hwcomposer holds a resized task's frames until one of the task's drawn layers fills
 its new bounds (`ResizeGate` in `src/task_layout.cpp`), and only then resizes the task's
 host display and sends the frame. An old surface that SurfaceFlinger clipped to a task that
-shrank fills the bounds too, but shows part of a larger buffer, and does not count. There is no
-time limit: the window keeps its last frame, stretched, for as long as the app has not filled
-the new size, because anything else would show empty space. An app that has not after 2 s at
-one size is logged once; the hwcomposer asks SurfaceFlinger for a frame at that moment in case
-nothing else changes. Only a task's first frame goes as it is.
+shrank fills the bounds too, but shows part of a larger buffer, and does not count.
+
+Only what was filling is held. If the last frame sent filled the task, the window keeps it,
+stretched, with no time limit while the app has not responded, and an app silent for 2 s at one
+size is logged once. Once the app has changed its drawn layers and they have been stable for
+500 ms, the frame goes even if it does not fill the task, because that is the app's layout at
+this size (a dialog, margins, letterboxing). If the last frame sent did not fill the task, nothing
+is held, so such a window keeps updating. The same rule covers a frame of unchanged size, such as
+an app's incomplete frame while it is recreated. A task's first frame goes as it is. The
+hwcomposer asks SurfaceFlinger for a frame when a layout settles or a slow app is due to be
+logged, in case nothing else changes.
 
 A layer no task contains is never sent: the wallpaper, display-wide backgrounds and dim
 layers, and anything that straddles a window's edge. Sending it would put pixels that

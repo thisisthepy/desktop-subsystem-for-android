@@ -279,14 +279,16 @@ void TaskComposer::compose(Frame& frame) {
             }
             const ResizeGate::Decision decision = mResizeGate.decide(
                 task.task, output.onHost ? output.width : 0, output.onHost ? output.height : 0,
-                task.bounds, drawnAtSize(task.bounds, fills), now);
+                task.bounds, drawnAtSize(task.bounds, fills), now,
+                drawnGeometry(task.bounds, fills));
             if (decision == ResizeGate::Decision::HoldSlow) {
                 HWC_LOGW("task %d has not drawn at %lldx%lld after %lld ms; its window keeps its "
                          "last frame stretched until it does",
                          task.task, static_cast<long long>(width), static_cast<long long>(height),
                          static_cast<long long>(ResizeGate::kSlowMs));
             }
-            if (decision != ResizeGate::Decision::Post) {
+            if (decision == ResizeGate::Decision::Hold ||
+                decision == ResizeGate::Decision::HoldSlow) {
                 logTrace(mTrace.held(task.task, width, height, traceMonoMs(), traceWallMs()));
                 continue;
             }
@@ -408,7 +410,8 @@ void TaskComposer::compose(Frame& frame) {
                                   traceWallMs());
                 }
                 output.next ^= 1;
-                logTrace(mTrace.posted(task.task, width, height, false, traceMonoMs(),
+                logTrace(mTrace.posted(task.task, width, height,
+                                       decision == ResizeGate::Decision::PostSettled, traceMonoMs(),
                                        traceWallMs()));
             }
         }
