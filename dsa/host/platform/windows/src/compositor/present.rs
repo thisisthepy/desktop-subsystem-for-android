@@ -593,7 +593,8 @@ impl WindowPresenter {
         let region = content_region(content, texture.size);
         let started = Instant::now();
         let stage = state.hold.as_ref().is_some_and(|hold| hold.view == region);
-        let shown = self.present_locked(&mut state, &texture.texture, texture.size, region, stage)?;
+        let shown =
+            self.present_locked(&mut state, &texture.texture, texture.size, region, stage)?;
         state.sync.frame_arrived(region, Instant::now());
         if let Some(hold) = state.hold.as_mut() {
             hold.staged = stage;
