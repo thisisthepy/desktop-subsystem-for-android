@@ -1,6 +1,7 @@
 //! A compositor that starts before the user's Android does: its task windows open once
 //! Android runs and reports a task. The service, its named pipe and the user's session are
-//! real; only the VM and the guest's agent are fakes.
+//! real; the VM, the guest's agent and the app window programs are fakes. A task's window
+//! opens by starting its app's window program, so that start is what the test looks for.
 #![cfg(windows)]
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -13,6 +14,8 @@ use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{PerUser, UserAndroid};
 use dsa_host_core::host_api_conformance::RunningService;
 use dsa_host_core::session::{GuestLauncher, Session, SessionConfig, SessionState};
+use dsa_host_core::tasks::AppInfo;
+use dsa_host_windows::compositor::hosts::HostLauncher;
 use dsa_host_windows::compositor::{Compositor, CompositorConfig};
 use dsa_host_windows::pipe::{NamedPipeConnector, NamedPipeListener};
 use dsa_protocol::auth::BootSecret;
@@ -53,6 +56,17 @@ impl GuestLauncher for Guest {
     }
 }
 
+/// Remembers which apps' window programs the window manager asked to start.
+#[derive(Clone, Default)]
+struct RecordingHosts(Arc<Mutex<Vec<String>>>);
+
+impl HostLauncher for RecordingHosts {
+    fn start(&mut self, package: &str, _app: Option<&AppInfo>) -> Result<(), String> {
+        self.0.lock().unwrap().push(package.to_string());
+        Ok(())
+    }
+}
+
 fn wait_for<T>(what: &str, mut check: impl FnMut() -> Option<T>) -> T {
     let deadline = Instant::now() + WAIT;
     loop {
@@ -88,6 +102,7 @@ fn fr3_a_compositor_started_before_android_opens_a_window_once_android_reports_a
         SessionConfig {
             connect_timeout: WAIT,
             stop_timeout: WAIT,
+            ..Default::default()
         },
     ));
     let name = fresh_name();
@@ -104,6 +119,8 @@ fn fr3_a_compositor_started_before_android_opens_a_window_once_android_reports_a
         Err(TransportError::Unsupported("no VM in this test".into()))
     };
     let pipe_name = name.clone();
+    let hosts = RecordingHosts::default();
+    let (host_listener, _host_connector) = memory::pair();
     let compositor = Compositor::with_custom_transport(
         CompositorConfig::default(),
         Arc::new(FakeRenderer::new()),
@@ -114,8 +131,11 @@ fn fr3_a_compositor_started_before_android_opens_a_window_once_android_reports_a
         }),
         Box::new(move |_| unbound()),
         Box::new(move |_| unbound()),
+    )
+    .with_window_hosts(
+        Box::new(move || Ok(Box::new(host_listener) as Box<dyn Listener>)),
+        Box::new(hosts.clone()),
     );
-    let windows = compositor.open_windows();
     let stop = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&stop);
     let running = thread::spawn(move || compositor.run(flag));
@@ -141,16 +161,16 @@ fn fr3_a_compositor_started_before_android_opens_a_window_once_android_reports_a
                 package_name: "com.android.settings".into(),
                 label: "Settings".into(),
                 focused: true,
+                ..Default::default()
             })),
         }))
         .unwrap();
 
-    let open = wait_for("the task's window", || {
-        let open = windows.lock().unwrap().clone();
-        (!open.is_empty()).then_some(open)
+    let started = wait_for("the task's window program", || {
+        let started = hosts.0.lock().unwrap().clone();
+        (!started.is_empty()).then_some(started)
     });
-    assert_eq!(open.len(), 1);
-    assert_eq!(open[0].task_id, 7);
+    assert_eq!(started, ["com.android.settings"]);
 
     stop.store(true, Ordering::SeqCst);
     running.join().unwrap();
