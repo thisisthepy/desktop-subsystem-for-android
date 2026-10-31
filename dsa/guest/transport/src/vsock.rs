@@ -139,6 +139,10 @@ impl StreamSocket for VsockSocket {
         // SAFETY: shutting down an owned descriptor.
         unsafe { libc::shutdown(self.fd(), libc::SHUT_RDWR) };
     }
+
+    fn try_clone(&self) -> io::Result<VsockSocket> {
+        Ok(VsockSocket(self.0.try_clone()?))
+    }
 }
 
 /// Listens for vsock connections.

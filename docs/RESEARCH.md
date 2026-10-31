@@ -259,3 +259,34 @@ and runs into IBT, which the WSL kernel enables.
 
 Android userspace in a WSL container, sharing WSL's VM and memory management instead of
 starting a second VM, for any project that wants it.
+
+## 터치 지연의 구간별 원인 (FR-5)
+
+**확인 대상**: develop 87e802d, gfxstream d047a572, mesa3d 224e91e3, 커널 `linux-msft-wsl-6.18.54.1`.
+
+**방법**: 터치 메시지부터 화면까지 코드를 구간별로 읽었다. 이 조사에서는 빌드도 실행도 하지 않았으므로 아래에 시간을 적은 수치는 측정값이 아니다. 실측은 아래 절차로 한다.
+
+**찾은 원인**
+
+- 게스트 Vulkan 드라이버가 제출마다 앱의 host-visible 메모리 전부를 hvsocket으로 보냈다(패치 0003의 `flushShadowedMemory`, `VK_WHOLE_SIZE`). 앱이 쓰는 메모리에 비례해 프레임마다 전송량이 늘어나므로, 가장 유력한 원인이다. 이제 4 KiB 블록의 해시를 비교해 바뀐 블록만 보낸다. 해시는 블록마다 8바이트를 쓴다.
+- 에이전트는 포인터 주입을 작업 조회나 앱 실행 같은 binder 호출과 같은 스레드에서 처리했다. 이제 전용 스레드에서 처리하고, 밀린 이동 이벤트는 최신 것으로 합친다.
+- 게스트 커널이 `PREEMPT_NONE`이었다(`config-wsl`). 실시간 스레드도 커널 코드가 스스로 양보할 때까지 기다린다. 이제 `CONFIG_PREEMPT=y`이다.
+- 모든 로그(`-b all *:V`)가 에뮬레이션 직렬 포트로 나갔다. 바이트마다 VM 밖으로 나가므로 프로세서 시간을 빼앗는다. 이제 `main,system,crash` 버퍼의 정보 수준 이상만 보낸다.
+- `dsa-channeld`의 게스트에서 호스트 방향 프레임은 수신 대기(20 ms)가 끝나야 나갔다. 이제 방향마다 스레드를 둔다. 터치 이벤트 자체는 이 경로가 아니고, 새 창의 `TaskUpdated`와 `TaskFrames`가 이 경로다.
+- 창이 없는 `dsa-wm`과 서비스는 Windows에서 백그라운드 작업으로 취급될 수 있고, 호스트 스레드에 우선순위 설정이 없었다. 이제 효율 스케줄링을 끄고 입력과 프레임 스레드의 우선순위를 올린다.
+- 터치 창에 `TWF_WANTPALM`이 없어 손바닥 판별 지연이 생길 수 있었고, 길게 누르기 판별도 켜져 있었다. 둘 다 끈다.
+- 스왑체인 버퍼가 2개라 DWM이 보여 주는 버퍼에 복사가 걸리면 다음 수직 동기까지 기다릴 수 있었다. 이제 3개다.
+
+**원인이 아니라고 본 것**: 입력 스트림(`stream_input`, `Session::send_direct`)은 폴링과 응답 대기가 없다. hvsocket과 파이프의 대기는 이벤트로 깨어난다. 주입은 비동기 모드다. 표시 복사는 표시마다 최신 프레임만 남긴다.
+
+**코드로 확인하지 못한 것**: 구간별 실제 시간, 앱별 host-visible 메모리 크기, Hyper-V 직렬 포트의 바이트당 비용, `TWF_WANTPALM`이 `WM_POINTER`에 미치는 효과, 유휴 뒤 회수된 페이지를 다시 읽는 비용(`memory.reclaim`, zram).
+
+**측정 절차**
+
+1. 호스트 설정의 `kernel_cmdline`에 `androidboot.hardware.dsa_input_trace=1`을 더하고, `%LOCALAPPDATA%\DSA\input-trace` 파일을 만든 뒤 DSA를 다시 시작한다.
+2. 앱 창을 20번 누른다.
+3. `Select-String input-trace "$env:LOCALAPPDATA\DSA\logs\*.log", "C:\ProgramData\DSA\logs\android-*.log"`로 모아 `utc` 순으로 합친다.
+
+구간은 `app.pointer`, `agent.inject`, `driver.flush`, `hwc.frame`, `wm.frame`, `app.present` 순이다. 호스트와 게스트의 시계 차이는 합친 간격에 포함된다.
+
+**결정**: 위 원인을 고친다(PR 참조). 수치 예산은 실측 뒤에 정한다.

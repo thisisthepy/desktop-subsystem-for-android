@@ -26,7 +26,7 @@ fun interface ChannelLocator {
  * The daemon may start after the agent, and init restarts it when it exits. Until its
  * service is found the client looks again every [retryMillis]; once found it subscribes and
  * calls [onConnected]. When the daemon dies it starts looking again. Frames for the agent
- * reach [onFrame] on the scheduler's thread.
+ * reach [onFrame] on the scheduler's thread, unless [intercept] takes them first.
  *
  * Every method runs on the scheduler's thread.
  */
@@ -37,6 +37,11 @@ class ChannelClient(
     private val onFrame: (ByteArray) -> Unit,
     private val onConnected: () -> Unit,
     private val retryMillis: Long = 1000,
+    /**
+     * Sees every frame first, on the thread the daemon delivers it on, so a frame that must
+     * not wait behind the scheduler's work need not. True when it took the frame.
+     */
+    private val intercept: (ByteArray) -> Boolean = { false },
 ) {
     private var endpoint: ChannelEndpoint? = null
     private var generation = 0
@@ -77,7 +82,9 @@ class ChannelClient(
         val mine = ++generation
         try {
             found.onGone { scheduler.post { lost(mine) } }
-            found.subscribe { frame -> scheduler.post { if (mine == generation) onFrame(frame) } }
+            found.subscribe { frame ->
+                if (!intercept(frame)) scheduler.post { if (mine == generation) onFrame(frame) }
+            }
         } catch (e: Exception) {
             log.warn("subscribing to the control daemon failed; trying again", e)
             scheduler.postDelayed(retryMillis) { connect() }

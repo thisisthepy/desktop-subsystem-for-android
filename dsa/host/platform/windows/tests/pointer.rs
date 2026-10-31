@@ -149,3 +149,43 @@ fn fr5_pressure_runs_from_0_to_1() {
     assert_eq!(pressure(1024), 1.0);
     assert_eq!(pressure(5000), 1.0);
 }
+
+#[test]
+fn fr5_windows_hands_a_windows_contacts_over_without_holding_them_back() {
+    use dsa_host_windows::app_window::pointer::{
+        deliver_contacts_at_once, tablet_service_property, TABLET_SERVICE_FLAGS,
+    };
+    use windows_sys::Win32::UI::Input::Touch::{IsTouchWindow, TWF_WANTPALM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, GetPropW, WS_POPUP,
+    };
+
+    let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+    // SAFETY: a hidden window of this thread, destroyed below.
+    unsafe {
+        let hwnd = CreateWindowExW(
+            0,
+            class.as_ptr(),
+            std::ptr::null(),
+            WS_POPUP,
+            0,
+            0,
+            10,
+            10,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        );
+        assert!(!hwnd.is_null());
+        deliver_contacts_at_once(hwnd);
+        let mut flags = 0;
+        assert_ne!(IsTouchWindow(hwnd, &mut flags), 0);
+        assert_ne!(flags & TWF_WANTPALM, 0);
+        assert_eq!(
+            GetPropW(hwnd, tablet_service_property().as_ptr()) as usize,
+            TABLET_SERVICE_FLAGS
+        );
+        DestroyWindow(hwnd);
+    }
+}

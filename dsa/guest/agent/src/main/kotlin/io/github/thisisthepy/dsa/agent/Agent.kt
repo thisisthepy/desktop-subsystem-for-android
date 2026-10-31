@@ -8,6 +8,7 @@ import io.github.thisisthepy.dsa.agent.input.InputInjector
 import io.github.thisisthepy.dsa.agent.input.InputMethodSetup
 import io.github.thisisthepy.dsa.agent.input.KeyInput
 import io.github.thisisthepy.dsa.agent.input.PointerInput
+import io.github.thisisthepy.dsa.agent.input.PointerQueue
 import io.github.thisisthepy.dsa.agent.input.TextInput
 import io.github.thisisthepy.dsa.agent.input.TextKeys
 import io.github.thisisthepy.dsa.agent.power.DevicePower
@@ -20,8 +21,10 @@ import io.github.thisisthepy.dsa.agent.requests.TaskActions
 import io.github.thisisthepy.dsa.agent.tasks.AppInfoSource
 import io.github.thisisthepy.dsa.agent.tasks.InstalledAppReporter
 import io.github.thisisthepy.dsa.agent.tasks.LauncherApps
+import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.tasks.TaskReporter
 import io.github.thisisthepy.dsa.agent.tasks.TaskSource
+import io.github.thisisthepy.dsa.agent.trace.InputTrace
 import io.github.thisisthepy.dsa.agent.trace.ResizeTrace
 import io.github.thisisthepy.dsa.agent.windowing.FreeformSetup
 import io.github.thisisthepy.dsa.agent.windowing.TaskArranger
@@ -33,9 +36,12 @@ import io.github.thisisthepy.dsa.control.v1.Envelope
  * them to the host over the control daemon, and acts on the host's requests: launching an
  * app, ending a task, and giving a task the size and density of its host window.
  *
- * Everything runs on the scheduler's one thread. Task changes are coalesced: however many
- * arrive before the agent gets to them, it reads the tasks once. Pointer input from the
- * host is injected into its task as it arrives, and reads nothing; a key first gives its
+ * Everything but pointer input runs on the scheduler's one thread. Task changes are
+ * coalesced: however many arrive before the agent gets to them, it reads the tasks once.
+ * Pointer input from the host goes to [inputScheduler]'s thread as it arrives, past whatever
+ * the scheduler's thread is doing, because reading tasks and starting apps are binder calls
+ * into a framework that may be busy for hundreds of milliseconds, and a touch must not wait
+ * for them. A key first gives its
  * task the input focus if the task does not hold it. Text from the host's input method goes
  * to the focused editor through the agent's own input method, which the agent makes the
  * guest's at boot, and the editor's cursor goes back to the host. The apps a launcher lists
@@ -62,6 +68,8 @@ class Agent(
     power: DevicePower = DevicePower.NONE,
     private val launcherApps: LauncherApps = LauncherApps.NONE,
     memory: MemorySource? = null,
+    private val inputScheduler: Scheduler = scheduler,
+    private val inputTrace: InputTrace = InputTrace(log),
 ) {
     private val channel = ChannelClient(
         locator = locator,
@@ -69,10 +77,24 @@ class Agent(
         log = log,
         onFrame = ::onFrame,
         onConnected = ::onConnected,
+        intercept = ::pointerFrame,
     )
     private val reporter = TaskReporter(ownPackage, apps) { frame -> channel.send(frame) }
     private val requests = HostRequests(ownPackage, actions, reporter::isReported)
-    private val pointer = PointerInput(injector, reporter::reportedBounds, log)
+
+    /** Where the host was last told each task is, for the input thread to read. */
+    @Volatile
+    private var taskBounds: Map<Int, TaskBounds> = emptyMap()
+    private val pointer = PointerInput(injector, { taskId -> taskBounds[taskId] }, log)
+    private val pointerQueue = PointerQueue(inputScheduler) { event, queuedNanos ->
+        val started = System.nanoTime()
+        try {
+            pointer.handle(event)
+        } catch (e: Exception) {
+            log.warn("injecting pointer input failed", e)
+        }
+        inputTrace.injected(event, queuedNanos, System.nanoTime() - started)
+    }
     private val keys = KeyInput(injector, reporter::isReported, reporter::reportedFocused, actions::focusTask, log)
     private val text = TextInput(
         editor = editor,
@@ -200,7 +222,20 @@ class Agent(
         if (result !is RequestResult.NotForTheAgent) requestRefresh()
     }
 
-    /** Injects the frame if it is pointer, key or text input. False for any other frame. */
+    /** Queues the frame for the input thread if it is pointer input. Called on a binder thread. */
+    private fun pointerFrame(frame: ByteArray): Boolean {
+        val envelope = try {
+            Envelope.parseFrom(frame)
+        } catch (e: InvalidProtocolBufferException) {
+            // The scheduler's thread reports it.
+            return false
+        }
+        if (envelope.bodyCase != Envelope.BodyCase.POINTER_EVENT) return false
+        pointerQueue.add(envelope.pointerEvent)
+        return true
+    }
+
+    /** Injects the frame if it is key or text input. False for any other frame. */
     private fun input(frame: ByteArray): Boolean {
         val envelope = try {
             Envelope.parseFrom(frame)
@@ -209,11 +244,6 @@ class Agent(
         }
         if (lifecycle.handle(envelope)) return true
         when (envelope.bodyCase) {
-            Envelope.BodyCase.POINTER_EVENT -> try {
-                pointer.handle(envelope.pointerEvent)
-            } catch (e: Exception) {
-                log.warn("injecting pointer input failed", e)
-            }
             Envelope.BodyCase.KEY_EVENT -> try {
                 keys.handle(envelope.keyEvent)
             } catch (e: Exception) {
@@ -290,7 +320,12 @@ class Agent(
             },
             arranger.display,
         )
-        pointer.retainTasks(reporter.reported)
+        val reported = reporter.reported
+        val told = reported.mapNotNull { taskId -> reporter.reportedBounds(taskId)?.let { taskId to it } }.toMap()
+        if (told != taskBounds) {
+            taskBounds = told
+            inputScheduler.post { pointer.retainTasks(reported) }
+        }
         keys.retainTasks(reporter.reported)
         text.retainTasks(reporter.reported)
     }

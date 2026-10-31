@@ -86,6 +86,8 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
 - Android's log (`logcat`) goes to the serial console, which the host keeps as the VM's
   console log (`C:\ProgramData\DSA\logs\android-*.log` on Windows). Cuttlefish writes it to a
   virtio console, which Hyper-V does not have, and a user build has no adb to read it with.
+  Only informational messages and above go there, because each byte written to the emulated
+  port traps out of the VM and takes time from vsync and input.
 - Every APK, APEX and verified boot image is re-signed. The published build is signed with
   AOSP's test keys, whose private halves are public.
 

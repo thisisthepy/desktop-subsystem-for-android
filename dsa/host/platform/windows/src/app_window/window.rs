@@ -558,6 +558,7 @@ unsafe extern "system" fn task_window_proc(
             0
         }
         WM_NCDESTROY => {
+            super::pointer::forget_contacts(hwnd);
             let data = SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) as *mut WindowData;
             if !data.is_null() {
                 drop(Box::from_raw(data));
@@ -771,6 +772,7 @@ impl Ui {
             ));
             return;
         }
+        super::pointer::deliver_contacts_at_once(hwnd);
         let client = apply_size(hwnd, size);
         let presenter = match &self.setup.gpu {
             Some(gpu) => match WindowPresenter::new(

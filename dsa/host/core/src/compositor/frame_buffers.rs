@@ -28,6 +28,13 @@ pub enum SwapchainChange {
     Keep,
 }
 
+/// How many buffers a window's swapchain has. With two, the buffer a frame is copied into is
+/// the one the desktop compositor is still showing, and the copy waits for its next vertical
+/// blank; the renderer waits for the copy. The third is always free.
+pub fn swapchain_buffers() -> u32 {
+    3
+}
+
 /// What a swapchain whose buffers are `current` pixels (`None` when there is none) needs to
 /// show frames from a texture of `texture` pixels. The buffers follow the texture, which is
 /// the largest a frame can be, never a frame's own size, so a window resize changes nothing
@@ -65,6 +72,11 @@ pub fn visual_scale(buffers: (u32, u32), view: (u32, u32)) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fr5_a_frame_never_waits_for_the_buffer_the_desktop_is_showing() {
+        assert!(swapchain_buffers() >= 3);
+    }
 
     #[test]
     fn fr4_a_frame_smaller_than_its_buffers_is_shown_at_the_window_size_not_stretched() {

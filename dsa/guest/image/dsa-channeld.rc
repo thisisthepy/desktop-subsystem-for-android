@@ -5,6 +5,9 @@ service dsa_channeld /vendor/bin/dsa-channeld
     user system
     group system
     stdio_to_kmsg
+    # Every pointer event passes through here on its way to the agent; it must not wait
+    # behind apps. Only the framework's display and input threads go ahead of it.
+    priority -10
 
 # Handing idle memory back to the host. dsa-channeld sets this when no task is in use for a
 # while, or the guest holds mostly cache. A guest with memory to spare is never short, so the
