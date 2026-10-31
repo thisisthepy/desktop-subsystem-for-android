@@ -6,21 +6,30 @@ service dsa_channeld /vendor/bin/dsa-channeld
     group system
     stdio_to_kmsg
 
-# Handing idle memory back to the host. dsa-channeld sets this when the guest has had no app
-# task for a while, or holds mostly cache. Dropping the clean page cache and the reclaimable
-# kernel caches, then compacting, leaves whole 2 MiB blocks free, which free page reporting
-# hands back to Hyper-V. Nothing is lost: what was dropped is read again from disk if needed.
-on property:vendor.dsa.memory.reclaim=1
+# Handing idle memory back to the host. dsa-channeld sets this when no task is in use for a
+# while, or the guest holds mostly cache. A guest with memory to spare is never short, so the
+# kernel would never swap by itself: first it is asked to move cold pages to zram, a quarter at
+# a time because init does nothing else during a command. Writing to the root cgroup covers
+# every process, and "swappiness=200" prefers anonymous pages. Then the clean page cache and
+# the reclaimable kernel caches are dropped, and compaction leaves whole blocks free, which free
+# page reporting hands back to Hyper-V. Nothing is lost: what left is read back when needed.
+# It waits for boot to finish, so a boot still under way does not swap out what it is using;
+# a request made before then stays set, and runs when boot completes.
+on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
+    write /sys/fs/cgroup/memory.reclaim "256M swappiness=200"
+    write /sys/fs/cgroup/memory.reclaim "256M swappiness=200"
+    write /sys/fs/cgroup/memory.reclaim "256M swappiness=200"
+    write /sys/fs/cgroup/memory.reclaim "256M swappiness=200"
     write /proc/sys/vm/drop_caches 3
     write /proc/sys/vm/compact_memory 1
     setprop vendor.dsa.memory.reclaim 0
 
 # The gradual trim while apps are open: dsa-channeld sets this every so often when cold page
 # cache has piled up and the guest is not under memory pressure. The kernel is asked for 64 MiB
-# in all, 48 MiB from the apps' cgroup and 16 MiB from the system's, and takes it from the
-# coldest pages first, so the hot pages of running apps and system_server stay. A cgroup that
-# is missing or reclaims less only makes the write fail; nothing else depends on it.
+# from the root cgroup, which every process's memory is charged under, and takes it from the
+# coldest pages first, so the hot pages of running apps and system_server stay. The root's file
+# is root's, unlike those of the groups libprocessgroup makes, so init's vendor scripts can
+# always open it.
 on property:vendor.dsa.memory.trim=1
-    write /sys/fs/cgroup/apps/memory.reclaim 48M
-    write /sys/fs/cgroup/system/memory.reclaim 16M
+    write /sys/fs/cgroup/memory.reclaim 64M
     setprop vendor.dsa.memory.trim 0

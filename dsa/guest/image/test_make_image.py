@@ -1159,6 +1159,11 @@ class GuestMemoryTests(unittest.TestCase):
             rc = archive.read("VENDOR/etc/init/dsa-memory.rc").decode()
             self.assertIn("swapon_all /vendor/etc/fstab.dsa", rc)
             self.assertIn("write /proc/sys/vm/swappiness 100", rc)
+            self.assertIn("write /proc/sys/vm/page-cluster 0", rc)
+            self.assertIn(
+                "(allow vendor_init proc_page_cluster (file (write open getattr)))",
+                archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode(),
+            )
             self.assertIn(
                 "vendor/etc/init/dsa-memory.rc 0 0 644 capabilities=0x0",
                 archive.read("META/vendor_filesystem_config.txt").decode(),
@@ -1221,14 +1226,22 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertIn("write /proc/sys/vm/compact_memory 1", trigger)
             self.assertIn("setprop vendor.dsa.memory.reclaim 0", trigger)
 
+    def test_nfr1_an_idle_reclaim_swaps_cold_pages_out_before_dropping_caches_and_waits_for_boot(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
+            rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
+            start = rc.index("on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1")
+            trigger = rc[start:rc.index("on property:vendor.dsa.memory.trim=1")]
+            self.assertEqual(trigger.count('write /sys/fs/cgroup/memory.reclaim "256M swappiness=200"'), 4)
+            self.assertLess(trigger.rindex("memory.reclaim"), trigger.index("drop_caches"))
+            self.assertLess(trigger.index("drop_caches"), trigger.index("compact_memory"))
+
     def test_nfr2_a_gradual_trim_reclaims_a_bounded_slice_from_the_coldest_pages_and_reads_memory_pressure(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
             contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
             self.assertIn("vendor.dsa.memory.trim u:object_r:dsa_memory_prop:s0 exact bool", contexts)
             rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
             trigger = rc[rc.index("on property:vendor.dsa.memory.trim=1"):]
-            self.assertIn("write /sys/fs/cgroup/apps/memory.reclaim 48M", trigger)
-            self.assertIn("write /sys/fs/cgroup/system/memory.reclaim 16M", trigger)
+            self.assertIn("write /sys/fs/cgroup/memory.reclaim 64M", trigger)
             self.assertNotIn("drop_caches", trigger)
             self.assertNotIn("compact_memory", trigger)
             self.assertIn("(allow vendor_init cgroup_v2 (file (write open getattr)))", archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode())

@@ -7,7 +7,7 @@ use std::time::Duration;
 use dsa_guest_channeld::reclaim::{MemInfo, Reason, ReclaimPolicy, Reclaimer, RECLAIM_PROPERTY};
 use dsa_guest_channeld::router::{Peer, Router};
 use dsa_protocol::control::envelope::Body;
-use dsa_protocol::control::{Envelope, TaskRemoved, TaskUpdated};
+use dsa_protocol::control::{Envelope, ScreenState, TaskRemoved, TaskUpdated};
 
 const MIB: u64 = 1024;
 
@@ -20,6 +20,7 @@ fn memory(free: u64, cached: u64) -> MemInfo {
         cached_kb: cached * MIB,
         shmem_kb: 0,
         slab_reclaimable_kb: 0,
+        anon_pages_kb: 0,
     }
 }
 
@@ -32,12 +33,15 @@ fn nfr2_meminfo_is_read_in_kib_and_shared_memory_is_not_droppable() {
     let info = MemInfo::parse(
         "MemTotal:        4015356 kB\nMemFree:          812444 kB\nBuffers:           10240 kB\n\
          Cached:          1503112 kB\nShmem:             20480 kB\nSReclaimable:      80000 kB\n\
+         AnonPages:        700000 kB\n\
          HugePages_Total:       0\nnonsense\n",
     );
     assert_eq!(info.mem_total_kb, 4015356);
     assert_eq!(info.mem_free_kb, 812444);
     assert_eq!(info.droppable_kb(), 1503112 - 20480 + 10240 + 80000);
     assert_eq!(info.used_kb(), 4015356 - 812444);
+    assert_eq!(info.anon_pages_kb, 700000);
+    assert_eq!(info.reclaimable_kb(), info.droppable_kb() + 700000);
 }
 
 #[test]
@@ -97,6 +101,73 @@ fn nfr2_a_little_cache_is_not_worth_dropping() {
     let tiny = memory(4000, 64);
     reclaimer.decide(secs(0), 0, &tiny);
     assert_eq!(reclaimer.decide(secs(120), 0, &tiny), None);
+}
+
+/// An idle guest whose cache is gone, holding `anon` MiB of anonymous memory.
+fn anon_only(anon: u64) -> MemInfo {
+    MemInfo {
+        anon_pages_kb: anon * MIB,
+        ..memory(3000, 0)
+    }
+}
+
+#[test]
+fn nfr1_anonymous_memory_alone_is_worth_an_idle_reclaim_but_not_a_busy_one() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    reclaimer.decide(secs(0), 0, &anon_only(700));
+    assert_eq!(
+        reclaimer.decide(secs(60), 0, &anon_only(700)),
+        Some(Reason::Idle)
+    );
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    assert_eq!(reclaimer.decide(secs(0), 1, &anon_only(700)), None);
+}
+
+#[test]
+fn nfr1_an_idle_guest_reclaims_again_only_when_memory_has_grown_back() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    reclaimer.decide(secs(0), 0, &anon_only(900));
+    assert_eq!(
+        reclaimer.decide(secs(60), 0, &anon_only(900)),
+        Some(Reason::Idle)
+    );
+    // What the reclaim left is the floor.
+    assert_eq!(reclaimer.decide(secs(90), 0, &anon_only(300)), None);
+    // Grown back, but not yet time.
+    assert_eq!(reclaimer.decide(secs(120), 0, &anon_only(500)), None);
+    // Time, but it stayed small.
+    assert_eq!(reclaimer.decide(secs(360), 0, &anon_only(350)), None);
+    // Time, and grown back: this is also how a reclaim made during boot gets its second go.
+    assert_eq!(
+        reclaimer.decide(secs(390), 0, &anon_only(500)),
+        Some(Reason::Idle)
+    );
+}
+
+#[test]
+fn nfr1_minimized_tasks_do_not_hold_the_idle_reclaim_back() {
+    let (to_host, _host) = mpsc::channel();
+    let router = Router::new(to_host);
+    router
+        .from_guest(
+            Peer(10),
+            frame(Body::TaskUpdated(TaskUpdated {
+                task_id: 1,
+                package_name: "org.example.app".to_string(),
+                ..Default::default()
+            })),
+        )
+        .unwrap();
+    assert_eq!(router.tasks_in_use(), 1);
+    router.from_host(&frame(Body::ScreenState(ScreenState { on: false })));
+    assert_eq!(router.tasks_in_use(), 0);
+    assert_eq!(router.task_count(), 1);
+    router.from_host(&frame(Body::ScreenState(ScreenState { on: true })));
+    assert_eq!(router.tasks_in_use(), 1);
+    // A host that connects again takes the screen to be on, and says so if it is not.
+    router.from_host(&frame(Body::ScreenState(ScreenState { on: false })));
+    router.host_connected();
+    assert_eq!(router.tasks_in_use(), 1);
 }
 
 #[test]
