@@ -4,6 +4,7 @@
 #include "task_layout.h"
 
 #include <algorithm>
+#include <cmath>
 #include <set>
 
 namespace dsa::hwc {
@@ -119,26 +120,74 @@ Layout assignLayersToTasks(const std::vector<LayerPlacement>& layers,
     return layout;
 }
 
+namespace {
+
+// A layer that shows part of a larger buffer pixel for pixel: an old surface clipped to a task
+// that shrank. An app's own surface always shows all of a buffer of its window's size, and a
+// surface an app scales shows a crop of another size than its frame.
+bool clippedOldSurface(const LayerFill& layer) {
+    if (layer.bufferWidth <= 0 || layer.bufferHeight <= 0) {
+        return false;
+    }
+    const bool largerBuffer =
+        layer.bufferWidth > layer.frame.width() || layer.bufferHeight > layer.frame.height();
+    const bool oneToOne =
+        std::abs(static_cast<double>(layer.cropWidth) - static_cast<double>(layer.frame.width())) <= 1 &&
+        std::abs(static_cast<double>(layer.cropHeight) - static_cast<double>(layer.frame.height())) <= 1;
+    return largerBuffer && oneToOne;
+}
+
+}  // namespace
+
 bool drawnAtSize(const Rect& bounds, const std::vector<LayerFill>& layers) {
     for (const LayerFill& layer : layers) {
-        if (layer.drawn && layer.frame == bounds) {
+        if (layer.drawn && layer.frame == bounds && !clippedOldSurface(layer)) {
             return true;
         }
     }
     return false;
 }
 
+uint64_t drawnGeometry(const std::vector<LayerFill>& layers) {
+    // FNV-1a over the frames of the drawn layers.
+    uint64_t hash = 14695981039346656037ull;
+    const auto mix = [&hash](int32_t value) {
+        hash ^= static_cast<uint32_t>(value);
+        hash *= 1099511628211ull;
+    };
+    for (const LayerFill& layer : layers) {
+        if (layer.drawn) {
+            mix(layer.frame.left);
+            mix(layer.frame.top);
+            mix(layer.frame.right);
+            mix(layer.frame.bottom);
+        }
+    }
+    return hash;
+}
+
 ResizeGate::Decision ResizeGate::decide(int32_t task, int64_t postedWidth, int64_t postedHeight,
-                                        const Rect& bounds, bool drawn, int64_t nowMs) {
+                                        const Rect& bounds, bool drawn, int64_t nowMs,
+                                        uint64_t geometry) {
     const bool firstFrame = postedWidth <= 0 || postedHeight <= 0;
     const bool sameSize = postedWidth == bounds.width() && postedHeight == bounds.height();
     if (firstFrame || sameSize || drawn) {
-        mHeldSince.erase(task);
+        mHeld.erase(task);
         return Decision::Post;
     }
-    const int64_t since = mHeldSince.emplace(task, nowMs).first->second;
-    if (nowMs - since >= kHoldMs) {
-        mHeldSince.erase(task);
+    auto it = mHeld.find(task);
+    if (it == mHeld.end() || it->second.width != bounds.width() ||
+        it->second.height != bounds.height()) {
+        // A new size starts a new wait: the app cannot have drawn at it yet.
+        mHeld[task] = Held{bounds.width(), bounds.height(), nowMs, geometry, false};
+        return Decision::Hold;
+    }
+    Held& held = it->second;
+    if (geometry != held.geometry) {
+        held.reacted = true;
+    }
+    if (nowMs >= held.deadline()) {
+        mHeld.erase(it);
         return Decision::PostLate;
     }
     return Decision::Hold;
@@ -146,8 +195,8 @@ ResizeGate::Decision ResizeGate::decide(int32_t task, int64_t postedWidth, int64
 
 std::optional<int64_t> ResizeGate::nextDeadline() const {
     std::optional<int64_t> first;
-    for (const auto& [_, since] : mHeldSince) {
-        const int64_t deadline = since + kHoldMs;
+    for (const auto& [_, held] : mHeld) {
+        const int64_t deadline = held.deadline();
         if (!first || deadline < *first) {
             first = deadline;
         }

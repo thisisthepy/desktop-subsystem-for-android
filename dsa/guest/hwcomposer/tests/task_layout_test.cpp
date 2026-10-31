@@ -53,23 +53,102 @@ TEST(fr4_a_resized_task_is_held_until_its_app_draws_at_the_new_size) {
     EXPECT_TRUE(gate.decide(1, 600, 500, grown, false, 0) == ResizeGate::Decision::Post);
     // Grown to 600x500 from 400x300: held while the app has not drawn at it.
     EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 1000) == ResizeGate::Decision::Hold);
-    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(1000 + ResizeGate::kHoldMs));
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(1000 + ResizeGate::kStuckMs));
     EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 1200) == ResizeGate::Decision::Hold);
     EXPECT_TRUE(gate.decide(1, 400, 300, grown, true, 1250) == ResizeGate::Decision::Post);
     EXPECT_TRUE(!gate.nextDeadline());
 }
 
-TEST(fr4_a_resized_task_whose_app_does_not_draw_is_sent_in_time) {
+TEST(fr4_a_resized_task_whose_app_does_not_draw_is_sent_in_the_end) {
     ResizeGate gate;
     const Rect grown{0, 0, 600, 500};
     EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 0) == ResizeGate::Decision::Hold);
     EXPECT_TRUE(gate.decide(2, 300, 300, grown, false, 100) == ResizeGate::Decision::Hold);
-    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(ResizeGate::kHoldMs));
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, ResizeGate::kHoldMs) ==
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(ResizeGate::kStuckMs));
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, ResizeGate::kStuckMs) ==
                 ResizeGate::Decision::PostLate);
-    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(100 + ResizeGate::kHoldMs));
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(100 + ResizeGate::kStuckMs));
     gate.forget(2);
     EXPECT_TRUE(!gate.nextDeadline());
+}
+
+TEST(fr4_a_busy_app_is_not_shown_beside_black_while_it_can_still_draw) {
+    ResizeGate gate;
+    const Rect grown{0, 0, 600, 500};
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 0, 7) == ResizeGate::Decision::Hold);
+    // Well past the time an app that reacted gets, its old surface has not moved.
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, ResizeGate::kHoldMs * 2, 7) ==
+                ResizeGate::Decision::Hold);
+}
+
+TEST(fr4_an_app_that_reacts_without_filling_its_task_is_sent_sooner) {
+    ResizeGate gate;
+    const Rect grown{0, 0, 600, 500};
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 0, 7) == ResizeGate::Decision::Hold);
+    // A dialog that moved to the middle of its new window: it will never fill it.
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 10, 8) == ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(ResizeGate::kHoldMs));
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, ResizeGate::kHoldMs, 8) ==
+                ResizeGate::Decision::PostLate);
+}
+
+TEST(fr4_each_new_size_of_a_drag_starts_its_wait_anew) {
+    ResizeGate gate;
+    // A drag that keeps moving ahead of a slow app: no frame goes on the way, however long
+    // the drag takes, because each would show the old picture beside black.
+    int64_t now = 0;
+    for (int32_t step = 0; step < 100; ++step, now += 100) {
+        const Rect size{0, 0, 600 + step, 500};
+        EXPECT_TRUE(gate.decide(1, 400, 300, size, false, now, 7) == ResizeGate::Decision::Hold);
+    }
+    EXPECT_TRUE(now > ResizeGate::kStuckMs);
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(now - 100 + ResizeGate::kStuckMs));
+}
+
+TEST(fr4_an_old_surface_clipped_to_a_shrunken_task_is_not_drawn_at_its_size) {
+    const Rect shrunk{100, 100, 500, 400};
+    // SurfaceFlinger clips the 800x600 surface to the task: its frame fills the bounds, and it
+    // shows the top left 400x300 of the buffer, pixel for pixel.
+    LayerFill clipped;
+    clipped.frame = shrunk;
+    clipped.drawn = true;
+    clipped.bufferWidth = 800;
+    clipped.bufferHeight = 600;
+    clipped.cropWidth = 400;
+    clipped.cropHeight = 300;
+    EXPECT_TRUE(!drawnAtSize(shrunk, {clipped}));
+
+    // Once the app has drawn at the size, all of a buffer of that size.
+    LayerFill redrawn = clipped;
+    redrawn.bufferWidth = 400;
+    redrawn.bufferHeight = 300;
+    EXPECT_TRUE(drawnAtSize(shrunk, {redrawn}));
+
+    // A surface an app scales to its window (a game at a fixed size) has drawn at it.
+    LayerFill scaled = clipped;
+    scaled.cropWidth = 800;
+    scaled.cropHeight = 600;
+    EXPECT_TRUE(drawnAtSize(shrunk, {scaled}));
+
+    // A layer whose buffer is not known counts by its frame.
+    LayerFill unknown;
+    unknown.frame = shrunk;
+    unknown.drawn = true;
+    EXPECT_TRUE(drawnAtSize(shrunk, {unknown}));
+}
+
+TEST(fr4_the_geometry_follows_only_the_drawn_layers) {
+    LayerFill surface;
+    surface.frame = Rect{0, 0, 400, 300};
+    surface.drawn = true;
+    LayerFill colour;
+    colour.frame = Rect{0, 0, 600, 500};
+
+    const uint64_t before = drawnGeometry({surface, colour});
+    colour.frame = Rect{0, 0, 700, 500};
+    EXPECT_TRUE(drawnGeometry({surface, colour}) == before);
+    surface.frame = Rect{100, 100, 500, 400};
+    EXPECT_TRUE(drawnGeometry({surface, colour}) != before);
 }
 
 TEST(fr3_a_layer_inside_one_task_goes_to_that_task) {
