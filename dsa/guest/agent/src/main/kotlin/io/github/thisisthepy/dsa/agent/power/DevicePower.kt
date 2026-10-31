@@ -26,6 +26,9 @@ interface DevicePower {
     /** Lets the device leave the idle state it was forced into. */
     fun unforceIdle()
 
+    /** Ends the cached processes of apps, which start again when something needs them. */
+    fun killCachedApps()
+
     /** Whether the device is in Doze's deep idle state now. */
     fun isDeviceIdle(): Boolean
 
@@ -45,6 +48,7 @@ interface DevicePower {
             override fun screenOn() = Unit
             override fun forceIdle() = Unit
             override fun unforceIdle() = Unit
+            override fun killCachedApps() = Unit
             override fun isDeviceIdle() = false
             override fun listenIdle(onChange: () -> Unit) = Unit
             override fun setBattery(battery: Battery) = Unit
