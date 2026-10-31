@@ -86,7 +86,7 @@ class Agent(
         send = { frame -> channel.send(frame) },
         log = log,
     )
-    private val lifecycle = Lifecycle(power, { frame -> channel.send(frame) }, log)
+    private val lifecycle = Lifecycle(power, { frame -> channel.send(frame) }, log, { reporter.reported.isNotEmpty() })
     private val memoryReporter = memory?.let {
         MemoryReporter(it, scheduler, log, isConnected = { channel.connected }, send = { frame -> channel.send(frame) })
     }
