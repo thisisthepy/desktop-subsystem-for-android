@@ -321,9 +321,9 @@ class Agent(
             arranger.display,
         )
         val reported = reporter.reported
-        val bounds = reported.mapNotNull { taskId -> reporter.reportedBounds(taskId)?.let { taskId to it } }.toMap()
-        if (bounds != taskBounds) {
-            taskBounds = bounds
+        val told = reported.mapNotNull { taskId -> reporter.reportedBounds(taskId)?.let { taskId to it } }.toMap()
+        if (told != taskBounds) {
+            taskBounds = told
             inputScheduler.post { pointer.retainTasks(reported) }
         }
         keys.retainTasks(reporter.reported)
