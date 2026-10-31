@@ -189,9 +189,10 @@ pub struct WindowDragging {
     pub dragging: bool,
 }
 /// Window manager to window host: the task's size in Android, which its frames and its pointer
-/// input are measured in, and the largest client area its window may have (what Android can
-/// draw; 0 when unknown). Sent when either changes, which a resize the window asked for does
-/// without the window itself changing.
+/// input are measured in, the largest client area its window may have (what Android can draw;
+/// 0 when unknown), and the smallest (what Android gives the task; 0 when unknown). Sent when
+/// any of them changes, which a resize the window asked for does without the window itself
+/// changing.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct TaskSize {
     #[prost(int32, tag = "1")]
@@ -204,6 +205,10 @@ pub struct TaskSize {
     pub max_width: u32,
     #[prost(uint32, tag = "5")]
     pub max_height: u32,
+    #[prost(uint32, tag = "6")]
+    pub min_width: u32,
+    #[prost(uint32, tag = "7")]
+    pub min_height: u32,
 }
 /// Window manager to window host: where the cursor of the editor focused in the task is, in the
 /// window's client pixels, so the window puts the input method's windows beside it.

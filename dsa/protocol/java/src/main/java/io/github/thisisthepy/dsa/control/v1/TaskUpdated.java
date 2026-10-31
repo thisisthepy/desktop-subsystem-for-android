@@ -405,6 +405,76 @@ public  final class TaskUpdated extends
     maxHeight_ = 0;
   }
 
+  public static final int MIN_WIDTH_FIELD_NUMBER = 9;
+  private int minWidth_;
+  /**
+   * <pre>
+   * The smallest size the guest gives the task, in guest display pixels: what its activity
+   * declares, else the framework's default. A window smaller than this could only show the
+   * task's frames stretched. 0 when unknown.
+   * </pre>
+   *
+   * <code>uint32 min_width = 9;</code>
+   * @return The minWidth.
+   */
+  @java.lang.Override
+  public int getMinWidth() {
+    return minWidth_;
+  }
+  /**
+   * <pre>
+   * The smallest size the guest gives the task, in guest display pixels: what its activity
+   * declares, else the framework's default. A window smaller than this could only show the
+   * task's frames stretched. 0 when unknown.
+   * </pre>
+   *
+   * <code>uint32 min_width = 9;</code>
+   * @param value The minWidth to set.
+   */
+  private void setMinWidth(int value) {
+    
+    minWidth_ = value;
+  }
+  /**
+   * <pre>
+   * The smallest size the guest gives the task, in guest display pixels: what its activity
+   * declares, else the framework's default. A window smaller than this could only show the
+   * task's frames stretched. 0 when unknown.
+   * </pre>
+   *
+   * <code>uint32 min_width = 9;</code>
+   */
+  private void clearMinWidth() {
+    
+    minWidth_ = 0;
+  }
+
+  public static final int MIN_HEIGHT_FIELD_NUMBER = 10;
+  private int minHeight_;
+  /**
+   * <code>uint32 min_height = 10;</code>
+   * @return The minHeight.
+   */
+  @java.lang.Override
+  public int getMinHeight() {
+    return minHeight_;
+  }
+  /**
+   * <code>uint32 min_height = 10;</code>
+   * @param value The minHeight to set.
+   */
+  private void setMinHeight(int value) {
+    
+    minHeight_ = value;
+  }
+  /**
+   * <code>uint32 min_height = 10;</code>
+   */
+  private void clearMinHeight() {
+    
+    minHeight_ = 0;
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.TaskUpdated parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -909,6 +979,80 @@ public  final class TaskUpdated extends
       return this;
     }
 
+    /**
+     * <pre>
+     * The smallest size the guest gives the task, in guest display pixels: what its activity
+     * declares, else the framework's default. A window smaller than this could only show the
+     * task's frames stretched. 0 when unknown.
+     * </pre>
+     *
+     * <code>uint32 min_width = 9;</code>
+     * @return The minWidth.
+     */
+    @java.lang.Override
+    public int getMinWidth() {
+      return instance.getMinWidth();
+    }
+    /**
+     * <pre>
+     * The smallest size the guest gives the task, in guest display pixels: what its activity
+     * declares, else the framework's default. A window smaller than this could only show the
+     * task's frames stretched. 0 when unknown.
+     * </pre>
+     *
+     * <code>uint32 min_width = 9;</code>
+     * @param value The minWidth to set.
+     * @return This builder for chaining.
+     */
+    public Builder setMinWidth(int value) {
+      copyOnWrite();
+      instance.setMinWidth(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The smallest size the guest gives the task, in guest display pixels: what its activity
+     * declares, else the framework's default. A window smaller than this could only show the
+     * task's frames stretched. 0 when unknown.
+     * </pre>
+     *
+     * <code>uint32 min_width = 9;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearMinWidth() {
+      copyOnWrite();
+      instance.clearMinWidth();
+      return this;
+    }
+
+    /**
+     * <code>uint32 min_height = 10;</code>
+     * @return The minHeight.
+     */
+    @java.lang.Override
+    public int getMinHeight() {
+      return instance.getMinHeight();
+    }
+    /**
+     * <code>uint32 min_height = 10;</code>
+     * @param value The minHeight to set.
+     * @return This builder for chaining.
+     */
+    public Builder setMinHeight(int value) {
+      copyOnWrite();
+      instance.setMinHeight(value);
+      return this;
+    }
+    /**
+     * <code>uint32 min_height = 10;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearMinHeight() {
+      copyOnWrite();
+      instance.clearMinHeight();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.TaskUpdated)
   }
   @java.lang.Override
@@ -933,10 +1077,12 @@ public  final class TaskUpdated extends
             "densityDpi_",
             "maxWidth_",
             "maxHeight_",
+            "minWidth_",
+            "minHeight_",
           };
           java.lang.String info =
-              "\u0000\b\u0000\u0000\u0001\b\b\u0000\u0000\u0000\u0001\u0004\u0002\t\u0003\u0208" +
-              "\u0004\u0208\u0005\u0007\u0006\u000b\u0007\u000b\b\u000b";
+              "\u0000\n\u0000\u0000\u0001\n\n\u0000\u0000\u0000\u0001\u0004\u0002\t\u0003\u0208" +
+              "\u0004\u0208\u0005\u0007\u0006\u000b\u0007\u000b\b\u000b\t\u000b\n\u000b";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through
