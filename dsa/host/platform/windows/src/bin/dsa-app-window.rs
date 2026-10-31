@@ -35,6 +35,11 @@ fn main() -> std::process::ExitCode {
     let logger = CompositorLogger::open(default_log_dir().join("dsa-app-window.log"))
         .ok()
         .map(Arc::new);
+    // Its windows show frames and take touches whether or not one has the focus.
+    if let Err(why) = dsa_host_windows::scheduling::raise_this_process() {
+        note(logger.as_deref(), &why);
+    }
+    dsa_host_windows::compositor::log::input_trace_to(logger.clone());
     let args: Vec<String> = std::env::args().skip(1).collect();
     let program = std::env::current_exe().unwrap_or_default();
     let Some(package) = package_of(&program, &args) else {

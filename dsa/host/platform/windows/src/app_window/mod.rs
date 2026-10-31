@@ -31,7 +31,9 @@ use dsa_transport::{Connector, FrameSender, TransportError};
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 
 use self::window::{OpenWindow, Presenters, UiSetup};
-use crate::compositor::log::{note, trace_forget, trace_stage, CompositorLogger};
+use crate::compositor::log::{
+    input_trace, input_trace_on, note, trace_forget, trace_stage, CompositorLogger,
+};
 use crate::compositor::present::{Gpu, OpenedTexture};
 use crate::compositor::tasks::serve_input;
 use dsa_host_core::resize_trace::millis;
@@ -201,6 +203,8 @@ pub fn run(mut setup: HostSetup) -> Result<(), String> {
         listing: Arc::clone(&setup.listing),
     })?;
 
+    // This thread shows each frame, and the renderer waits for it.
+    crate::scheduling::raise_this_thread();
     let mut textures = Textures::new();
     loop {
         let frame = match connection.recv(None) {
@@ -284,8 +288,20 @@ pub fn run(mut setup: HostSetup) -> Result<(), String> {
                     (presenter, textures.get(&frame.task_id))
                 {
                     if *id == frame.texture_id {
+                        let started = std::time::Instant::now();
                         if let Err(why) = presenter.present(texture, (frame.width, frame.height)) {
                             note(log.as_deref(), &why);
+                        }
+                        if input_trace_on() {
+                            input_trace(
+                                "app.present",
+                                frame.task_id,
+                                &format!(
+                                    "sequence={} took={}",
+                                    frame.sequence,
+                                    millis(started.elapsed())
+                                ),
+                            );
                         }
                     }
                 }

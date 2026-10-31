@@ -129,6 +129,11 @@ unsafe extern "C" fn display_target_trampoline(
         return std::ptr::null_mut();
     }
     let sink = &*(context as *const Arc<dyn DisplaySink>);
+    // This is the renderer's presentation thread, which only this callback reaches.
+    thread_local!(static RAISED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+    if !RAISED.with(|raised| raised.replace(true)) {
+        crate::scheduling::raise_this_thread();
+    }
     // A panic must not cross into the renderer; the frame is dropped instead.
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         sink.target(display_id, width, height)

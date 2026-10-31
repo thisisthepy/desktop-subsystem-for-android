@@ -128,6 +128,17 @@ class HvSocketPatchTests(unittest.TestCase):
         self.assertIn("VK_MEMORY_PROPERTY_HOST_CACHED_BIT", patch)
         self.assertIn('"$patch_dir"/0003-*.patch', FETCH.read_text())
 
+    def test_fr5_a_submit_sends_only_the_memory_that_changed(self):
+        # Sending every allocation whole with every submit makes each frame wait for tens of
+        # megabytes to cross the socket. Behaviour: tests/shadow_blocks_test.cpp.
+        patch = PATCH_0003.read_text()
+        self.assertIn('#include "dsa_shadow_blocks.h"', patch)
+        self.assertIn("info.shadowBlocks->changed(info.ptr)", patch)
+        self.assertIn("it->second.shadowBlocks->refresh(it->second.ptr);", patch)
+        flush = patch[patch.index("ResourceTracker::flushShadowedMemory"):
+                      patch.index("ResourceTracker::invalidateShadowedMemory")]
+        self.assertNotIn("VK_WHOLE_SIZE", flush)
+
     def test_pr3_guest_reads_back_exactly_the_memory_the_host_sends(self):
         # The host's allocation is aligned up from the application's, so it can send more
         # bytes than the guest expected. Reading fewer leaves the rest in the stream, and
