@@ -57,6 +57,7 @@ class AndroidTaskSource(
 
     private fun read(info: ActivityManager.RunningTaskInfo): TaskSnapshot {
         val root = info.baseActivity ?: info.baseIntent?.component ?: info.topActivity
+        val smallest = fields.minSize(info, context.resources.configuration.densityDpi)
         return TaskSnapshot(
             taskId = info.taskId,
             kind = if (fields.activityType(info) == ACTIVITY_TYPE_STANDARD) TaskKind.APP else TaskKind.OTHER,
@@ -66,6 +67,8 @@ class AndroidTaskSource(
             focused = fields.focused(info),
             densityDpi = fields.densityDpi(info) ?: 0,
             screenDp = fields.screenDp(info),
+            minWidth = smallest?.first ?: 0,
+            minHeight = smallest?.second ?: 0,
         )
     }
 
@@ -106,6 +109,9 @@ private class TaskFields(private val log: Log) {
     private val getBounds = field { Class.forName("android.app.WindowConfiguration").getMethod("getBounds") }
     private val getActivityType = field { Class.forName("android.app.WindowConfiguration").getMethod("getActivityType") }
     private val isFocused = field { taskInfo.getField("isFocused") }
+    private val minWidth = field { taskInfo.getField("minWidth") }
+    private val minHeight = field { taskInfo.getField("minHeight") }
+    private val defaultMinSize = field { taskInfo.getField("defaultMinSize") }
     private val warned = HashSet<String>()
 
     fun bounds(info: ActivityManager.RunningTaskInfo): Rect? =
@@ -128,6 +134,19 @@ private class TaskFields(private val log: Log) {
             ScreenDp(config.screenWidthDp, config.screenHeightDp, config.smallestScreenWidthDp)
         }?.takeIf { it.widthDp > 0 && it.heightDp > 0 && it.smallestWidthDp > 0 }
 
+    /**
+     * The smallest size the framework gives the task, in pixels: what its activity declares
+     * (TaskInfo.minWidth and minHeight, -1 when it declares nothing), else the framework's
+     * default (TaskInfo.defaultMinSize, in dp at the density of the display [displayDensityDpi]).
+     */
+    fun minSize(info: ActivityManager.RunningTaskInfo, displayDensityDpi: Int): Pair<Int, Int>? =
+        read("smallest size") {
+            val default = defaultMinSize!!.getInt(info) * displayDensityDpi / DENSITY_BASE
+            val width = minWidth!!.getInt(info)
+            val height = minHeight!!.getInt(info)
+            Pair(if (width > 0) width else default, if (height > 0) height else default)
+        }
+
     fun focused(info: ActivityManager.RunningTaskInfo): Boolean =
         read("focus") { isFocused!!.getBoolean(info) } ?: false
 
@@ -146,5 +165,10 @@ private class TaskFields(private val log: Log) {
     } catch (e: Exception) {
         if (warned.add(what)) log.warn("could not read a task's $what", e)
         null
+    }
+
+    private companion object {
+        // DisplayMetrics.DENSITY_DEFAULT: the density at which one dp is one pixel.
+        const val DENSITY_BASE = 160
     }
 }

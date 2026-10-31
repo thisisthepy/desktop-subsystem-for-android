@@ -6,8 +6,8 @@ import io.github.thisisthepy.dsa.agent.windowing.Size
  * Keeps the host's picture of the guest's app tasks in step with the guest.
  *
  * Each [update] compares the running tasks with what the host was last told and sends only
- * the difference: TaskUpdated for a task that is new or whose bounds, package, label, focus
- * or density changed, TaskRemoved for a task that is gone. Every TaskUpdated also carries the
+ * the difference: TaskUpdated for a task that is new or whose bounds, package, label, focus,
+ * density or smallest size changed, TaskRemoved for a task that is gone. Every TaskUpdated also carries the
  * display's size, the largest a task can be; when it changes, every task is sent again. A frame that could not be sent is not
  * recorded as told, so the next update tries again.
  *

@@ -1331,6 +1331,8 @@ class TaskUpdated final :
     kDensityDpiFieldNumber = 6,
     kMaxWidthFieldNumber = 7,
     kMaxHeightFieldNumber = 8,
+    kMinWidthFieldNumber = 9,
+    kMinHeightFieldNumber = 10,
   };
   // string package_name = 3;
   void clear_package_name();
@@ -1423,6 +1425,24 @@ class TaskUpdated final :
   void _internal_set_max_height(uint32_t value);
   public:
 
+  // uint32 min_width = 9;
+  void clear_min_width();
+  uint32_t min_width() const;
+  void set_min_width(uint32_t value);
+  private:
+  uint32_t _internal_min_width() const;
+  void _internal_set_min_width(uint32_t value);
+  public:
+
+  // uint32 min_height = 10;
+  void clear_min_height();
+  uint32_t min_height() const;
+  void set_min_height(uint32_t value);
+  private:
+  uint32_t _internal_min_height() const;
+  void _internal_set_min_height(uint32_t value);
+  public:
+
   // @@protoc_insertion_point(class_scope:dsa.control.v1.TaskUpdated)
  private:
   class _Internal;
@@ -1439,6 +1459,8 @@ class TaskUpdated final :
     uint32_t density_dpi_;
     uint32_t max_width_;
     uint32_t max_height_;
+    uint32_t min_width_;
+    uint32_t min_height_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -6219,6 +6241,46 @@ inline void TaskUpdated::_internal_set_max_height(uint32_t value) {
 inline void TaskUpdated::set_max_height(uint32_t value) {
   _internal_set_max_height(value);
   // @@protoc_insertion_point(field_set:dsa.control.v1.TaskUpdated.max_height)
+}
+
+// uint32 min_width = 9;
+inline void TaskUpdated::clear_min_width() {
+  _impl_.min_width_ = 0u;
+}
+inline uint32_t TaskUpdated::_internal_min_width() const {
+  return _impl_.min_width_;
+}
+inline uint32_t TaskUpdated::min_width() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.TaskUpdated.min_width)
+  return _internal_min_width();
+}
+inline void TaskUpdated::_internal_set_min_width(uint32_t value) {
+  
+  _impl_.min_width_ = value;
+}
+inline void TaskUpdated::set_min_width(uint32_t value) {
+  _internal_set_min_width(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.TaskUpdated.min_width)
+}
+
+// uint32 min_height = 10;
+inline void TaskUpdated::clear_min_height() {
+  _impl_.min_height_ = 0u;
+}
+inline uint32_t TaskUpdated::_internal_min_height() const {
+  return _impl_.min_height_;
+}
+inline uint32_t TaskUpdated::min_height() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.TaskUpdated.min_height)
+  return _internal_min_height();
+}
+inline void TaskUpdated::_internal_set_min_height(uint32_t value) {
+  
+  _impl_.min_height_ = value;
+}
+inline void TaskUpdated::set_min_height(uint32_t value) {
+  _internal_set_min_height(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.TaskUpdated.min_height)
 }
 
 // -------------------------------------------------------------------

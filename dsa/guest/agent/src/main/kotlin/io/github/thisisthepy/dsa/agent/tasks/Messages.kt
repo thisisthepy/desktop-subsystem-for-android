@@ -29,6 +29,7 @@ object Messages {
         if (display != null && display.width > 0 && display.height > 0) {
             update.setMaxWidth(display.width).setMaxHeight(display.height)
         }
+        update.setMinWidth(maxOf(0, task.minWidth)).setMinHeight(maxOf(0, task.minHeight))
         return Envelope.newBuilder().setTaskUpdated(update).build().toByteArray()
     }
 

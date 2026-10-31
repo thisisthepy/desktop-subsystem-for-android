@@ -113,4 +113,22 @@ public interface TaskUpdatedOrBuilder extends
    * @return The maxHeight.
    */
   int getMaxHeight();
+
+  /**
+   * <pre>
+   * The smallest size the guest gives the task, in guest display pixels: what its activity
+   * declares, else the framework's default. A window smaller than this could only show the
+   * task's frames stretched. 0 when unknown.
+   * </pre>
+   *
+   * <code>uint32 min_width = 9;</code>
+   * @return The minWidth.
+   */
+  int getMinWidth();
+
+  /**
+   * <code>uint32 min_height = 10;</code>
+   * @return The minHeight.
+   */
+  int getMinHeight();
 }

@@ -51,12 +51,20 @@ pub struct Task {
     /// The largest size the guest can give the task, in its display pixels; 0 when unknown.
     pub max_width: u32,
     pub max_height: u32,
+    /// The smallest size the guest gives the task, in its display pixels; 0 when unknown.
+    pub min_width: u32,
+    pub min_height: u32,
 }
 
 impl Task {
     /// The largest size the guest can give the task, when the agent said.
     pub fn max_size(&self) -> Option<(u32, u32)> {
         (self.max_width > 0 && self.max_height > 0).then_some((self.max_width, self.max_height))
+    }
+
+    /// The smallest size the guest gives the task, when the agent said.
+    pub fn min_size(&self) -> Option<(u32, u32)> {
+        (self.min_width > 0 || self.min_height > 0).then_some((self.min_width, self.min_height))
     }
 }
 

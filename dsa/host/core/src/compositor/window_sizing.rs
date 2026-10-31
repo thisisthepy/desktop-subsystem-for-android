@@ -75,6 +75,31 @@ pub fn maximized_position(proposed: i32, start: i32, area: i32, outer: i32) -> i
     start + (area - outer) / 2
 }
 
+/// The smallest a task window's client area gets, in density-independent pixels in each
+/// direction: the smallest task Android's own freeform windows let a user make. Below it the
+/// guest would keep the task larger than the window, so no frame could ever show 1:1, and
+/// apps are not designed to be laid out in less.
+pub const MIN_CLIENT_DP: u32 = 220;
+
+/// The smallest client area a window on a monitor of `dpi` may have, in pixels: at least
+/// `task`, the smallest the guest gives the task (an app may declare more than the default),
+/// and within `max`, the most the guest can draw, when that is smaller.
+pub fn min_client_size(dpi: u32, max: Option<(u32, u32)>, task: Option<(u32, u32)>) -> (u32, u32) {
+    let dpi = if dpi == 0 { BASE_DPI } else { dpi };
+    let side = MIN_CLIENT_DP * dpi / BASE_DPI;
+    let (task_width, task_height) = task.unwrap_or((0, 0));
+    let (width, height) = (side.max(task_width), side.max(task_height));
+    match max {
+        Some((max_width, max_height)) => {
+            (width.min(max_width.max(1)), height.min(max_height.max(1)))
+        }
+        None => (width, height),
+    }
+}
+
+/// A task's size in the guest, and the largest and the smallest it can have.
+pub type TaskSize = ((u32, u32), Option<(u32, u32)>, Option<(u32, u32)>);
+
 /// One task window's size and density, as the host and the guest each see them.
 #[derive(Debug, Clone)]
 pub struct WindowSizing {
@@ -85,6 +110,8 @@ pub struct WindowSizing {
     density: u32,
     /// The largest size the guest can give the task.
     max: Option<(u32, u32)>,
+    /// The smallest size the guest gives the task.
+    min: Option<(u32, u32)>,
     /// The window's client size.
     view: (u32, u32),
     /// The size last asked of the guest that it has not yet reported, and when.
@@ -112,6 +139,7 @@ impl WindowSizing {
             guest,
             density: task.density_dpi,
             max: task.max_size(),
+            min: task.min_size(),
             view: guest,
             asked: None,
             asked_density: None,
@@ -170,10 +198,10 @@ impl WindowSizing {
         (Some(size), request)
     }
 
-    /// The task's size as the guest has it and the largest client area the window may have,
-    /// which the window measures its pointer input in and keeps to.
-    pub fn task_size(&self) -> ((u32, u32), Option<(u32, u32)>) {
-        (self.guest, self.max)
+    /// The task's size as the guest has it, which the window measures its pointer input in,
+    /// and the largest and smallest sizes the guest gives it, which the window keeps to.
+    pub fn task_size(&self) -> TaskSize {
+        (self.guest, self.max, self.min)
     }
 
     /// The window is now on a monitor of `dpi`. Returns the request that has the task draw
@@ -304,6 +332,9 @@ impl WindowSizing {
         self.density = task.density_dpi;
         if let Some(max) = task.max_size() {
             self.max = Some(max);
+        }
+        if let Some(min) = task.min_size() {
+            self.min = Some(min);
         }
         let previous = std::mem::replace(&mut self.guest, size);
         match self.asked {
@@ -544,6 +575,46 @@ mod tests {
     }
 
     #[test]
+    fn fr4_a_window_stays_at_least_the_smallest_task_size_on_its_monitor() {
+        assert_eq!(min_client_size(96, None, None), (220, 220));
+        assert_eq!(min_client_size(144, None, None), (330, 330));
+        assert_eq!(min_client_size(192, Some((1920, 1080)), None), (440, 440));
+        assert_eq!(
+            min_client_size(0, None, None),
+            (220, 220),
+            "no DPI counts as 100%"
+        );
+        // A guest that draws less than that decides.
+        assert_eq!(min_client_size(192, Some((300, 1080)), None), (300, 440));
+    }
+
+    #[test]
+    fn fr4_a_window_respects_a_minimum_its_app_declares_above_the_default() {
+        assert_eq!(min_client_size(96, None, Some((700, 500))), (700, 500));
+        // Each direction on its own: the default still holds where the app asks for less.
+        assert_eq!(min_client_size(96, None, Some((700, 100))), (700, 220));
+        assert_eq!(min_client_size(192, None, Some((300, 500))), (440, 500));
+        // Never more than the guest can draw.
+        assert_eq!(
+            min_client_size(96, Some((600, 1080)), Some((700, 500))),
+            (600, 500)
+        );
+    }
+
+    #[test]
+    fn fr4_the_window_hears_its_tasks_minimum_and_any_change_to_it() {
+        let mut declared = task(400, 300, 160);
+        declared.min_width = 700;
+        declared.min_height = 500;
+        let mut sizing = WindowSizing::new(&declared);
+        assert_eq!(sizing.task_size().2, Some((700, 500)));
+        // Another activity on top of the task declares another minimum.
+        declared.min_width = 800;
+        sizing.guest_updated(&declared);
+        assert_eq!(sizing.task_size().2, Some((800, 500)));
+    }
+
+    #[test]
     fn fr4_density_follows_the_monitor_scale() {
         assert_eq!(density_for_dpi(96), 160);
         assert_eq!(density_for_dpi(120), 200);
@@ -684,7 +755,7 @@ mod tests {
         assert_eq!(sizing.dpi_reported(96), (None, density(160)));
         let mut at_100 = WindowSizing::new(&task(400, 300, 160));
         assert_eq!(at_100.dpi_reported(96), (None, None));
-        assert_eq!(at_100.task_size(), ((400, 300), Some((1920, 1080))));
+        assert_eq!(at_100.task_size(), ((400, 300), Some((1920, 1080)), None));
     }
 
     #[test]

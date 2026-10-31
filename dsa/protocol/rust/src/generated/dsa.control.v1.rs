@@ -90,6 +90,13 @@ pub struct TaskUpdated {
     pub max_width: u32,
     #[prost(uint32, tag = "8")]
     pub max_height: u32,
+    /// The smallest size the guest gives the task, in guest display pixels: what its activity
+    /// declares, else the framework's default. A window smaller than this could only show the
+    /// task's frames stretched. 0 when unknown.
+    #[prost(uint32, tag = "9")]
+    pub min_width: u32,
+    #[prost(uint32, tag = "10")]
+    pub min_height: u32,
 }
 /// Guest to host, from the agent: the task ended; the host closes its window.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]

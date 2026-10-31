@@ -191,15 +191,18 @@ message WindowDragging {
 }
 
 // Window manager to window host: the task's size in Android, which its frames and its pointer
-// input are measured in, and the largest client area its window may have (what Android can
-// draw; 0 when unknown). Sent when either changes, which a resize the window asked for does
-// without the window itself changing.
+// input are measured in, the largest client area its window may have (what Android can draw;
+// 0 when unknown), and the smallest (what Android gives the task; 0 when unknown). Sent when
+// any of them changes, which a resize the window asked for does without the window itself
+// changing.
 message TaskSize {
   int32 task_id = 1;
   uint32 width = 2;
   uint32 height = 3;
   uint32 max_width = 4;
   uint32 max_height = 5;
+  uint32 min_width = 6;
+  uint32 min_height = 7;
 }
 
 // Window manager to window host: where the cursor of the editor focused in the task is, in the

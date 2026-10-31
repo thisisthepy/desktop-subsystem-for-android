@@ -246,6 +246,11 @@ pub struct Task {
     pub max_width: u32,
     #[prost(uint32, tag = "8")]
     pub max_height: u32,
+    /// The smallest size Android gives the task, in its display pixels. 0 when unknown.
+    #[prost(uint32, tag = "9")]
+    pub min_width: u32,
+    #[prost(uint32, tag = "10")]
+    pub min_height: u32,
 }
 /// The task ended.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]

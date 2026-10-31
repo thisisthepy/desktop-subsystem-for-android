@@ -265,21 +265,32 @@ void TaskComposer::compose(Frame& frame) {
             fills.reserve(task.layers.size());
             for (int64_t id : task.layers) {
                 const FrameLayer& layer = *byId[id];
-                fills.push_back(LayerFill{
-                    layer.frame,
-                    layer.client || (layer.mode == ComposeMode::Device && layer.buffer.valid())});
+                const bool device = layer.mode == ComposeMode::Device && layer.buffer.valid();
+                LayerFill fill;
+                fill.frame = layer.frame;
+                fill.drawn = layer.client || device;
+                if (device && !layer.client) {
+                    fill.bufferWidth = layer.buffer.width;
+                    fill.bufferHeight = layer.buffer.height;
+                    fill.cropWidth = layer.crop.right - layer.crop.left;
+                    fill.cropHeight = layer.crop.bottom - layer.crop.top;
+                }
+                fills.push_back(fill);
             }
             const ResizeGate::Decision decision = mResizeGate.decide(
                 task.task, output.onHost ? output.width : 0, output.onHost ? output.height : 0,
-                task.bounds, drawnAtSize(task.bounds, fills), now);
-            if (decision == ResizeGate::Decision::Hold) {
+                task.bounds, drawnAtSize(task.bounds, fills), now,
+                drawnGeometry(task.bounds, fills));
+            if (decision == ResizeGate::Decision::HoldSlow) {
+                HWC_LOGW("task %d has not drawn at %lldx%lld after %lld ms; its window keeps its "
+                         "last frame stretched until it does",
+                         task.task, static_cast<long long>(width), static_cast<long long>(height),
+                         static_cast<long long>(ResizeGate::kSlowMs));
+            }
+            if (decision == ResizeGate::Decision::Hold ||
+                decision == ResizeGate::Decision::HoldSlow) {
                 logTrace(mTrace.held(task.task, width, height, traceMonoMs(), traceWallMs()));
                 continue;
-            }
-            if (decision == ResizeGate::Decision::PostLate) {
-                HWC_LOGW("task %d did not draw at %lldx%lld within %lld ms; its frame goes as it is",
-                         task.task, static_cast<long long>(width), static_cast<long long>(height),
-                         static_cast<long long>(ResizeGate::kHoldMs));
             }
 
             if (!output.onHost) {
@@ -400,7 +411,7 @@ void TaskComposer::compose(Frame& frame) {
                 }
                 output.next ^= 1;
                 logTrace(mTrace.posted(task.task, width, height,
-                                       decision == ResizeGate::Decision::PostLate, traceMonoMs(),
+                                       decision == ResizeGate::Decision::PostSettled, traceMonoMs(),
                                        traceWallMs()));
             }
         }

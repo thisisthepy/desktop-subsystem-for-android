@@ -709,6 +709,8 @@ fn task_updated(task_id: i32, label: &str) -> Body {
         density_dpi: 240,
         max_width: 1920,
         max_height: 1080,
+        min_width: 700,
+        min_height: 500,
     })
 }
 
@@ -727,6 +729,8 @@ fn clock(task_id: i32, label: &str) -> Task {
         density_dpi: 240,
         max_width: 1920,
         max_height: 1080,
+        min_width: 700,
+        min_height: 500,
     }
 }
 
