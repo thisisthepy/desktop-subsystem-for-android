@@ -6,8 +6,8 @@ import io.github.thisisthepy.dsa.agent.windowing.Size
  * Keeps the host's picture of the guest's app tasks in step with the guest.
  *
  * Each [update] compares the running tasks with what the host was last told and sends only
- * the difference: TaskUpdated for a task that is new or whose bounds, package, label, focus
- * or density changed, TaskRemoved for a task that is gone. Every TaskUpdated also carries the
+ * the difference: TaskUpdated for a task that is new or whose bounds, package, label, focus,
+ * density or smallest size changed, TaskRemoved for a task that is gone. Every TaskUpdated also carries the
  * display's size, the largest a task can be; when it changes, every task is sent again. A frame that could not be sent is not
  * recorded as told, so the next update tries again.
  *
@@ -57,11 +57,8 @@ class TaskReporter(
         }
         val current = LinkedHashMap<Int, TaskSnapshot>()
         for (task in tasks) {
-            // The host is not told a task's screen size in dp or its smallest size, so a change
-            // to those alone is no news.
-            if (reportable(task) && task.taskId !in current) {
-                current[task.taskId] = task.copy(screenDp = null, minWidth = 0, minHeight = 0)
-            }
+            // The host is not told a task's screen size in dp, so a change to it alone is no news.
+            if (reportable(task) && task.taskId !in current) current[task.taskId] = task.copy(screenDp = null)
         }
         for (taskId in told.keys.toList()) {
             if (taskId !in current && send(Messages.taskRemoved(taskId))) told.remove(taskId)

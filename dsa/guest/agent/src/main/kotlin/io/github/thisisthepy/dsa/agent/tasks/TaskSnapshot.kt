@@ -37,8 +37,8 @@ data class TaskSnapshot(
     val screenDp: ScreenDp? = null,
     /**
      * The smallest size the framework gives the task, in pixels; 0 when the framework does not
-     * say. The host is not told it: asking for less would leave the task at another size than
-     * the one asked for.
+     * say. The host keeps the task's window to it: asking for less would leave the task at
+     * another size than the one asked for.
      */
     val minWidth: Int = 0,
     val minHeight: Int = 0,

@@ -666,12 +666,33 @@ fn fr4_a_window_cannot_be_dragged_smaller_than_android_gives_a_task() {
 
     resize_to(hwnd, 10, 10);
 
-    let expected = min_client_size(dpi_of_new_windows(), Some((1920, 1080)));
+    let expected = min_client_size(dpi_of_new_windows(), Some((1920, 1080)), None);
     assert_eq!(
         client_size(hwnd),
         (expected.0 as i32, expected.1 as i32),
         "the window went below the smallest size"
     );
+}
+
+#[test]
+fn fr4_a_window_cannot_be_dragged_below_the_minimum_its_app_declares() {
+    let running = start(None);
+    let mut declared = task_at_monitor_density(1, 800, 600);
+    declared.min_width = 700;
+    declared.min_height = 500;
+    running.android.publish(TaskEvent::Updated(declared));
+    let open = windows_of(&running, 1);
+    let hwnd = open[0].hwnd;
+
+    // The window stops at the minimum during the drag; nothing has to correct it afterwards.
+    unsafe { SendMessageW(hwnd as HWND, WM_ENTERSIZEMOVE, 0, 0) };
+    wait_for("the window to hear its task's minimum", || {
+        resize_to(hwnd, 10, 10);
+        (client_size(hwnd).0 >= 700).then_some(())
+    });
+    let expected = min_client_size(dpi_of_new_windows(), Some((1920, 1080)), Some((700, 500)));
+    assert_eq!(client_size(hwnd), (expected.0 as i32, expected.1 as i32));
+    unsafe { SendMessageW(hwnd as HWND, WM_EXITSIZEMOVE, 0, 0) };
 }
 
 fn resize_to(hwnd: isize, width: i32, height: i32) {

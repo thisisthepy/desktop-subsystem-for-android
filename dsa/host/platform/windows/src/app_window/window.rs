@@ -195,6 +195,9 @@ struct WindowData {
     /// The largest client area Android can draw for the task, as the window manager last
     /// said, for WM_GETMINMAXINFO.
     max_client: Cell<Option<(u32, u32)>>,
+    /// The smallest size Android gives the task, as the window manager last said, for
+    /// WM_GETMINMAXINFO.
+    min_client: Cell<Option<(u32, u32)>>,
     /// Whether the window reports its size: not until it has been given the task's.
     reporting: Cell<bool>,
     /// Whether the window is minimized, so a restore is reported once.
@@ -453,9 +456,9 @@ unsafe extern "system" fn task_window_proc(
                     y: height.min(info.ptMaxSize.y),
                 };
             }
-            // Never smaller than Android gives a task: the guest would keep the task larger
-            // than the window, and no frame could show 1:1.
-            let (width, height) = outer_size(min_client_size(dpi, max), dpi);
+            // Never smaller than Android gives this task, which its app may declare: the guest
+            // would keep the task larger than the window, and no frame could show 1:1.
+            let (width, height) = outer_size(min_client_size(dpi, max, data.min_client.get()), dpi);
             info.ptMinTrackSize = POINT {
                 x: width.max(info.ptMinTrackSize.x),
                 y: height.max(info.ptMinTrackSize.y),
@@ -693,12 +696,14 @@ impl Ui {
                         width,
                         height,
                         max,
+                        min,
                     } => {
                         if let Some(data) =
                             self.open.get(&task_id).and_then(|hwnd| window_data(*hwnd))
                         {
                             data.pointer.task_resized((width, height));
                             data.max_client.set(max);
+                            data.min_client.set(min);
                         }
                     }
                     ToHost::ImeCursor { task_id, cursor } => {
@@ -773,6 +778,7 @@ impl Ui {
             keys: KeyWindow::new(task_id, self.setup.input.clone()),
             ime: ImeWindow::new(task_id, self.setup.input.clone()),
             max_client: Cell::new(None),
+            min_client: Cell::new(None),
             reporting: Cell::new(false),
             minimized: Cell::new(false),
             rescaling: Cell::new(false),

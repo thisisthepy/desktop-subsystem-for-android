@@ -113,6 +113,11 @@ message TaskUpdated {
   // A window larger than this could only show the task's frames stretched. 0 when unknown.
   uint32 max_width = 7;
   uint32 max_height = 8;
+  // The smallest size the guest gives the task, in guest display pixels: what its activity
+  // declares, else the framework's default. A window smaller than this could only show the
+  // task's frames stretched. 0 when unknown.
+  uint32 min_width = 9;
+  uint32 min_height = 10;
 }
 
 // Guest to host, from the agent: the task ended; the host closes its window.

@@ -574,6 +574,8 @@ pub fn sample_task(task_id: i32, label: &str) -> Task {
         density_dpi: 320,
         max_width: 3840,
         max_height: 2160,
+        min_width: 700,
+        min_height: 500,
     }
 }
 

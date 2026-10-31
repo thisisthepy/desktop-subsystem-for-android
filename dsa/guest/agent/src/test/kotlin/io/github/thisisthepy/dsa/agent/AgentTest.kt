@@ -659,6 +659,22 @@ class AgentTest {
     }
 
     @Test
+    fun fr4_the_host_hears_the_smallest_size_a_task_can_have_and_any_change_to_it() {
+        tasks.running = listOf(appTask(1).copy(minWidth = 700, minHeight = 500))
+        started()
+
+        val update = daemon.sentMessages().single().taskUpdated
+        assertEquals(700, update.minWidth)
+        assertEquals(500, update.minHeight)
+
+        // Another activity on top of the task declares another minimum.
+        tasks.change(listOf(appTask(1).copy(minWidth = 800, minHeight = 500)))
+        scheduler.runDue()
+
+        assertEquals(800, daemon.sentMessages().last().taskUpdated.minWidth)
+    }
+
+    @Test
     fun fr4_the_host_hears_each_tasks_density_and_the_largest_size_it_can_have() {
         tasks.running = listOf(appTask(1, densityDpi = 240))
         started()
