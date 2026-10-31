@@ -2,6 +2,17 @@ diff --git a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp b/src/gfxstream/
 index 4e0dc43c892..530b8c9b23c 100644
 --- a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
 +++ b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+@@ -6,6 +6,11 @@
+ #include "ResourceTracker.h"
+
++#include "dsa_shadow_blocks.h"
++#if DETECT_OS_ANDROID
++#include <sys/system_properties.h>
++#endif
++
+ #include "CommandBufferStagingStream.h"
+ #include "DescriptorSetVirtualization.h"
+ #include "HostVisibleMemoryVirtualization.h"
 @@ -1520,7 +1520,52 @@ void ResourceTracker::setThreadingCallbacks(const ResourceTracker::ThreadingCall
      ResourceTracker::threadingCallbacks = callbacks;
  }
@@ -14,18 +25,71 @@ index 4e0dc43c892..530b8c9b23c 100644
 +           mCaps.vulkanCapset.deferredMapping || mCaps.params[kParamCreateGuestHandle];
 +}
 +
++// Whether this boot traces where input latency goes (androidboot.hardware.dsa_input_trace=1
++// on the kernel command line). Read once.
++static bool inputTraceRequested() {
++#if DETECT_OS_ANDROID
++    static const bool requested = [] {
++        char value[PROP_VALUE_MAX] = {};
++        return __system_property_get("ro.boot.hardware.dsa_input_trace", value) > 0 &&
++               value[0] == '1';
++    }();
++    return requested;
++#else
++    return false;
++#endif
++}
++
 +void ResourceTracker::flushShadowedMemory(VkEncoder* enc, VkDevice device) {
++    const bool traced = inputTraceRequested();
++    const auto started = std::chrono::steady_clock::now();
 +    std::vector<VkMappedMemoryRange> ranges;
++    uint64_t scanned = 0;
++    uint64_t changed = 0;
 +    {
++        // Held across the scan, so another thread freeing an allocation cannot free its copy
++        // from under it.
 +        std::lock_guard<std::recursive_mutex> lock(mLock);
 +        for (const auto& [memory, info] : info_VkDeviceMemory) {
-+            if (!info.shadowed || info.device != device) continue;
-+            ranges.push_back({VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, nullptr, memory, 0,
-+                              VK_WHOLE_SIZE});
++            if (!info.shadowed || info.device != device || !info.shadowBlocks) continue;
++            scanned += info.shadowBlocks->size();
++            for (const dsa::ShadowBlocks::Range& range : info.shadowBlocks->changed(info.ptr)) {
++                ranges.push_back({VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, nullptr, memory,
++                                  range.offset, range.size});
++                changed += range.size;
++            }
 +        }
 +    }
++    const auto compared = std::chrono::steady_clock::now();
 +    if (!ranges.empty()) {
 +        enc->vkFlushMappedMemoryRanges(device, ranges.size(), ranges.data(), true /* do lock */);
++    }
++    if (traced) {
++        // One line per batch of submits, so tracing does not add to what it measures.
++        static constexpr uint32_t kTraceEvery = 120;
++        static std::mutex traceMutex;
++        static uint32_t submits = 0;
++        static uint64_t scannedTotal = 0;
++        static uint64_t sentTotal = 0;
++        static double scanMs = 0;
++        static double sendMs = 0;
++        using Ms = std::chrono::duration<double, std::milli>;
++        std::lock_guard<std::mutex> lock(traceMutex);
++        submits++;
++        scannedTotal += scanned;
++        sentTotal += changed;
++        scanMs += Ms(compared - started).count();
++        sendMs += Ms(std::chrono::steady_clock::now() - compared).count();
++        if (submits == kTraceEvery) {
++            mesa_logi(
++                "input-trace stage=driver.flush submits=%u scanned_mb_per_submit=%.2f "
++                "sent_kb_per_submit=%.1f scan_ms_per_submit=%.2f send_ms_per_submit=%.2f",
++                submits, scannedTotal / (1048576.0 * submits), sentTotal / (1024.0 * submits),
++                scanMs / submits, sendMs / submits);
++            submits = 0;
++            scannedTotal = sentTotal = 0;
++            scanMs = sendMs = 0;
++        }
 +    }
 +}
 +
@@ -51,6 +115,14 @@ index 4e0dc43c892..530b8c9b23c 100644
 +    if (!ranges.empty()) {
 +        enc->vkInvalidateMappedMemoryRanges(device, ranges.size(), ranges.data(),
 +                                            true /* do lock */);
++        // The copies now hold what the host sent; the next flush need not send it back.
++        std::lock_guard<std::recursive_mutex> lock(mLock);
++        for (const VkMappedMemoryRange& range : ranges) {
++            auto it = info_VkDeviceMemory.find(range.memory);
++            if (it != info_VkDeviceMemory.end() && it->second.shadowBlocks) {
++                it->second.shadowBlocks->refresh(it->second.ptr);
++            }
++        }
 +    }
 +}
  
@@ -85,6 +157,7 @@ index 4e0dc43c892..530b8c9b23c 100644
 +        stored.allocationSize = pAllocateInfo->allocationSize;
 +        stored.ptr = shadow;
 +        stored.shadowed = true;
++        stored.shadowBlocks = std::make_shared<dsa::ShadowBlocks>(pAllocateInfo->allocationSize);
 +        *pMemory = mem;
 +        return host_res;
 +    }
@@ -169,6 +242,14 @@ diff --git a/src/gfxstream/guest/vulkan_enc/ResourceTracker.h b/src/gfxstream/gu
 index 1462a7bf02f..2222d637ea2 100644
 --- a/src/gfxstream/guest/vulkan_enc/ResourceTracker.h
 +++ b/src/gfxstream/guest/vulkan_enc/ResourceTracker.h
+@@ -105,3 +105,7 @@
++namespace dsa {
++class ShadowBlocks;
++}  // namespace dsa
++
+ namespace gfxstream {
+ namespace vk {
+
 @@ -546,6 +546,8 @@ class ResourceTracker {
      void setThreadingCallbacks(const ThreadingCallbacks& callbacks);
      bool hostSupportsVulkan() const;
@@ -185,7 +266,9 @@ index 1462a7bf02f..2222d637ea2 100644
 +        // ptr is the guest's own copy of the memory, which the stream keeps in step with
 +        // the host's, since there is no memory the guest and the host share.
 +        bool shadowed = false;
- 
++        // Which blocks of that copy changed since the host last had them.
++        std::shared_ptr<dsa::ShadowBlocks> shadowBlocks;
+
          uint64_t blobId = 0;
          uint64_t allocationSize = 0;
 diff --git a/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp b/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp
