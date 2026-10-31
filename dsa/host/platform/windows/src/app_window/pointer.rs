@@ -13,6 +13,7 @@
 use std::cell::{Cell, RefCell};
 use std::sync::mpsc::Sender;
 
+use crate::compositor::log::{input_trace, input_trace_on};
 use dsa_host_core::input::{
     buttons, Capture, ContactPhase, InputEvent, MouseButton, PointerMapper, PointerTool,
     WindowGeometry, WindowInput,
@@ -22,13 +23,15 @@ use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
 };
+use windows_sys::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 use windows_sys::Win32::UI::Input::Pointer::{
     GetPointerPenInfo, GetPointerTouchInfo, GetPointerType, POINTER_FLAG_CANCELED,
     POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE, POINTER_INFO, POINTER_PEN_INFO,
     POINTER_TOUCH_INFO,
 };
+use windows_sys::Win32::UI::Input::Touch::{RegisterTouchWindow, TWF_WANTPALM};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, GetMessageExtraInfo, PEN_FLAG_BARREL, PEN_FLAG_ERASER, PEN_FLAG_INVERTED,
+    GetClientRect, GetMessageExtraInfo, RemovePropW, SetPropW, PEN_FLAG_BARREL, PEN_FLAG_ERASER, PEN_FLAG_INVERTED,
     PEN_MASK_PRESSURE, POINTER_INPUT_TYPE, PT_PEN, PT_TOUCH, TOUCH_MASK_PRESSURE, WHEEL_DELTA,
     WM_CAPTURECHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL,
     WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_POINTERCAPTURECHANGED, WM_POINTERDOWN, WM_POINTERLEAVE,
@@ -39,6 +42,71 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 /// The mouse left the window (`TrackMouseEvent`). windows-sys keeps it with the common
 /// controls, which this crate does not otherwise need.
 const WM_MOUSELEAVE: u32 = 0x02a3;
+
+/// The window property the tablet service reads, and the behaviours it turns off in the
+/// window: press and hold, its feedback, and flicks. Android has its own long press, and
+/// Windows must not hold a contact back to see whether it is one.
+const TABLET_SERVICE_PROPERTY: &str = "MicrosoftTabletPenServiceProperty";
+const TABLET_DISABLE_PRESSANDHOLD: usize = 0x0000_0001;
+const TABLET_DISABLE_PENTAPFEEDBACK: usize = 0x0000_0008;
+const TABLET_DISABLE_PENBARRELFEEDBACK: usize = 0x0000_0010;
+const TABLET_DISABLE_FLICKS: usize = 0x0001_0000;
+
+/// What [`deliver_contacts_at_once`] sets the tablet service's property to.
+pub const TABLET_SERVICE_FLAGS: usize = TABLET_DISABLE_PRESSANDHOLD
+    | TABLET_DISABLE_PENTAPFEEDBACK
+    | TABLET_DISABLE_PENBARRELFEEDBACK
+    | TABLET_DISABLE_FLICKS;
+
+/// The tablet service's property name, NUL-terminated.
+pub fn tablet_service_property() -> Vec<u16> {
+    TABLET_SERVICE_PROPERTY
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+/// Makes Windows hand the window's touch and pen contacts over without delay: without
+/// `TWF_WANTPALM`, a contact waits while Windows decides whether it is a palm.
+///
+/// # Safety
+///
+/// `hwnd` is a live window of this thread.
+pub unsafe fn deliver_contacts_at_once(hwnd: HWND) {
+    RegisterTouchWindow(hwnd, TWF_WANTPALM);
+    SetPropW(
+        hwnd,
+        tablet_service_property().as_ptr(),
+        TABLET_SERVICE_FLAGS as *mut std::ffi::c_void,
+    );
+}
+
+/// Undoes what stays behind of [`deliver_contacts_at_once`] when the window goes.
+///
+/// # Safety
+///
+/// `hwnd` is a live window of this thread.
+pub unsafe fn forget_contacts(hwnd: HWND) {
+    RemovePropW(hwnd, tablet_service_property().as_ptr());
+}
+
+/// How long ago, in milliseconds, Windows stamped a pointer message with `stamp`. 0 when the
+/// device gives no stamp.
+fn pointer_age_millis(stamp: u64) -> f64 {
+    if stamp == 0 {
+        return 0.0;
+    }
+    let (mut now, mut frequency) = (0i64, 0i64);
+    // SAFETY: both write one local integer.
+    unsafe {
+        QueryPerformanceCounter(&mut now);
+        QueryPerformanceFrequency(&mut frequency);
+    }
+    if frequency <= 0 {
+        return 0.0;
+    }
+    (now as f64 - stamp as f64) * 1000.0 / frequency as f64
+}
 
 /// The low and high 16 bits of a message parameter, as Windows packs them.
 fn low_word(value: usize) -> u16 {
@@ -142,6 +210,7 @@ pub fn pressure(raw: u32) -> f32 {
 
 /// One task window's pointer input.
 pub struct PointerWindow {
+    task_id: i32,
     mapper: RefCell<PointerMapper>,
     /// The size of the task the window shows, in guest pixels.
     task_size: Cell<(u32, u32)>,
@@ -153,6 +222,7 @@ pub struct PointerWindow {
 impl PointerWindow {
     pub fn new(task_id: i32, task_size: (u32, u32), events: Sender<InputEvent>) -> Self {
         PointerWindow {
+            task_id,
             mapper: RefCell::new(PointerMapper::new(task_id)),
             task_size: Cell::new(task_size),
             tracking_leave: Cell::new(false),
@@ -214,6 +284,7 @@ impl PointerWindow {
                     return Some(handled);
                 }
                 let (button, down) = mouse_button(message, wparam)?;
+                input_trace("app.pointer", self.task_id, &format!("mouse_down={down}"));
                 self.deliver(
                     hwnd,
                     WindowInput::MouseButton {
@@ -297,6 +368,16 @@ impl PointerWindow {
             // Handled, so Windows makes no mouse messages from it.
             None => return Some(0),
         };
+        if input_trace_on() && matches!(phase, ContactPhase::Down | ContactPhase::Up) {
+            input_trace(
+                "app.pointer",
+                self.task_id,
+                &format!(
+                    "phase={phase:?} age={:.1}",
+                    pointer_age_millis(info.PerformanceCount)
+                ),
+            );
+        }
         let position = client_point(hwnd, &info);
         self.deliver(
             hwnd,

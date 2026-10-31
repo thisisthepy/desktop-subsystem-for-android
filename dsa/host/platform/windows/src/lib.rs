@@ -73,6 +73,8 @@ pub mod power;
 pub mod profile;
 pub mod render_gpu;
 #[cfg(windows)]
+pub mod scheduling;
+#[cfg(windows)]
 pub mod scm;
 #[cfg(windows)]
 pub mod service;

@@ -181,6 +181,7 @@ pub fn serve_input(
     events: Receiver<InputEvent>,
     logger: Option<Arc<CompositorLogger>>,
 ) {
+    crate::scheduling::raise_this_thread();
     let mut stream: Option<InputStream> = None;
     let mut retry_at: Option<Instant> = None;
     let mut last_error = String::new();
