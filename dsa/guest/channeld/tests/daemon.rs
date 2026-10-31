@@ -7,12 +7,12 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use dsa_guest_channeld::{connect, run, ChannelError, ChannelEvent, Credentials, RetryPolicy};
+use dsa_guest_channeld::{connect, pump, run, ChannelError, ChannelEvent, Credentials, RetryPolicy};
 use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{RejectReason, Role};
 use dsa_protocol::handshake::{host_accept, local_hello};
 use dsa_transport::memory::{self, MemoryConnector, MemoryListener};
-use dsa_transport::{Connection, Connector, Listener, TransportError};
+use dsa_transport::{Connection, Connector, FrameSender, Listener, TransportError};
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -199,4 +199,59 @@ fn fr2_frames_flow_both_ways_and_a_lost_channel_is_reconnected() {
 
     stop.store(true, Ordering::Relaxed);
     assert_eq!(daemon.join().unwrap(), ChannelError::Stopped);
+}
+
+/// A connection whose host says nothing until the test lets it, however long the wait asked.
+struct SilentHost {
+    release: mpsc::Receiver<()>,
+    sent: mpsc::Sender<Vec<u8>>,
+}
+
+struct SilentHostSender(mpsc::Sender<Vec<u8>>);
+
+impl FrameSender for SilentHostSender {
+    fn send(&mut self, frame: &[u8]) -> Result<(), TransportError> {
+        self.0
+            .send(frame.to_vec())
+            .map_err(|_| TransportError::Closed)
+    }
+}
+
+impl Connection for SilentHost {
+    fn send(&mut self, frame: &[u8]) -> Result<(), TransportError> {
+        self.sent
+            .send(frame.to_vec())
+            .map_err(|_| TransportError::Closed)
+    }
+    fn recv(&mut self, _timeout: Option<Duration>) -> Result<Vec<u8>, TransportError> {
+        let _ = self.release.recv();
+        Err(TransportError::Closed)
+    }
+    fn close(&mut self) {}
+    fn try_clone_sender(&self) -> Option<Box<dyn FrameSender>> {
+        Some(Box::new(SilentHostSender(self.sent.clone())))
+    }
+}
+
+#[test]
+fn fr5_a_frame_for_the_host_does_not_wait_for_the_hosts_next_frame() {
+    let (release, released) = mpsc::channel();
+    let (sent_tx, sent) = mpsc::channel();
+    let (to_host, from_guest) = mpsc::channel();
+    let (to_guest, _from_host) = mpsc::channel();
+    let pumping = thread::spawn(move || {
+        let stop = AtomicBool::new(false);
+        let mut host = SilentHost {
+            release: released,
+            sent: sent_tx,
+        };
+        pump(&mut host, &to_guest, &from_guest, &stop)
+    });
+    // Let the pump settle into its wait for the host.
+    thread::sleep(Duration::from_millis(100));
+    to_host.send(vec![1, 2, 3]).unwrap();
+    let frame = sent.recv_timeout(Duration::from_secs(2));
+    release.send(()).unwrap();
+    assert_eq!(frame.expect("the frame goes at once"), vec![1, 2, 3]);
+    assert_eq!(pumping.join().unwrap(), TransportError::Closed);
 }

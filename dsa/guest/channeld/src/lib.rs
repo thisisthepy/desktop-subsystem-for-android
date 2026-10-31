@@ -137,15 +137,80 @@ pub fn connect(
     }
 }
 
+/// How long the threads of [`pump`] wait before looking whether they should stop.
+const POLL: Duration = Duration::from_millis(20);
+
 /// Carries frames over one connection until it is lost or `stop` is set: frames from the
 /// host go to `to_guest`, frames on `from_guest` go to the host. Returns why it ended.
+///
+/// Each direction has a thread, so a frame for the host goes the moment it is handed over
+/// rather than when the wait for the host's next frame times out.
 pub fn pump(
     connection: &mut dyn Connection,
     to_guest: &Sender<Vec<u8>>,
     from_guest: &Receiver<Vec<u8>>,
     stop: &AtomicBool,
 ) -> TransportError {
-    const POLL: Duration = Duration::from_millis(20);
+    let Some(mut sender) = connection.try_clone_sender() else {
+        return pump_in_turns(connection, to_guest, from_guest, stop);
+    };
+    let ended = AtomicBool::new(false);
+    let send_failed = AtomicBool::new(false);
+    thread::scope(|scope| {
+        let reader = scope.spawn(|| {
+            let why = read_until_lost(connection, to_guest, stop, &send_failed);
+            ended.store(true, Ordering::Relaxed);
+            why
+        });
+        let mut send_error = None;
+        while !ended.load(Ordering::Relaxed) {
+            match from_guest.recv_timeout(POLL) {
+                Ok(frame) => {
+                    if let Err(error) = sender.send(&frame) {
+                        send_error = Some(error);
+                        send_failed.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                // Nobody in the guest can send any more; keep delivering the host's frames.
+                Err(RecvTimeoutError::Disconnected) => thread::sleep(POLL),
+            }
+        }
+        let read_error = reader.join().unwrap_or(TransportError::Closed);
+        send_error.unwrap_or(read_error)
+    })
+}
+
+fn read_until_lost(
+    connection: &mut dyn Connection,
+    to_guest: &Sender<Vec<u8>>,
+    stop: &AtomicBool,
+    send_failed: &AtomicBool,
+) -> TransportError {
+    loop {
+        if stop.load(Ordering::Relaxed) || send_failed.load(Ordering::Relaxed) {
+            connection.close();
+            return TransportError::Closed;
+        }
+        match connection.recv(Some(POLL)) {
+            Ok(frame) => {
+                // A guest side that has gone away just stops receiving.
+                let _ = to_guest.send(frame);
+            }
+            Err(TransportError::Timeout) => {}
+            Err(error) => return error,
+        }
+    }
+}
+
+/// [`pump`] on a transport that cannot share its connection between two threads.
+fn pump_in_turns(
+    connection: &mut dyn Connection,
+    to_guest: &Sender<Vec<u8>>,
+    from_guest: &Receiver<Vec<u8>>,
+    stop: &AtomicBool,
+) -> TransportError {
     loop {
         if stop.load(Ordering::Relaxed) {
             connection.close();
