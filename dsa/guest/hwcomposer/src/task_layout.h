@@ -98,6 +98,73 @@ class TaskRegistry {
     std::map<int32_t, Rect> mTasks;
 };
 
+// One layer of a task, as far as telling whether its app has drawn at the task's size goes.
+struct LayerFill {
+    Rect frame;
+    // It shows a buffer an app drew (not a solid colour).
+    bool drawn = false;
+};
+
+// Whether the task's app has drawn at the size of `bounds`: one of its drawn layers fills the
+// bounds exactly. Until then the task's own surface still has its old size.
+bool drawnAtSize(const Rect& bounds, const std::vector<LayerFill>& layers);
+
+// Whether a task's frame goes to the host, after the task's size changed.
+//
+// When a task's bounds take a new size, its app has not redrawn yet: its surface keeps the
+// old size until the app draws again. A frame composed at the new size then would show the
+// old picture in one corner and nothing beside it. The host meanwhile stretches the last
+// frame it has over the resized window, which shows no empty space. So after a size change
+// the task's frames are held until its app has drawn at the new size, and the first frame
+// that goes is a whole one. A task whose app does not draw within kHoldMs is sent as it is,
+// so its window never stays stretched.
+class ResizeGate {
+   public:
+    static constexpr int64_t kHoldMs = 500;
+
+    enum class Decision {
+        // Send the frame.
+        Post,
+        // Keep the host's last frame; look again at the next frame or at nextDeadline().
+        Hold,
+        // The app did not draw at the new size in time; send the frame as it is.
+        PostLate,
+    };
+
+    // `posted` is the size the task's frames last had on the host (0 x 0 before the first),
+    // `bounds` the task's bounds now, `drawn` whether its app has drawn at their size.
+    Decision decide(int32_t task, int64_t postedWidth, int64_t postedHeight, const Rect& bounds,
+                    bool drawn, int64_t nowMs);
+    void forget(int32_t task) { mHeldSince.erase(task); }
+    void clear() { mHeldSince.clear(); }
+    // When the first held task runs out of time, if any is held.
+    std::optional<int64_t> nextDeadline() const;
+
+   private:
+    std::map<int32_t, int64_t> mHeldSince;
+};
+
+// The size of a task's ColorBuffers on the host. Each frame is composed into their top-left
+// corner at the task's size, so they only need to be at least as large as the task.
+struct BufferSize {
+    int64_t width = 0;
+    int64_t height = 0;
+
+    bool covers(int64_t w, int64_t h) const { return width >= w && height >= h; }
+    bool operator==(const BufferSize& other) const {
+        return width == other.width && height == other.height;
+    }
+    bool operator!=(const BufferSize& other) const { return !(*this == other); }
+};
+
+// The size a task's ColorBuffers should have, given the size they have now (`current`, 0 x 0
+// when there are none), the freeform display, and the task's size. They are made at the
+// display's size, the largest a task inside it can be, so that resizing the task's window
+// does not remake them: the answer is `current` while that still holds both the display and
+// the task. A task larger than the display gets buffers of its own size in that direction.
+BufferSize taskBufferSize(BufferSize current, const Rect& display, int64_t taskWidth,
+                          int64_t taskHeight);
+
 // Which host display carries each task's frames. A task keeps its display from its first
 // frame until it ends, so the host sees one stable pairing per window.
 class TaskDisplays {

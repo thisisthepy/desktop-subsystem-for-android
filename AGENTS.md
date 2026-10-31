@@ -149,13 +149,15 @@ Job names are English sentence case and say briefly what the job does. Matrix jo
 
 These bind the agent and whoever dispatches it equally.
 
-1. **A background agent never runs the heavy builds.** Not the Android system image, not the
-   guest kernel, not gfxstream. Those builds take tens of minutes to hours, use most of the
-   machine's cores and memory, and several running at once take the machine down. Do not
-   write such a build command into a task prompt. When a build or a test run is needed, one
-   temporary builder agent does it, one at a time, in its own worktree, and edits no code
-   beyond the minimal fixes a build needs, which it reports with the commands it ran and
-   their output. When no builder is needed, push and let CI build.
+1. **A background agent never builds or tests on this machine.** No `cargo build`, `cargo
+   test` or `cargo clippy`, no Gradle, no `test.sh`, and never the Android image, the guest
+   kernel or gfxstream. Builds and test runs take most of the machine's cores and memory, and
+   several agents running them at once stall the owner's own work, down to mouse clicks. A
+   background agent pushes its branch and lets CI build and test the pull request, and reads
+   the CI logs to fix what fails. Do not write a build or test command into a task prompt.
+   Running the code on this machine (installing a build, booting it, checking it by hand)
+   is done from `develop`, by the session that dispatches the agents, after the pull request
+   is merged.
 2. **A background agent never decides that part of its task is out of scope.** If the task
    says implement it, it gets implemented. No narrowing, no deferring, no "future work", no
    TODO standing in for the feature, and above all no writing that judgement into SPEC or

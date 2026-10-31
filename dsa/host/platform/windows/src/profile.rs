@@ -89,6 +89,59 @@ pub fn local_app_data(sid: &str) -> Result<PathBuf, String> {
     Ok(resolve(&profile, moved.as_deref()))
 }
 
+/// The profile folder of every user Windows has one for.
+pub fn profile_folders() -> Vec<PathBuf> {
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, KEY_READ,
+    };
+    const LIST: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList";
+    let list = wide(LIST);
+    let mut key: HKEY = std::ptr::null_mut();
+    // SAFETY: a NUL-terminated name; the key is closed below.
+    if unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, list.as_ptr(), 0, KEY_READ, &mut key) }
+        != ERROR_SUCCESS
+    {
+        return Vec::new();
+    }
+    let mut sids = Vec::new();
+    for index in 0.. {
+        let mut name = [0u16; 256];
+        let mut length = name.len() as u32;
+        // SAFETY: a buffer of the length given; the key opened above.
+        let code = unsafe {
+            RegEnumKeyExW(
+                key,
+                index,
+                name.as_mut_ptr(),
+                &mut length,
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        if code != ERROR_SUCCESS {
+            break;
+        }
+        sids.push(String::from_utf16_lossy(&name[..length as usize]));
+    }
+    // SAFETY: the key opened above, closed once.
+    unsafe { RegCloseKey(key) };
+    sids.into_iter()
+        .filter_map(|sid| {
+            read_string(
+                HKEY_LOCAL_MACHINE,
+                &format!(r"{LIST}\{sid}"),
+                "ProfileImagePath",
+                true,
+            )
+            .ok()
+            .flatten()
+        })
+        .map(PathBuf::from)
+        .collect()
+}
+
 /// The folder from the profile folder and the user's own "Local AppData" setting, which
 /// names the profile as `%USERPROFILE%`. A setting that names other variables cannot be
 /// expanded for another user, so the default place is used for it.

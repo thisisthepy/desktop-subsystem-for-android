@@ -33,6 +33,34 @@ typedef void (*dsa_post_callback_fn)(void* context,
 
 typedef void (*dsa_color_buffer_post_fn)(void* context, uint32_t color_buffer_id);
 
+/* Which GPU the renderer runs on.
+ *
+ * The embedder may ask for a GPU before dsa_gfx_init. Only a GPU with a graphics queue can
+ * match. When none matches, or nothing is asked, gfxstream ranks the GPUs itself: a discrete
+ * GPU first, then an integrated one, then the highest Vulkan version. */
+#define DSA_GFX_GPU_RANKING 0    /* gfxstream's own ranking */
+#define DSA_GFX_GPU_LUID 1       /* the GPU whose VkPhysicalDeviceIDProperties::deviceLUID is `luid` */
+#define DSA_GFX_GPU_INTEGRATED 2 /* the first integrated GPU */
+#define DSA_GFX_GPU_DISCRETE 3   /* the first discrete GPU */
+#define DSA_GFX_GPU_NAME 4       /* the first GPU whose name contains `name`, ignoring case */
+
+/* Asks for the GPU `rule` describes. `luid` (8 bytes, as a Windows LUID) is read only for
+ * DSA_GFX_GPU_LUID and `name` (UTF-8) only for DSA_GFX_GPU_NAME. Returns 0 on success, -1
+ * when the rule is unknown, its argument is missing, or the renderer is already running. */
+DSA_GFX_EXPORT int dsa_gfx_select_gpu(uint32_t rule, const uint8_t* luid, const char* name);
+
+/* The GPU the renderer runs on, and whether it is the one asked for. */
+typedef struct dsa_gfx_gpu_info {
+    char name[256];          /* VkPhysicalDeviceProperties::deviceName, UTF-8 */
+    uint32_t device_type;    /* VkPhysicalDeviceType */
+    uint8_t luid[8];         /* valid when luid_valid is 1 */
+    int32_t luid_valid;
+    int32_t preference_matched; /* 1: the GPU asked for; 0: none matched, so ranked; -1: none asked */
+} dsa_gfx_gpu_info;
+
+/* Fills `info`. Returns 0 on success, -1 when the renderer is not initialised. */
+DSA_GFX_EXPORT int dsa_gfx_get_gpu_info(dsa_gfx_gpu_info* info);
+
 /* Initializes the host gfxstream renderer (Vulkan only, surfaceless). */
 DSA_GFX_EXPORT int dsa_gfx_init(uint32_t width, uint32_t height);
 
@@ -74,14 +102,19 @@ DSA_GFX_EXPORT int dsa_gfx_set_color_buffer_post_callback(dsa_color_buffer_post_
  * asks the embedder where to put it, copies it there on the GPU, and says when it is there.
  * Nothing is read back to the CPU.
  *
+ * The hwcomposer keeps each task's color buffers at the largest size the task can have and
+ * composes each frame into their top-left region, so that resizing the task's window does
+ * not remake them. It sets the display's size (rcSetDisplayPose) to the frame's size before
+ * it sets the frame, and only that region is copied and shown.
+ *
  * The frame must be complete when it is set: the backend copies it on the renderer's queue
  * right away. A composition the host runs for the guest (rcCompose with a display ID) sets
  * the display's color buffer before it composes, so its result shows one frame late.
  */
 
-/* Called on the backend's presentation thread when `display_id` has a new frame of
- * `width` x `height` pixels. Returns a Windows NT handle to a Direct3D 11 texture of exactly
- * that size, in DXGI_FORMAT_R8G8B8A8_UNORM, made with D3D11_RESOURCE_MISC_SHARED_NTHANDLE on
+/* Called on the backend's presentation thread when `display_id` has a new frame in a color
+ * buffer of `width` x `height` pixels. Returns a Windows NT handle to a Direct3D 11 texture
+ * of exactly that size, in DXGI_FORMAT_R8G8B8A8_UNORM, made with D3D11_RESOURCE_MISC_SHARED_NTHANDLE on
  * the GPU dsa_gfx_get_adapter_luid names, to copy the frame into; or NULL to drop the frame.
  * The handle and its texture stay the embedder's, and stay valid until the next call for the
  * same display returns something else. */
@@ -90,15 +123,21 @@ typedef void* (*dsa_display_target_fn)(void* context,
                                        uint32_t width,
                                        uint32_t height);
 
-/* Called on the same thread once the frame is in the texture and the GPU has finished
- * copying it. The texture is not written again for this display until this returns. */
-typedef void (*dsa_display_frame_fn)(void* context, uint32_t display_id);
+/* Called on the same thread once the frame is in the texture, filling its top-left
+ * `width` x `height` pixels, and the GPU has finished copying it. The texture is not written
+ * again for this display until this returns. */
+typedef void (*dsa_display_frame_fn)(void* context,
+                                     uint32_t display_id,
+                                     uint32_t width,
+                                     uint32_t height);
 
 /* Registers the presentation callbacks; NULLs stop the presentation. Returns 0 on success,
- * -1 when the renderer is not initialised or cannot present on this host. */
-DSA_GFX_EXPORT int dsa_gfx_set_display_callbacks(dsa_display_target_fn target,
-                                                 dsa_display_frame_fn frame,
-                                                 void* context);
+ * -1 when the renderer is not initialised or cannot present on this host. The name carries
+ * a 2 because the frame callback gained the frame's size: an embedder built for the older
+ * callback does not find this one, rather than calling it with the wrong arguments. */
+DSA_GFX_EXPORT int dsa_gfx_set_display_callbacks2(dsa_display_target_fn target,
+                                                  dsa_display_frame_fn frame,
+                                                  void* context);
 
 /* Writes the LUID of the GPU the renderer runs on (8 bytes, as a Windows LUID). Returns 0 on
  * success, -1 when the renderer is not initialised or the driver does not report one. */

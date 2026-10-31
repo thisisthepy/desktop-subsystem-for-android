@@ -6,11 +6,13 @@
 //! dsa-hostd service <config.json>  the same, as a Windows service
 //! dsa-hostd remove-images <folder> removes the downloaded images (the uninstaller runs it)
 //! dsa-hostd remove-updates <folder> removes the downloaded setup files (the same)
+//! dsa-hostd remove-start-menu      removes every user's app shortcuts DSA made (the same)
 //! ```
 //!
 //! Without a mode it starts one VM, waits for the guest's channel daemon to connect and
 //! pass the protocol handshake, and prints every state change. Commands on standard input:
-//! `start`, `stop`, `status`, `quit`. End of input also quits; quitting stops the VM first.
+//! `start`, `stop`, `freeze`, `status`, `quit`. End of input also quits; quitting stops the
+//! VM first.
 //!
 //! `serve` and `service` answer the local API on a named pipe and run each caller's own
 //! VM. `serve` stops on Ctrl+C. `service` is what the installer registers; it writes its
@@ -53,6 +55,7 @@ mod windows_host {
     };
 
     use dsa_host_core::handshake::ControlHandshake;
+    use dsa_host_core::power::PowerHub;
     use dsa_host_core::session::{Session, SessionState};
     use dsa_host_windows::account::current_user_sid;
     use dsa_host_windows::android_vm::AndroidVmLauncher;
@@ -64,7 +67,8 @@ mod windows_host {
     use dsa_transport::Listener;
 
     const USAGE: &str = "usage: dsa-hostd [serve | service] <config.json> | \
-                         dsa-hostd remove-images <folder> | dsa-hostd remove-updates <folder>";
+                         dsa-hostd remove-images <folder> | dsa-hostd remove-updates <folder> | \
+                         dsa-hostd remove-start-menu";
 
     fn build() -> String {
         format!("dsa-hostd {}", dsa_host_windows::VERSION)
@@ -97,6 +101,28 @@ mod windows_host {
             [mode, path] if mode == "remove-updates" => {
                 use dsa_host_windows::uninstall::{installer_folder, remove_downloaded_updates};
                 remove_downloaded_updates(&installer_folder(path))
+            }
+            [mode] if mode == "remove-start-menu" => {
+                use dsa_host_windows::uninstall::remove_start_menu_shortcuts;
+                // Every user's, as the window manager made them in each profile.
+                for profile in dsa_host_windows::profile::profile_folders() {
+                    let note = profile
+                        .join("AppData")
+                        .join("Local")
+                        .join("DSA")
+                        .join(dsa_host_windows::start_menu::NOTE_NAME);
+                    let programs = profile
+                        .join("AppData")
+                        .join("Roaming")
+                        .join("Microsoft")
+                        .join("Windows")
+                        .join("Start Menu")
+                        .join("Programs");
+                    if let Err(why) = remove_start_menu_shortcuts(&note, &programs) {
+                        eprintln!("{}: {why}", profile.display());
+                    }
+                }
+                Ok(())
             }
             [path] if path != "serve" && path != "service" => one_vm(read_config(path)?),
             _ => Err(USAGE.into()),
@@ -177,7 +203,20 @@ mod windows_host {
         let session_config = config.session_config();
         let build = build();
         let handshake = ControlHandshake::new(&build, session_config.connect_timeout);
-        let session = Session::new(launcher, Box::new(listener), handshake, session_config);
+        let session = Arc::new(Session::new(
+            launcher,
+            Box::new(listener),
+            handshake,
+            session_config,
+        ));
+        // The guest's battery follows the computer's power.
+        let power = Arc::new(PowerHub::new());
+        power.attach(&session);
+        let power_stop = Arc::new(AtomicBool::new(false));
+        {
+            let (power, stop) = (Arc::clone(&power), Arc::clone(&power_stop));
+            thread::spawn(move || dsa_host_windows::power::follow(power, stop));
+        }
 
         let events = session.events();
         thread::spawn(move || {
@@ -190,7 +229,7 @@ mod windows_host {
         });
 
         println!(
-            "{build}: starting the Android VM {:?}; commands: start, stop, status, quit",
+            "{build}: starting the Android VM {:?}; commands: start, stop, freeze, status, quit",
             config.vm_name
         );
         session.start();
@@ -198,16 +237,24 @@ mod windows_host {
             match line.map_err(|e| e.to_string())?.trim() {
                 "start" => session.start(),
                 "stop" => session.stop(),
+                "freeze" => {
+                    if let Err(why) = session.freeze() {
+                        println!("not frozen: {why}");
+                    }
+                }
                 "status" => match session.last_reason() {
                     Some(reason) => println!("status: {} (last: {reason})", session.state()),
                     None => println!("status: {}", session.state()),
                 },
                 "quit" => break,
                 "" => {}
-                other => println!("unknown command {other:?}; commands: start, stop, status, quit"),
+                other => println!(
+                    "unknown command {other:?}; commands: start, stop, freeze, status, quit"
+                ),
             }
         }
 
+        power_stop.store(true, Ordering::Relaxed);
         session.stop();
         let grace = Duration::from_secs(config.stop_timeout_secs + 15);
         if !session.wait_for(SessionState::Stopped, grace) {

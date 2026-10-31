@@ -9,8 +9,11 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use dsa_protocol::control::{
-    envelope::Body, AuthChallenge, AuthProof, CloseTask, Envelope, Hello, HelloAccepted,
-    HelloRejected, LaunchApp, Rect, RejectReason, Role, TaskFrames, TaskRemoved, TaskUpdated,
+    envelope::Body, AppInfo, AuthChallenge, AuthProof, CloseTask, DeviceIdle, Envelope,
+    GuestMemory, Hello, HelloAccepted, HelloRejected, ImeCommit, ImeComposition, ImeCursor,
+    KeyAction, KeyEvent, LaunchApp, PointerAction, PointerEvent, PointerTool, PowerState,
+    ProcessMemory, Rect, RejectReason, RequestGuestMemory, ResizeTask, Role, ScreenState,
+    SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
 
@@ -90,6 +93,40 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                 package_name: "com.example.notes".into(),
                 label: "메모 (Notes)".into(),
                 focused: true,
+                ..TaskUpdated::default()
+            })),
+        ),
+        (
+            "task_updated_density",
+            wrap(Body::TaskUpdated(TaskUpdated {
+                task_id: 42,
+                bounds: Some(Rect {
+                    left: 0,
+                    top: 0,
+                    right: 1096,
+                    bottom: 1948,
+                }),
+                package_name: "com.example.notes".into(),
+                density_dpi: 320,
+                max_width: 3840,
+                max_height: 2160,
+                ..TaskUpdated::default()
+            })),
+        ),
+        (
+            "resize_task",
+            wrap(Body::ResizeTask(ResizeTask {
+                task_id: 42,
+                width: 1280,
+                height: 720,
+                live: false,
+            })),
+        ),
+        (
+            "set_task_density",
+            wrap(Body::SetTaskDensity(SetTaskDensity {
+                task_id: 42,
+                density_dpi: 240,
             })),
         ),
         (
@@ -127,11 +164,182 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
             })),
         ),
         (
+            "app_info",
+            wrap(Body::AppInfo(AppInfo {
+                package_name: "com.example.notes".into(),
+                label: "Notes".into(),
+                icon_png: vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
+            })),
+        ),
+        (
+            "pointer_event_mouse_secondary_down",
+            wrap(Body::PointerEvent(PointerEvent {
+                task_id: 42,
+                action: PointerAction::Down as i32,
+                tool: PointerTool::Mouse as i32,
+                pointer_id: 0,
+                x: 120.5,
+                y: 64.25,
+                buttons: 2,
+                pressure: 1.0,
+                ..PointerEvent::default()
+            })),
+        ),
+        (
+            "pointer_event_touch_move",
+            wrap(Body::PointerEvent(PointerEvent {
+                task_id: 7,
+                action: PointerAction::Move as i32,
+                tool: PointerTool::Touch as i32,
+                pointer_id: 3,
+                x: 10.0,
+                y: 1023.75,
+                pressure: 0.5,
+                ..PointerEvent::default()
+            })),
+        ),
+        (
+            "pointer_event_scroll",
+            wrap(Body::PointerEvent(PointerEvent {
+                task_id: 42,
+                action: PointerAction::Scroll as i32,
+                tool: PointerTool::Mouse as i32,
+                x: 300.0,
+                y: 200.0,
+                scroll_x: 0.5,
+                scroll_y: -1.0,
+                ..PointerEvent::default()
+            })),
+        ),
+        (
+            "pointer_event_pen_hover",
+            wrap(Body::PointerEvent(PointerEvent {
+                task_id: 42,
+                action: PointerAction::HoverMove as i32,
+                tool: PointerTool::Pen as i32,
+                pointer_id: 1,
+                x: 0.0,
+                y: 599.0,
+                buttons: 32,
+                ..PointerEvent::default()
+            })),
+        ),
+        (
+            "key_event_ctrl_a_down",
+            wrap(Body::KeyEvent(KeyEvent {
+                task_id: 42,
+                action: KeyAction::Down as i32,
+                key_code: 29,
+                meta_state: 0x3000,
+                event_time_ms: 123_456,
+                ..KeyEvent::default()
+            })),
+        ),
+        (
+            "key_event_backspace_repeat",
+            wrap(Body::KeyEvent(KeyEvent {
+                task_id: 42,
+                action: KeyAction::Down as i32,
+                key_code: 67,
+                repeat_count: 3,
+                event_time_ms: 500,
+                ..KeyEvent::default()
+            })),
+        ),
+        (
+            "key_event_canceled_up",
+            wrap(Body::KeyEvent(KeyEvent {
+                task_id: 7,
+                action: KeyAction::Up as i32,
+                key_code: 66,
+                meta_state: 0x10_0000,
+                event_time_ms: 4_294_967_000,
+                canceled: true,
+                ..KeyEvent::default()
+            })),
+        ),
+        (
+            "ime_composition_korean",
+            wrap(Body::ImeComposition(ImeComposition {
+                task_id: 42,
+                text: "\u{d55c}".into(),
+                cursor: 1,
+            })),
+        ),
+        (
+            "ime_composition_removed",
+            wrap(Body::ImeComposition(ImeComposition {
+                task_id: 7,
+                ..ImeComposition::default()
+            })),
+        ),
+        (
+            "ime_commit_korean",
+            wrap(Body::ImeCommit(ImeCommit {
+                task_id: 42,
+                text: "\u{d55c}\u{ae00}".into(),
+            })),
+        ),
+        (
+            "ime_cursor",
+            wrap(Body::ImeCursor(ImeCursor {
+                task_id: 42,
+                cursor: Some(Rect {
+                    left: 100,
+                    top: 200,
+                    right: 102,
+                    bottom: 240,
+                }),
+            })),
+        ),
+        (
+            "screen_state_off",
+            wrap(Body::ScreenState(ScreenState { on: false })),
+        ),
+        (
+            "screen_state_on",
+            wrap(Body::ScreenState(ScreenState { on: true })),
+        ),
+        (
+            "power_state_on_battery",
+            wrap(Body::PowerState(PowerState {
+                ac_online: false,
+                battery_present: true,
+                battery_percent: 57,
+                charging: false,
+                power_saver: true,
+            })),
+        ),
+        (
+            "device_idle",
+            wrap(Body::DeviceIdle(DeviceIdle { idle: true })),
+        ),
+        (
             "hello_rejected_authentication",
             wrap(Body::HelloRejected(HelloRejected {
                 reason: RejectReason::AuthenticationFailed as i32,
                 detail: "no proof".into(),
                 host: None,
+            })),
+        ),
+        (
+            "request_guest_memory",
+            wrap(Body::RequestGuestMemory(RequestGuestMemory {})),
+        ),
+        (
+            "guest_memory",
+            wrap(Body::GuestMemory(GuestMemory {
+                mem_total_kb: 4015356,
+                cached_kb: 1503112,
+                zram_used_kb: 30720,
+                total_pss_kb: 330000,
+                top_processes: vec![ProcessMemory {
+                    pid: 500,
+                    name: "system".into(),
+                    pss_kb: 180000,
+                    swap_pss_kb: 1000,
+                }],
+                ..GuestMemory::default()
             })),
         ),
     ])

@@ -18,16 +18,25 @@ nothing else.
    `TaskFrames {task_id, display_id}` before the first frame. A task keeps its display until
    `TaskRemoved`, when the display and its ColorBuffers are released.
 4. The task's layers are composed on the host GPU with `rcComposeWithoutPost`
-   (`ComposeDevice_v2`) into a ColorBuffer the size of the task's bounds. Layer frames are
-   moved so the task's top left corner is the origin. The request names display 0, not
+   (`ComposeDevice_v2`) into the top-left corner of a ColorBuffer. Layer frames are moved
+   so the task's top left corner is the origin. The ColorBuffers are made at the display's
+   size, the largest a task can be, so resizing a window remakes none of them; only the
+   task display's size (`rcSetDisplayPose`) follows the task, and it tells the host how
+   much of the ColorBuffer the frame fills. The request names display 0, not
    the task's: given a display, the host would make the target that display's frame
    before composing into it, and the window would show each frame one late. Once the
    compose has finished, the hwcomposer makes the ColorBuffer the task display's current
    one (`rcSetDisplayColorBuffer`), which is when the host copies it into the window. Two
    ColorBuffers per task alternate, so the host can show one while the next is composed.
 
-Composition finishes before `presentDisplay` returns, so the hwcomposer hands back no
-release fences and declares `PRESENT_FENCE_IS_NOT_RELIABLE`.
+`presentDisplay` does not wait for the host. It hands the frame to a thread of its own,
+which composes and posts it, and waits only until the frame before has gone out. That is
+enough without release fences: SurfaceFlinger gives a buffer back to its app when the
+present after the one that showed it returns, and by then the host has finished with it.
+SurfaceFlinger latches and composes the next frame while the host composes this one,
+instead of spending every round trip to the host on its main thread, where a late answer
+held back the release of every app's buffers. The hwcomposer hands back no release fences
+and declares `PRESENT_FENCE_IS_NOT_RELIABLE`.
 
 ## Which layers belong to which task
 
@@ -38,6 +47,21 @@ display. When several tasks contain it (one window over another), the layer goes
 2. otherwise the task of the nearest layer below it that one of those tasks owns, since a
    task's layers are adjacent in z order;
 3. otherwise the smallest of those tasks, then the lowest task ID.
+
+Task bounds never overlap in practice: Android's freeform launch puts every new task at
+the same place, and two tasks at the same place cannot be told apart, so the agent moves
+tasks apart and reports the bounds a task is moving to. A task that moves keeps its host
+display; a new size resizes it. Until the task's surface reaches its new place, no task
+contains it and it is not sent.
+
+After a task's size changes, its app still has its old surface until it draws again. A
+frame composed at the new size then would show the old picture in a corner and nothing
+beside it, while the host is already stretching the last frame over the resized window.
+So the hwcomposer holds a resized task's frames until one of the task's drawn layers fills
+its new bounds (`ResizeGate` in `src/task_layout.cpp`), and only then resizes the task's
+host display and sends the frame. A task whose app has not drawn at the new size after
+500 ms is sent as it is and logged, so its window never stays stretched; the hwcomposer
+asks SurfaceFlinger for a frame at that moment in case nothing else changes.
 
 A layer no task contains is never sent: the wallpaper, display-wide backgrounds and dim
 layers, and anything that straddles a window's edge. Sending it would put pixels that
@@ -70,7 +94,9 @@ in the hwcomposer. Without virtio-gpu, a gralloc buffer carries no host resource
 process derives the ColorBuffer handle from the buffer ID minigbm writes into the handle
 (`dsa/graphics/include/dsa_shared_color_buffer.h`). The first process to use the buffer
 creates the ColorBuffer with that handle; the others open it. The guest Vulkan driver does
-the same (`dsa/graphics/patches/0002-*.patch`). The hwcomposer closes its reference when
+the same (`dsa/graphics/patches/0002-*.patch`). Whoever creates it gives it the buffer's
+own format, from the DRM format minigbm writes into the handle, through the same header:
+the driver binds the buffer's VkImage, made in that format, to the ColorBuffer's memory. The hwcomposer closes its reference when
 SurfaceFlinger can no longer show the buffer, and the host frees whatever a process still
 holds when the process dies.
 
@@ -104,7 +130,8 @@ the NDK's libc++ is not the platform's. `dsa/graphics/check-guest-driver.py --ex
 checks every import resolves against the image.
 
 `test.sh` runs the task rules (`tests/task_layout_test.cpp`) and the channel messages
-against the protocol vectors (`tests/channel_messages_test.cpp`) on the build machine. It
+against the protocol vectors (`tests/channel_messages_test.cpp`), and the present
+pipeline (`tests/frame_pipeline_test.cpp`) on the build machine. It
 needs a C++17 compiler and protobuf-lite 3.21 (Debian: `libprotobuf-dev`).
 
 The composer is DSA's own code, written after ranchu's hwc3
@@ -116,10 +143,11 @@ composition paths (DRM, guest composition) do not apply to a VM without a displa
 
 | File | What it is |
 |---|---|
-| `src/task_layout.*` | The rules: which layer belongs to which task, task bounds, display pairings |
+| `src/task_layout.*` | The rules: which layer belongs to which task, task bounds, display pairings, holding a resized task's frames |
 | `src/compose_request.*` | The `ComposeDevice_v2` request renderControl's `rcCompose` takes |
 | `src/channel_messages.*` | `TaskUpdated`, `TaskRemoved` and `TaskFrames`, through the generated codec |
 | `src/task_composer.*` | Per-task composition and posting, display lifetimes, shared ColorBuffers |
+| `src/frame_pipeline.*` | The thread a frame goes to the host on, one frame in flight |
 | `src/host_renderer.*`, `src/host_stream.*` | renderControl over vsock to the host renderer |
 | `src/channel_client.*` | The binder client of `dsa-channeld` |
 | `src/composer*.*`, `src/display.*`, `src/vsync_thread.*`, `src/main.cpp` | The composer HAL SurfaceFlinger talks to |

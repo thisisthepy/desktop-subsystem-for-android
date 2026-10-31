@@ -11,12 +11,22 @@
 #include <mutex>
 
 #include <aidl/android/hardware/graphics/composer3/BnComposerClient.h>
+#include <android/binder_ibinder_platform.h>
 
 #include "display.h"
 #include "task_composer.h"
 #include "vsync_thread.h"
 
 namespace dsa::hwc {
+
+// SCHED_FIFO priority of SurfaceFlinger's main thread, which the composer's display work
+// runs at too.
+constexpr int kDisplaySchedPriority = 2;
+
+// Makes the calling thread SCHED_FIFO at kDisplaySchedPriority; logs if it cannot.
+void raiseToDisplayPriority(const char* what);
+// Serves calls to `binder` at real-time priority. Before the binder leaves the process.
+void makeBinderRealtime(AIBinder* binder);
 
 class ComposerClient : public composer3::BnComposerClient {
    public:

@@ -61,6 +61,20 @@ fn pr5_the_service_learns_the_clients_user_from_windows() {
 }
 
 #[test]
+fn fr17_the_service_learns_whether_the_client_is_an_administrator() {
+    let name = fresh_name();
+    let mut listener = NamedPipeListener::bind(&name, TEST_SDDL).unwrap();
+    let _client = NamedPipeConnector { name }
+        .connect(Duration::from_secs(5))
+        .unwrap();
+    let (_, peer) = listener.accept(Duration::from_secs(5)).unwrap();
+    assert_eq!(
+        peer.administrator,
+        dsa_host_windows::pipe::current_process_is_administrator()
+    );
+}
+
+#[test]
 fn pr5_a_second_server_cannot_take_over_the_name() {
     let name = fresh_name();
     let _first = NamedPipeListener::bind(&name, TEST_SDDL).unwrap();
@@ -71,4 +85,24 @@ fn pr5_a_second_server_cannot_take_over_the_name() {
 fn pr5_an_invalid_security_descriptor_is_refused() {
     assert!(NamedPipeListener::bind(&fresh_name(), "not sddl").is_err());
     assert!(DEFAULT_PIPE_SDDL.starts_with("D:P"));
+}
+
+/// The window manager sends each app window its frames from one thread while another waits
+/// for what the window says back, over one pipe.
+#[test]
+fn pr1_a_pipe_sends_from_a_clone_while_another_thread_receives() {
+    let (mut listener, mut connector) = pipe_pair();
+    let mut near = connector.connect(Duration::from_secs(5)).unwrap();
+    let mut far = listener.accept(Duration::from_secs(5)).unwrap();
+    let mut sender = near
+        .try_clone_sender()
+        .expect("a pipe can share its handle");
+    let reader = std::thread::spawn(move || near.recv(Some(Duration::from_secs(5))));
+    std::thread::sleep(Duration::from_millis(50));
+    let started = std::time::Instant::now();
+    sender.send(b"frame").unwrap();
+    assert_eq!(far.recv(Some(Duration::from_secs(5))).unwrap(), b"frame");
+    assert!(started.elapsed() < Duration::from_secs(1));
+    far.send(b"presented").unwrap();
+    assert_eq!(reader.join().unwrap().unwrap(), b"presented");
 }

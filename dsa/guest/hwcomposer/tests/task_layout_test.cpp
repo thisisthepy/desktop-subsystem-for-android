@@ -35,6 +35,43 @@ bool hasTask(const Layout& layout, int32_t task) {
 
 }  // namespace
 
+TEST(fr4_an_app_has_drawn_at_its_size_when_a_drawn_layer_fills_the_task) {
+    const Rect bounds{100, 100, 700, 600};
+    // The old, smaller surface, and a solid colour that fills the task.
+    const std::vector<LayerFill> beforeRedraw{{{100, 100, 500, 400}, true}, {bounds, false}};
+    const std::vector<LayerFill> afterRedraw{{{100, 100, 500, 400}, true}, {bounds, true}};
+    EXPECT_TRUE(!drawnAtSize(bounds, beforeRedraw));
+    EXPECT_TRUE(drawnAtSize(bounds, afterRedraw));
+    EXPECT_TRUE(!drawnAtSize(bounds, {}));
+}
+
+TEST(fr4_a_resized_task_is_held_until_its_app_draws_at_the_new_size) {
+    ResizeGate gate;
+    const Rect grown{0, 0, 600, 500};
+    // The first frame, and frames of the size the host has, always go.
+    EXPECT_TRUE(gate.decide(1, 0, 0, grown, false, 0) == ResizeGate::Decision::Post);
+    EXPECT_TRUE(gate.decide(1, 600, 500, grown, false, 0) == ResizeGate::Decision::Post);
+    // Grown to 600x500 from 400x300: held while the app has not drawn at it.
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 1000) == ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(1000 + ResizeGate::kHoldMs));
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 1200) == ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, true, 1250) == ResizeGate::Decision::Post);
+    EXPECT_TRUE(!gate.nextDeadline());
+}
+
+TEST(fr4_a_resized_task_whose_app_does_not_draw_is_sent_in_time) {
+    ResizeGate gate;
+    const Rect grown{0, 0, 600, 500};
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 0) == ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.decide(2, 300, 300, grown, false, 100) == ResizeGate::Decision::Hold);
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(ResizeGate::kHoldMs));
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, ResizeGate::kHoldMs) ==
+                ResizeGate::Decision::PostLate);
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(100 + ResizeGate::kHoldMs));
+    gate.forget(2);
+    EXPECT_TRUE(!gate.nextDeadline());
+}
+
 TEST(fr3_a_layer_inside_one_task_goes_to_that_task) {
     const std::vector<Task> tasks{{1, {100, 100, 900, 700}}, {2, {1000, 100, 1800, 700}}};
     const std::vector<LayerPlacement> layers{
@@ -185,6 +222,60 @@ TEST(fr3_no_display_is_paired_when_all_are_taken) {
     EXPECT_TRUE(!displays.acquire(3));
 }
 
+TEST(fr3_two_tasks_at_one_place_cannot_be_told_apart) {
+    // Android's freeform launch gives every new task the same default place. With identical
+    // bounds both surfaces match both tasks exactly, so every layer goes to one task and the
+    // other gets none: the agent has to move tasks apart.
+    const Rect place{686, 53, 1234, 1027};
+    const std::vector<Task> tasks{{4, place}, {5, place}};
+    const std::vector<LayerPlacement> layers{{40, 1, place}, {50, 2, place}};
+    const Layout layout = assignLayersToTasks(layers, tasks, kDisplay);
+    EXPECT_EQ(layersOf(layout, 4), (std::vector<int64_t>{40, 50}));
+    EXPECT_TRUE(!hasTask(layout, 5));
+}
+
+TEST(fr3_a_task_moved_apart_gets_its_own_layers_and_keeps_its_display) {
+    const Rect place{686, 53, 1234, 1027};
+    const Rect moved{0, 0, 548, 974};
+    TaskRegistry registry;
+    TaskDisplays displays(1, 10);
+    registry.update(4, place);
+    registry.update(5, place);
+    const auto before = displays.acquire(5);
+
+    // The agent moves task 5 and reports its new bounds; its surface follows.
+    EXPECT_TRUE(registry.update(5, moved));
+    const std::vector<LayerPlacement> layers{
+        {40, 1, place},
+        {50, 2, moved},
+        {51, 3, {100, 200, 300, 260}},
+    };
+    const Layout layout = assignLayersToTasks(layers, registry.tasks(), kDisplay);
+    EXPECT_EQ(layersOf(layout, 4), (std::vector<int64_t>{40}));
+    EXPECT_EQ(layersOf(layout, 5), (std::vector<int64_t>{50, 51}));
+    EXPECT_TRUE(layout.unassigned.empty());
+
+    const auto after = displays.acquire(5);
+    EXPECT_TRUE(before && after);
+    EXPECT_EQ(after->displayId, before->displayId);
+    EXPECT_TRUE(!after->created);
+}
+
+TEST(fr3_a_surface_not_yet_at_its_task_new_place_goes_to_no_other_task) {
+    // Between the agent's report and the window manager's move, the surface is still at the
+    // old place, which no task's bounds hold any more: it is left out, not given to a
+    // neighbour.
+    const std::vector<Task> tasks{{4, {0, 0, 548, 974}}, {5, {548, 0, 1096, 974}}};
+    const std::vector<LayerPlacement> layers{
+        {40, 1, {0, 0, 548, 974}},
+        {50, 2, {686, 53, 1234, 1027}},
+    };
+    const Layout layout = assignLayersToTasks(layers, tasks, kDisplay);
+    EXPECT_EQ(layersOf(layout, 4), (std::vector<int64_t>{40}));
+    EXPECT_TRUE(!hasTask(layout, 5));
+    EXPECT_EQ(layout.unassigned, (std::vector<int64_t>{50}));
+}
+
 TEST(fr3_task_frames_are_composed_relative_to_the_task_origin) {
     ComposeInput surface;
     surface.colorBuffer = 0x80000007u;
@@ -230,6 +321,61 @@ TEST(fr3_task_frames_are_composed_relative_to_the_task_origin) {
     EXPECT_EQ(layers[2].cbHandle, 0u);
     EXPECT_EQ(layers[2].composeMode, 3);
     EXPECT_EQ(layers[2].color.a, 128);
+}
+
+TEST(fr4_a_task_buffers_are_made_at_the_display_size) {
+    // The first frame of a 600x400 task on a 1920x1080 display.
+    const BufferSize first = taskBufferSize({}, kDisplay, 600, 400);
+    EXPECT_EQ(first.width, 1920);
+    EXPECT_EQ(first.height, 1080);
+}
+
+TEST(fr4_resizing_a_task_within_the_display_keeps_its_buffers) {
+    BufferSize buffers = taskBufferSize({}, kDisplay, 600, 400);
+    // A drag through many sizes, smaller and larger, up to the whole display.
+    const int64_t sizes[][2] = {{610, 405}, {580, 390}, {1200, 800}, {1920, 1080}, {300, 200}};
+    for (const auto& size : sizes) {
+        const BufferSize next = taskBufferSize(buffers, kDisplay, size[0], size[1]);
+        EXPECT_TRUE(next == buffers);
+        buffers = next;
+    }
+}
+
+TEST(fr4_a_task_larger_than_the_display_gets_buffers_that_hold_it) {
+    const BufferSize buffers = taskBufferSize({1920, 1080}, kDisplay, 2000, 900);
+    EXPECT_EQ(buffers.width, 2000);
+    EXPECT_EQ(buffers.height, 1080);
+    // Once they hold it, they stay.
+    EXPECT_TRUE(taskBufferSize(buffers, kDisplay, 1990, 1000) == buffers);
+}
+
+TEST(fr4_a_larger_display_remakes_the_buffers_once) {
+    const Rect larger{0, 0, 2560, 1440};
+    const BufferSize buffers = taskBufferSize({1920, 1080}, larger, 600, 400);
+    EXPECT_EQ(buffers.width, 2560);
+    EXPECT_EQ(buffers.height, 1440);
+    EXPECT_TRUE(taskBufferSize(buffers, larger, 640, 420) == buffers);
+}
+
+TEST(fr4_a_resized_task_is_composed_into_the_top_left_of_its_buffers) {
+    // The task moved and grew; its layers land at its own origin in the larger buffer, so
+    // the frame fills exactly the task's size from (0, 0).
+    const Rect bounds{300, 200, 1000, 700};
+    std::vector<ComposeInput> inputs(1);
+    inputs[0].mode = ComposeMode::Device;
+    inputs[0].colorBuffer = 7;
+    inputs[0].frame = bounds;
+    inputs[0].crop = FRect{0, 0, 700, 500};
+    const std::vector<uint8_t> request = buildComposeRequest(0, 9, bounds, inputs);
+    WireComposeDeviceV2 header;
+    std::memcpy(&header, request.data(), sizeof(header));
+    EXPECT_EQ(header.targetHandle, 9u);
+    WireComposeLayer layer;
+    std::memcpy(&layer, request.data() + sizeof(header), sizeof(layer));
+    EXPECT_EQ(layer.displayFrame.left, 0);
+    EXPECT_EQ(layer.displayFrame.top, 0);
+    EXPECT_EQ(layer.displayFrame.right, 700);
+    EXPECT_EQ(layer.displayFrame.bottom, 500);
 }
 
 int main() { return ::dsa::test::runAll(); }

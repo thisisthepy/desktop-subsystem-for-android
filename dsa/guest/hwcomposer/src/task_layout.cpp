@@ -119,6 +119,42 @@ Layout assignLayersToTasks(const std::vector<LayerPlacement>& layers,
     return layout;
 }
 
+bool drawnAtSize(const Rect& bounds, const std::vector<LayerFill>& layers) {
+    for (const LayerFill& layer : layers) {
+        if (layer.drawn && layer.frame == bounds) {
+            return true;
+        }
+    }
+    return false;
+}
+
+ResizeGate::Decision ResizeGate::decide(int32_t task, int64_t postedWidth, int64_t postedHeight,
+                                        const Rect& bounds, bool drawn, int64_t nowMs) {
+    const bool firstFrame = postedWidth <= 0 || postedHeight <= 0;
+    const bool sameSize = postedWidth == bounds.width() && postedHeight == bounds.height();
+    if (firstFrame || sameSize || drawn) {
+        mHeldSince.erase(task);
+        return Decision::Post;
+    }
+    const int64_t since = mHeldSince.emplace(task, nowMs).first->second;
+    if (nowMs - since >= kHoldMs) {
+        mHeldSince.erase(task);
+        return Decision::PostLate;
+    }
+    return Decision::Hold;
+}
+
+std::optional<int64_t> ResizeGate::nextDeadline() const {
+    std::optional<int64_t> first;
+    for (const auto& [_, since] : mHeldSince) {
+        const int64_t deadline = since + kHoldMs;
+        if (!first || deadline < *first) {
+            first = deadline;
+        }
+    }
+    return first;
+}
+
 bool TaskRegistry::update(int32_t id, const Rect& bounds) {
     auto it = mTasks.find(id);
     if (it != mTasks.end() && it->second == bounds) {
@@ -158,6 +194,16 @@ std::optional<TaskDisplays::Pairing> TaskDisplays::acquire(int32_t task) {
         }
     }
     return std::nullopt;
+}
+
+BufferSize taskBufferSize(BufferSize current, const Rect& display, int64_t taskWidth,
+                          int64_t taskHeight) {
+    const int64_t width = std::max<int64_t>({display.width(), taskWidth, 1});
+    const int64_t height = std::max<int64_t>({display.height(), taskHeight, 1});
+    if (current.covers(width, height)) {
+        return current;
+    }
+    return BufferSize{width, height};
 }
 
 std::optional<uint32_t> TaskDisplays::release(int32_t task) {

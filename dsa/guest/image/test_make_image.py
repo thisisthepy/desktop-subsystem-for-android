@@ -376,7 +376,7 @@ class ImageLayoutTests(unittest.TestCase):
             source = root / "target-files.zip"
             removed = [
                 "com.google.cf.oemlock", "com.android.hardware.uwb", "com.google.cf.bt",
-                "com.android.hardware.threadnetwork",
+                "com.android.hardware.threadnetwork", "com.google.cf.nfc", "com.google.cf.rild",
             ]
             with zipfile.ZipFile(source, "w") as archive:
                 for apex in removed + ["com.android.hardware.boot"]:
@@ -415,6 +415,26 @@ class ImageLayoutTests(unittest.TestCase):
                 self.assertIn(f'<unavailable-feature name="{feature}" />', xml)
             self.assertIn("vendor/etc/permissions/dsa-unavailable-features.xml 0 0 644 capabilities=0x0", fs_config)
 
+    def test_fr4_nfc_and_telephony_are_not_advertised_without_the_hardware(self):
+        # Declared, the NFC service and the phone process start, fail to reach their HALs and
+        # time out every few seconds; each ANR dumps the stacks of many processes and takes
+        # the CPU that the apps need to draw.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/etc/permissions 0 2000 755 capabilities=0x0\n")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+            with zipfile.ZipFile(modified) as archive:
+                xml = archive.read("VENDOR/etc/permissions/dsa-unavailable-features.xml").decode()
+            for feature in ["android.hardware.nfc", "android.hardware.nfc.any", "android.hardware.nfc.hce",
+                            "android.hardware.telephony", "android.hardware.telephony.radio.access",
+                            "android.hardware.telephony.subscription", "android.hardware.telephony.data",
+                            "android.hardware.telephony.calling", "android.hardware.telephony.messaging",
+                            "android.hardware.telephony.gsm", "android.hardware.telephony.ims"]:
+                self.assertIn(f'<unavailable-feature name="{feature}" />', xml)
+
     def test_fr1_system_server_does_not_wait_for_a_factory_reset_protection_partition(self):
         # With ro.frp.pst set, system_server starts PersistentDataBlockService, which needs
         # an frp partition the DSA disks do not have, and dies at boot phase 500. Empty,
@@ -422,6 +442,75 @@ class ImageLayoutTests(unittest.TestCase):
         props = make_image.edit_props("ro.frp.pst=/dev/block/by-name/frp\n")
         self.assertIn("ro.frp.pst=\n", props)
         self.assertNotIn("by-name/frp", props)
+
+    # The Wi-Fi init script as the pinned Android 16 and 17 builds ship it, comments trimmed.
+    WIFI_RC = (
+        "on post-fs-data\n"
+        "   restorecon_recursive /data/misc/apexdata/com.android.wifi\n"
+        "\n"
+        "on property:sys.user.0.ce_available=true\n"
+        "   restorecon_recursive /data/misc_ce/0/apexdata/com.android.wifi\n"
+        "\n"
+        "# Below are for kernel tracing related stuff.\n"
+        "on fs\n"
+        "   setprop sys.wifitracing.started 0\n"
+        "\n"
+        "on property:sys.boot_completed=1 && property:sys.wifitracing.started=0\n"
+        "   # Create trace buffer, and set basic configuration.\n"
+        "   mkdir /sys/kernel/tracing/instances/wifi 711\n"
+        "   restorecon_recursive /sys/kernel/tracing/instances/wifi\n"
+        "   write /sys/kernel/tracing/instances/wifi/tracing_on 0\n"
+        "   write /sys/kernel/tracing/instances/wifi/buffer_size_kb 1\n"
+        "   write /sys/kernel/tracing/instances/wifi/trace_options disable_on_free\n"
+        "\n"
+        "   write /sys/kernel/tracing/instances/wifi/events/cfg80211/rdev_connect/enable 1\n"
+        "   write /sys/kernel/tracing/instances/wifi/events/net/filter name==${wifi.interface:-wlan0}\n"
+        "   write /sys/kernel/tracing/instances/wifi/events/net/net_dev_queue/enable 1\n"
+        "   write /sys/kernel/tracing/instances/wifi/events/net/netif_receive_skb/enable 1\n"
+        "\n"
+        "   chown system /sys/kernel/tracing/instances/wifi/tracing_on\n"
+        "   chmod 600 /sys/kernel/tracing/instances/wifi/trace\n"
+        "   setprop sys.wifitracing.started 1\n"
+        "\n"
+        "on property:sys.boot_completed=1 && property:wifi.interface=* && property:sys.wifitracing.started=1\n"
+        "   # Override default value.\n"
+        "   write /sys/kernel/tracing/instances/wifi/events/net/filter name==${wifi.interface}\n"
+    )
+
+    def test_fr3_boot_completed_sets_up_no_wifi_trace_instance(self):
+        # On Hyper-V each write into tracefs takes up to two seconds, and lmkd attaches its
+        # memory event programs to tracepoints behind them when boot completes, past its
+        # watchdog's two seconds; the watchdog then killed the app the user had just opened.
+        rc = make_image.edit_wifi_rc(self.WIFI_RC)
+        self.assertNotIn("sys.wifitracing.started=0", rc)
+        self.assertNotIn("instances/wifi/buffer_size_kb", rc)
+        self.assertNotIn("instances/wifi/events/net/net_dev_queue/enable", rc)
+        self.assertNotIn("mkdir /sys/kernel/tracing", rc)
+        # The rest of the script stays: Wi-Fi's data migration and its other triggers.
+        self.assertIn("on post-fs-data\n   restorecon_recursive /data/misc/apexdata/com.android.wifi\n", rc)
+        self.assertIn("on property:sys.user.0.ce_available=true\n", rc)
+        self.assertIn("on fs\n   setprop sys.wifitracing.started 0\n", rc)
+        self.assertIn("property:sys.wifitracing.started=1\n", rc)
+
+    def test_fr3_an_unrecognised_wifi_rc_is_not_passed_through(self):
+        # A new build that set the trace instance up some other way would bring the stall
+        # back unnoticed, so the image is not made until this edit is looked at again.
+        with self.assertRaisesRegex(ValueError, "wifi.rc"):
+            make_image.edit_wifi_rc("on property:sys.boot_completed=1\n"
+                                    "   mkdir /sys/kernel/tracing/instances/wifi 711\n")
+
+    def test_fr3_modify_removes_the_wifi_trace_setup_from_the_system_image(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/init/wifi.rc", self.WIFI_RC)
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+            with zipfile.ZipFile(modified) as archive:
+                rc = archive.read("SYSTEM/etc/init/wifi.rc").decode()
+            self.assertNotIn("sys.wifitracing.started=0", rc)
+            self.assertIn("on post-fs-data\n", rc)
 
     def test_pr3_graphics_clients_can_open_the_drm_card_minigbm_uses(self):
         # Every process that maps a graphics buffer runs minigbm's mapper, which opens the
@@ -697,6 +786,25 @@ class ImageLayoutTests(unittest.TestCase):
                     "system_ext/etc/permissions/privapp-permissions-dsa-agent.xml 0 0 644 capabilities=0x0",
                     fs_config,
                 )
+
+    def test_fr10_the_agent_may_put_the_guest_into_doze_and_set_its_battery(self):
+        # The agent calls the deviceidle and battery shell commands over binder, handing
+        # system_server the descriptors the commands write to.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = self._target_files_with_system_ext(root)
+            with zipfile.ZipFile(source, "a") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type platform_app)\n")
+            agent = root / "agent.apk"
+            agent.write_bytes(b"PK agent")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, agent=agent)
+            with zipfile.ZipFile(modified) as archive:
+                policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+                self.assertIn("(allow platform_app deviceidle_service (service_manager (find)))", policy)
+                self.assertIn("(allow platform_app battery_service (service_manager (find)))", policy)
+                self.assertIn("(allow system_server platform_app (fd (use)))", policy)
+                self.assertIn("(allow system_server platform_app (fifo_file (write getattr)))", policy)
 
     def test_fr3_the_agent_is_signed_with_the_platform_key(self):
         # A platform app may use the framework interfaces the agent needs. sign_target_files_apks
@@ -990,6 +1098,189 @@ class ImageLayoutTests(unittest.TestCase):
             # Without DSA's composer no task window ever gets a frame.
             self.assertIn("VENDOR/bin/hw/dsa-hwcomposer is missing", proc.stdout)
             self.assertIn("androidboot.dsa.display_width", proc.stdout)
+
+    def test_fr3_check_image_rejects_the_wifi_trace_setup(self):
+        check_script = Path(__file__).with_name("check-image.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_dir = root / "image"
+            img_dir.mkdir()
+            keys_dir = root / "keys"
+            keys_dir.mkdir()
+            (img_dir / "image.json").write_text(json.dumps({"files": {}, "kernel_cmdline": ""}))
+            (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
+            with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
+                archive.writestr("META/apkcerts.txt", "")
+                archive.writestr("SYSTEM/etc/init/wifi.rc", self.WIFI_RC)
+
+            proc = subprocess.run(
+                [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("wifi.rc still sets up a kernel trace instance when boot completes", proc.stdout)
+
+            with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
+                archive.writestr("META/apkcerts.txt", "")
+                archive.writestr("SYSTEM/etc/init/wifi.rc", make_image.edit_wifi_rc(self.WIFI_RC))
+            proc = subprocess.run(
+                [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotIn("wifi.rc", proc.stdout)
+
+
+class GuestMemoryTests(unittest.TestCase):
+    """The image keeps the guest's memory small, so the host gets back what it does not use."""
+
+    def _modify(self, root, channeld=False, extra=None):
+        source = root / "target-files.zip"
+        with zipfile.ZipFile(source, "w") as archive:
+            archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+            archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+            for name, data in (extra or {}).items():
+                archive.writestr(name, data)
+        daemon = None
+        if channeld:
+            daemon = root / "dsa-channeld"
+            daemon.write_bytes(b"daemon")
+        modified = root / "modified.zip"
+        make_image.modify(source, modified, channeld=daemon)
+        return zipfile.ZipFile(modified)
+
+    def test_nfr1_the_guest_swaps_to_zram_of_half_its_memory(self):
+        fstab = (Path(make_image.__file__).with_name("fstab.dsa")).read_text()
+        self.assertIn("/dev/block/zram0 none swap defaults zramsize=50%", fstab)
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            rc = archive.read("VENDOR/etc/init/dsa-memory.rc").decode()
+            self.assertIn("swapon_all /vendor/etc/fstab.dsa", rc)
+            self.assertIn("write /proc/sys/vm/swappiness 100", rc)
+            self.assertIn(
+                "vendor/etc/init/dsa-memory.rc 0 0 644 capabilities=0x0",
+                archive.read("META/vendor_filesystem_config.txt").decode(),
+            )
+            for directory in make_image.FSTAB_DIRS:
+                self.assertIn(b"zramsize=50%", archive.read(directory + "fstab.dsa"))
+
+    def test_nfr1_swapon_all_does_not_stop_at_the_missing_max_comp_streams(self):
+        # fs_mgr opens /sys/block/zram0/max_comp_streams for any value of 0 or more, its
+        # default, and skips the device when the file is missing, as it is on the guest's
+        # kernel. Only -1 lets it go on to the size, mkswap and swapon.
+        fstab = (Path(make_image.__file__).with_name("fstab.dsa")).read_text()
+        entries = [line.split() for line in fstab.splitlines() if line.startswith("/dev/block/zram0")]
+        self.assertEqual(len(entries), 1)
+        self.assertIn("max_comp_streams=-1", entries[0][4].split(","))
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            for directory in make_image.FSTAB_DIRS:
+                self.assertIn(b"max_comp_streams=-1", archive.read(directory + "fstab.dsa"))
+
+    def test_nfr1_the_kernel_has_what_zram_swap_needs(self):
+        config = (make_image.REPO / "dsa/kernel/android.config").read_text().splitlines()
+        for option in ("CONFIG_SWAP", "CONFIG_ZSMALLOC", "CONFIG_ZRAM",
+                       "CONFIG_ZRAM_BACKEND_LZ4", "CONFIG_ZRAM_DEF_COMP_LZ4"):
+            self.assertIn(f"{option}=y", config)
+
+    def test_nfr1_lmkd_watches_the_zram_swap(self):
+        props = make_image.edit_props("ro.debuggable=1\n")
+        for line in [
+            "ro.lmk.use_psi=true",
+            "ro.lmk.use_minfree_levels=false",
+            "ro.lmk.swap_free_low_percentage=10",
+            "ro.lmk.swap_util_max=90",
+            "ro.lmk.thrashing_limit=30",
+        ]:
+            self.assertIn(line + "\n", props)
+
+    def test_nfr2_vendor_init_may_drop_caches_compact_and_tune_swap_only(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            self.assertIn('(genfscon proc "/sys/vm/compact_memory" (u object_r dsa_proc_vm_tunable', policy)
+            self.assertIn('(genfscon proc "/sys/vm/swappiness" (u object_r dsa_proc_vm_tunable', policy)
+            self.assertIn("(allow vendor_init dsa_proc_vm_tunable (file (write open getattr)))", policy)
+            self.assertIn("(allow vendor_init proc_drop_caches (file (write open getattr)))", policy)
+            # Nothing gains write access to plain proc.
+            self.assertNotRegex(policy, r"\(allow \S+ proc \(file \([^)]*write")
+            # The agent reads zram's statistics for its memory report.
+            self.assertIn("(allow platform_app sysfs_zram (file (read open getattr)))", policy)
+
+    def test_nfr2_only_the_control_daemon_asks_init_to_reclaim(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
+            contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
+            self.assertIn("vendor.dsa.memory.reclaim u:object_r:dsa_memory_prop:s0 exact bool", contexts)
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            self.assertIn("(typeattributeset vendor_property_type (dsa_memory_prop))", policy)
+            setters = re.findall(r"\(allow (\S+) dsa_memory_prop \(property_service \(set\)\)\)", policy)
+            self.assertEqual(sorted(setters), ["dsa_channeld", "vendor_init"])
+            rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
+            trigger = rc[rc.index("on property:vendor.dsa.memory.reclaim=1"):]
+            self.assertIn("write /proc/sys/vm/drop_caches 3", trigger)
+            self.assertIn("write /proc/sys/vm/compact_memory 1", trigger)
+            self.assertIn("setprop vendor.dsa.memory.reclaim 0", trigger)
+
+    def test_nfr2_a_gradual_trim_reclaims_a_bounded_slice_from_the_coldest_pages_and_reads_memory_pressure(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
+            contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
+            self.assertIn("vendor.dsa.memory.trim u:object_r:dsa_memory_prop:s0 exact bool", contexts)
+            rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
+            trigger = rc[rc.index("on property:vendor.dsa.memory.trim=1"):]
+            self.assertIn("write /sys/fs/cgroup/apps/memory.reclaim 48M", trigger)
+            self.assertIn("write /sys/fs/cgroup/system/memory.reclaim 16M", trigger)
+            self.assertNotIn("drop_caches", trigger)
+            self.assertNotIn("compact_memory", trigger)
+            self.assertIn("(allow vendor_init cgroup_v2 (file (write open getattr)))", archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode())
+            self.assertIn("setprop vendor.dsa.memory.trim 0", trigger)
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            self.assertIn("(allow dsa_channeld proc_pressure_mem (file (read open getattr)))", policy)
+
+    def test_nfr2_the_reclaim_property_keeps_the_existing_vendor_contexts(self):
+        existing = "vendor.example u:object_r:vendor_default_prop:s0\n"
+        with tempfile.TemporaryDirectory() as tmp, self._modify(
+            Path(tmp), extra={"VENDOR/etc/selinux/vendor_property_contexts": existing}
+        ) as archive:
+            contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
+            self.assertEqual(contexts[0], existing.strip())
+            self.assertEqual(contexts.count(make_image.RECLAIM_PROPERTY_CONTEXT), 1)
+            self.assertEqual(contexts.count(make_image.TRIM_PROPERTY_CONTEXT), 1)
+        both = make_image.RECLAIM_PROPERTY_CONTEXT + "\n" + make_image.TRIM_PROPERTY_CONTEXT + "\n"
+        self.assertEqual(make_image.update_vendor_property_contexts(both), both)
+
+    def test_nfr1_apps_a_desktop_has_no_use_for_are_removed_and_the_ones_apps_need_are_kept(self):
+        removed = ["Dialer", "messaging", "Stk", "BasicDreams", "LiveWallpapersPicker", "QuickSearchBox"]
+        kept = [
+            "SYSTEM/app/webview/webview.apk",
+            "SYSTEM/priv-app/ContactsProvider/ContactsProvider.apk",
+            "SYSTEM/priv-app/PackageInstaller/PackageInstaller.apk",
+            "SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk",
+            "SYSTEM/app/PrintSpooler/PrintSpooler.apk",
+            "SYSTEM/priv-app/Settings/Settings.apk",
+            "SYSTEM/priv-app/Telecom/Telecom.apk",
+            "PRODUCT/app/DeskClock/DeskClock.apk",
+        ]
+        for app in removed:
+            self.assertIn(app, make_image.REMOVED_APPS)
+        extra = {f"PRODUCT/app/{app}/{app}.apk": b"apk" for app in removed}
+        extra.update({name: b"apk" for name in kept})
+        extra["META/apkcerts.txt"] = "".join(
+            f'name="{Path(name).name}" certificate="c.x509.pem" private_key="c.pk8"\n'
+            for name in list(extra) if name.endswith(".apk")
+        )
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), extra=extra) as archive:
+            names = archive.namelist()
+            certs = archive.read("META/apkcerts.txt").decode()
+            for app in removed:
+                self.assertNotIn(f"PRODUCT/app/{app}/{app}.apk", names)
+                self.assertNotIn(f'name="{app}.apk"', certs)
+            for name in kept:
+                self.assertIn(name, names)
+                self.assertIn(f'name="{Path(name).name}"', certs)
+        for needed in ["webview", "ContactsProvider", "PackageInstaller", "PermissionController",
+                       "DocumentsUI", "PrintSpooler", "Settings", "Provision", "Telecom",
+                       "TeleService", "DeskClock"]:
+            self.assertNotIn(needed, make_image.REMOVED_APPS)
 
 
 if __name__ == "__main__":

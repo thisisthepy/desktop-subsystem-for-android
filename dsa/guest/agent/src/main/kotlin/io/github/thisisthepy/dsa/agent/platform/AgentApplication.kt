@@ -13,14 +13,32 @@ class AgentApplication : Application() {
         super.onCreate()
         val thread = HandlerThread("dsa-agent").apply { start() }
         val log = AndroidLog
-        Agent(
+        val agent = Agent(
             ownPackage = packageName,
             tasks = AndroidTaskSource(this, log),
             actions = AndroidTaskActions(this, log),
             locator = BinderChannelLocator(log),
             windowing = AndroidWindowing(this),
+            injector = AndroidInputInjector(this),
             scheduler = HandlerScheduler(thread.looper),
             log = log,
-        ).start()
+            apps = AndroidAppInfoSource(this, log),
+            editor = { HostInputMethod.connection },
+            textKeys = AndroidTextKeys(),
+            inputMethods = AndroidInputMethodSetup(this),
+            power = AndroidDevicePower(this, log),
+            // `setprop log.tag.DsaResizeTrace D` turns on the per-stage resize trace lines.
+            trace = io.github.thisisthepy.dsa.agent.trace.ResizeTrace(log, detailed = {
+                android.util.Log.isLoggable("DsaResizeTrace", android.util.Log.DEBUG)
+            }),
+            launcherApps = AndroidLauncherApps(this, log),
+            memory = AndroidMemorySource(this),
+        )
+        HostInputMethod.onCursor = { rect -> agent.cursorMoved(rect.left, rect.top, rect.right, rect.bottom) }
+        agent.start()
+        // Starting windows draw on a thread of their own, so a slow app theme never holds up
+        // the agent's work or the home activity on the main thread.
+        val splash = HandlerThread("dsa-splash").apply { start() }
+        AndroidStartingWindows(this, splash.looper, log).start()
     }
 }

@@ -15,9 +15,10 @@ them with the project's keys.
 | `fstab.dsa` | The guest's mount table on Hyper-V |
 | `console-logcat.rc` | The service that writes Android's log to the serial console |
 | `unavailable-features.xml` | Hardware features the VM lacks, withdrawn from the system |
-| `dsa-channeld.rc` | The service that runs the control channel daemon |
+| `dsa-channeld.rc` | The service that runs the control channel daemon, and the trigger that drops the guest's caches when it asks |
+| `dsa-memory.rc` | Turns on the zram swap and tunes the kernel for it |
 | `dsa-channel-manifest.xml` | The vendor manifest entry declaring the daemon's binder service |
-| `sepolicy/` | Policy added to the image: vsock for graphics, and the control daemon's domain and binder service |
+| `sepolicy/` | Policy added to the image: vsock for graphics, the control daemon's domain and binder service, the memory controls (`memory.cil`), and what the agent needs to force Doze and set the battery (`agent.cil`) |
 
 ```
 dsa/guest/image/fetch.sh 17
@@ -37,11 +38,26 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
 
 - The launcher, SystemUI and the keyboard app are removed: the desktop is the shell, and
   text input goes through the host's input method.
+- Apps a desktop has no use for are removed too (`UNNEEDED_APPS` in `make-image.py`, each
+  with its reason): telephony apps without a modem, screen savers and wallpaper pickers, the
+  launcher's search widget, Bluetooth MIDI, and developer and demo apps. Each is a leaf that
+  nothing else needs; WebView, the providers, PackageInstaller, PermissionController,
+  DocumentsUI and the other apps that apps call stay. `make-image.py` prints each file it
+  removes.
+- The guest keeps its memory small, so the host gets back what it does not use. It swaps to
+  zram of half its memory (`fstab.dsa`, `dsa-memory.rc`), and lmkd watches the swap as well
+  as memory pressure. When no app task has been open for a minute, or most of its memory is
+  cache, the control daemon sets `vendor.dsa.memory.reclaim`, and init drops the clean caches
+  and compacts memory, which free page reporting then hands back to Hyper-V. Only the daemon
+  may set the property, and only init's vendor scripts may write those kernel settings.
 - The oemlock, UWB, Bluetooth and Thread HAL APEXes are removed. Their devices
   (Cuttlefish's virtio consoles, radios) do not exist on Hyper-V, they abort in a loop, and
   system_server waits for the oemlock HAL forever. Bluetooth comes back as a host HAL.
 - `unavailable-features.xml` withdraws the Bluetooth features, so system_server does not
   start a Bluetooth stack that has no controller to talk to.
+- `wifi.rc` no longer sets up its kernel trace instance when boot completes. The VM has no
+  Wi-Fi device to trace, and on Hyper-V those tracefs writes hold up lmkd's own tracepoint
+  setup past its two second watchdog, which then kills the app the user just opened.
 - The build becomes a user build: not debuggable, adb only when authorised.
 - The control channel daemon (`/vendor/bin/dsa-channeld`) is added and runs in its own
   SELinux domain, the only one that may read `/proc/bootconfig`, where the host puts the

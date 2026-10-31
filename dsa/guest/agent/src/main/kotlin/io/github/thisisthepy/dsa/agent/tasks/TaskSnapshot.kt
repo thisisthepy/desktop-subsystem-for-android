@@ -2,6 +2,9 @@ package io.github.thisisthepy.dsa.agent.tasks
 
 /** A rectangle in guest display pixels: left and top inclusive, right and bottom exclusive. */
 data class TaskBounds(val left: Int, val top: Int, val right: Int, val bottom: Int) {
+    /** Whether it covers no pixel: the framework has not given the task bounds. */
+    fun isEmpty() = right <= left || bottom <= top
+
     companion object {
         val EMPTY = TaskBounds(0, 0, 0, 0)
     }
@@ -25,7 +28,21 @@ data class TaskSnapshot(
     val label: String,
     val bounds: TaskBounds,
     val focused: Boolean,
+    /** The density the task's app draws at, in dots per inch; 0 when the framework names none. */
+    val densityDpi: Int = 0,
+    /**
+     * The screen size the task's configuration gives its app; null when the framework names
+     * none. The host is not told it: it only says what to hold while a window is resized.
+     */
+    val screenDp: ScreenDp? = null,
 )
+
+/**
+ * A configuration's screen size in density-independent pixels (Configuration's
+ * screenWidthDp, screenHeightDp and smallestScreenWidthDp): what an app's resources, layout
+ * and orientation are chosen by.
+ */
+data class ScreenDp(val widthDp: Int, val heightDp: Int, val smallestWidthDp: Int)
 
 /** Reads the guest's running tasks and says when they may have changed. */
 interface TaskSource {

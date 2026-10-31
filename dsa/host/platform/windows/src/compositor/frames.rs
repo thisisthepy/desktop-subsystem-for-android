@@ -16,14 +16,16 @@ pub trait FrameTarget: Send + Sync {
     type Texture: Send + Sync;
 
     /// A texture of exactly `width` x `height` pixels for the next frame, or `None` when
-    /// the window cannot show one.
+    /// the window cannot show one. The size is the guest buffer's, the largest a frame of
+    /// the task can be, so it stays the same while the window is resized.
     fn texture(&self, width: u32, height: u32) -> Option<Arc<Self::Texture>>;
 
     /// The shared handle the renderer opens `texture` by.
     fn handle(texture: &Self::Texture) -> isize;
 
-    /// Shows the frame that was copied into `texture`.
-    fn present(&self, texture: &Self::Texture);
+    /// Shows the frame that was copied into `texture`, which fills its top-left `content`
+    /// pixels.
+    fn present(&self, texture: &Self::Texture, content: (u32, u32));
 }
 
 type Given<T> = (Arc<T>, Arc<<T as FrameTarget>::Texture>);
@@ -96,7 +98,7 @@ impl<T: FrameTarget + 'static> DisplaySink for FrameRouter<T> {
         handle
     }
 
-    fn frame(&self, display_id: u32) {
+    fn frame(&self, display_id: u32, content: (u32, u32)) {
         let given = self
             .given
             .lock()
@@ -104,7 +106,7 @@ impl<T: FrameTarget + 'static> DisplaySink for FrameRouter<T> {
             .get(&display_id)
             .cloned();
         if let Some((window, texture)) = given {
-            window.present(&texture);
+            window.present(&texture, content);
         }
     }
 }
@@ -126,11 +128,15 @@ mod tests {
         }
     }
 
+    /// A frame a test window showed: the texture's handle, its size, and the frame's size.
+    type Shown = (isize, (u32, u32), (u32, u32));
+
     /// A window that hands out a new texture for each frame size and records what it shows.
     struct Window {
         base: isize,
         current: Mutex<Option<Arc<Texture>>>,
-        shown: Mutex<Vec<(isize, (u32, u32))>>,
+        /// Each frame shown: the texture's handle, its size, and the frame's content size.
+        shown: Mutex<Vec<Shown>>,
         dropped: Arc<AtomicUsize>,
     }
 
@@ -161,11 +167,11 @@ mod tests {
         fn handle(texture: &Texture) -> isize {
             texture.handle
         }
-        fn present(&self, texture: &Texture) {
+        fn present(&self, texture: &Texture, content: (u32, u32)) {
             self.shown
                 .lock()
                 .unwrap()
-                .push((texture.handle, texture.size));
+                .push((texture.handle, texture.size, content));
         }
     }
 
@@ -177,11 +183,17 @@ mod tests {
         router.set_routes([(3, Arc::clone(&clock)), (4, Arc::clone(&maps))]);
 
         assert_eq!(router.target(3, 10, 20), Some(1010));
-        router.frame(3);
+        router.frame(3, (10, 20));
         assert_eq!(router.target(4, 30, 40), Some(2030));
-        router.frame(4);
-        assert_eq!(*clock.shown.lock().unwrap(), vec![(1010, (10, 20))]);
-        assert_eq!(*maps.shown.lock().unwrap(), vec![(2030, (30, 40))]);
+        router.frame(4, (30, 40));
+        assert_eq!(
+            *clock.shown.lock().unwrap(),
+            vec![(1010, (10, 20), (10, 20))]
+        );
+        assert_eq!(
+            *maps.shown.lock().unwrap(),
+            vec![(2030, (30, 40), (30, 40))]
+        );
     }
 
     #[test]
@@ -190,9 +202,9 @@ mod tests {
         let clock = Window::new(1000);
         router.set_routes([(3, Arc::clone(&clock))]);
         assert_eq!(router.target(0, 1920, 1080), None);
-        router.frame(0);
+        router.frame(0, (1920, 1080));
         assert_eq!(router.target(9, 10, 10), None);
-        router.frame(9);
+        router.frame(9, (10, 10));
         assert!(clock.shown.lock().unwrap().is_empty());
         assert_eq!(router.routed_displays(), vec![3]);
     }
@@ -203,7 +215,7 @@ mod tests {
         let clock = Window::new(1000);
         router.set_routes([(3, Arc::clone(&clock))]);
         router.target(3, 10, 20);
-        router.frame(3);
+        router.frame(3, (10, 20));
         // The window closes: its own reference goes, the renderer may still hold the texture.
         *clock.current.lock().unwrap() = None;
         router.set_routes([]);
@@ -211,7 +223,7 @@ mod tests {
         // The renderer's next frame for the display gets nothing, and the texture goes.
         assert_eq!(router.target(3, 10, 20), None);
         assert_eq!(clock.dropped.load(Ordering::Relaxed), 1);
-        router.frame(3);
+        router.frame(3, (10, 20));
         assert_eq!(clock.shown.lock().unwrap().len(), 1);
     }
 
@@ -224,8 +236,29 @@ mod tests {
         router.target(3, 10, 20);
         // The display moves to another task between the copy and the frame.
         router.set_routes([(3, Arc::clone(&maps))]);
-        router.frame(3);
+        router.frame(3, (10, 20));
         assert_eq!(clock.shown.lock().unwrap().len(), 1);
         assert!(maps.shown.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn fr4_frames_of_a_resizing_task_share_one_texture_and_carry_their_size() {
+        let router = FrameRouter::new();
+        let clock = Window::new(1000);
+        router.set_routes([(3, Arc::clone(&clock))]);
+        // The guest's buffer stays at its display's size; only the content changes.
+        for content in [(800, 600), (812, 606), (830, 615)] {
+            assert_eq!(router.target(3, 1920, 1080), Some(2920));
+            router.frame(3, content);
+        }
+        assert_eq!(
+            *clock.shown.lock().unwrap(),
+            vec![
+                (2920, (1920, 1080), (800, 600)),
+                (2920, (1920, 1080), (812, 606)),
+                (2920, (1920, 1080), (830, 615)),
+            ]
+        );
+        assert_eq!(clock.dropped.load(Ordering::Relaxed), 0);
     }
 }

@@ -103,6 +103,73 @@ mod daemon {
         say!("no binder service off Android; only the connection runs");
     }
 
+    /// Sets a system property through bionic, which hands it to init.
+    #[cfg(target_os = "android")]
+    fn set_property(name: &str, value: &str) -> Result<(), String> {
+        use std::ffi::{c_char, c_int, CString};
+        extern "C" {
+            fn __system_property_set(name: *const c_char, value: *const c_char) -> c_int;
+        }
+        let (c_name, c_value) = (
+            CString::new(name).map_err(|e| e.to_string())?,
+            CString::new(value).map_err(|e| e.to_string())?,
+        );
+        // SAFETY: both are valid NUL-terminated strings that outlive the call.
+        match unsafe { __system_property_set(c_name.as_ptr(), c_value.as_ptr()) } {
+            0 => Ok(()),
+            code => Err(format!("init refused {name}={value} ({code})")),
+        }
+    }
+
+    /// Hands idle memory back to the host: every so often, decides whether the guest should
+    /// drop its caches now (see `reclaim`), and has init do it. Only init may write the
+    /// kernel's memory controls; the daemon only asks.
+    #[cfg(target_os = "android")]
+    fn reclaim_idle_memory(router: Arc<Router>) {
+        use dsa_guest_channeld::reclaim::{
+            memory_pressure, MemInfo, Reason, ReclaimPolicy, Reclaimer, CHECK_INTERVAL,
+            RECLAIM_PROPERTY, TRIM_PROPERTY,
+        };
+        let start = std::time::Instant::now();
+        let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+        loop {
+            thread::sleep(CHECK_INTERVAL);
+            let memory = match std::fs::read_to_string("/proc/meminfo") {
+                Ok(text) => MemInfo::parse(&text),
+                Err(error) => {
+                    say!("cannot read /proc/meminfo, so idle memory is not reclaimed: {error}");
+                    return;
+                }
+            };
+            let tasks = router.task_count();
+            // Pressure stall information is optional in the kernel: unreadable counts as busy.
+            let pressure = std::fs::read_to_string("/proc/pressure/memory")
+                .map(|text| memory_pressure(&text, 5.0))
+                .unwrap_or(true);
+            if let Some(reason) = reclaimer.decide_under(start.elapsed(), tasks, &memory, pressure)
+            {
+                let property = if reason == Reason::Gradual {
+                    TRIM_PROPERTY
+                } else {
+                    RECLAIM_PROPERTY
+                };
+                say!(
+                    "dropping the guest's caches ({reason:?}, {tasks} tasks): {} MiB droppable \
+                     of {} MiB in use",
+                    memory.droppable_kb() / 1024,
+                    memory.used_kb() / 1024
+                );
+                if let Err(why) = set_property(property, "1") {
+                    say!("could not ask init to drop the caches: {why}");
+                }
+            }
+        }
+    }
+
+    /// Off Android there is no init to ask, and the host is not Hyper-V.
+    #[cfg(not(target_os = "android"))]
+    fn reclaim_idle_memory(_router: Arc<Router>) {}
+
     pub fn run() -> i32 {
         let options = match options() {
             Ok(options) => options,
@@ -154,6 +221,10 @@ mod daemon {
             });
         }
         serve_clients(&router);
+        {
+            let router = Arc::clone(&router);
+            thread::spawn(move || reclaim_idle_memory(router));
+        }
         let (events, event_rx) = mpsc::channel();
         thread::spawn(move || {
             for event in event_rx {

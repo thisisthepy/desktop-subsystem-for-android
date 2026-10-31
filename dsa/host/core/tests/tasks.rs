@@ -10,7 +10,7 @@ use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{ClientError, HostApiClient, PerUser, UserAndroid};
 use dsa_host_core::host_api_conformance::RunningService;
 use dsa_host_core::session::{GuestLauncher, Session, SessionConfig, SessionState};
-use dsa_host_core::tasks::{Bounds, Task, TaskEvent};
+use dsa_host_core::tasks::{AppInfo, Bounds, Task, TaskEvent};
 use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{self, envelope::Body, Envelope, Role};
 use dsa_protocol::handshake::{guest_connect, local_hello};
@@ -68,6 +68,7 @@ fn setup() -> Setup {
         SessionConfig {
             connect_timeout: WAIT,
             stop_timeout: WAIT,
+            ..SessionConfig::default()
         },
     ));
     let (api_listener, api) = local::pair();
@@ -123,7 +124,7 @@ fn updated(task_id: i32, label: &str) -> Body {
         }),
         package_name: format!("com.example.app{task_id}"),
         label: label.into(),
-        focused: false,
+        ..control::TaskUpdated::default()
     })
 }
 
@@ -138,7 +139,7 @@ fn task(task_id: i32, label: &str) -> Task {
         },
         package_name: format!("com.example.app{task_id}"),
         label: label.into(),
-        focused: false,
+        ..Task::default()
     }
 }
 
@@ -242,4 +243,130 @@ fn nfr5_a_guest_that_dies_closes_every_task_a_client_watches() {
         }
         other => panic!("expected the service to refuse, got {other:?}"),
     }
+}
+
+fn installed_app(package: &str, label: &str) -> AppInfo {
+    AppInfo {
+        package_name: package.into(),
+        label: label.into(),
+        icon_png: vec![0x89, b'P', b'N', b'G', label.len() as u8],
+    }
+}
+
+fn describe(agent: &mut Box<dyn Connection>, app: &AppInfo) {
+    send(
+        agent,
+        Body::InstalledApp(control::InstalledApp {
+            package_name: app.package_name.clone(),
+            label: app.label.clone(),
+            icon_png: app.icon_png.clone(),
+        }),
+    );
+}
+
+fn list(agent: &mut Box<dyn Connection>, packages: &[&str]) {
+    send(
+        agent,
+        Body::InstalledApps(control::InstalledApps {
+            package_names: packages.iter().map(|p| p.to_string()).collect(),
+        }),
+    );
+}
+
+#[test]
+fn fr7_the_installed_apps_reach_a_client_that_lists_or_watches_them() {
+    let mut setup = setup();
+    assert_eq!(
+        client(&mut setup.api).installed_apps().unwrap(),
+        None,
+        "unknown until the agent says"
+    );
+    let mut stream = client(&mut setup.api).watch_tasks().expect("watching");
+    assert_eq!(stream.current().installed, None);
+
+    let clock = installed_app("com.example.clock", "Clock");
+    let maps = installed_app("com.example.maps", "Maps");
+    describe(&mut setup.agent, &maps);
+    describe(&mut setup.agent, &clock);
+    list(&mut setup.agent, &["com.example.clock", "com.example.maps"]);
+    assert_eq!(
+        stream.next(WAIT).unwrap(),
+        Some(TaskEvent::Installed(vec![clock.clone(), maps.clone()]))
+    );
+    assert_eq!(
+        client(&mut setup.api).installed_apps().unwrap(),
+        Some(vec![clock.clone(), maps.clone()])
+    );
+
+    // Maps is removed.
+    list(&mut setup.agent, &["com.example.clock"]);
+    assert_eq!(
+        stream.next(WAIT).unwrap(),
+        Some(TaskEvent::Installed(vec![clock.clone()]))
+    );
+
+    // A client that watches later starts from the list.
+    let late = client(&mut setup.api).watch_tasks().expect("watching");
+    assert_eq!(late.current().installed, Some(vec![clock.clone()]));
+    assert_eq!(
+        late.current().events()[0],
+        TaskEvent::Installed(vec![clock])
+    );
+}
+
+#[test]
+fn fr7_the_installed_apps_are_kept_while_android_is_stopped() {
+    let mut setup = setup();
+    let clock = installed_app("com.example.clock", "Clock");
+    describe(&mut setup.agent, &clock);
+    list(&mut setup.agent, &["com.example.clock"]);
+    let deadline = Instant::now() + WAIT;
+    while client(&mut setup.api).installed_apps().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "the list never arrived");
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    setup.agent.close();
+    assert!(setup.session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(
+        client(&mut setup.api).installed_apps().unwrap(),
+        Some(vec![clock])
+    );
+}
+
+#[test]
+fn fr3_an_apps_name_and_icon_reach_a_watching_client_before_its_task() {
+    let mut setup = setup();
+    let mut stream = client(&mut setup.api).watch_tasks().expect("watching");
+    let icon = vec![0x89, b'P', b'N', b'G', 1, 2, 3];
+    send(
+        &mut setup.agent,
+        Body::AppInfo(control::AppInfo {
+            package_name: "com.example.app1".into(),
+            label: "Clock".into(),
+            icon_png: icon.clone(),
+        }),
+    );
+    send(&mut setup.agent, updated(1, "Alarm"));
+    let app = AppInfo {
+        package_name: "com.example.app1".into(),
+        label: "Clock".into(),
+        icon_png: icon,
+    };
+    assert_eq!(
+        stream.next(WAIT).unwrap(),
+        Some(TaskEvent::App(app.clone()))
+    );
+    assert_eq!(
+        stream.next(WAIT).unwrap(),
+        Some(TaskEvent::Updated(task(1, "Alarm")))
+    );
+
+    // A client that watches later is told the app before its task.
+    let late = client(&mut setup.api).watch_tasks().expect("watching");
+    assert_eq!(late.current().apps, vec![app.clone()]);
+    assert_eq!(
+        late.current().events()[..2],
+        [TaskEvent::App(app), TaskEvent::Updated(task(1, "Alarm"))]
+    );
 }

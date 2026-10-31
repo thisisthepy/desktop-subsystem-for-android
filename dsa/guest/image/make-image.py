@@ -4,7 +4,8 @@
 
 It takes the pinned target_files and otatools (fetch.sh downloads them) and:
 
-1. removes the launcher, SystemUI and the keyboard app, because the host is the shell;
+1. removes the launcher, SystemUI and the keyboard app, because the host is the shell, and
+   the apps a desktop subsystem has no use for (UNNEEDED_APPS);
 2. switches the build to user (not debuggable, adb authorised only);
 3. drops the published kernel modules (they belong to Google's kernel, and DSA ships its
    own kernel with the drivers built in) and installs the Hyper-V mount table;
@@ -45,17 +46,59 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 
 # The host is the shell: no launcher, no SystemUI, no keyboard app in the guest.
-REMOVED_APPS = ["Launcher3QuickStep", "SystemUI", "LatinIME"]
+SHELL_APPS = ["Launcher3QuickStep", "SystemUI", "LatinIME"]
+
+# Apps a desktop subsystem has no use for, removed so they neither take disk nor start and
+# hold memory (several start at boot or on every connectivity or locale change). Each is
+# a leaf: no other app, provider or system service needs it, and an app that sends one of
+# their intents gets the usual "no app can do this" answer. Removed only when the build has
+# them; make-image prints each one it removes.
+#
+# Kept on purpose, because apps rely on them: WebView, every content provider (contacts,
+# calendar, media, downloads, settings, telephony's database), PackageInstaller,
+# PermissionController, DocumentsUI, the print spooler, the sound picker, Settings, Provision
+# (it marks the device set up), Telecom and TeleService (system_server binds them at boot),
+# CarrierConfig, the browser (http links need an app), the camera and the clock.
+UNNEEDED_APPS = [
+    # Telephony without a modem (the radio HAL is removed): calls, SMS, the SIM toolkit, MMS,
+    # emergency information, IMS entitlement and the carrier's captive portal app.
+    "Dialer",
+    "messaging",
+    "Stk",
+    "MmsService",
+    "EmergencyInfo",
+    "ImsServiceEntitlement",
+    "CarrierDefaultApp",
+    # Screen savers and wallpapers: the host draws the desktop, and the guest's display is
+    # never seen, so there is no screen to save or wallpaper to show (SystemUI, which draws
+    # it, is removed above).
+    "BasicDreams",
+    "PhotoTable",
+    "LiveWallpapersPicker",
+    "WallpaperPicker",
+    # Bluetooth MIDI needs the Bluetooth stack, which has no controller here.
+    "BluetoothMidiService",
+    # The search widget lives on the launcher, which is removed.
+    "QuickSearchBox",
+    # Developer and demo apps.
+    "Traceur",
+    "EasterEgg",
+]
+
+REMOVED_APPS = SHELL_APPS + UNNEEDED_APPS
 
 # Vendor HALs whose devices a Hyper-V VM does not have: oemlock, UWB and Bluetooth talk to
 # the host over Cuttlefish's virtio consoles, and Thread needs a radio. They abort in a loop,
 # and system_server waits for the oemlock HAL, which their APEXes declare, forever. Without
 # its HAL the Bluetooth app aborts too, waiting for the controller, each time it restarts.
+# NFC and the radio interface layer reach Cuttlefish's NFC and modem simulators the same way.
 REMOVED_APEXES = [
     "com.google.cf.oemlock",
     "com.android.hardware.uwb",
     "com.google.cf.bt",
     "com.android.hardware.threadnetwork",
+    "com.google.cf.nfc",
+    "com.google.cf.rild",
 ]
 
 # The user's disk. The super partition's UUID is how first-stage init finds the disk, so it
@@ -108,8 +151,20 @@ USER_PROPS = {
 
 # Shared memory goes through memfd: libcutils falls back to /dev/ashmem unless this is
 # set, and DSA's kernel has no ashmem driver (its memfds answer the ashmem ioctls).
+#
+# The guest swaps to zram (fstab.dsa, dsa-memory.rc): idle apps' memory is kept compressed
+# rather than resident, so the host gets more of it back. lmkd decides from memory pressure
+# (PSI), and with swap it must also watch how full the swap is: it starts killing cached apps
+# once less than a tenth of the swap is free or the swap is 90% used, instead of letting the
+# guest thrash through a full zram. Thrashing past 30% of the time reclaiming counts as
+# pressure too, as on Android Go devices, which have the same small-memory, zram-backed shape.
 MEMORY_PROPS = {
     "sys.use_memfd": "true",
+    "ro.lmk.use_psi": "true",
+    "ro.lmk.use_minfree_levels": "false",
+    "ro.lmk.swap_free_low_percentage": "10",
+    "ro.lmk.swap_util_max": "90",
+    "ro.lmk.thrashing_limit": "30",
 }
 
 GRAPHICS_PROPS = {
@@ -310,6 +365,37 @@ def edit_props(text):
     return "\n".join(out) + "\n"
 
 
+# Wi-Fi's init script makes a kernel trace instance when boot completes, for WifiService to
+# record connection attempts into. The VM has no Wi-Fi device, so nothing ever records into
+# it, and on Hyper-V each of its tracefs writes takes up to two seconds of kernel time. At
+# the same moment lmkd attaches its BPF memory event programs to tracepoints, which waits
+# behind those writes, inside the two seconds its watchdog gives its main loop. When the
+# watchdog fires it kills the process lmkd last saw with the highest oom_score_adj, and lmkd
+# has not yet read the update that made the app the user just opened a foreground one.
+WIFI_RC = "SYSTEM/etc/init/wifi.rc"
+WIFI_TRACING_TRIGGER = "on property:sys.boot_completed=1 && property:sys.wifitracing.started=0"
+
+
+def edit_wifi_rc(text):
+    """Returns Wi-Fi's init script without the section that sets up its trace instance."""
+    out = []
+    skipping = False
+    found = False
+    for line in text.splitlines(keepends=True):
+        if line.strip() == WIFI_TRACING_TRIGGER:
+            skipping = found = True
+            continue
+        # An rc section runs until the next line that starts another one at column 0.
+        if skipping and line[:1] not in ("", " ", "\t", "\n", "\r", "#"):
+            skipping = False
+        if not skipping:
+            out.append(line)
+    if not found:
+        raise ValueError(f"{WIFI_RC} has no '{WIFI_TRACING_TRIGGER}' section; check how this build "
+                         "sets up the Wi-Fi trace instance before making the image")
+    return "".join(out)
+
+
 PROP_FILES = {
     "SYSTEM/build.prop",
     "VENDOR/build.prop",
@@ -352,6 +438,17 @@ DISPLAY_BOOTCONFIG = {
 }
 
 CONSOLE_LOGCAT_RC = "VENDOR/etc/init/dsa-console-logcat.rc"
+# Turns on the zram swap fstab.dsa declares, and tunes the kernel for it.
+MEMORY_RC = "VENDOR/etc/init/dsa-memory.rc"
+# The property dsa-channeld sets to have init drop the caches and compact memory, so free
+# page reporting hands idle memory back to the host. vendor_property_contexts gives it the
+# type the daemon's policy lets it set.
+VENDOR_PROPERTY_CONTEXTS = "VENDOR/etc/selinux/vendor_property_contexts"
+RECLAIM_PROPERTY = "vendor.dsa.memory.reclaim"
+RECLAIM_PROPERTY_CONTEXT = f"{RECLAIM_PROPERTY} u:object_r:dsa_memory_prop:s0 exact bool"
+# The gentler property for the gradual trim while apps are open: init drops only the page cache.
+TRIM_PROPERTY = "vendor.dsa.memory.trim"
+TRIM_PROPERTY_CONTEXT = f"{TRIM_PROPERTY} u:object_r:dsa_memory_prop:s0 exact bool"
 # Features the VM lacks; SystemConfig drops them wherever else they are declared.
 UNAVAILABLE_FEATURES = "VENDOR/etc/permissions/dsa-unavailable-features.xml"
 
@@ -424,6 +521,16 @@ def update_vendor_service_contexts(text):
     return "\n".join(lines) + "\n"
 
 
+def update_vendor_property_contexts(text):
+    """Gives the daemon's reclaim property its type in vendor_property_contexts if it has none."""
+    lines = text.splitlines()
+    if not any(line.split()[:1] == [RECLAIM_PROPERTY] for line in lines):
+        lines.append(RECLAIM_PROPERTY_CONTEXT)
+    if not any(line.split()[:1] == [TRIM_PROPERTY] for line in lines):
+        lines.append(TRIM_PROPERTY_CONTEXT)
+    return "\n".join(lines) + "\n"
+
+
 # The partitions' file contexts, in the order the Android build joins them into
 # META/file_contexts.bin. The partition images are labelled from that file, not from these.
 PARTITION_FILE_CONTEXTS = [
@@ -467,6 +574,9 @@ def update_vendor_filesystem_config(fs_config_text, channeld=False, hwcomposer=F
         ("vendor/lib64/hw/vulkan.ranchu.so", "vendor/lib64/hw/vulkan.ranchu.so 0 0 644 capabilities=0x0"),
         ("vendor/lib64/libOpenglSystemCommon.so", "vendor/lib64/libOpenglSystemCommon.so 0 0 644 capabilities=0x0"),
         ("vendor/etc/init/dsa-console-logcat.rc", "vendor/etc/init/dsa-console-logcat.rc 0 0 644 capabilities=0x0"),
+        ("vendor/etc/init/dsa-memory.rc", "vendor/etc/init/dsa-memory.rc 0 0 644 capabilities=0x0"),
+        ("vendor/etc/selinux/vendor_property_contexts",
+         "vendor/etc/selinux/vendor_property_contexts 0 0 644 capabilities=0x0"),
         ("vendor/etc/permissions/dsa-unavailable-features.xml",
          "vendor/etc/permissions/dsa-unavailable-features.xml 0 0 644 capabilities=0x0"),
     ]
@@ -498,6 +608,8 @@ GFXSTREAM_ALLOWED_PERMS = {
 }
 SEPOLICY_FRAGMENT = HERE / "sepolicy/graphics-vsock.cil"
 CHANNELD_POLICY = HERE / "sepolicy/channeld.cil"
+AGENT_POLICY = HERE / "sepolicy/agent.cil"
+MEMORY_POLICY = HERE / "sepolicy/memory.cil"
 
 
 def narrow_vsock_neverallows(text):
@@ -666,9 +778,14 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         if "SYSTEM/etc/selinux/plat_sepolicy.cil" in cil_map:
             plat_orig = cil_map["SYSTEM/etc/selinux/plat_sepolicy.cil"].decode()
             plat_patched = patch_plat_sepolicy(plat_orig, fragment_text)
+            # The memory controls the vendor scripts write, and the reclaim property.
+            plat_patched += "\n" + MEMORY_POLICY.read_text()
             if channeld_payload is not None:
                 # Its rules name the domain they declare, so they go in whole.
                 plat_patched += "\n" + CHANNELD_POLICY.read_text()
+            if agent_payload is not None:
+                # What the agent needs to put the guest into Doze and set its battery.
+                plat_patched += "\n" + AGENT_POLICY.read_text()
             new_plat_bytes = plat_patched.encode()
             cil_map["SYSTEM/etc/selinux/plat_sepolicy.cil"] = new_plat_bytes
 
@@ -705,7 +822,11 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
 
         for info in zin.infolist():
             name = info.filename
-            if removed(name, has_hwcomposer) or kept_modules.match(name):
+            if removed(name, has_hwcomposer):
+                if name.endswith((".apk", ".apex", ".capex")):
+                    print(f"removing {name}", flush=True)
+                continue
+            if kept_modules.match(name):
                 continue
             if name.startswith("IMAGES/"):
                 # Rebuilt after signing from the modified contents.
@@ -735,6 +856,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 data = zin.read(name)
                 if name in PROP_FILES:
                     data = edit_props(data.decode()).encode()
+                elif name == WIFI_RC:
+                    data = edit_wifi_rc(data.decode()).encode()
                 elif name.endswith("lib/modules/modules.load") or name.endswith("lib/modules/modules.dep"):
                     data = b""
                 elif name == "META/apexkeys.txt":
@@ -771,11 +894,16 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                                                        has_hwcomposer).encode()
                 elif name == VENDOR_SERVICE_CONTEXTS and channeld_payload is not None:
                     data = update_vendor_service_contexts(data.decode()).encode()
+                elif name == VENDOR_PROPERTY_CONTEXTS:
+                    data = update_vendor_property_contexts(data.decode()).encode()
             info.compress_type = zipfile.ZIP_STORED
             zout.writestr(info, data)
         for directory in FSTAB_DIRS:
             zout.writestr(directory + "fstab.dsa", fstab)
         zout.writestr(CONSOLE_LOGCAT_RC, console_logcat)
+        zout.writestr(MEMORY_RC, (HERE / "dsa-memory.rc").read_bytes())
+        if VENDOR_PROPERTY_CONTEXTS not in names:
+            zout.writestr(VENDOR_PROPERTY_CONTEXTS, update_vendor_property_contexts(""))
         zout.writestr(UNAVAILABLE_FEATURES, (HERE / "unavailable-features.xml").read_bytes())
         if has_hwcomposer:
             zout.writestr(HWCOMPOSER_BINARY, hwcomposer_payload)

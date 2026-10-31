@@ -73,7 +73,7 @@ impl SignOutListener {
         let thread = thread::Builder::new()
             .name("dsa-signout-listener".into())
             .spawn(move || {
-                let class_name = wide(&format!("DsaCompositorSignOut_{}", std::process::id()));
+                let class_name = wide(&format!("DsaWmSignOut_{}", std::process::id()));
                 // SAFETY: GetModuleHandleW with null retrieves the current module instance.
                 let instance = unsafe { GetModuleHandleW(null()) };
 

@@ -15,25 +15,27 @@ use dsa_transport::local::{LocalListener, Peer};
 use dsa_transport::stream::{FramedConnection, StreamSocket};
 use dsa_transport::{Connection, Connector, TransportError};
 use windows_sys::Win32::Foundation::{
-    CloseHandle, LocalFree, ERROR_BROKEN_PIPE, ERROR_CANNOT_IMPERSONATE, ERROR_IO_PENDING,
-    ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED, GENERIC_READ,
-    GENERIC_WRITE, HANDLE, HLOCAL, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, DuplicateHandle, LocalFree, DUPLICATE_SAME_ACCESS, ERROR_BROKEN_PIPE,
+    ERROR_CANNOT_IMPERSONATE, ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_PIPE_BUSY,
+    ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED, GENERIC_READ, GENERIC_WRITE, HANDLE, HLOCAL,
+    INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
 use windows_sys::Win32::Security::{
-    GetTokenInformation, RevertToSelf, TokenUser, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
-    TOKEN_QUERY, TOKEN_USER,
+    CheckTokenMembership, CreateWellKnownSid, DuplicateToken, GetTokenInformation, RevertToSelf,
+    SecurityIdentification, TokenUser, WinBuiltinAdministratorsSid, PSECURITY_DESCRIPTOR,
+    SECURITY_ATTRIBUTES, TOKEN_DUPLICATE, TOKEN_QUERY, TOKEN_USER,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
     OPEN_EXISTING, PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
 };
 use windows_sys::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, ImpersonateNamedPipeClient,
-    WaitNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE,
-    PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, GetNamedPipeServerProcessId,
+    ImpersonateNamedPipeClient, WaitNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
+    PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
 };
 use windows_sys::Win32::System::Threading::{
     CreateEventW, GetCurrentProcess, GetCurrentThread, OpenProcess, OpenProcessToken,
@@ -211,6 +213,32 @@ impl StreamSocket for PipeStream {
         // every operation is waited for before it returns.
         self.handle = None;
     }
+
+    /// A second handle on the same pipe, with its own event, so one thread can write while
+    /// another waits in a read. The peer reads end of stream once every handle is closed.
+    fn try_clone(&self) -> io::Result<PipeStream> {
+        let handle = match &self.handle {
+            Some(handle) => handle.0,
+            None => return Err(io::Error::from(io::ErrorKind::NotConnected)),
+        };
+        let mut copy: HANDLE = std::ptr::null_mut();
+        // SAFETY: duplicates a handle of this process into this process.
+        let duplicated = unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                handle,
+                GetCurrentProcess(),
+                &mut copy,
+                0,
+                0,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+        if duplicated == 0 {
+            return Err(last_error());
+        }
+        PipeStream::new(OwnedHandle(copy))
+    }
 }
 
 /// Reads the user SID of the client on `pipe` by impersonating it for a moment.
@@ -218,7 +246,7 @@ impl StreamSocket for PipeStream {
 /// Windows may refuse to impersonate before anything has been read from the pipe; then the
 /// user is read from the client process's token instead, which the service, running as
 /// SYSTEM, may always open.
-fn client_sid(pipe: HANDLE) -> io::Result<String> {
+fn client_sid(pipe: HANDLE) -> io::Result<(String, bool)> {
     // SAFETY: a connected pipe; impersonation is undone below on every path.
     if unsafe { ImpersonateNamedPipeClient(pipe) } == 0 {
         let error = last_error();
@@ -236,16 +264,76 @@ fn client_sid(pipe: HANDLE) -> io::Result<String> {
     if opened == 0 {
         return Err(open_error);
     }
-    token_user_sid(&OwnedHandle(token))
+    let token = OwnedHandle(token);
+    // The thread's token is an impersonation token, which a membership check takes as it is.
+    Ok((token_user_sid(&token)?, is_administrator(token.0)))
 }
 
-/// The user SID of the process at the client end of `pipe`.
-fn client_process_sid(pipe: HANDLE) -> io::Result<String> {
+/// Whether `token` (an impersonation or identification token) is a member of
+/// BUILTIN\Administrators. A token that UAC filtered has that group for deny only, so this
+/// is true for an elevated process only.
+fn is_administrator(token: HANDLE) -> bool {
+    let mut sid = [0u8; 68];
+    let mut size = sid.len() as u32;
+    // SAFETY: the buffer holds `size` bytes, enough for any SID.
+    if unsafe {
+        CreateWellKnownSid(
+            WinBuiltinAdministratorsSid,
+            std::ptr::null_mut(),
+            sid.as_mut_ptr().cast(),
+            &mut size,
+        )
+    } == 0
+    {
+        return false;
+    }
+    let mut member = 0;
+    // SAFETY: a valid token and SID.
+    let checked = unsafe { CheckTokenMembership(token, sid.as_mut_ptr().cast(), &mut member) };
+    checked != 0 && member != 0
+}
+
+/// The user SID of the process at the client end of `pipe`, and whether it runs as an
+/// administrator.
+fn client_process_sid(pipe: HANDLE) -> io::Result<(String, bool)> {
     let mut pid = 0u32;
     // SAFETY: a connected pipe.
     if unsafe { GetNamedPipeClientProcessId(pipe, &mut pid) } == 0 {
         return Err(last_error());
     }
+    Ok((process_sid(pid)?, process_is_administrator(pid)))
+}
+
+/// Whether the process `pid` runs as an administrator. False when that cannot be read.
+fn process_is_administrator(pid: u32) -> bool {
+    // SAFETY: opened for query only, closed by OwnedHandle.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return false;
+    }
+    let process = OwnedHandle(process);
+    let mut token: HANDLE = std::ptr::null_mut();
+    // SAFETY: a process handle with query access.
+    if unsafe { OpenProcessToken(process.0, TOKEN_QUERY | TOKEN_DUPLICATE, &mut token) } == 0 {
+        return false;
+    }
+    let token = OwnedHandle(token);
+    // A membership check needs an impersonation token; an identification copy is enough.
+    let mut copy: HANDLE = std::ptr::null_mut();
+    // SAFETY: a primary token opened for duplication; the copy is closed by OwnedHandle.
+    if unsafe { DuplicateToken(token.0, SecurityIdentification, &mut copy) } == 0 {
+        return false;
+    }
+    is_administrator(OwnedHandle(copy).0)
+}
+
+/// Whether this process runs as an administrator, as the service would see it as a client.
+pub fn current_process_is_administrator() -> bool {
+    process_is_administrator(std::process::id())
+}
+
+/// The user SID of the process `pid`.
+fn process_sid(pid: u32) -> io::Result<String> {
     // SAFETY: opened for query only, closed by OwnedHandle.
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if process.is_null() {
@@ -271,7 +359,7 @@ pub fn current_user_sid() -> io::Result<String> {
 }
 
 /// The user SID in `token`, as an `S-1-...` string.
-fn token_user_sid(token: &OwnedHandle) -> io::Result<String> {
+pub(crate) fn token_user_sid(token: &OwnedHandle) -> io::Result<String> {
     let mut needed = 0u32;
     // SAFETY: a size query.
     unsafe { GetTokenInformation(token.0, TokenUser, std::ptr::null_mut(), 0, &mut needed) };
@@ -437,9 +525,15 @@ impl LocalListener for NamedPipeListener {
         if let Ok(next) = self.create_instance() {
             self.pending = Some(next);
         }
-        let sid = client_sid(instance.0)?;
+        let (sid, administrator) = client_sid(instance.0)?;
         let stream = PipeStream::new(instance)?;
-        Ok((Box::new(FramedConnection::new(stream)), Peer { user: sid }))
+        Ok((
+            Box::new(FramedConnection::new(stream)),
+            Peer {
+                user: sid,
+                administrator,
+            },
+        ))
     }
 }
 
@@ -450,37 +544,81 @@ pub struct NamedPipeConnector {
 
 impl Connector for NamedPipeConnector {
     fn connect(&mut self, timeout: Duration) -> Result<Box<dyn Connection>, TransportError> {
-        let path = wide(&pipe_path(&self.name));
-        let deadline = Instant::now() + timeout;
-        loop {
-            // SAFETY: a NUL-terminated name. Identification level lets the server read our
-            // user without being able to act as us.
-            let handle = unsafe {
-                CreateFileW(
-                    path.as_ptr(),
-                    GENERIC_READ | GENERIC_WRITE,
-                    0,
-                    std::ptr::null(),
-                    OPEN_EXISTING,
-                    FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
-                    std::ptr::null_mut::<c_void>(),
-                )
-            };
-            if handle != INVALID_HANDLE_VALUE {
-                return Ok(Box::new(FramedConnection::new(PipeStream::new(
-                    OwnedHandle(handle),
-                )?)));
-            }
-            let error = last_error();
-            if error.raw_os_error() != Some(ERROR_PIPE_BUSY as i32) {
-                return Err(error.into());
-            }
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return Err(TransportError::Timeout);
-            }
-            // SAFETY: a NUL-terminated name.
-            unsafe { WaitNamedPipeW(path.as_ptr(), millis(Some(left))) };
+        let handle = open_client(&self.name, timeout)?;
+        Ok(Box::new(FramedConnection::new(PipeStream::new(handle)?)))
+    }
+}
+
+/// The client end of a pipe that only a process of the same user may serve: before anything
+/// is sent, it checks who runs the process at the other end, so another user who took the
+/// pipe's name first is never talked to.
+pub struct SameUserPipeConnector {
+    pub name: String,
+}
+
+impl Connector for SameUserPipeConnector {
+    fn connect(&mut self, timeout: Duration) -> Result<Box<dyn Connection>, TransportError> {
+        let handle = open_client(&self.name, timeout)?;
+        let server = server_process_sid(handle.0)?;
+        let own = current_user_sid()?;
+        if server != own {
+            return Err(TransportError::Io {
+                kind: io::ErrorKind::PermissionDenied,
+                message: format!(
+                    "{} is served by another user ({server}), not this one",
+                    pipe_path(&self.name)
+                ),
+            });
         }
+        Ok(Box::new(FramedConnection::new(PipeStream::new(handle)?)))
+    }
+}
+
+/// The user SID of the process at the server end of `pipe`.
+fn server_process_sid(pipe: HANDLE) -> io::Result<String> {
+    let mut pid = 0u32;
+    // SAFETY: a connected pipe.
+    if unsafe { GetNamedPipeServerProcessId(pipe, &mut pid) } == 0 {
+        return Err(last_error());
+    }
+    process_sid(pid)
+}
+
+/// The security descriptor of a pipe only the current user may open.
+pub fn current_user_only_sddl() -> io::Result<String> {
+    Ok(format!("D:P(A;;GA;;;{})", current_user_sid()?))
+}
+
+/// Opens the client end of `\\.\pipe\<name>`, waiting at most `timeout` for a free instance.
+fn open_client(name: &str, timeout: Duration) -> Result<OwnedHandle, TransportError> {
+    let path = wide(&pipe_path(name));
+    let deadline = Instant::now() + timeout;
+    loop {
+        // SAFETY: a NUL-terminated name. Identification level lets the server read our
+        // user without being able to act as us.
+        let handle = unsafe {
+            CreateFileW(
+                path.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE,
+                0,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION,
+                std::ptr::null_mut::<c_void>(),
+            )
+        };
+        if handle != INVALID_HANDLE_VALUE {
+            return Ok(OwnedHandle(handle));
+        }
+        let error = last_error();
+        if error.raw_os_error() != Some(ERROR_PIPE_BUSY as i32) {
+            return Err(error.into());
+        }
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(TransportError::Timeout);
+        }
+        // SAFETY: a NUL-terminated name.
+        unsafe { WaitNamedPipeW(path.as_ptr(), millis(Some(left))) };
     }
 }

@@ -18,6 +18,10 @@ use crate::{Connection, Connector, Listener, TransportError};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Peer {
     pub user: String,
+    /// Whether the OS says the caller acts as an administrator now: on Windows, a token that
+    /// is a member of BUILTIN\Administrators, which takes an elevated process when UAC is on;
+    /// on Linux and macOS, root. Settings that apply to every user of the machine need it.
+    pub administrator: bool,
 }
 
 impl fmt::Display for Peer {
@@ -79,6 +83,7 @@ impl Connector for MemoryLocalConnector {
     fn connect(&mut self, _timeout: Duration) -> Result<Box<dyn Connection>, TransportError> {
         self.connect_as(Peer {
             user: "test".into(),
+            administrator: false,
         })
     }
 }

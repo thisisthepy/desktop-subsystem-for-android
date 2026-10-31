@@ -7,7 +7,7 @@
 //! {
 //!   "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
 //!   "system_image": "C:\\Program Files\\DSA\\vm\\system.vhdx",
-//!   "memory_mb": 4096
+//!   "memory_mb": 3072
 //! }
 //! ```
 //!
@@ -25,6 +25,10 @@
 //! `update.program_list_url` and `update.program_dir` let the service update DSA itself
 //! from the signed program list, downloading setup files into that folder;
 //! `"program": false` turns that off.
+//!
+//! `settings_dir` is where the service keeps the settings users change from the settings
+//! app (`%ProgramData%\DSA\settings` when absent). The settings can turn either kind of
+//! update off; they cannot turn on what this file leaves out.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -122,13 +126,58 @@ fn default_vm_name() -> String {
     "dsa-android".into()
 }
 fn default_memory_mb() -> u32 {
-    4096
+    3072
 }
 fn default_processors() -> u32 {
     4
 }
 fn default_page_reporting_order() -> u8 {
-    9
+    page_reporting_order_for_build(windows_build())
+}
+
+/// The free page reporting order for a Windows build, as WSL chooses it: 5 (128 KiB) from
+/// Windows 11 (build 22000) on, 9 (2 MiB) before it or when the build is unknown. A guest's
+/// free memory is scattered, so the smaller the pieces it may report, the more of it the
+/// host gets back.
+pub fn page_reporting_order_for_build(build: Option<u32>) -> u8 {
+    match build {
+        Some(build) if build >= 22000 => 5,
+        _ => 9,
+    }
+}
+
+/// The build number of the running Windows, from the registry.
+#[cfg(windows)]
+fn windows_build() -> Option<u32> {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
+    let wide = |text: &str| text.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+    let key = wide(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
+    let value = wide("CurrentBuildNumber");
+    let mut buffer = [0u16; 32];
+    let mut size = std::mem::size_of_val(&buffer) as u32;
+    // SAFETY: NUL-terminated names and a buffer of the size given.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_SZ,
+            std::ptr::null_mut(),
+            buffer.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if status != 0 {
+        return None;
+    }
+    let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+    String::from_utf16_lossy(&buffer[..len]).trim().parse().ok()
+}
+
+/// Off Windows (in tests) there is no build to read.
+#[cfg(not(windows))]
+fn windows_build() -> Option<u32> {
+    None
 }
 fn default_control_port() -> u32 {
     5000
@@ -202,12 +251,16 @@ pub struct HostConfig {
     /// messages are lost.
     #[serde(default)]
     pub log_file: Option<PathBuf>,
+    /// Where the service keeps the settings users change from the settings app.
+    #[serde(default)]
+    pub settings_dir: Option<PathBuf>,
     /// The user allowed to use the VM's Hyper-V sockets besides SYSTEM. When absent, the
     /// user running `dsa-hostd`.
     #[serde(default)]
     pub user_sid: Option<String>,
     /// Free page reporting granularity as a page order: 9 (2 MiB) works on every Windows
-    /// build; 5 (128 KiB) returns memory more finely on recent builds.
+    /// build; 5 (128 KiB) returns memory more finely on recent builds. By default, 5 on
+    /// Windows 11 and later and 9 before.
     #[serde(default = "default_page_reporting_order")]
     pub page_reporting_order: u8,
     /// The vsock port the guest's channel daemon connects to.
@@ -217,6 +270,20 @@ pub struct HostConfig {
     pub connect_timeout_secs: u64,
     #[serde(default = "default_stop_timeout_secs")]
     pub stop_timeout_secs: u64,
+    /// How long no Android window may be shown before Android's screen goes off and it goes
+    /// into Doze.
+    #[serde(default = "default_doze_delay_secs")]
+    pub doze_delay_secs: u64,
+    /// How long Android stays in Doze before it is frozen, for a user who turned freezing on
+    /// in their settings (30 minutes when absent). The service freezes only such a user's
+    /// Android: a frozen Android gets no notifications, alarms or widget updates. Run by hand
+    /// (`dsa-hostd <config.json>`), the setting alone turns freezing on.
+    #[serde(default)]
+    pub freeze_after_minutes: Option<u64>,
+}
+
+fn default_doze_delay_secs() -> u64 {
+    dsa_host_core::session::DEFAULT_DOZE_DELAY.as_secs()
 }
 
 fn default_check_interval_hours() -> u64 {
@@ -338,9 +405,21 @@ impl HostConfig {
         }))
     }
 
+    /// Whether this installation downloads new Android images at all.
+    pub fn image_updates_available(&self) -> bool {
+        self.update.is_some() && self.images_dir.is_some()
+    }
+
+    /// Whether this installation updates DSA itself at all.
+    pub fn program_updates_available(&self) -> bool {
+        self.update.as_ref().is_some_and(|update| {
+            update.program && update.program_list_url.is_some() && update.program_dir.is_some()
+        })
+    }
+
     /// The service's log folder: the folder of `log_file`, when there is one. Split as
     /// text, so it is a Windows path on every platform the tests run on.
-    fn log_dir(&self) -> Option<PathBuf> {
+    pub fn log_dir(&self) -> Option<PathBuf> {
         self.log_file.as_ref().and_then(|log| {
             let log = log.to_string_lossy();
             log.rfind(['\\', '/']).map(|end| PathBuf::from(&log[..end]))
@@ -511,6 +590,7 @@ impl HostConfig {
                 (None, Some(first)) => Some(first.version.clone()),
                 _ => None,
             },
+            hosting_process_name_suffix: None,
         }
     }
 
@@ -518,6 +598,10 @@ impl HostConfig {
         SessionConfig {
             connect_timeout: Duration::from_secs(self.connect_timeout_secs),
             stop_timeout: Duration::from_secs(self.stop_timeout_secs),
+            doze_delay: Duration::from_secs(self.doze_delay_secs),
+            freeze_after: self
+                .freeze_after_minutes
+                .map(|minutes| Duration::from_secs(minutes.saturating_mul(60))),
         }
     }
 }

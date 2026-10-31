@@ -566,7 +566,7 @@ namespace Dsa.Setup
             {
                 if (this.PlannedAction == LaunchAction.Install)
                 {
-                    this.LaunchCompositor();
+                    this.LaunchWindowManager();
                 }
 
                 this.window.ShowSuccess(this.PlannedAction, promptRestart);
@@ -577,7 +577,7 @@ namespace Dsa.Setup
                 this.window.ShowFailure(this.PlannedAction, cancelled ? null : this.lastError, cancelled, promptRestart);
             }
         }
-        private void LaunchCompositor()
+        private void LaunchWindowManager()
         {
             try
             {
@@ -587,7 +587,7 @@ namespace Dsa.Setup
                     installFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "DSA");
                 }
 
-                var exePath = Path.Combine(installFolder, "dsa-compositor.exe");
+                var exePath = Path.Combine(installFolder, "dsa-wm.exe");
                 if (File.Exists(exePath))
                 {
                     var startInfo = new ProcessStartInfo
@@ -601,7 +601,7 @@ namespace Dsa.Setup
             }
             catch (Exception e)
             {
-                this.Log("could not launch compositor: " + e.Message);
+                this.Log("could not launch the window manager: " + e.Message);
             }
         }
 

@@ -1,0 +1,155 @@
+diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations.cpp
+index 5f8abc0c2..8cced45ec 100644
+--- a/host/vulkan/VkCommonOperations.cpp
++++ b/host/vulkan/VkCommonOperations.cpp
+@@ -664,6 +664,71 @@ static std::string decodeDriverVersion(uint32_t vendorId, uint32_t driverVersion
+     return res;
+ }
+ 
++namespace {
++
++std::mutex sGpuPreferenceMutex;
++GpuPreference sGpuPreference;
++int sGpuPreferenceMatched = -1;
++
++std::string lowercaseGpuName(std::string text) {
++    std::transform(text.begin(), text.end(), text.begin(),
++                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
++    return text;
++}
++
++const char* gpuPreferenceRuleName(GpuPreference::Rule rule) {
++    switch (rule) {
++        case GpuPreference::Rule::None:
++            return "none";
++        case GpuPreference::Rule::Luid:
++            return "LUID";
++        case GpuPreference::Rule::Integrated:
++            return "integrated";
++        case GpuPreference::Rule::Discrete:
++            return "discrete";
++        case GpuPreference::Rule::Name:
++            return "name";
++    }
++    return "unknown";
++}
++
++bool deviceMatchesGpuPreference(bool hasGraphicsQueueFamily,
++                                const VkPhysicalDeviceProperties& props,
++                                const VkPhysicalDeviceIDProperties& idProps,
++                                const GpuPreference& preference) {
++    if (!hasGraphicsQueueFamily) {
++        return false;
++    }
++    switch (preference.rule) {
++        case GpuPreference::Rule::None:
++            return false;
++        case GpuPreference::Rule::Luid:
++            return idProps.deviceLUIDValid &&
++                   std::memcmp(idProps.deviceLUID, preference.luid, VK_LUID_SIZE) == 0;
++        case GpuPreference::Rule::Integrated:
++            return props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
++        case GpuPreference::Rule::Discrete:
++            return props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
++        case GpuPreference::Rule::Name:
++            return !preference.name.empty() &&
++                   lowercaseGpuName(props.deviceName).find(lowercaseGpuName(preference.name)) !=
++                       std::string::npos;
++    }
++    return false;
++}
++
++}  // namespace
++
++void setGpuPreference(const GpuPreference& preference) {
++    std::lock_guard<std::mutex> lock(sGpuPreferenceMutex);
++    sGpuPreference = preference;
++}
++
++int gpuPreferenceMatched() {
++    std::lock_guard<std::mutex> lock(sGpuPreferenceMutex);
++    return sGpuPreferenceMatched;
++}
++
+ // Checks if the user enforced a specific GPU, it can be done via index or name.
+ // Otherwise try to find the best device with discrete GPU and high vulkan API level.
+ // Scoring of the devices is done by some implicit choices based on known driver
+@@ -673,6 +738,33 @@ static std::string decodeDriverVersion(uint32_t vendorId, uint32_t driverVersion
+ int VkEmulation::getSelectedGpuIndex(
+     const std::vector<VkEmulation::DeviceSupportInfo>& deviceInfos) {
+     const int physicalDeviceCount = deviceInfos.size();
++
++    // The embedder's preference comes first.
++    GpuPreference preference;
++    {
++        std::lock_guard<std::mutex> lock(sGpuPreferenceMutex);
++        preference = sGpuPreference;
++        sGpuPreferenceMatched = -1;
++    }
++    if (preference.rule != GpuPreference::Rule::None) {
++        for (int i = 0; i < physicalDeviceCount; ++i) {
++            if (deviceMatchesGpuPreference(deviceInfos[i].hasGraphicsQueueFamily,
++                                           deviceInfos[i].physdevProps, deviceInfos[i].idProps,
++                                           preference)) {
++                INFO("Selecting GPU (%s) at index %d, which the embedder asked for by %s.",
++                     deviceInfos[i].physdevProps.deviceName, i,
++                     gpuPreferenceRuleName(preference.rule));
++                std::lock_guard<std::mutex> lock(sGpuPreferenceMutex);
++                sGpuPreferenceMatched = 1;
++                return i;
++            }
++        }
++        WARN("No GPU matches the embedder's preference (by %s); choosing by the ranking.",
++             gpuPreferenceRuleName(preference.rule));
++        std::lock_guard<std::mutex> lock(sGpuPreferenceMutex);
++        sGpuPreferenceMatched = 0;
++    }
++
+     if (physicalDeviceCount == 1) {
+         return 0;
+     }
+diff --git a/host/vulkan/VkCommonOperations.h b/host/vulkan/VkCommonOperations.h
+index 2deb2d597..3e62ad36b 100644
+--- a/host/vulkan/VkCommonOperations.h
++++ b/host/vulkan/VkCommonOperations.h
+@@ -17,8 +17,10 @@
+ #include <vulkan/vulkan.h>
+ 
+ #include <atomic>
++#include <cstdint>
+ #include <functional>
+ #include <memory>
++#include <string>
+ #include <unordered_map>
+ #include <unordered_set>
+ #include <vector>
+@@ -63,6 +65,29 @@ bool getStagingMemoryTypeIndex(VulkanDispatch* vk, VkDevice device,
+                                const VkPhysicalDeviceMemoryProperties* memProps,
+                                uint32_t* typeIndex);
+ 
++// The GPU an embedder asks the renderer to run on. It is tried before
++// ANDROID_EMU_VK_SELECT_GPU and the built-in ranking, and only a device with a graphics
++// queue can match it. When no device matches, the renderer chooses as if none was asked.
++struct GpuPreference {
++    enum class Rule {
++        None,        // the built-in ranking
++        Luid,        // VkPhysicalDeviceIDProperties::deviceLUID equals `luid`
++        Integrated,  // the first integrated GPU
++        Discrete,    // the first discrete GPU
++        Name,        // the first device whose name contains `name`, ignoring case
++    };
++    Rule rule = Rule::None;
++    uint8_t luid[VK_LUID_SIZE] = {};
++    std::string name;
++};
++
++// Sets the preference for the next VkEmulation::create.
++void setGpuPreference(const GpuPreference& preference);
++
++// Whether the last VkEmulation::create found a device for the preference: 1 when it did,
++// 0 when it chose by the ranking because none matched, -1 when no preference was set.
++int gpuPreferenceMatched();
++
+ enum class AstcEmulationMode {
+     Disabled,  // No ASTC emulation (ie: ASTC not supported unless the GPU supports it natively)
+     Cpu,       // Decompress ASTC textures on the CPU

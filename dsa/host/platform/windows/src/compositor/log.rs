@@ -3,8 +3,10 @@
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::SystemTime;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Instant, SystemTime};
+
+use dsa_host_core::resize_trace::{self, ResizeTrace};
 
 /// Returns the default log folder for the current user: `%LOCALAPPDATA%\DSA\logs`.
 pub fn default_log_dir() -> PathBuf {
@@ -21,9 +23,9 @@ pub fn default_log_dir() -> PathBuf {
     }
 }
 
-/// Returns the default log file path: `%LOCALAPPDATA%\DSA\logs\dsa-compositor.log`.
+/// Returns the default log file path: `%LOCALAPPDATA%\DSA\logs\dsa-wm.log`.
 pub fn default_log_file() -> PathBuf {
-    default_log_dir().join("dsa-compositor.log")
+    default_log_dir().join("dsa-wm.log")
 }
 
 /// A thread-safe file logger.
@@ -75,13 +77,14 @@ fn humantime_now() -> String {
     match now.duration_since(SystemTime::UNIX_EPOCH) {
         Ok(dur) => {
             let total_secs = dur.as_secs();
+            let millis = dur.subsec_millis();
             let secs = total_secs % 60;
             let total_mins = total_secs / 60;
             let mins = total_mins % 60;
             let total_hours = total_mins / 60;
             let hours = total_hours % 24;
             let days = total_hours / 24;
-            format!("+{days}d {hours:02}:{mins:02}:{secs:02} UTC")
+            format!("+{days}d {hours:02}:{mins:02}:{secs:02}.{millis:03} UTC")
         }
         Err(_) => "0 UTC".to_string(),
     }
@@ -91,6 +94,90 @@ fn humantime_now() -> String {
 pub fn note(logger: Option<&CompositorLogger>, message: &str) {
     match logger {
         Some(logger) => logger.log(message),
-        None => eprintln!("dsa-compositor: {message}"),
+        None => eprintln!("dsa-wm: {message}"),
     }
+}
+
+/// The resize trace of this process. Its per-stage lines are on when the environment
+/// variable `DSA_RESIZE_TRACE` is set, or the file `%LOCALAPPDATA%\DSA\resize-trace` exists
+/// when the process first traces.
+fn resize_trace() -> &'static Mutex<ResizeTrace> {
+    static TRACE: OnceLock<Mutex<ResizeTrace>> = OnceLock::new();
+    TRACE.get_or_init(|| {
+        let file = default_log_dir()
+            .parent()
+            .map(|dsa| dsa.join(resize_trace::DETAIL_FILE).exists())
+            .unwrap_or(false);
+        let env = std::env::var(resize_trace::DETAIL_ENV).ok();
+        Mutex::new(ResizeTrace::new(
+            resize_trace::detail_requested(env.as_deref(), file),
+            Instant::now(),
+        ))
+    })
+}
+
+/// Whether this process writes the per-stage resize trace lines.
+pub fn trace_detailed() -> bool {
+    resize_trace()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .detailed()
+}
+
+/// Logs `stage` of the resize of `task_id` to `size`, when the per-stage lines are on and
+/// the stage has not been logged at that size already.
+pub fn trace_stage(
+    logger: Option<&CompositorLogger>,
+    task_id: i32,
+    stage: &'static str,
+    size: (u32, u32),
+    detail: &str,
+) {
+    let line = resize_trace()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .stage(
+            task_id,
+            stage,
+            size,
+            detail,
+            Instant::now(),
+            resize_trace::wall_now(),
+        );
+    if let Some(line) = line {
+        note(logger, &line);
+    }
+}
+
+/// Logs the summary `stage` of the resize of `task_id` to `size`, unless the task's last
+/// summary went out moments ago.
+pub fn trace_summary(
+    logger: Option<&CompositorLogger>,
+    task_id: i32,
+    stage: &'static str,
+    size: (u32, u32),
+    detail: &str,
+) {
+    let line = resize_trace()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .summary(
+            task_id,
+            stage,
+            size,
+            detail,
+            Instant::now(),
+            resize_trace::wall_now(),
+        );
+    if let Some(line) = line {
+        note(logger, &line);
+    }
+}
+
+/// The task's window is gone: its trace state goes too.
+pub fn trace_forget(task_id: i32) {
+    resize_trace()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .forget(task_id);
 }

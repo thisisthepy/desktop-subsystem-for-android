@@ -1,0 +1,16 @@
+; Desktop Subsystem for Android (DSA)
+; The agent (a platform-signed privileged app, platform_app) puts the guest into Doze when no
+; task window is shown on the host, and makes the guest's battery follow the host's. It does
+; so through the shell commands of the device idle controller ("deviceidle force-idle") and
+; the battery service ("battery set ..."), which it calls over binder with the DEVICE_POWER
+; permission, as the shell would. A shell command call hands system_server three file
+; descriptors: /dev/null for input, and the write ends of a pipe the agent reads the
+; command's output and errors from.
+
+; Finding the two services.
+(allow platform_app deviceidle_service (service_manager (find)))
+(allow platform_app battery_service (service_manager (find)))
+
+; system_server takes the descriptors the agent hands it, and writes the command's output.
+(allow system_server platform_app (fd (use)))
+(allow system_server platform_app (fifo_file (write getattr)))

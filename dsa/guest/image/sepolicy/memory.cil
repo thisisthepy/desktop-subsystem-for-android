@@ -1,0 +1,38 @@
+; Desktop Subsystem for Android (DSA)
+; The guest's memory controls. init runs the commands of the vendor scripts (dsa-memory.rc,
+; dsa-channeld.rc) as vendor_init, which may write only the kernel settings it is given here:
+; the cache drop and compaction that let free page reporting hand idle memory back to the
+; host, and how readily the kernel swaps to zram.
+
+; /proc/sys/vm/compact_memory and /proc/sys/vm/swappiness have no label of their own, so
+; they would be plain proc, which vendor_init may not write. A type of their own opens these
+; two and nothing else.
+(type dsa_proc_vm_tunable)
+(roletype object_r dsa_proc_vm_tunable)
+(typeattributeset fs_type (dsa_proc_vm_tunable))
+(typeattributeset proc_type (dsa_proc_vm_tunable))
+(genfscon proc "/sys/vm/compact_memory" (u object_r dsa_proc_vm_tunable ((s0) (s0))))
+(genfscon proc "/sys/vm/swappiness" (u object_r dsa_proc_vm_tunable ((s0) (s0))))
+(allow vendor_init dsa_proc_vm_tunable (file (write open getattr)))
+(allow init dsa_proc_vm_tunable (file (read write open getattr)))
+(allow vendor_init proc_drop_caches (file (write open getattr)))
+
+; vendor.dsa.memory.reclaim (vendor_property_contexts): set to 1 by dsa-channeld when the
+; guest should drop its caches, and back to 0 by init once it has. Nothing else may set it.
+(type dsa_memory_prop)
+(roletype object_r dsa_memory_prop)
+(typeattributeset property_type (dsa_memory_prop))
+(typeattributeset vendor_property_type (dsa_memory_prop))
+(allow vendor_init dsa_memory_prop (property_service (set)))
+(allow vendor_init dsa_memory_prop (file (read open getattr map)))
+
+; The gradual trim writes memory.reclaim in the unified cgroup hierarchy (labelled cgroup_v2).
+(allow vendor_init cgroup_v2 (dir (search getattr)))
+(allow vendor_init cgroup_v2 (file (write open getattr)))
+
+; The agent reports how much compressed swap holds (zram's mm_stat) with the rest of the
+; guest's memory.
+(allow system_app sysfs_zram (dir (search)))
+(allow system_app sysfs_zram (file (read open getattr)))
+(allow platform_app sysfs_zram (dir (search)))
+(allow platform_app sysfs_zram (file (read open getattr)))

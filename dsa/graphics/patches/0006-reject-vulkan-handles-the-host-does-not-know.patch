@@ -1,0 +1,347 @@
+diff --git a/host/vulkan/VkDecoder.cpp b/host/vulkan/VkDecoder.cpp
+index acf441fa1..534e0e3d5 100644
+--- a/host/vulkan/VkDecoder.cpp
++++ b/host/vulkan/VkDecoder.cpp
+@@ -1919,10 +1919,6 @@ size_t VkDecoder::Impl::decode(void* buf, size_t len, IOStream* ioStream,
+                         memcpy(&readStream, *readStreamPtrPtr, sizeof(uint64_t));
+                         *readStreamPtrPtr += sizeof(uint64_t);
+                         sizeLeft -= sizeof(uint64_t);
+-                        auto hostPtr = m_state->getMappedHostPointer(memory);
+-                        if (!hostPtr && readStream > 0)
+-                            GFXSTREAM_ABORT(::emugl::FatalError(::emugl::ABORT_REASON_OTHER));
+-                        if (!hostPtr) continue;
+                         if (sizeLeft < readStream) {
+                             if (m_prevSeqno) {
+                                 m_prevSeqno = m_prevSeqno.value() - 1;
+@@ -1931,10 +1927,26 @@ size_t VkDecoder::Impl::decode(void* buf, size_t len, IOStream* ioStream,
+                             ;
+                         }
+                         sizeLeft -= readStream;
++                        // The size and the contents follow the packet whatever happens to
++                        // them, so the next packet starts after both.
++                        packetLen += 8 + readStream;
++                        auto hostPtr = m_state->getMappedHostPointer(memory);
++                        const uint64_t mappedSize = m_state->getDeviceMemorySize(memory);
++                        if (!hostPtr || offset > mappedSize || readStream > mappedSize - offset) {
++                            // Contents for memory the host has not mapped, or that run past
++                            // its end: the guest's error. Drop them and keep serving.
++                            if (readStream > 0) {
++                                ERR("vkFlushMappedMemoryRanges: dropping %llu bytes at offset "
++                                    "%llu for memory %p, which has %llu mapped bytes",
++                                    (unsigned long long)readStream, (unsigned long long)offset,
++                                    memory, (unsigned long long)(hostPtr ? mappedSize : 0));
++                            }
++                            *readStreamPtrPtr += readStream;
++                            continue;
++                        }
+                         uint8_t* targetRange = hostPtr + offset;
+                         memcpy(targetRange, *readStreamPtrPtr, readStream);
+                         *readStreamPtrPtr += readStream;
+-                        packetLen += 8 + readStream;
+                     }
+                 }
+                 VkResult vkFlushMappedMemoryRanges_VkResult_return = VK_ERROR_OUT_OF_HOST_MEMORY;
+@@ -2016,10 +2028,21 @@ size_t VkDecoder::Impl::decode(void* buf, size_t len, IOStream* ioStream,
+                         auto size = range.size;
+                         auto offset = range.offset;
+                         auto hostPtr = m_state->getMappedHostPointer(memory);
+-                        auto actualSize =
+-                            size == VK_WHOLE_SIZE ? m_state->getDeviceMemorySize(memory) : size;
++                        const uint64_t mappedSize = m_state->getDeviceMemorySize(memory);
++                        uint64_t actualSize = size;
++                        if (size == VK_WHOLE_SIZE) {
++                            actualSize = offset <= mappedSize ? mappedSize - offset : 0;
++                        }
+                         uint64_t writeStream = 0;
+-                        if (!hostPtr) {
++                        if (!hostPtr || offset > mappedSize || actualSize > mappedSize - offset) {
++                            // Nothing to send back for memory the host has not mapped or a
++                            // range past its end. The guest reads exactly the size it is sent.
++                            if (hostPtr) {
++                                ERR("vkInvalidateMappedMemoryRanges: range at offset %llu of "
++                                    "%llu bytes is past the %llu mapped bytes of memory %p",
++                                    (unsigned long long)offset, (unsigned long long)actualSize,
++                                    (unsigned long long)mappedSize, memory);
++                            }
+                             vkStream->write(&writeStream, sizeof(uint64_t));
+                             continue;
+                         };
+diff --git a/host/vulkan/VkDecoderGlobalState.cpp b/host/vulkan/VkDecoderGlobalState.cpp
+index f79a06df7..a3a6285ab 100644
+--- a/host/vulkan/VkDecoderGlobalState.cpp
++++ b/host/vulkan/VkDecoderGlobalState.cpp
+@@ -131,11 +131,15 @@ using gfxstream::VulkanInfo;
+ #define VALIDATE_REQUIRED_HANDLE(parameter) \
+     validateRequiredHandle(__FUNCTION__, #parameter, parameter)
+ 
++// A handle the guest must pass and did not, or one the host does not know (it unboxes to
++// VK_NULL_HANDLE). The call is the guest's error: it fails, and the renderer goes on serving.
+ template <typename T>
+-void validateRequiredHandle(const char* api_name, const char* parameter_name, T value) {
++bool validateRequiredHandle(const char* api_name, const char* parameter_name, T value) {
+     if (value == VK_NULL_HANDLE) {
+-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER)) << api_name << ":" << parameter_name;
++        ERR("%s: %s is VK_NULL_HANDLE or unknown to the host", api_name, parameter_name);
++        return false;
+     }
++    return true;
+ }
+ 
+ #define VALIDATE_NEW_HANDLE_INFO_ENTRY(objectMap, newEntry) \
+@@ -2413,13 +2417,39 @@ class VkDecoderGlobalState::Impl {
+         return VK_SUCCESS;
+     }
+ 
++    // Whether `handle` is one the host made and still has. A guest can name a handle it
++    // destroyed, or one it never had (a NULL, or a value read from a stream that went out of
++    // step); the driver dereferences whatever it is given, so such a call must not reach it.
++    template <typename T, typename Info>
++    bool isKnownHandleLocked(const std::unordered_map<T, Info>& infos, T handle,
++                             const char* api_name, const char* parameter_name)
++        REQUIRES(mMutex) {
++        if (handle != VK_NULL_HANDLE && infos.find(handle) != infos.end()) {
++            return true;
++        }
++        ERR("%s: %s %p is not a handle the host has", api_name, parameter_name, handle);
++        return false;
++    }
++
++    bool isKnownBufferBindLocked(const char* api_name, VkBuffer buffer, VkDeviceMemory memory)
++        REQUIRES(mMutex) {
++        return isKnownHandleLocked(mBufferInfo, buffer, api_name, "buffer") &&
++               isKnownHandleLocked(mMemoryInfo, memory, api_name, "memory");
++    }
++
+     VkResult on_vkBindBufferMemory(android::base::BumpPool* pool, VkSnapshotApiCallInfo*,
+                                    VkDevice boxed_device, VkBuffer buffer, VkDeviceMemory memory,
+                                    VkDeviceSize memoryOffset) {
+         auto device = unbox_VkDevice(boxed_device);
+         auto vk = dispatch_VkDevice(boxed_device);
+ 
+-        VALIDATE_REQUIRED_HANDLE(memory);
++        if (!VALIDATE_REQUIRED_HANDLE(memory)) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
++        {
++            std::lock_guard<std::mutex> lock(mMutex);
++            if (!isKnownBufferBindLocked(__func__, buffer, memory)) {
++                return VK_ERROR_OUT_OF_DEVICE_MEMORY;
++            }
++        }
+         VkResult result = vk->vkBindBufferMemory(device, buffer, memory, memoryOffset);
+         if (result != VK_SUCCESS) {
+             return result;
+@@ -2435,8 +2465,15 @@ class VkDecoderGlobalState::Impl {
+         auto device = unbox_VkDevice(boxed_device);
+         auto vk = dispatch_VkDevice(boxed_device);
+ 
+-        for (uint32_t i = 0; i < bindInfoCount; ++i) {
+-            VALIDATE_REQUIRED_HANDLE(pBindInfos[i].memory);
++        {
++            std::lock_guard<std::mutex> lock(mMutex);
++            for (uint32_t i = 0; i < bindInfoCount; ++i) {
++                if (!VALIDATE_REQUIRED_HANDLE(pBindInfos[i].memory) ||
++                    !isKnownBufferBindLocked(__func__, pBindInfos[i].buffer,
++                                             pBindInfos[i].memory)) {
++                    return VK_ERROR_OUT_OF_DEVICE_MEMORY;
++                }
++            }
+         }
+         VkResult result = vk->vkBindBufferMemory2(device, bindInfoCount, pBindInfos);
+         if (result != VK_SUCCESS) {
+@@ -2461,8 +2498,15 @@ class VkDecoderGlobalState::Impl {
+         auto device = unbox_VkDevice(boxed_device);
+         auto vk = dispatch_VkDevice(boxed_device);
+ 
+-        for (uint32_t i = 0; i < bindInfoCount; ++i) {
+-            VALIDATE_REQUIRED_HANDLE(pBindInfos[i].memory);
++        {
++            std::lock_guard<std::mutex> lock(mMutex);
++            for (uint32_t i = 0; i < bindInfoCount; ++i) {
++                if (!VALIDATE_REQUIRED_HANDLE(pBindInfos[i].memory) ||
++                    !isKnownBufferBindLocked(__func__, pBindInfos[i].buffer,
++                                             pBindInfos[i].memory)) {
++                    return VK_ERROR_OUT_OF_DEVICE_MEMORY;
++                }
++            }
+         }
+         VkResult result = vk->vkBindBufferMemory2KHR(device, bindInfoCount, pBindInfos);
+ 
+@@ -2677,7 +2721,14 @@ class VkDecoderGlobalState::Impl {
+         auto device = unbox_VkDevice(boxed_device);
+         auto vk = dispatch_VkDevice(boxed_device);
+ 
+-        VALIDATE_REQUIRED_HANDLE(memory);
++        if (!VALIDATE_REQUIRED_HANDLE(memory)) return VK_ERROR_OUT_OF_DEVICE_MEMORY;
++        {
++            std::lock_guard<std::mutex> lock(mMutex);
++            if (!isKnownHandleLocked(mImageInfo, image, __func__, "image") ||
++                !isKnownHandleLocked(mMemoryInfo, memory, __func__, "memory")) {
++                return VK_ERROR_OUT_OF_DEVICE_MEMORY;
++            }
++        }
+         VkResult result = vk->vkBindImageMemory(device, image, memory, memoryOffset);
+         if (result != VK_SUCCESS) {
+             return result;
+@@ -2752,10 +2803,16 @@ class VkDecoderGlobalState::Impl {
+             if (!deviceInfo) return VK_ERROR_UNKNOWN;
+ 
+             for (uint32_t i = 0; i < bindInfoCount; i++) {
++                if (!isKnownHandleLocked(mImageInfo, pBindInfos[i].image, __func__, "image")) {
++                    return VK_ERROR_UNKNOWN;
++                }
+                 auto* imageInfo = android::base::find(mImageInfo, pBindInfos[i].image);
+-                if (!imageInfo) return VK_ERROR_UNKNOWN;
+ 
+                 const auto* anb = vk_find_struct<VkNativeBufferANDROID>(&pBindInfos[i]);
++                if (anb == nullptr &&
++                    !isKnownHandleLocked(mMemoryInfo, pBindInfos[i].memory, __func__, "memory")) {
++                    return VK_ERROR_OUT_OF_DEVICE_MEMORY;
++                }
+                 if (anb != nullptr) {
+                     needEmulation = true;
+                     break;
+@@ -4527,6 +4584,14 @@ class VkDecoderGlobalState::Impl {
+                                          VkMemoryRequirements* pMemoryRequirements) {
+         auto device = unbox_VkDevice(boxed_device);
+         auto vk = dispatch_VkDevice(boxed_device);
++        {
++            std::lock_guard<std::mutex> lock(mMutex);
++            if (!isKnownHandleLocked(mImageInfo, image, __func__, "image")) {
++                // No memory type can back an image that does not exist.
++                *pMemoryRequirements = {};
++                return;
++            }
++        }
+         vk->vkGetImageMemoryRequirements(device, image, pMemoryRequirements);
+         std::lock_guard<std::mutex> lock(mMutex);
+         updateImageMemorySizeLocked(device, image, pMemoryRequirements);
+@@ -4556,6 +4621,9 @@ class VkDecoderGlobalState::Impl {
+ 
+         std::lock_guard<std::mutex> lock(mMutex);
+ 
++        // What the guest gets back when the call cannot be answered: no memory type fits.
++        pMemoryRequirements->memoryRequirements = {};
++
+         auto* physicalDevice = android::base::find(mDeviceToPhysicalDevice, device);
+         if (!physicalDevice) {
+             ERR("Failed to find physical device for device:%p", device);
+@@ -4568,6 +4636,10 @@ class VkDecoderGlobalState::Impl {
+             return;
+         }
+ 
++        if (!isKnownHandleLocked(mImageInfo, pInfo->image, __func__, "pInfo->image")) {
++            return;
++        }
++
+         if ((physicalDeviceInfo->props.apiVersion >= VK_MAKE_VERSION(1, 1, 0)) &&
+             vk->vkGetImageMemoryRequirements2) {
+             vk->vkGetImageMemoryRequirements2(device, pInfo, pMemoryRequirements);
+@@ -4595,22 +4667,30 @@ class VkDecoderGlobalState::Impl {
+                                           VkMemoryRequirements* pMemoryRequirements) {
+         auto device = unbox_VkDevice(boxed_device);
+         auto vk = dispatch_VkDevice(boxed_device);
+-        vk->vkGetBufferMemoryRequirements(device, buffer, pMemoryRequirements);
+ 
+         std::lock_guard<std::mutex> lock(mMutex);
+ 
++        // What the guest gets back when the call cannot be answered: no memory type fits.
++        *pMemoryRequirements = {};
++
+         auto* physicalDevice = android::base::find(mDeviceToPhysicalDevice, device);
+         if (!physicalDevice) {
+-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
+-                << "No physical device available for " << device;
++            ERR("No physical device available for %p", device);
++            return;
+         }
+ 
+         auto* physicalDeviceInfo = android::base::find(mPhysdevInfo, *physicalDevice);
+         if (!physicalDeviceInfo) {
+-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
+-                << "No physical device info available for " << *physicalDevice;
++            ERR("No physical device info available for %p", *physicalDevice);
++            return;
+         }
+ 
++        if (!isKnownHandleLocked(mBufferInfo, buffer, __func__, "buffer")) {
++            return;
++        }
++
++        vk->vkGetBufferMemoryRequirements(device, buffer, pMemoryRequirements);
++
+         auto& physicalDeviceMemHelper = physicalDeviceInfo->memoryPropertiesHelper;
+         physicalDeviceMemHelper->transformToGuestMemoryRequirements(pMemoryRequirements);
+     }
+@@ -4624,16 +4704,23 @@ class VkDecoderGlobalState::Impl {
+ 
+         std::lock_guard<std::mutex> lock(mMutex);
+ 
++        // What the guest gets back when the call cannot be answered: no memory type fits.
++        pMemoryRequirements->memoryRequirements = {};
++
+         auto* physicalDevice = android::base::find(mDeviceToPhysicalDevice, device);
+         if (!physicalDevice) {
+-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
+-                << "No physical device available for " << device;
++            ERR("No physical device available for %p", device);
++            return;
+         }
+ 
+         auto* physicalDeviceInfo = android::base::find(mPhysdevInfo, *physicalDevice);
+         if (!physicalDeviceInfo) {
+-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
+-                << "No physical device info available for " << *physicalDevice;
++            ERR("No physical device info available for %p", *physicalDevice);
++            return;
++        }
++
++        if (!isKnownHandleLocked(mBufferInfo, pInfo->buffer, __func__, "pInfo->buffer")) {
++            return;
+         }
+ 
+         if ((physicalDeviceInfo->props.apiVersion >= VK_MAKE_VERSION(1, 1, 0)) &&
+@@ -5849,6 +5936,11 @@ class VkDecoderGlobalState::Impl {
+ 
+         auto* imageInfo = android::base::find(mImageInfo, image);
+         if (!imageInfo) return VK_ERROR_INITIALIZATION_FAILED;
++        if (!imageInfo->anbInfo) {
++            // Only a swapchain image, made from a gralloc buffer, comes from the window system.
++            ERR("%s: image %p was not made from a gralloc buffer", __func__, image);
++            return VK_ERROR_INITIALIZATION_FAILED;
++        }
+ 
+         VkQueue defaultQueue;
+         uint32_t defaultQueueFamilyIndex;
+@@ -5918,6 +6010,12 @@ class VkDecoderGlobalState::Impl {
+         if (!imageInfo) return VK_ERROR_INITIALIZATION_FAILED;
+ 
+         auto* anbInfo = imageInfo->anbInfo.get();
++        if (!anbInfo) {
++            // Only a swapchain image, made from a gralloc buffer, can be released to the
++            // window system.
++            ERR("%s: image %p was not made from a gralloc buffer", __func__, image);
++            return VK_ERROR_INITIALIZATION_FAILED;
++        }
+         if (anbInfo->isUsingNativeImage()) {
+             // vkQueueSignalReleaseImageANDROID() is only called by the Android framework's
+             // implementation of vkQueuePresentKHR(). The guest application is responsible for
+diff --git a/host/vulkan/VulkanBoxedHandles.cpp b/host/vulkan/VulkanBoxedHandles.cpp
+index 9ff8b478c..b77d6c95e 100644
+--- a/host/vulkan/VulkanBoxedHandles.cpp
++++ b/host/vulkan/VulkanBoxedHandles.cpp
+@@ -418,12 +418,10 @@ VkObjectT unbox_VkType(VkObjectT boxed) {
+             } else if constexpr (std::is_same_v<VkObjectT, VkFence>) {
+                 // TODO: investigate.
+             } else {
+-                GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
+-                        << "Failed to unbox "
+-                        << GetTypeStr<VkObjectT>()
+-                        << " "
+-                        << boxed
+-                        << ", not found.";
++                // A guest names a handle the host does not know: one it destroyed, or one
++                // it never had. That is the guest's error; the call gets VK_NULL_HANDLE,
++                // which the entry points reject, and the renderer keeps serving the others.
++                ERR("Failed to unbox %s %p, not found", GetTypeStr<VkObjectT>(), boxed);
+             }
+             unboxed = VK_NULL_HANDLE;
+         } else {

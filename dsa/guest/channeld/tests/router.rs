@@ -8,7 +8,8 @@ use std::sync::{Arc, Mutex};
 use dsa_guest_channeld::router::{Delivery, Listener, Peer, Router, SendError};
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{
-    AuthProof, CloseTask, Envelope, Hello, LaunchApp, Rect, TaskFrames, TaskRemoved, TaskUpdated,
+    AppInfo, AuthProof, CloseTask, Envelope, Hello, LaunchApp, Rect, TaskFrames, TaskRemoved,
+    TaskUpdated,
 };
 
 /// A client's callback that keeps what it is given, and can be made to die.
@@ -53,6 +54,7 @@ fn task_updated(task_id: i32) -> Vec<u8> {
         package_name: "org.example.notes".into(),
         label: "Notes".into(),
         focused: true,
+        ..TaskUpdated::default()
     }))
 }
 
@@ -241,4 +243,39 @@ fn fr3_a_client_cannot_speak_the_handshake() {
         .unwrap_err();
     assert!(matches!(error, SendError::NotAllowed(_)), "{error:?}");
     assert!(host.try_recv().is_err());
+}
+
+fn app_info(package: &str, label: &str) -> Vec<u8> {
+    frame(Body::AppInfo(AppInfo {
+        package_name: package.into(),
+        label: label.into(),
+        icon_png: vec![0x89, b'P', b'N', b'G'],
+    }))
+}
+
+#[test]
+fn fr3_a_host_that_connects_again_learns_the_apps_before_their_tasks() {
+    let (router, host) = router();
+    let notes = app_info("org.example.notes", "Notes");
+    router.from_guest(AGENT, notes.clone()).unwrap();
+    let updated = task_updated(7);
+    router.from_guest(AGENT, updated.clone()).unwrap();
+    // An app's name and icon go to the host alone.
+    let composer = Arc::new(Recorder::default());
+    router.subscribe(COMPOSER, composer.clone());
+    assert_eq!(host.try_iter().count(), 2);
+
+    router.host_connected();
+    assert_eq!(host.try_iter().collect::<Vec<_>>(), vec![notes, updated]);
+    assert!(!composer
+        .frames()
+        .contains(&app_info("org.example.notes", "Notes")));
+
+    // Once the app's last task ends, it is forgotten.
+    router
+        .from_guest(AGENT, frame(Body::TaskRemoved(TaskRemoved { task_id: 7 })))
+        .unwrap();
+    host.try_iter().count();
+    router.host_connected();
+    assert!(host.try_iter().next().is_none());
 }

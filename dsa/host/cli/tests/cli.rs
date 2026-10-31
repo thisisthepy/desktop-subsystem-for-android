@@ -1,5 +1,9 @@
 //! `dsa` against a running service, over the platform's real local transport.
 
+use dsa_host_core::ime::ImeEvent;
+use dsa_host_core::input::PointerEvent;
+use dsa_host_core::keys::KeyEvent;
+use dsa_host_core::tasks::TaskRequestError;
 use std::process::{Command, Output};
 use std::sync::Arc;
 use std::time::Duration;
@@ -279,6 +283,15 @@ impl UserAndroid for Updated {
     fn update_notice(&self) -> Option<String> {
         Some("DSA was updated to 0.1.1".into())
     }
+    fn pointer(&self, _: &PointerEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn key(&self, _: &KeyEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn ime(&self, _: &ImeEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
 }
 
 #[test]
@@ -460,6 +473,28 @@ fn fr2_dsa_stop_does_not_start_stopped_service() {
 }
 
 #[test]
+fn fr10_dsa_freeze_freezes_a_running_android_and_says_when_none_runs() {
+    assert_eq!(parse(&args("freeze")).unwrap().command, Cmd::Freeze);
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+
+    let refused = dsa(&endpoint, "freeze");
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(
+        stderr(&refused).contains("not running"),
+        "{}",
+        stderr(&refused)
+    );
+
+    assert!(dsa(&endpoint, "start").status.success());
+    let frozen = dsa(&endpoint, "freeze");
+    assert!(frozen.status.success(), "{}", stderr(&frozen));
+    assert_eq!(stdout(&frozen), "Android: Frozen");
+    assert_eq!(androids.of(&user).unwrap().state(), SessionState::Frozen);
+}
+
+#[test]
 fn fr3_dsa_launch_and_dsa_tasks_are_parsed() {
     let launch = parse(&args("launch com.android.settings --pipe p")).unwrap();
     assert_eq!(launch.command, Cmd::Launch);
@@ -534,4 +569,197 @@ fn fr3_dsa_tasks_lists_the_tasks_android_shows_as_windows() {
         "Task 3: Clock (com.example.app), 1080x1920, display 2\n\
          Task 8: com.example.app (com.example.app), 1080x1920, focused"
     );
+}
+
+fn settings_service(listener: Box<dyn dsa_transport::local::LocalListener>) -> RunningService {
+    use dsa_host_core::host_api::{HostApiService, ServiceFacts};
+    use dsa_host_core::settings::MemorySettings;
+    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+        .with_settings(
+            Arc::new(MemorySettings::default()),
+            ServiceFacts {
+                version: "0.0.9".into(),
+                log_dir: Some("C:\\ProgramData\\DSA\\logs".into()),
+                program_updates_available: true,
+                image_updates_available: true,
+            },
+        );
+    RunningService::start_service(listener, service)
+}
+
+fn json_of(output: &Output) -> serde_json::Value {
+    assert!(output.status.success(), "{}", stderr(output));
+    serde_json::from_str(&stdout(output)).expect("dsa printed JSON")
+}
+
+#[test]
+fn fr17_dsa_settings_set_is_parsed() {
+    use dsa_cli::Change;
+    let invocation = parse(&args("settings set render-gpu discrete --json")).unwrap();
+    assert_eq!(invocation.command, Cmd::Settings);
+    assert_eq!(
+        invocation.change,
+        Some(Change::RenderGpu("discrete".into()))
+    );
+    assert!(invocation.json);
+    assert_eq!(
+        parse(&args("settings set freeze on")).unwrap().change,
+        Some(Change::Freeze(true))
+    );
+    assert_eq!(
+        parse(&args("settings set program-updates off"))
+            .unwrap()
+            .change,
+        Some(Change::ProgramUpdates(false))
+    );
+    assert!(parse(&args("settings set freeze maybe")).is_err());
+    assert!(parse(&args("settings set colour blue")).is_err());
+    assert!(parse(&args("settings set render-gpu")).is_err());
+    assert_eq!(parse(&args("memory --json")).unwrap().command, Cmd::Memory);
+    assert_eq!(parse(&args("gpus")).unwrap().command, Cmd::Gpus);
+    assert!(!parse(&args("status")).unwrap().json);
+}
+
+#[test]
+fn fr17_dsa_status_json_reports_the_state_and_the_last_reason() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let status = json_of(&dsa(&endpoint, "status --json"));
+    assert_eq!(status["state"], "Stopped");
+    assert_eq!(status["last_reason"], "stopped on request");
+    assert!(status["update_notice"].is_null());
+    let started = json_of(&dsa(&endpoint, "start --wait --timeout 10 --json"));
+    assert_eq!(started["state"], "Active");
+}
+
+#[test]
+fn fr17_dsa_settings_reads_and_changes_the_settings_through_the_service() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let settings = json_of(&dsa(&endpoint, "settings --json"));
+    assert_eq!(settings["render_gpu"], "display");
+    assert_eq!(settings["freeze"], false);
+    assert_eq!(settings["program_updates"], true);
+    assert_eq!(settings["version"], "0.0.9");
+    assert_eq!(settings["log_dir"], "C:\\ProgramData\\DSA\\logs");
+
+    let changed = json_of(&dsa(&endpoint, "settings set render-gpu Integrated --json"));
+    assert_eq!(changed["render_gpu"], "integrated");
+    let changed = json_of(&dsa(&endpoint, "settings set freeze on --json"));
+    assert_eq!(changed["freeze"], true);
+    assert_eq!(
+        changed["render_gpu"], "integrated",
+        "one change keeps the others"
+    );
+
+    let text = dsa(&endpoint, "settings");
+    assert!(text.status.success(), "{}", stderr(&text));
+    assert!(
+        stdout(&text).contains("Render GPU: integrated"),
+        "{}",
+        stdout(&text)
+    );
+    assert!(
+        stdout(&text).contains("Freeze when idle: on"),
+        "{}",
+        stdout(&text)
+    );
+}
+
+#[test]
+fn fr17_dsa_settings_reports_why_a_value_was_refused() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let output = Command::new(env!("CARGO_BIN_EXE_dsa"))
+        .args(["settings", "set", "render-gpu", "   ", "--json"])
+        .args([endpoint_flag(), &endpoint])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("render GPU"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn fr17_dsa_memory_json_says_what_it_knows_of_the_host_and_android() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let memory = json_of(&dsa(&endpoint, "memory --json"));
+    assert!(memory["guest"].is_null(), "{memory}");
+    assert!(memory["host"].as_array().unwrap().is_empty(), "{memory}");
+    assert_eq!(memory["host_total_kb"], 0);
+}
+
+#[test]
+fn fr17_dsa_memory_json_carries_the_guest_breakdown_and_the_host_processes() {
+    use dsa_host_core::memory::{
+        GuestMemory, GuestMemoryReport, HostProcessMemory, HostRole, MemorySnapshot, ProcessMemory,
+    };
+    let json = dsa_cli::memory_json(&MemorySnapshot {
+        guest: Some(GuestMemoryReport {
+            memory: GuestMemory {
+                mem_total_kb: 4 * 1024 * 1024,
+                mem_available_kb: 3 * 1024 * 1024,
+                cached_kb: 200 * 1024,
+                total_pss_kb: 500 * 1024,
+                top_processes: vec![ProcessMemory {
+                    pid: 42,
+                    name: "system_server".into(),
+                    pss_kb: 150 * 1024,
+                    swap_pss_kb: 0,
+                }],
+                ..GuestMemory::default()
+            },
+            age: Duration::from_secs(12),
+        }),
+        host: vec![HostProcessMemory {
+            role: HostRole::Vm,
+            pid: 10,
+            working_set_kb: 900_000,
+            private_kb: 880_000,
+        }],
+    });
+    assert_eq!(json["guest"]["mem_total_kb"], 4 * 1024 * 1024);
+    assert_eq!(json["guest"]["total_pss_kb"], 500 * 1024);
+    assert_eq!(json["guest"]["age_seconds"], 12);
+    assert_eq!(json["guest"]["top_processes"][0]["name"], "system_server");
+    assert_eq!(json["host"][0]["role"], "vm");
+    assert_eq!(json["host_total_kb"], 900_000);
+}
+
+#[test]
+fn fr17_dsa_gpus_prints_a_list() {
+    let output = Command::new(env!("CARGO_BIN_EXE_dsa"))
+        .args(["gpus", "--json"])
+        .output()
+        .unwrap();
+    let gpus = json_of(&output);
+    assert!(gpus["gpus"].is_array());
+}
+
+#[test]
+fn nfr1_dsa_memory_is_parsed() {
+    assert_eq!(parse(&args("memory")).unwrap().command, Cmd::Memory);
+    assert_eq!(
+        parse(&args("memory --pipe p")).unwrap().endpoint.as_deref(),
+        Some("p")
+    );
+}
+
+#[test]
+fn nfr1_dsa_memory_says_what_it_knows_of_the_host_and_android() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let output = dsa(&endpoint, "memory");
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.starts_with("Host: 0 MiB in all"), "{text}");
+    assert!(
+        text.contains("no process of this Android is running"),
+        "{text}"
+    );
+    assert!(text.contains("Android: no report yet"), "{text}");
 }

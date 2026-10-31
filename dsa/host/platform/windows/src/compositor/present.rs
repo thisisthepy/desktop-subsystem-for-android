@@ -1,15 +1,34 @@
 //! Direct3D 11 and DirectComposition: how a task's frames appear in its window.
 //!
-//! Each task window has a DirectComposition visual holding a flip-model swapchain. The
-//! renderer copies the task's frame into a shared texture on the GPU, and
-//! [`WindowPresenter::present`] copies that into the swapchain and presents it. The visual
-//! is scaled to fill the window, so while the user resizes it, the last frame is stretched
-//! over the new size until a frame of that size arrives. No frame passes through the CPU.
+//! The window manager makes a [`SharedTexture`] for each task window and the renderer copies
+//! the task's frame into it on the GPU. The texture is shared by an NT handle, which the
+//! window manager places in the app window host's process; the window host opens it
+//! ([`Gpu::open_shared`]) on the same GPU. Each task window there has a DirectComposition
+//! visual holding a flip-model swapchain, and [`WindowPresenter::present`] copies the frame
+//! into the swapchain and presents it. The visual is scaled to fill the window, so while the
+//! user resizes it, the last frame is stretched over the new size until a frame of that size
+//! arrives, which is then shown 1:1. No frame passes through the CPU.
+//!
+//! The texture has the size of the guest's buffers, the largest a frame of the task can be,
+//! and each frame fills its top-left region. The swapchain's buffers take the texture's
+//! size once, and each frame sets only the swapchain's source size
+//! (`IDXGISwapChain2::SetSourceSize`) to the region it fills, so a window resize never
+//! resizes the swapchain's buffers. DirectComposition stretches the source region over the
+//! whole of the buffers, so the visual scales from the buffers' size to the client area.
+//!
+//! Each presenter measures how long its window waited for a frame of its new size
+//! (`ResizeLatency`) and logs a summary every 20 resizes and when the window closes, and a
+//! warning when a window is left showing a stretched frame.
 
 use std::ffi::c_void;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use dsa_host_core::compositor::frame_buffers::{
+    content_region, swapchain_change, visual_scale, SwapchainChange,
+};
+use dsa_host_core::compositor::resize_latency::ResizeLatency;
+use dsa_host_core::compositor::resize_sync::{self, Step};
 use dsa_host_core::compositor::task_windows::fill_scale;
 use windows::core::{Interface, BOOL, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HMODULE, HWND, LUID};
@@ -17,11 +36,11 @@ use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN, D3D_DRIVER_TYPE_WARP,
 };
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Query, ID3D11Texture2D,
-    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-    D3D11_QUERY_DESC, D3D11_QUERY_EVENT, D3D11_RESOURCE_MISC_SHARED,
-    D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
-    D3D11_USAGE_DEFAULT,
+    D3D11CreateDevice, ID3D11Device, ID3D11Device1, ID3D11DeviceContext, ID3D11Query,
+    ID3D11Texture2D, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BOX,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
+    D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION,
+    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
 };
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual,
@@ -31,14 +50,14 @@ use windows::Win32::Graphics::Dxgi::Common::{
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory2, IDXGIAdapter, IDXGIDevice, IDXGIFactory2, IDXGIFactory4, IDXGIResource1,
-    IDXGISwapChain1, DXGI_CREATE_FACTORY_FLAGS, DXGI_PRESENT, DXGI_SCALING_STRETCH,
+    IDXGISwapChain2, DXGI_CREATE_FACTORY_FLAGS, DXGI_PRESENT, DXGI_SCALING_STRETCH,
     DXGI_SHARED_RESOURCE_READ, DXGI_SHARED_RESOURCE_WRITE, DXGI_SWAP_CHAIN_DESC1,
     DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
 };
 use windows_numerics::Matrix3x2;
 
-use super::frames::FrameTarget;
-use super::log::{note, CompositorLogger};
+use super::log::{note, trace_stage, trace_summary, CompositorLogger};
+use dsa_host_core::resize_trace::millis;
 
 /// How long a present waits for the GPU to finish reading the shared texture.
 const COPY_WAIT: Duration = Duration::from_millis(500);
@@ -47,12 +66,13 @@ fn failed(what: &str, error: windows::core::Error) -> String {
     format!("{what}: {error}")
 }
 
-/// The Direct3D 11 device and DirectComposition device every task window shares.
+/// The Direct3D 11 device, and the DirectComposition device every task window of a process
+/// shares when the process has windows.
 pub struct Gpu {
     device: ID3D11Device,
     context: Mutex<ID3D11DeviceContext>,
     factory: IDXGIFactory2,
-    dcomp: Mutex<IDCompositionDevice>,
+    dcomp: Option<Mutex<IDCompositionDevice>>,
     /// Whether the device is on the GPU the renderer named; frames cannot cross GPUs.
     pub on_renderer_gpu: bool,
 }
@@ -64,8 +84,9 @@ unsafe impl Sync for Gpu {}
 
 impl Gpu {
     /// Creates the devices on the GPU `luid` names (the renderer's), else on the default
-    /// GPU, else on the software rasteriser.
-    pub fn new(luid: Option<[u8; 8]>) -> Result<Arc<Gpu>, String> {
+    /// GPU, else on the software rasteriser. `composition` adds the DirectComposition device
+    /// that windows need; the window manager, which has none, leaves it out.
+    pub fn new(luid: Option<[u8; 8]>, composition: bool) -> Result<Arc<Gpu>, String> {
         // SAFETY: plain COM calls; every out pointer is a local.
         unsafe {
             let factory: IDXGIFactory2 = CreateDXGIFactory2(DXGI_CREATE_FACTORY_FLAGS(0))
@@ -108,16 +129,21 @@ impl Gpu {
                         let (Some(device), Some(context)) = (device, context) else {
                             continue;
                         };
-                        let dxgi: IDXGIDevice = device
-                            .cast()
-                            .map_err(|e| failed("reaching the DXGI device", e))?;
-                        let dcomp: IDCompositionDevice = DCompositionCreateDevice(&dxgi)
-                            .map_err(|e| failed("creating the DirectComposition device", e))?;
+                        let dcomp = if composition {
+                            let dxgi: IDXGIDevice = device
+                                .cast()
+                                .map_err(|e| failed("reaching the DXGI device", e))?;
+                            let dcomp: IDCompositionDevice = DCompositionCreateDevice(&dxgi)
+                                .map_err(|e| failed("creating the DirectComposition device", e))?;
+                            Some(Mutex::new(dcomp))
+                        } else {
+                            None
+                        };
                         return Ok(Arc::new(Gpu {
                             device,
                             context: Mutex::new(context),
                             factory,
-                            dcomp: Mutex::new(dcomp),
+                            dcomp,
                             on_renderer_gpu,
                         }));
                     }
@@ -168,18 +194,65 @@ impl Gpu {
                 )
                 .map_err(|e| failed("sharing a task window's texture", e))?;
             Ok(SharedTexture {
-                texture,
+                _texture: texture,
                 handle,
                 size: (width, height),
             })
         }
     }
+
+    /// Opens the texture another process shared by `handle`, which is a handle of this
+    /// process. The handle stays the caller's to close.
+    pub fn open_shared(&self, handle: isize, size: (u32, u32)) -> Result<OpenedTexture, String> {
+        // SAFETY: plain COM calls; the handle is only read.
+        unsafe {
+            let device: ID3D11Device1 = self
+                .device
+                .cast()
+                .map_err(|e| failed("reaching the Direct3D 11.1 device", e))?;
+            let texture: ID3D11Texture2D = device
+                .OpenSharedResource1(HANDLE(handle as *mut c_void))
+                .map_err(|e| failed("opening a task's shared frame texture", e))?;
+            let mut desc = D3D11_TEXTURE2D_DESC::default();
+            texture.GetDesc(&mut desc);
+            if (desc.Width, desc.Height) != size {
+                return Err(format!(
+                    "a task's frame texture is {}x{}, not the {}x{} it was announced as",
+                    desc.Width, desc.Height, size.0, size.1
+                ));
+            }
+            Ok(OpenedTexture { texture, size })
+        }
+    }
+
+    fn dcomp(&self) -> Result<&Mutex<IDCompositionDevice>, String> {
+        self.dcomp
+            .as_ref()
+            .ok_or_else(|| "these devices were made without DirectComposition".to_string())
+    }
 }
 
-/// A texture the renderer copies a task's frame into, opened by its shared NT handle. The
-/// handle closes when the last reference goes.
-pub struct SharedTexture {
+/// A texture another process shares, opened in this one: where a task's frames arrive.
+pub struct OpenedTexture {
     texture: ID3D11Texture2D,
+    size: (u32, u32),
+}
+
+// SAFETY: a Direct3D 11 resource may be used from any thread.
+unsafe impl Send for OpenedTexture {}
+unsafe impl Sync for OpenedTexture {}
+
+impl OpenedTexture {
+    pub fn size(&self) -> (u32, u32) {
+        self.size
+    }
+}
+
+/// A texture the renderer copies a task's frame into, and an app window host shows it from,
+/// each opening it by its shared NT handle. The handle closes when the last reference goes.
+pub struct SharedTexture {
+    /// Held so the texture is this process's for as long as its handle is handed out.
+    _texture: ID3D11Texture2D,
     handle: HANDLE,
     size: (u32, u32),
 }
@@ -187,6 +260,17 @@ pub struct SharedTexture {
 // SAFETY: a Direct3D 11 resource may be used from any thread; the handle is a kernel handle.
 unsafe impl Send for SharedTexture {}
 unsafe impl Sync for SharedTexture {}
+
+impl SharedTexture {
+    /// The NT handle the texture is shared by, in this process.
+    pub fn handle(&self) -> isize {
+        self.handle.0 as isize
+    }
+
+    pub fn size(&self) -> (u32, u32) {
+        self.size
+    }
+}
 
 impl Drop for SharedTexture {
     fn drop(&mut self) {
@@ -200,20 +284,31 @@ impl Drop for SharedTexture {
 struct State {
     target: IDCompositionTarget,
     visual: IDCompositionVisual,
-    swapchain: Option<IDXGISwapChain1>,
-    /// The size of the swapchain's buffers: the last frame's size.
+    swapchain: Option<IDXGISwapChain2>,
+    /// The size of the swapchain's buffers: the texture's, not a frame's.
+    buffers: Option<(u32, u32)>,
+    /// The size of the last frame shown: the swapchain's source size.
     frame: (u32, u32),
     /// The size of the window's client area.
     view: (u32, u32),
-    texture: Option<Arc<SharedTexture>>,
     query: Option<ID3D11Query>,
     closed: bool,
+    /// How long the window waits for a frame of its size after each resize.
+    latency: ResizeLatency,
 }
+
+/// How many resizes go between two summaries of their waits in the log.
+const SUMMARY_EVERY: usize = 20;
 
 /// Shows one task's frames in its window.
 pub struct WindowPresenter {
+    task_id: i32,
     gpu: Arc<Gpu>,
     state: Mutex<State>,
+    /// The size of the last frame shown, apart from the state so a window can wait for a
+    /// frame while the frame is being shown.
+    shown: Mutex<(u32, u32)>,
+    arrived: Condvar,
     logger: Option<Arc<CompositorLogger>>,
 }
 
@@ -223,15 +318,16 @@ unsafe impl Send for WindowPresenter {}
 unsafe impl Sync for WindowPresenter {}
 
 impl WindowPresenter {
-    /// Puts a visual on the window `hwnd`, whose client area is `view` pixels. Called on the
-    /// thread that owns the window.
+    /// Puts a visual on the window `hwnd` of task `task_id`, whose client area is `view`
+    /// pixels. Called on the thread that owns the window.
     pub fn new(
+        task_id: i32,
         gpu: Arc<Gpu>,
         hwnd: isize,
         view: (u32, u32),
         logger: Option<Arc<CompositorLogger>>,
     ) -> Result<Arc<Self>, String> {
-        let dcomp = gpu.dcomp.lock().unwrap_or_else(|e| e.into_inner());
+        let dcomp = gpu.dcomp()?.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: `hwnd` is a live window of this thread; the rest are plain COM calls.
         let (target, visual) = unsafe {
             let target = dcomp
@@ -250,39 +346,122 @@ impl WindowPresenter {
         };
         drop(dcomp);
         Ok(Arc::new(WindowPresenter {
+            task_id,
             gpu,
             state: Mutex::new(State {
                 target,
                 visual,
                 swapchain: None,
+                buffers: None,
                 frame: (0, 0),
                 view,
-                texture: None,
                 query: None,
                 closed: false,
+                latency: ResizeLatency::new(),
             }),
+            shown: Mutex::new((0, 0)),
+            arrived: Condvar::new(),
             logger,
         }))
     }
 
     /// The client area is now `view` pixels: the last frame is stretched over it.
     pub fn view_resized(&self, view: (u32, u32)) {
+        if self.take_view(view) {
+            self.fit_view();
+        }
+    }
+
+    /// Notes that the client area is now `view` pixels without touching what is shown, so
+    /// the last frame stays 1:1 at the top left until a frame arrives or [`Self::fit_view`]
+    /// stretches it. Returns whether the size changed.
+    pub fn take_view(&self, view: (u32, u32)) -> bool {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.closed || state.view == view {
-            return;
+            return false;
         }
         state.view = view;
-        if state.swapchain.is_some() {
+        state.latency.view_changed(view, Instant::now());
+        // Where a resize's wait starts: the client area took the size.
+        trace_stage(
+            self.logger.as_deref(),
+            self.task_id,
+            "app.view",
+            view,
+            &format!("frame={}x{}", state.frame.0, state.frame.1),
+        );
+        true
+    }
+
+    /// Fits what is shown to the client area and returns once the compositor has taken it,
+    /// so a live resize shows it with the new window size.
+    pub fn fit_view(&self) {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if !state.closed && state.swapchain.is_some() {
             self.scale(&state, true);
+        }
+    }
+
+    /// Whether a frame has been shown.
+    pub fn has_frame(&self) -> bool {
+        *self.shown.lock().unwrap_or_else(|e| e.into_inner()) != (0, 0)
+    }
+
+    /// Waits until a frame of `view` pixels has been shown and committed, for as long as
+    /// [`resize_sync::BUDGET`] allows from `since`. Returns whether it came in time. Called
+    /// on the window's thread, which holds no lock of the presenter while it waits, so the
+    /// connection thread shows frames meanwhile.
+    pub fn wait_for_frame(&self, view: (u32, u32), since: Instant) -> bool {
+        let mut shown = self.shown.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            match resize_sync::step(view, *shown, since.elapsed()) {
+                Step::Show => return true,
+                Step::GiveUp => return false,
+                Step::Wait(left) => {
+                    shown = self
+                        .arrived
+                        .wait_timeout(shown, left)
+                        .unwrap_or_else(|e| e.into_inner())
+                        .0;
+                }
+            }
+        }
+    }
+
+    /// Time has passed: a window left showing a stretched frame is logged, once per size.
+    pub fn tick(&self) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.closed {
+            return;
+        }
+        if let Some(((width, height), waited)) = state.latency.stuck(Instant::now()) {
+            note(
+                self.logger.as_deref(),
+                &format!(
+                    "a task window shows its last frame stretched: no {width}x{height} frame \
+                     came in the {} ms since it took that size",
+                    waited.as_millis()
+                ),
+            );
         }
     }
 
     /// The window is closing: nothing more is shown in it.
     pub fn close(&self) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if !state.closed {
+            if let Some(summary) = state.latency.summary() {
+                note(
+                    self.logger.as_deref(),
+                    &format!("a task window closed after {summary}"),
+                );
+            }
+        }
         state.closed = true;
-        state.texture = None;
-        let dcomp = self.gpu.dcomp.lock().unwrap_or_else(|e| e.into_inner());
+        let Ok(dcomp) = self.gpu.dcomp() else {
+            return;
+        };
+        let dcomp = dcomp.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: plain COM calls on objects this presenter owns.
         unsafe {
             let _ = state.target.SetRoot(None::<&IDCompositionVisual>);
@@ -290,11 +469,72 @@ impl WindowPresenter {
         }
     }
 
+    /// Shows the frame in `texture`, which fills its top-left `content` pixels (0 when the
+    /// frame fills the whole texture), and returns once it has been copied out, so the
+    /// texture may be written again.
+    pub fn present(&self, texture: &OpenedTexture, content: (u32, u32)) -> Result<(), String> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.closed {
+            return Ok(());
+        }
+        let region = content_region(content, texture.size);
+        let started = Instant::now();
+        let shown = self.present_locked(&mut state, &texture.texture, texture.size, region)?;
+        let presented = Instant::now();
+        if shown.new_size {
+            // Once per size: what showing a frame of a new size cost. `resize_buffers` is 0
+            // unless the texture itself changed size.
+            trace_stage(
+                self.logger.as_deref(),
+                self.task_id,
+                "app.present",
+                region,
+                &format!(
+                    "buffers={}x{} resize_buffers={} present={}",
+                    texture.size.0,
+                    texture.size.1,
+                    millis(shown.resize_buffers.unwrap_or_default()),
+                    millis(presented.saturating_duration_since(started))
+                ),
+            );
+        }
+        // After the frame is committed (present_locked scales a new size), so a window that
+        // waits for this frame shows it as soon as it wakes.
+        *self.shown.lock().unwrap_or_else(|e| e.into_inner()) = region;
+        self.arrived.notify_all();
+        let resized = shown.resize_buffers;
+        if let Some(waited) = state.latency.frame_shown(region, presented) {
+            // One line per resize that ended in a frame of the window's size, a few a
+            // second at most during a drag.
+            trace_summary(
+                self.logger.as_deref(),
+                self.task_id,
+                "app.summary",
+                region,
+                &format!(
+                    "waited={} resize_buffers={} present={}",
+                    millis(waited),
+                    resized.map(millis).unwrap_or_else(|| "0.0".into()),
+                    millis(presented.saturating_duration_since(started))
+                ),
+            );
+            if state.latency.count() % SUMMARY_EVERY == 0 {
+                if let Some(summary) = state.latency.summary() {
+                    note(self.logger.as_deref(), &format!("task window: {summary}"));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Scales the visual so the frame fills the client area, and commits it. `wait` waits
     /// until the compositor has taken the change, so a live resize shows it with the new
     /// window size.
     fn scale(&self, state: &State, wait: bool) {
-        let (x, y) = fill_scale(state.frame, state.view);
+        let (x, y) = match state.buffers {
+            Some(buffers) => visual_scale(buffers, state.view),
+            None => fill_scale(state.frame, state.view),
+        };
         let matrix = Matrix3x2 {
             M11: x,
             M12: 0.0,
@@ -303,7 +543,10 @@ impl WindowPresenter {
             M31: 0.0,
             M32: 0.0,
         };
-        let dcomp = self.gpu.dcomp.lock().unwrap_or_else(|e| e.into_inner());
+        let Ok(dcomp) = self.gpu.dcomp() else {
+            return;
+        };
+        let dcomp = dcomp.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: plain COM calls on objects this presenter owns.
         unsafe {
             let _ = state.visual.SetTransform2(&matrix);
@@ -314,16 +557,25 @@ impl WindowPresenter {
         }
     }
 
-    fn present_locked(&self, state: &mut State, texture: &SharedTexture) -> Result<(), String> {
-        let (width, height) = texture.size;
+    fn present_locked(
+        &self,
+        state: &mut State,
+        texture: &ID3D11Texture2D,
+        texture_size: (u32, u32),
+        (width, height): (u32, u32),
+    ) -> Result<Shown, String> {
         // SAFETY: plain COM calls on objects this presenter owns, and the immediate context
         // under its lock.
         unsafe {
-            let resized = match &state.swapchain {
-                None => {
+            let started = Instant::now();
+            // The buffers follow the texture, which keeps its size while the window is
+            // resized; only the source size follows the frame.
+            let change = swapchain_change(state.buffers, texture_size);
+            match change {
+                SwapchainChange::Create((buffer_width, buffer_height)) => {
                     let desc = DXGI_SWAP_CHAIN_DESC1 {
-                        Width: width,
-                        Height: height,
+                        Width: buffer_width,
+                        Height: buffer_height,
                         Format: DXGI_FORMAT_R8G8B8A8_UNORM,
                         Stereo: BOOL(0),
                         SampleDesc: DXGI_SAMPLE_DESC {
@@ -332,6 +584,8 @@ impl WindowPresenter {
                         },
                         BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
                         BufferCount: 2,
+                        // The only scaling a composition swapchain takes; the visual's
+                        // transform does the scaling.
                         Scaling: DXGI_SCALING_STRETCH,
                         SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
                         AlphaMode: DXGI_ALPHA_MODE_IGNORE,
@@ -342,40 +596,63 @@ impl WindowPresenter {
                         .factory
                         .CreateSwapChainForComposition(&self.gpu.device, &desc, None)
                         .map_err(|e| failed("creating a task window's swapchain", e))?;
+                    let swapchain: IDXGISwapChain2 = swapchain
+                        .cast()
+                        .map_err(|e| failed("reaching a task window's IDXGISwapChain2", e))?;
                     {
-                        let _dcomp = self.gpu.dcomp.lock().unwrap_or_else(|e| e.into_inner());
+                        let _dcomp = self.gpu.dcomp()?.lock().unwrap_or_else(|e| e.into_inner());
                         state
                             .visual
                             .SetContent(&swapchain)
                             .map_err(|e| failed("showing a task window's swapchain", e))?;
                     }
                     state.swapchain = Some(swapchain);
-                    true
                 }
-                Some(swapchain) if state.frame != (width, height) => {
-                    swapchain
-                        .ResizeBuffers(
-                            0,
-                            width,
-                            height,
-                            DXGI_FORMAT_UNKNOWN,
-                            DXGI_SWAP_CHAIN_FLAG(0),
-                        )
-                        .map_err(|e| failed("resizing a task window's swapchain", e))?;
-                    true
+                SwapchainChange::Resize((buffer_width, buffer_height)) => {
+                    if let Some(swapchain) = &state.swapchain {
+                        swapchain
+                            .ResizeBuffers(
+                                0,
+                                buffer_width,
+                                buffer_height,
+                                DXGI_FORMAT_UNKNOWN,
+                                DXGI_SWAP_CHAIN_FLAG(0),
+                            )
+                            .map_err(|e| failed("resizing a task window's swapchain", e))?;
+                    }
                 }
-                Some(_) => false,
-            };
-            state.frame = (width, height);
+                SwapchainChange::Keep => {}
+            }
+            let remade = change != SwapchainChange::Keep;
+            state.buffers = Some(texture_size);
+            // How long making or resizing the swapchain took, when it happened.
+            let resize_buffers = remade.then(|| started.elapsed());
+            let new_size = remade || state.frame != (width, height);
             let Some(swapchain) = &state.swapchain else {
                 unreachable!("the swapchain was made above");
             };
+            if new_size {
+                // Made or resized buffers show all of themselves until told otherwise.
+                swapchain
+                    .SetSourceSize(width, height)
+                    .map_err(|e| failed("setting the size a task window shows", e))?;
+            }
+            state.frame = (width, height);
             let back: ID3D11Texture2D = swapchain
                 .GetBuffer(0)
                 .map_err(|e| failed("reaching a task window's back buffer", e))?;
             let context = self.gpu.context.lock().unwrap_or_else(|e| e.into_inner());
-            context.CopyResource(&back, &texture.texture);
+            let region = D3D11_BOX {
+                left: 0,
+                top: 0,
+                front: 0,
+                right: width,
+                bottom: height,
+                back: 1,
+            };
+            context.CopySubresourceRegion(&back, 0, 0, 0, 0, texture, 0, Some(&region as *const _));
             drop(back);
+            // Sync interval 0: the present is queued without waiting for a vertical blank.
             swapchain
                 .Present(0, DXGI_PRESENT(0))
                 .ok()
@@ -410,52 +687,21 @@ impl WindowPresenter {
                 }
             }
             drop(context);
-            if resized {
+            if new_size {
                 self.scale(state, false);
             }
+            Ok(Shown {
+                new_size,
+                resize_buffers,
+            })
         }
-        Ok(())
     }
 }
 
-impl FrameTarget for WindowPresenter {
-    type Texture = SharedTexture;
-
-    fn texture(&self, width: u32, height: u32) -> Option<Arc<SharedTexture>> {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if state.closed {
-            return None;
-        }
-        if let Some(texture) = &state.texture {
-            if texture.size == (width, height) {
-                return Some(Arc::clone(texture));
-            }
-        }
-        match self.gpu.shared_texture(width, height) {
-            Ok(texture) => {
-                let texture = Arc::new(texture);
-                state.texture = Some(Arc::clone(&texture));
-                Some(texture)
-            }
-            Err(why) => {
-                note(self.logger.as_deref(), &why);
-                state.texture = None;
-                None
-            }
-        }
-    }
-
-    fn handle(texture: &SharedTexture) -> isize {
-        texture.handle.0 as isize
-    }
-
-    fn present(&self, texture: &SharedTexture) {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if state.closed {
-            return;
-        }
-        if let Err(why) = self.present_locked(&mut state, texture) {
-            note(self.logger.as_deref(), &why);
-        }
-    }
+/// What showing one frame changed.
+struct Shown {
+    /// The frame's size differs from the last one's, or the swapchain was made or resized.
+    new_size: bool,
+    /// How long making or resizing the swapchain took, when it was.
+    resize_buffers: Option<Duration>,
 }

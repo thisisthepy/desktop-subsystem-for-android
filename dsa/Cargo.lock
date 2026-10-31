@@ -170,11 +170,17 @@ dependencies = [
 name = "dsa-cli"
 version = "0.1.0"
 dependencies = [
+ "dsa-exe-resources",
  "dsa-host-core",
  "dsa-host-unix",
  "dsa-host-windows",
  "dsa-transport",
+ "serde_json",
 ]
+
+[[package]]
+name = "dsa-exe-resources"
+version = "0.1.0"
 
 [[package]]
 name = "dsa-guest-channeld"
@@ -221,6 +227,7 @@ dependencies = [
 name = "dsa-host-windows"
 version = "0.1.0"
 dependencies = [
+ "dsa-exe-resources",
  "dsa-host-core",
  "dsa-protocol",
  "dsa-transport",

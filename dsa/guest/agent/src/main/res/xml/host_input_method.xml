@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The guest's input method. isDefault makes the input method manager enable and select it on
+  its own when nothing is selected: it is the image's only input method. It offers no way to
+  switch to another, since there is none.
+-->
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:isDefault="@bool/host_input_method_is_default"
+    android:supportsSwitchingToNextInputMethod="false" />

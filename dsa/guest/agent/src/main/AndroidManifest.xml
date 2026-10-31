@@ -1,27 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   The guest agent. coreApp makes it start in the core-only boot stages too; persistent makes
-  the activity manager start it at boot and restart it if it dies. It has no activities:
-  the host is the shell, and the agent only reports tasks and acts on the host's requests.
+  the activity manager start it at boot and restart it if it dies. The host is the shell: the
+  agent reports tasks and acts on the host's requests, and its one activity is the guest's
+  invisible home (platform/HomeActivity.kt), which Android requires and nobody sees. Its one
+  service is the guest's input method (platform/HostInputMethod.kt), which shows nothing and
+  types what the host's input method composes.
   Every permission here is also in privapp-permissions-dsa-agent.xml.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     coreApp="true">
 
-    <!-- Listening to task changes. -->
+    <!-- Listening to task changes; moving and resizing tasks and setting their density. -->
     <uses-permission android:name="android.permission.MANAGE_ACTIVITY_TASKS" />
     <!-- Seeing every app's tasks, not only its own. -->
     <uses-permission android:name="android.permission.REAL_GET_TASKS" />
     <!-- Ending a task the host closed. -->
     <uses-permission android:name="android.permission.REMOVE_TASKS" />
-    <!-- Starting the app the host launched while the agent has no window of its own. -->
+    <!-- Starting the app the host launched while no window of the agent is in front. -->
     <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
     <!-- Turning freeform windows on. -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
     <!-- Making the display a freeform display. -->
     <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" />
+    <!-- Injecting the pointer input of each task's host window into the task. -->
+    <uses-permission android:name="android.permission.INJECT_EVENTS" />
     <!-- Reading the label and launcher activity of any app. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!--
+      Turning the screen off and on, forcing Doze while no task window is shown on the host,
+      and setting the battery and battery saver to the host's.
+    -->
+    <uses-permission android:name="android.permission.DEVICE_POWER" />
 
     <application
         android:name=".platform.AgentApplication"
@@ -29,5 +39,46 @@
         android:defaultToDeviceProtectedStorage="true"
         android:directBootAware="true"
         android:label="@string/app_name"
-        android:persistent="true" />
+        android:persistent="true">
+
+        <!--
+          The guest's home: no content, transparent, never in recents, and not in the launcher
+          category, so it is in no app list. It stays in the agent's process (no
+          android:process), which is always running, so it never starts cold. It keeps every
+          configuration change instead of being recreated for it, and one instance is enough.
+        -->
+        <activity
+            android:name=".platform.HomeActivity"
+            android:configChanges="density|fontScale|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|navigation|orientation|screenLayout|screenSize|smallestScreenSize|touchscreen|uiMode"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:resumeWhilePausing="true"
+            android:stateNotNeeded="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          The guest's only input method. It is no keyboard: it has no view and is never shown,
+          and it puts the text the host's input method composes and commits into the focused
+          editor. BIND_INPUT_METHOD keeps every caller but the input method manager out.
+        -->
+        <service
+            android:name=".platform.HostInputMethod"
+            android:exported="true"
+            android:label="@string/input_method_name"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/host_input_method" />
+        </service>
+    </application>
 </manifest>

@@ -67,6 +67,7 @@ fn host() -> (Session, VmIdSlot, Bindings) {
     let config = SessionConfig {
         connect_timeout: WAIT,
         stop_timeout: WAIT,
+        ..SessionConfig::default()
     };
     let session = Session::new(
         launcher,

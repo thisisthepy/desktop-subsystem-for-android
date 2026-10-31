@@ -78,6 +78,26 @@ class AndroidKernelConfigTests(unittest.TestCase):
         config = CONFIG.read_text()
         self.assertIn("CONFIG_DRM_VKMS=y", config)
 
+    def test_nfr2_free_guest_pages_are_reported_to_hyper_v(self):
+        # The host gets the guest's freed memory back only through the balloon driver's free
+        # page reporting, in the blocks compaction makes.
+        config = CONFIG.read_text()
+        for option in ["CONFIG_HYPERV_BALLOON=y", "CONFIG_PAGE_REPORTING=y", "CONFIG_COMPACTION=y"]:
+            self.assertIn(option, config)
+
+    def test_nfr1_the_guest_can_swap_to_zram(self):
+        config = CONFIG.read_text()
+        for option in [
+            "CONFIG_SWAP=y",
+            "CONFIG_ZSMALLOC=y",
+            "CONFIG_ZRAM=y",
+            "CONFIG_ZRAM_BACKEND_LZ4=y",
+            "CONFIG_ZRAM_DEF_COMP_LZ4=y",
+            "CONFIG_PSI=y",
+            "CONFIG_MEMCG=y",
+        ]:
+            self.assertIn(option, config)
+
     def test_fr1_vmbus_root_device_is_platform_device_patch(self):
         patch = (PATCHES / "vmbus-platform-device.patch").read_text()
         self.assertIn("drivers/hv/vmbus_drv.c", patch)

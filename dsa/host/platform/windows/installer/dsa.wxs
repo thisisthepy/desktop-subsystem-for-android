@@ -3,18 +3,21 @@
   The DSA package (MSI). build.ps1 builds it; see README.md.
 
   It installs dsa-hostd as the DsaHost service (SYSTEM, started automatically), the dsa
-  command on the system PATH, the service's configuration, the guest kernel and, when the
+  command on the system PATH, the DSA Window Manager (dsa-wm, started at each sign-in) and
+  the app window host it makes each app's window program from, the service's configuration, the guest kernel and, when the
   build has one, the first Android image. Uninstalling removes all of that, the Android
   images the service downloaded since, and the setup files it downloaded to update DSA.
   Each user's Android disk is in their own profile (%LOCALAPPDATA%\DSA), so it is not
-  part of the package and stays.
+  part of the package and stays. The settings app (DSA Settings) goes in the program folder's
+  settings folder, with a Start menu shortcut.
 
   INSTALLFOLDER (the program) and DATAFOLDER (configuration, logs and images) can be set
   on the command line or from setup.exe's Options. The configuration names them as
   {program} and {data}, which the service fills in. The package records both, and a later
   version installed over it (as the service does when it updates DSA) keeps them.
 
-  Build variables (-d): Version, SourceDir (the built binaries and dsa-hostd.json), and,
+  Build variables (-d): Version, SourceDir (the built binaries and dsa-hostd.json),
+  SettingsDir (the published settings app), and,
   when an image is bundled, ImageDir and ImageVersion, plus ImageManifest when the image
   is one make-image.py made (image.json, initrd.img, disk.vhdx) and ImageKernel when it
   carries its own bzImage.
@@ -65,6 +68,7 @@
             <Directory Id="INSTALLFOLDER" Name="DSA">
                 <Directory Id="VMFOLDER" Name="vm" />
                 <Directory Id="LICENSESFOLDER" Name="licenses" />
+                <Directory Id="SETTINGSFOLDER" Name="settings" />
             </Directory>
         </StandardDirectory>
         <StandardDirectory Id="CommonAppDataFolder">
@@ -80,18 +84,48 @@
             </Directory>
         </StandardDirectory>
 
+        <util:CloseApplication Id="CloseWindowManager"
+                               Target="dsa-wm.exe"
+                               CloseMessage="yes"
+                               PromptToContinue="no"
+                               RebootPrompt="no" />
+        <!-- Earlier releases called the window manager dsa-compositor.exe; an upgrade
+             from one closes it too, so its files can be replaced. -->
         <util:CloseApplication Id="CloseCompositor"
                                Target="dsa-compositor.exe"
                                CloseMessage="yes"
                                PromptToContinue="no"
                                RebootPrompt="no" />
 
+        <util:CloseApplication Id="CloseSettingsApp"
+                               Target="DsaSettings.exe"
+                               CloseMessage="yes"
+                               PromptToContinue="no"
+                               RebootPrompt="no" />
+
+        <!-- The settings app and the runtimes it carries. Its shortcut is named so that
+             searching the Start menu for DSA or for settings finds it. -->
+        <ComponentGroup Id="SettingsApp" Directory="SETTINGSFOLDER">
+            <Files Include="$(SettingsDir)\**">
+                <Exclude Files="$(SettingsDir)\DsaSettings.exe" />
+            </Files>
+            <Component Id="SettingsExe" Guid="*">
+                <File Id="SettingsExe" Source="$(SettingsDir)\DsaSettings.exe" KeyPath="yes">
+                    <Shortcut Id="SettingsShortcut"
+                              Directory="ProgramMenuFolder"
+                              Name="DSA Settings"
+                              Description="Settings and state of Desktop Subsystem for Android"
+                              WorkingDirectory="SETTINGSFOLDER" />
+                </File>
+            </Component>
+        </ComponentGroup>
+
         <ComponentGroup Id="Service" Directory="INSTALLFOLDER">
             <Component Id="HostdExe" Guid="*">
                 <File Id="HostdExe" Source="$(SourceDir)\dsa-hostd.exe" KeyPath="yes" />
                 <ServiceInstall Id="DsaHost"
                                 Name="DsaHost"
-                                DisplayName="Desktop Subsystem for Android"
+                                DisplayName="Desktop Subsystem for Android Service"
                                 Description="Runs each user's Android in its own virtual machine and answers the dsa command and the desktop apps."
                                 Type="ownProcess"
                                 Start="auto"
@@ -112,18 +146,23 @@
                 <File Id="DsaExe" Source="$(SourceDir)\dsa.exe" KeyPath="yes" />
                 <Environment Id="Path" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="yes" Permanent="no" />
             </Component>
-            <Component Id="CompositorExe" Guid="*">
-                <File Id="CompositorExe" Source="$(SourceDir)\dsa-compositor.exe" KeyPath="yes" />
+            <Component Id="WindowManagerExe" Guid="*">
+                <File Id="WindowManagerExe" Source="$(SourceDir)\dsa-wm.exe" KeyPath="yes" />
+            </Component>
+            <!-- The app window host. The window manager copies it for each Android app into
+                 the user's profile (%LOCALAPPDATA%\DSA\apps\<package>\<Label>.exe), named and drawn as the app. -->
+            <Component Id="AppWindowExe" Guid="*">
+                <File Id="AppWindowExe" Source="$(SourceDir)\dsa-app-window.exe" KeyPath="yes" />
             </Component>
             <Component Id="GfxstreamBackendDll" Guid="*">
                 <File Id="GfxstreamBackendDll" Source="$(SourceDir)\gfxstream_backend.dll" KeyPath="yes" />
             </Component>
-            <Component Id="CompositorRun" Guid="9f3a61ec-d762-4f18-bbbe-5c0245a49808">
+            <Component Id="WindowManagerRun" Guid="c1904da8-fec3-46a3-9d9f-676d1873a52e">
                 <RegistryValue Root="HKLM"
                                Key="SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
-                               Name="DsaCompositor"
+                               Name="DsaWindowManager"
                                Type="string"
-                               Value="&quot;[INSTALLFOLDER]dsa-compositor.exe&quot;"
+                               Value="&quot;[INSTALLFOLDER]dsa-wm.exe&quot;"
                                KeyPath="yes" />
             </Component>
             <Component Id="GuestCommunicationCommandService" Guid="6a0a012a-3eb5-44ea-86ad-953e5e01b341">
@@ -195,6 +234,9 @@
             <Component Id="LicSetupUi" Guid="*">
                 <File Id="LicSetupUi" Source="$(SourceDir)\licenses\setup-ui.txt" KeyPath="yes" />
             </Component>
+            <Component Id="LicSettingsApp" Guid="*">
+                <File Id="LicSettingsApp" Source="$(SourceDir)\licenses\settings-app.txt" KeyPath="yes" />
+            </Component>
             <Component Id="LicGfxstream" Guid="*">
                 <File Id="LicGfxstream" Source="$(SourceDir)\licenses\gfxstream.txt" KeyPath="yes" />
             </Component>
@@ -265,13 +307,24 @@
                       Execute="deferred"
                       Impersonate="no"
                       Return="ignore" />
+        <!-- The window manager made a Start menu shortcut for each Android app in each user's
+             profile; they would open nothing once DSA is gone. Only the ones it recorded
+             making are removed. -->
+        <CustomAction Id="RemoveStartMenu"
+                      FileRef="HostdExe"
+                      ExeCommand="remove-start-menu"
+                      Execute="deferred"
+                      Impersonate="no"
+                      Return="ignore" />
         <InstallExecuteSequence>
+            <Custom Action="RemoveStartMenu" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
             <Custom Action="RemoveImages" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
             <Custom Action="RemoveUpdates" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
         </InstallExecuteSequence>
 
         <Feature Id="Main" Title="Desktop Subsystem for Android" Level="1">
             <ComponentGroupRef Id="Service" />
+            <ComponentGroupRef Id="SettingsApp" />
             <ComponentGroupRef Id="Licenses" />
             <ComponentGroupRef Id="Data" />
             <ComponentGroupRef Id="Kernel" />

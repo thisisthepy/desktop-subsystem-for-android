@@ -73,6 +73,14 @@ $ConfigureArgs = @(
 $HasNinja = [bool](Get-Command ninja.exe -ErrorAction SilentlyContinue)
 $HasClangCl = [bool](Get-Command clang-cl.exe -ErrorAction SilentlyContinue)
 
+# Optimised as before, plus a PDB beside the DLL: a crash in the renderer, or in a GPU driver
+# it calls, can then be read with the debugger. The PDB is kept apart; nothing ships it.
+$ConfigureArgs += @(
+    "-DCMAKE_POLICY_DEFAULT_CMP0141=NEW",
+    "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase",
+    "-DCMAKE_SHARED_LINKER_FLAGS_RELEASE=/DEBUG /OPT:REF /OPT:ICF"
+)
+
 if ($Generator -eq "Ninja" -and $HasNinja) {
     $ConfigureArgs += @("-G", "Ninja", "-DCMAKE_BUILD_TYPE=$Config")
     if ($HasClangCl) {
@@ -109,6 +117,17 @@ if (-not (Test-Path $DllOutput)) {
     } else {
         throw "Build finished but gfxstream_backend.dll was not found."
     }
+}
+
+$PdbOutput = Join-Path $DistDir "symbols/gfxstream_backend.pdb"
+$Pdb = Get-ChildItem -Path $OutDir -Recurse -Filter "gfxstream_backend.pdb" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($Pdb) {
+    New-Item -ItemType Directory -Path (Join-Path $DistDir "symbols") -Force | Out-Null
+    Copy-Item $Pdb.FullName -Destination $PdbOutput -Force
+    Write-Host "Kept its symbols: $PdbOutput"
+} else {
+    Write-Warning "no gfxstream_backend.pdb was produced; a renderer crash will show no function names"
 }
 
 Write-Host "Built host graphics renderer: $DllOutput"

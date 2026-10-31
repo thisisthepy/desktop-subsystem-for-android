@@ -7,7 +7,9 @@
 //
 // A connection carries requests and their responses, until the client sends WatchTasks.
 // From the answer to that request on, the connection carries only TaskEvent frames from
-// the service; a client that sends anything more on it is disconnected.
+// the service; a client that sends anything more on it is disconnected. In the same way,
+// from the answer to StreamInput on, the connection carries only PointerEvent, KeyEvent,
+// ImeComposition and ImeCommit frames from the client, and the service answers none of them.
 //
 // The caller's identity is the user the operating system reports for the connection.
 // Nothing in these messages names a user, so a client cannot claim to be someone else, and
@@ -108,6 +110,10 @@ message ListTasks {}
 // lasts across restarts of the Android: when it stops, its tasks are removed.
 message WatchTasks {}
 
+// Asks for the apps installed in the caller's Android that a launcher lists, as the host's
+// start menu shows them.
+message ListApps {}
+
 // The user closed a task's window: asks the caller's Android to end the task.
 message CloseTask {
   int32 task_id = 1;
@@ -117,6 +123,144 @@ message CloseTask {
 // window.
 message LaunchApp {
   string package_name = 1;
+}
+
+// The user resized a task's window: asks the caller's Android to give the task the
+// window's client size, in Android display pixels. `live` is true while the user is still
+// dragging the window's edge: the task takes the size without being reconfigured, and the
+// request with `live` false at the end of the drag reconfigures it once.
+message ResizeTask {
+  int32 task_id = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  bool live = 4;
+}
+
+// A task's window moved to a monitor of another scale: asks the caller's Android to draw
+// the task at `density_dpi` (160 at a scale of 100%).
+message SetTaskDensity {
+  int32 task_id = 1;
+  uint32 density_dpi = 2;
+}
+
+// Turns the connection into a stream of input for the caller's Android: after the answer
+// (Done), the client sends only PointerEvent, KeyEvent, ImeComposition and ImeCommit frames, which the service passes on
+// as they come, without answering them. Input is never waited on, so a pointer that moves
+// fast is not held back by the answers.
+message StreamInput {}
+
+// Says whether any task window of the caller's Android is shown: open and not minimized. The
+// window manager sends it on each change. Once no window has been shown for a while, the
+// caller's Android turns its screen off and goes into Doze; it wakes as soon as a window is
+// shown again. The service keeps the latest value while the Android is not running, for its
+// next start.
+message SetWindowsShown {
+  bool shown = 1;
+}
+
+// Freezes the caller's Android: its processes stop until a task window is shown again. Its
+// notifications, alarms and widgets stop with them. Returns at once with the status.
+message FreezeSession {}
+
+// What a pointer did.
+enum PointerAction {
+  POINTER_ACTION_UNSPECIFIED = 0;
+  // The pointer touched down, or a mouse's first button went down.
+  POINTER_ACTION_DOWN = 1;
+  // The pointer moved while down, or a mouse's buttons changed while one stays down.
+  POINTER_ACTION_MOVE = 2;
+  // The pointer lifted, or a mouse's last button went up.
+  POINTER_ACTION_UP = 3;
+  // The gesture ended without completing, as when the window lost the pointer.
+  POINTER_ACTION_CANCEL = 4;
+  // The wheel turned; `scroll_x` and `scroll_y` say how far.
+  POINTER_ACTION_SCROLL = 5;
+  // The pointer moved over the window without touching it.
+  POINTER_ACTION_HOVER_MOVE = 6;
+  // The pointer left the window, or a pen went out of range.
+  POINTER_ACTION_HOVER_EXIT = 7;
+}
+
+// What kind of pointer it is.
+enum PointerTool {
+  POINTER_TOOL_UNSPECIFIED = 0;
+  POINTER_TOOL_MOUSE = 1;
+  POINTER_TOOL_TOUCH = 2;
+  POINTER_TOOL_PEN = 3;
+  // A pen's eraser end.
+  POINTER_TOOL_ERASER = 4;
+}
+
+// Pointer input in a task's window, sent on a connection that streams input.
+message PointerEvent {
+  int32 task_id = 1;
+  PointerAction action = 2;
+  PointerTool tool = 3;
+  // Tells the fingers of one touch apart. Stays the same from DOWN to UP.
+  uint32 pointer_id = 4;
+  // The position relative to the task's top left corner, in Android display pixels.
+  float x = 5;
+  float y = 6;
+  // The buttons held down after this event, as a set of bits: 1 primary, 2 secondary,
+  // 4 tertiary (middle), 8 back, 16 forward, 32 a pen's first barrel button, 64 its second.
+  uint32 buttons = 7;
+  // From 0 to 1.
+  float pressure = 8;
+  // For SCROLL: how far the wheel turned, in notches. Positive `scroll_y` scrolls up,
+  // positive `scroll_x` scrolls right.
+  float scroll_x = 9;
+  float scroll_y = 10;
+}
+
+// What a key did.
+enum KeyAction {
+  KEY_ACTION_UNSPECIFIED = 0;
+  // The key went down, or, with a `repeat_count` above 0, is repeated while it is held.
+  KEY_ACTION_DOWN = 1;
+  // The key came up.
+  KEY_ACTION_UP = 2;
+}
+
+// A key pressed or released in a task's window, sent on a connection that streams input.
+message KeyEvent {
+  int32 task_id = 1;
+  KeyAction action = 2;
+  // Android's key code (android.view.KeyEvent.KEYCODE_*).
+  uint32 key_code = 3;
+  // How many times the key has been repeated since it went down: 0 for the press itself.
+  uint32 repeat_count = 4;
+  // The modifiers and locks in effect after this event, as Android's meta state bits
+  // (android.view.KeyEvent.META_*).
+  uint32 meta_state = 5;
+  // When the window saw the event, in milliseconds of the host's clock, which wraps around.
+  uint32 event_time_ms = 6;
+  // Set on an UP the user did not make: the window lost the keyboard focus while the key
+  // was held.
+  bool canceled = 7;
+}
+
+// The text the host's input method is composing in a task's window, sent on a connection that
+// streams input. It replaces the whole composition; an empty `text` removes it.
+message ImeComposition {
+  int32 task_id = 1;
+  string text = 2;
+  // Where the cursor is in `text`, in UTF-16 code units from its start.
+  uint32 cursor = 3;
+}
+
+// Text typed in a task's window, sent on a connection that streams input: what the input
+// method committed, or a character a key typed without one. It takes the place of the
+// composition, which ends.
+message ImeCommit {
+  int32 task_id = 1;
+  string text = 2;
+}
+
+// Where the cursor of the editor focused in a task is, in the task's own pixels from its top
+// left corner, which are its window's client pixels.
+message ImeCursor {
+  int32 task_id = 1;
+  Rect cursor = 2;
 }
 
 // A rectangle in Android display pixels: left and top inclusive, right and bottom
@@ -141,6 +285,12 @@ message Task {
   string label = 4;
   // Whether the task has input focus in Android.
   bool focused = 5;
+  // The density the task's app draws at, in dots per inch (160 at a scale of 100%). 0 when
+  // unknown.
+  uint32 density_dpi = 6;
+  // The largest size Android can give the task, in its display pixels. 0 when unknown.
+  uint32 max_width = 7;
+  uint32 max_height = 8;
 }
 
 // The task ended.
@@ -154,12 +304,37 @@ message TaskFrames {
   uint32 display_id = 2;
 }
 
+// The name and launcher icon of an app the caller's Android has a task of. Sent before the
+// app's first task, and again before the next one once the app has had no task.
+message AppInfo {
+  string package_name = 1;
+  // The app's own name, as a launcher shows it.
+  string label = 2;
+  // The app's launcher icon, as a square PNG image of at most 256 pixels on a side. Empty
+  // when Android gave none.
+  bytes icon_png = 3;
+}
+
+// The apps installed in the caller's Android that a launcher lists. The list is kept while
+// the Android is stopped, because its apps stay installed.
+message InstalledApps {
+  // False until the caller's Android has said which apps it has since the service started.
+  // The list is then empty and says nothing about which apps are installed.
+  bool known = 1;
+  // In package order.
+  repeated AppInfo apps = 2;
+}
+
 // A change to the tasks of the caller's Android, sent after the answer to WatchTasks.
 message TaskEvent {
   oneof body {
     Task updated = 1;
     TaskRemoved removed = 2;
     TaskFrames frames = 3;
+    AppInfo app = 4;
+    ImeCursor ime_cursor = 5;
+    // The apps installed in the caller's Android changed: the whole list, as it is now.
+    InstalledApps installed = 6;
   }
 }
 
@@ -170,6 +345,68 @@ message Tasks {
   // The display of each task whose frames have been placed, in task ID order. A task may
   // appear here before it appears in `tasks`.
   repeated TaskFrames frames = 2;
+  // The name and icon of each app that has a task, in package order.
+  repeated AppInfo apps = 3;
+  // The apps installed in the caller's Android. Unset until it has said which apps it has.
+  InstalledApps installed = 4;
+}
+
+// Asks how much memory the caller's Android takes: inside the guest, as it last reported,
+// and on the host, the processes that run it.
+message GetMemory {}
+
+// One Android process's share of the guest's memory.
+message GuestProcessMemory {
+  int32 pid = 1;
+  string name = 2;
+  // Its proportional set size in KiB: its private pages plus its share of shared pages.
+  uint64 pss_kb = 3;
+  // How much of it is swapped out to compressed memory, proportionally, in KiB.
+  uint64 swap_pss_kb = 4;
+}
+
+// How Android uses the guest's memory, as it last reported it. Sizes in KiB; 0 when Android
+// could not read the value.
+message GuestMemory {
+  uint64 mem_total_kb = 1;
+  uint64 mem_free_kb = 2;
+  uint64 mem_available_kb = 3;
+  uint64 buffers_kb = 4;
+  uint64 cached_kb = 5;
+  uint64 anon_pages_kb = 6;
+  uint64 shmem_kb = 7;
+  uint64 slab_reclaimable_kb = 8;
+  uint64 swap_total_kb = 9;
+  uint64 swap_free_kb = 10;
+  uint64 zram_original_kb = 11;
+  uint64 zram_used_kb = 12;
+  // The proportional set size of the apps and the system server together; native daemons
+  // are not counted.
+  uint64 total_pss_kb = 13;
+  // Largest first, at most 10.
+  repeated GuestProcessMemory top_processes = 14;
+  // How long ago Android sent this report, in seconds.
+  uint64 age_seconds = 15;
+}
+
+// One host process that runs the caller's Android: its VM's memory process, the window
+// manager, an app window.
+message HostProcessMemory {
+  // What it is: "vm", "window manager" or "app window".
+  string role = 1;
+  uint32 pid = 2;
+  // The memory of it resident in RAM now, in KiB.
+  uint64 working_set_kb = 3;
+  // The memory committed to it alone, in KiB.
+  uint64 private_kb = 4;
+}
+
+// The answer to GetMemory.
+message Memory {
+  // Absent until Android has sent its first report since it started.
+  GuestMemory guest = 1;
+  // In the order: the VM, the window manager, the app windows.
+  repeated HostProcessMemory host = 2;
 }
 
 // The answer to a request that has nothing to report but that it was carried out.
@@ -201,6 +438,43 @@ message VmId {
   string vm_id = 1;
 }
 
+// Asks for the settings of the caller's DSA.
+message GetSettings {}
+
+// Changes the settings of the caller's DSA: each value of `settings` that a client may change
+// replaces the current one. The service answers with the settings as they are now. Changing
+// an update setting, which applies to every user, needs a caller acting as an administrator
+// (on Windows, an elevated process); otherwise nothing changes and the answer is
+// ERROR_CODE_NOT_ALLOWED.
+message SetSettings {
+  Settings settings = 1;
+}
+
+// The settings of the caller's DSA. `render_gpu` and `freeze` are the caller's own; the
+// update settings are the machine's, shared by every user of it.
+message Settings {
+  // The GPU the caller's window manager renders on: "display" (the GPU that drives the
+  // primary monitor, the default), "integrated", "discrete", or part of a GPU's name. The
+  // window manager reads it when it starts.
+  string render_gpu = 1;
+  // Whether the caller's Android may be frozen when it is idle. Off unless the user turns it
+  // on.
+  bool freeze = 2;
+  // Whether the service updates DSA itself from the signed program list.
+  bool program_updates = 3;
+  // Whether the service downloads new Android images from the signed release list.
+  bool image_updates = 4;
+  // Whether this installation can update DSA itself, or the Android image, at all. A client
+  // cannot change these.
+  bool program_updates_available = 5;
+  bool image_updates_available = 6;
+  // The version of DSA the service runs. A client cannot change it.
+  string version = 7;
+  // The folder the service writes its log to. Empty when it keeps none. A client cannot
+  // change it.
+  string log_dir = 8;
+}
+
 // What went wrong with a request.
 enum ErrorCode {
   ERROR_CODE_UNSPECIFIED = 0;
@@ -213,6 +487,11 @@ enum ErrorCode {
   ERROR_CODE_UPDATE_FAILED = 3;
   // The request needs the caller's Android to be running, and it is not.
   ERROR_CODE_NOT_RUNNING = 4;
+  // A setting has a value the service does not accept. The detail says which and why.
+  ERROR_CODE_INVALID_SETTING = 5;
+  // The request changes something that applies to every user of the machine, and the caller
+  // is not acting as an administrator.
+  ERROR_CODE_NOT_ALLOWED = 6;
 }
 
 message Error {
@@ -234,6 +513,15 @@ message Request {
     WatchTasks watch_tasks = 8;
     CloseTask close_task = 9;
     LaunchApp launch_app = 10;
+    StreamInput stream_input = 11;
+    ResizeTask resize_task = 12;
+    SetTaskDensity set_task_density = 13;
+    GetMemory get_memory = 14;
+    ListApps list_apps = 15;
+    GetSettings get_settings = 16;
+    SetSettings set_settings = 17;
+    SetWindowsShown set_windows_shown = 20;
+    FreezeSession freeze_session = 21;
   }
 }
 
@@ -246,6 +534,9 @@ message Response {
     VmId vm_id = 5;
     Tasks tasks = 6;
     Done done = 7;
+    Memory memory = 8;
+    InstalledApps installed_apps = 9;
+    Settings settings = 10;
   }
 }
 
@@ -258,5 +549,9 @@ message Envelope {
     Request request = 4;
     Response response = 5;
     TaskEvent task_event = 6;
+    PointerEvent pointer_event = 7;
+    KeyEvent key_event = 8;
+    ImeComposition ime_composition = 9;
+    ImeCommit ime_commit = 10;
   }
 }

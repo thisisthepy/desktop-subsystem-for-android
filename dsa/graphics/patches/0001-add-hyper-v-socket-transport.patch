@@ -66,10 +66,10 @@ index 6435bf463..a5e7af04f 100644
  class HostConnection
 diff --git a/guest/OpenglSystemCommon/HvSocketStream.cpp b/guest/OpenglSystemCommon/HvSocketStream.cpp
 new file mode 100644
-index 000000000..395ad9722
+index 000000000..78a514113
 --- /dev/null
 +++ b/guest/OpenglSystemCommon/HvSocketStream.cpp
-@@ -0,0 +1,145 @@
+@@ -0,0 +1,151 @@
 +/*
 + * Copyright 2026 The DSA Authors
 + * SPDX-License-Identifier: Apache-2.0
@@ -176,8 +176,13 @@ index 000000000..395ad9722
 +    if (!connected() || (!buffer && size != 0)) {
 +        return nullptr;
 +    }
++    if (size == 0) {
++        // Reading nothing succeeds, as on the other gfxstream streams: a reply can carry an
++        // empty array, and the encoder treats a null return as a broken connection.
++        static const unsigned char kNothing = 0;
++        return buffer ? static_cast<const unsigned char*>(buffer) : &kNothing;
++    }
 +    auto* cursor = static_cast<unsigned char*>(buffer);
-+    const size_t total = size;
 +    while (size != 0) {
 +        const ssize_t received = recv(fd_, cursor, size, 0);
 +        if (received > 0) {
@@ -188,10 +193,11 @@ index 000000000..395ad9722
 +        if (received < 0 && errno == EINTR) {
 +            continue;
 +        }
-+        ALOGE("HvSocketStream: read failed: %s", strerror(errno));
++        ALOGE("HvSocketStream: read failed: %s",
++              received == 0 ? "the host closed the connection" : strerror(errno));
 +        return nullptr;
 +    }
-+    return total == 0 ? nullptr : static_cast<const unsigned char*>(buffer);
++    return static_cast<const unsigned char*>(buffer);
 +}
 +
 +const unsigned char* HvSocketStream::commitBufferAndReadFully(
