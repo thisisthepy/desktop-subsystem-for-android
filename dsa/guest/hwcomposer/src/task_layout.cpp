@@ -148,27 +148,8 @@ bool drawnAtSize(const Rect& bounds, const std::vector<LayerFill>& layers) {
     return false;
 }
 
-uint64_t drawnGeometry(const std::vector<LayerFill>& layers) {
-    // FNV-1a over the frames of the drawn layers.
-    uint64_t hash = 14695981039346656037ull;
-    const auto mix = [&hash](int32_t value) {
-        hash ^= static_cast<uint32_t>(value);
-        hash *= 1099511628211ull;
-    };
-    for (const LayerFill& layer : layers) {
-        if (layer.drawn) {
-            mix(layer.frame.left);
-            mix(layer.frame.top);
-            mix(layer.frame.right);
-            mix(layer.frame.bottom);
-        }
-    }
-    return hash;
-}
-
 ResizeGate::Decision ResizeGate::decide(int32_t task, int64_t postedWidth, int64_t postedHeight,
-                                        const Rect& bounds, bool drawn, int64_t nowMs,
-                                        uint64_t geometry) {
+                                        const Rect& bounds, bool drawn, int64_t nowMs) {
     const bool firstFrame = postedWidth <= 0 || postedHeight <= 0;
     const bool sameSize = postedWidth == bounds.width() && postedHeight == bounds.height();
     if (firstFrame || sameSize || drawn) {
@@ -179,16 +160,13 @@ ResizeGate::Decision ResizeGate::decide(int32_t task, int64_t postedWidth, int64
     if (it == mHeld.end() || it->second.width != bounds.width() ||
         it->second.height != bounds.height()) {
         // A new size starts a new wait: the app cannot have drawn at it yet.
-        mHeld[task] = Held{bounds.width(), bounds.height(), nowMs, geometry, false};
+        mHeld[task] = Held{bounds.width(), bounds.height(), nowMs, false};
         return Decision::Hold;
     }
     Held& held = it->second;
-    if (geometry != held.geometry) {
-        held.reacted = true;
-    }
-    if (nowMs >= held.deadline()) {
-        mHeld.erase(it);
-        return Decision::PostLate;
+    if (!held.logged && nowMs - held.sinceMs >= kSlowMs) {
+        held.logged = true;
+        return Decision::HoldSlow;
     }
     return Decision::Hold;
 }
@@ -196,7 +174,10 @@ ResizeGate::Decision ResizeGate::decide(int32_t task, int64_t postedWidth, int64
 std::optional<int64_t> ResizeGate::nextDeadline() const {
     std::optional<int64_t> first;
     for (const auto& [_, held] : mHeld) {
-        const int64_t deadline = held.deadline();
+        if (held.logged) {
+            continue;
+        }
+        const int64_t deadline = held.sinceMs + kSlowMs;
         if (!first || deadline < *first) {
             first = deadline;
         }

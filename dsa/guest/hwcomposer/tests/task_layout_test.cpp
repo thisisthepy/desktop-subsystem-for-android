@@ -53,56 +53,57 @@ TEST(fr4_a_resized_task_is_held_until_its_app_draws_at_the_new_size) {
     EXPECT_TRUE(gate.decide(1, 600, 500, grown, false, 0) == ResizeGate::Decision::Post);
     // Grown to 600x500 from 400x300: held while the app has not drawn at it.
     EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 1000) == ResizeGate::Decision::Hold);
-    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(1000 + ResizeGate::kStuckMs));
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(1000 + ResizeGate::kSlowMs));
     EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 1200) == ResizeGate::Decision::Hold);
     EXPECT_TRUE(gate.decide(1, 400, 300, grown, true, 1250) == ResizeGate::Decision::Post);
     EXPECT_TRUE(!gate.nextDeadline());
 }
 
-TEST(fr4_a_resized_task_whose_app_does_not_draw_is_sent_in_the_end) {
+TEST(fr4_a_task_with_a_frame_never_shows_one_that_does_not_fill_its_new_size) {
+    ResizeGate gate;
+    const Rect grown{0, 0, 600, 500};
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 0) == ResizeGate::Decision::Hold);
+    // However long the app takes, an hour here, its frame does not go.
+    for (int64_t now = 100; now < 3600000; now += 1000) {
+        EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, now) != ResizeGate::Decision::Post);
+    }
+    // And the moment it fills the size, it does.
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, true, 3600000) == ResizeGate::Decision::Post);
+}
+
+TEST(fr4_a_task_with_no_earlier_frame_may_show_what_it_has) {
+    ResizeGate gate;
+    const Rect size{0, 0, 600, 500};
+    // Nothing to stretch yet: a dialog's first frame, not filling its task, goes.
+    EXPECT_TRUE(gate.decide(1, 0, 0, size, false, 0) == ResizeGate::Decision::Post);
+}
+
+TEST(fr4_a_slow_app_is_logged_once_rather_than_shown) {
     ResizeGate gate;
     const Rect grown{0, 0, 600, 500};
     EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 0) == ResizeGate::Decision::Hold);
     EXPECT_TRUE(gate.decide(2, 300, 300, grown, false, 100) == ResizeGate::Decision::Hold);
-    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(ResizeGate::kStuckMs));
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, ResizeGate::kStuckMs) ==
-                ResizeGate::Decision::PostLate);
-    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(100 + ResizeGate::kStuckMs));
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(ResizeGate::kSlowMs));
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, ResizeGate::kSlowMs) ==
+                ResizeGate::Decision::HoldSlow);
+    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, ResizeGate::kSlowMs + 1) ==
+                ResizeGate::Decision::Hold);
+    // The next look is for the task not logged yet; with none left, nothing is asked for.
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(100 + ResizeGate::kSlowMs));
     gate.forget(2);
     EXPECT_TRUE(!gate.nextDeadline());
 }
 
-TEST(fr4_a_busy_app_is_not_shown_beside_black_while_it_can_still_draw) {
-    ResizeGate gate;
-    const Rect grown{0, 0, 600, 500};
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 0, 7) == ResizeGate::Decision::Hold);
-    // Well past the time an app that reacted gets, its old surface has not moved.
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, ResizeGate::kHoldMs * 2, 7) ==
-                ResizeGate::Decision::Hold);
-}
-
-TEST(fr4_an_app_that_reacts_without_filling_its_task_is_sent_sooner) {
-    ResizeGate gate;
-    const Rect grown{0, 0, 600, 500};
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 0, 7) == ResizeGate::Decision::Hold);
-    // A dialog that moved to the middle of its new window: it will never fill it.
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, 10, 8) == ResizeGate::Decision::Hold);
-    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(ResizeGate::kHoldMs));
-    EXPECT_TRUE(gate.decide(1, 400, 300, grown, false, ResizeGate::kHoldMs, 8) ==
-                ResizeGate::Decision::PostLate);
-}
-
 TEST(fr4_each_new_size_of_a_drag_starts_its_wait_anew) {
     ResizeGate gate;
-    // A drag that keeps moving ahead of a slow app: no frame goes on the way, however long
-    // the drag takes, because each would show the old picture beside black.
+    // A drag that keeps moving ahead of a slow app is not called slow, however long it takes.
     int64_t now = 0;
     for (int32_t step = 0; step < 100; ++step, now += 100) {
         const Rect size{0, 0, 600 + step, 500};
-        EXPECT_TRUE(gate.decide(1, 400, 300, size, false, now, 7) == ResizeGate::Decision::Hold);
+        EXPECT_TRUE(gate.decide(1, 400, 300, size, false, now) == ResizeGate::Decision::Hold);
     }
-    EXPECT_TRUE(now > ResizeGate::kStuckMs);
-    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(now - 100 + ResizeGate::kStuckMs));
+    EXPECT_TRUE(now > ResizeGate::kSlowMs);
+    EXPECT_TRUE(gate.nextDeadline() == std::optional<int64_t>(now - 100 + ResizeGate::kSlowMs));
 }
 
 TEST(fr4_an_old_surface_clipped_to_a_shrunken_task_is_not_drawn_at_its_size) {
@@ -135,20 +136,6 @@ TEST(fr4_an_old_surface_clipped_to_a_shrunken_task_is_not_drawn_at_its_size) {
     unknown.frame = shrunk;
     unknown.drawn = true;
     EXPECT_TRUE(drawnAtSize(shrunk, {unknown}));
-}
-
-TEST(fr4_the_geometry_follows_only_the_drawn_layers) {
-    LayerFill surface;
-    surface.frame = Rect{0, 0, 400, 300};
-    surface.drawn = true;
-    LayerFill colour;
-    colour.frame = Rect{0, 0, 600, 500};
-
-    const uint64_t before = drawnGeometry({surface, colour});
-    colour.frame = Rect{0, 0, 700, 500};
-    EXPECT_TRUE(drawnGeometry({surface, colour}) == before);
-    surface.frame = Rect{100, 100, 500, 400};
-    EXPECT_TRUE(drawnGeometry({surface, colour}) != before);
 }
 
 TEST(fr3_a_layer_inside_one_task_goes_to_that_task) {
