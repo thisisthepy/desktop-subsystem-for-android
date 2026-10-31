@@ -8,8 +8,14 @@
 //! clean caches and compact memory (`/proc/sys/vm/drop_caches`, `/proc/sys/vm/compact_memory`),
 //! which frees whole 2 MiB blocks that page reporting can return.
 //!
-//! Dropping caches costs reading those files again later, so it is not done often: once each
-//! time the guest goes idle, and otherwise at most every few minutes while cache dominates.
+//! Page cache is only part of it. A guest with memory to spare is never short, so the kernel
+//! never swaps on its own and the anonymous memory of idle processes stays resident, however
+//! much zram is free. So the idle reclaim also asks the kernel to move cold anonymous pages to
+//! zram (cgroup `memory.reclaim`), where they take about a third of their size.
+//!
+//! Dropping caches costs reading those files again later, and swapped pages cost decompressing
+//! them, so neither is done often: once each time the guest goes idle, again while idle only
+//! when memory has grown back, and otherwise at most every few minutes while cache dominates.
 //! This module is the decision alone, so it runs and is tested on any platform; the daemon
 //! applies it on Android by setting [`RECLAIM_PROPERTY`], which the image's init script acts on.
 
@@ -36,6 +42,7 @@ pub struct MemInfo {
     pub cached_kb: u64,
     pub shmem_kb: u64,
     pub slab_reclaimable_kb: u64,
+    pub anon_pages_kb: u64,
 }
 
 impl MemInfo {
@@ -57,6 +64,7 @@ impl MemInfo {
                 "Cached" => info.cached_kb = value,
                 "Shmem" => info.shmem_kb = value,
                 "SReclaimable" => info.slab_reclaimable_kb = value,
+                "AnonPages" => info.anon_pages_kb = value,
                 _ => {}
             }
         }
@@ -70,6 +78,12 @@ impl MemInfo {
             .saturating_sub(self.shmem_kb)
             .saturating_add(self.buffers_kb)
             .saturating_add(self.slab_reclaimable_kb)
+    }
+
+    /// What an idle reclaim can act on: the droppable memory, and anonymous memory it can
+    /// swap to zram.
+    pub fn reclaimable_kb(&self) -> u64 {
+        self.droppable_kb().saturating_add(self.anon_pages_kb)
     }
 
     /// The memory in use, free memory aside.
@@ -116,8 +130,13 @@ pub struct ReclaimPolicy {
     /// reclaim while tasks are open.
     pub cache_percent: u64,
     /// The least droppable cache worth a reclaim, in KiB: below it the cost of reading the
-    /// files again outweighs what the host gets back.
+    /// files again outweighs what the host gets back. While idle, anonymous memory counts too.
     pub min_droppable_kb: u64,
+    /// The least time between two idle reclaims in one idle stretch.
+    pub idle_repeat: Duration,
+    /// How much reclaimable memory must have come back since the last idle reclaim for
+    /// another, in KiB. A guest that stays small is left alone.
+    pub idle_growth_kb: u64,
     /// The time between two gradual trims while tasks are open.
     pub trim_gap: Duration,
     /// The page cache the gradual trim leaves alone, in KiB: warm files of the open apps.
@@ -135,6 +154,8 @@ impl Default for ReclaimPolicy {
             min_gap: Duration::from_secs(10 * 60),
             cache_percent: 50,
             min_droppable_kb: 128 * 1024,
+            idle_repeat: Duration::from_secs(5 * 60),
+            idle_growth_kb: 64 * 1024,
             trim_gap: Duration::from_secs(45),
             keep_cache_kb: 256 * 1024,
             min_trim_kb: 64 * 1024,
@@ -152,6 +173,10 @@ pub struct Reclaimer {
     idle_reclaimed: bool,
     last_reclaim: Option<Duration>,
     last_trim: Option<Duration>,
+    /// Whether the next look at memory is the first since a reclaim, which sets `idle_floor_kb`.
+    measure_floor: bool,
+    /// What was left reclaimable just after the last reclaim, in KiB.
+    idle_floor_kb: Option<u64>,
 }
 
 impl Reclaimer {
@@ -162,6 +187,8 @@ impl Reclaimer {
             idle_reclaimed: false,
             last_reclaim: None,
             last_trim: None,
+            measure_floor: false,
+            idle_floor_kb: None,
         }
     }
 
@@ -186,7 +213,12 @@ impl Reclaimer {
         } else if self.idle_since.is_none() {
             self.idle_since = Some(now);
         }
+        if self.measure_floor {
+            self.measure_floor = false;
+            self.idle_floor_kb = Some(memory.reclaimable_kb());
+        }
         let worth_it = memory.droppable_kb() >= self.policy.min_droppable_kb;
+        let idle_worth_it = memory.reclaimable_kb() >= self.policy.min_droppable_kb;
         let gap_passed = self
             .last_reclaim
             .is_none_or(|last| now.saturating_sub(last) >= self.policy.min_gap);
@@ -194,11 +226,21 @@ impl Reclaimer {
             && self
                 .idle_since
                 .is_some_and(|since| now.saturating_sub(since) >= self.policy.idle_after);
+        // Background work during a long idle stretch, and a boot still under way at the first
+        // reclaim, bring memory back that nothing would otherwise return.
+        let idle_grew = self.idle_reclaimed
+            && self.idle_since.is_some()
+            && self
+                .last_reclaim
+                .is_some_and(|last| now.saturating_sub(last) >= self.policy.idle_repeat)
+            && self
+                .idle_floor_kb
+                .is_some_and(|floor| memory.reclaimable_kb() >= floor + self.policy.idle_growth_kb);
         let mostly_cache = memory.droppable_kb().saturating_mul(100)
             >= memory.used_kb().saturating_mul(self.policy.cache_percent);
         // Going idle is the moment the guest stops needing its cache, so the gap does not hold
         // the idle reclaim back.
-        let reason = if idle_due && worth_it {
+        let reason = if (idle_due || idle_grew) && idle_worth_it {
             self.idle_reclaimed = true;
             Some(Reason::Idle)
         } else if gap_passed && worth_it && mostly_cache {
@@ -219,6 +261,7 @@ impl Reclaimer {
             self.last_reclaim = Some(now);
             // A full reclaim also counts as the latest trim: no second one right behind it.
             self.last_trim = Some(now);
+            self.measure_floor = true;
         }
         reason
     }

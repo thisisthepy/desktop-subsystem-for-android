@@ -332,12 +332,15 @@ dsa-hostd 0.1.0: S-1-5-21-...: memory: host 820 MiB (vm 600, window manager 120,
 What keeps the number small:
 
 - The VM's memory is backed by the pagefile and committed on first touch, and the pages the
-  guest frees and reports go back to the host (`vm.rs`). By default the guest reports free
-  memory in 128 KiB pieces on Windows 11 and later, and in 2 MiB pieces before
-  (`page_reporting_order`, 5 or 9).
-- Inside Android, idle apps are swapped to compressed memory (zram), and the control daemon
-  has the clean caches dropped when no app has been open for a minute, so that memory is
-  free to report.
+  guest frees and reports go back to the host (`vm.rs`). On the Windows builds WSL does this
+  on (26100 and later, and earlier ones from a set update revision), the VM has small backing
+  pages and faults 64 KiB at a time, and the guest reports free memory in 128 KiB pieces.
+  Elsewhere it reports 2 MiB pieces (`page_reporting_order`, 5 or 9).
+- Inside Android, the control daemon has cold pages moved to compressed memory (zram) and the
+  clean caches dropped when no app has been in use for a minute, so that memory is free to
+  report. The agent ends cached apps when the guest goes to sleep with no task open.
+- A window host empties its working set when its window is minimized, and the window manager
+  does when no window has been shown for 30 seconds.
 - `dsa-wm` empties its working set 30 seconds after the last task window closes, and logs
   how much it held. Memory it touches again comes back by itself.
 

@@ -352,6 +352,7 @@ pub fn memory_json(memory: &MemorySnapshot) -> Value {
             "private_kb": p.private_kb,
         })).collect::<Vec<_>>(),
         "host_total_kb": memory.host_total_kb(),
+        "vm_beyond_guest_kb": memory.vm_beyond_guest_kb(),
     })
 }
 

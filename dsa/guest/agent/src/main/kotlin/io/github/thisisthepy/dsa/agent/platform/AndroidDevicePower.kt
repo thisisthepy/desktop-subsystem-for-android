@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * through setPowerSaveModeEnabled; none is in the SDK, so they are called by reflection.
  * The device idle controller has no binder method that forces deep idle, and the battery
  * service none that sets the battery, so the agent runs their shell commands
- * (`deviceidle force-idle`, `battery set ...`) over binder, as `dumpsys` and `cmd` do. Both
+ * (`deviceidle force-idle`, `battery set ...`, `activity kill-all`) over binder, as `dumpsys` and `cmd` do. Both
  * work on a user build: they check the caller's permission, not that it is the shell. The
  * guest's SELinux policy lets system_server use the descriptors such a call hands it.
  */
@@ -67,6 +67,10 @@ class AndroidDevicePower(private val context: Context, private val log: Log) : D
 
     override fun unforceIdle() {
         shell("deviceidle", "unforce")
+    }
+
+    override fun killCachedApps() {
+        shell("activity", "kill-all")
     }
 
     override fun isDeviceIdle(): Boolean = powerManager.isDeviceIdleMode

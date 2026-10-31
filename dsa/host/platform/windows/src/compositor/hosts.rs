@@ -28,6 +28,7 @@ use dsa_host_core::compositor::window_hosts::{
     accept_window_host, answer_attached, report_from_wire, to_wire, FromHost, HostAction, HostId,
     ToHost, WindowHosts,
 };
+use dsa_host_core::memory::IdleTrim;
 use dsa_host_core::tasks::{AppInfo, TaskEvent, TaskRequest};
 use dsa_protocol::window_host::types::{envelope::Body, Frame, FrameTexture};
 use dsa_protocol::window_host::{decode, encode_body};
@@ -514,6 +515,8 @@ pub struct ManagerSetup {
     pub listing: Arc<Mutex<Vec<i32>>>,
     /// Set when the window manager stops.
     pub stop: Arc<AtomicBool>,
+    /// Told whether any window is shown, for the trim of idle memory.
+    pub idle: Arc<Mutex<IdleTrim>>,
 }
 
 struct Manager {
@@ -786,6 +789,13 @@ impl Manager {
     fn publish(&mut self) {
         let windows = self.windows.windows();
         if let Some(request) = self.shown.update(&windows) {
+            if let TaskRequest::WindowsShown { shown } = request {
+                self.setup
+                    .idle
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .windows_shown(shown, Instant::now());
+            }
             self.request(vec![request]);
         }
         let routes: Vec<(u32, Arc<RemoteWindow>)> = self

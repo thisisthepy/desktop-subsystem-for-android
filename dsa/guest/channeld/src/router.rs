@@ -94,6 +94,8 @@ struct State {
     tasks: BTreeMap<i32, Task>,
     /// The last `AppInfo` of each app, by package.
     apps: BTreeMap<String, Vec<u8>>,
+    /// The host said no task window is shown: open tasks are minimized, and the guest dozes.
+    screen_off: bool,
     next_id: u64,
 }
 
@@ -161,15 +163,35 @@ impl Router {
             .count()
     }
 
+    /// How many app tasks are in use: none while the host shows no window for them, when
+    /// they are as idle as if they were closed.
+    pub fn tasks_in_use(&self) -> usize {
+        if self.lock().screen_off {
+            0
+        } else {
+            self.task_count()
+        }
+    }
+
     /// Passes a frame from the host to every listener.
     pub fn from_host(&self, frame: &[u8]) {
-        self.lock().deliver(frame, None);
+        let screen = dsa_protocol::decode(frame).ok().and_then(|e| match e.body {
+            Some(Body::ScreenState(screen)) => Some(screen),
+            _ => None,
+        });
+        let mut state = self.lock();
+        if let Some(screen) = screen {
+            state.screen_off = !screen.on;
+        }
+        state.deliver(frame, None);
     }
 
     /// Tells a host that has just connected the state of every live task. Frames that were
     /// waiting for the connection go first, so the host ends with the latest state.
     pub fn host_connected(&self) {
-        let state = self.lock();
+        let mut state = self.lock();
+        // The host takes the screen to be on when it connects, and says so if not.
+        state.screen_off = false;
         for frame in state.apps.values() {
             let _ = self.to_host.send(frame.clone());
         }

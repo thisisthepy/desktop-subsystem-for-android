@@ -48,6 +48,12 @@ class FakePower : DevicePower {
         onIdle?.invoke()
     }
 
+    var killedCached = 0
+
+    override fun killCachedApps() {
+        killedCached++
+    }
+
     override fun isDeviceIdle() = idle
 
     override fun listenIdle(onChange: () -> Unit) {
@@ -94,6 +100,25 @@ class LifecycleTest {
 
     private fun idleReports(): List<Boolean> =
         daemon.sentMessages().filter { it.hasDeviceIdle() }.map { it.deviceIdle.idle }
+
+    @Test
+    fun nfr1_going_to_sleep_with_no_task_open_ends_cached_apps() {
+        started()
+
+        screen(false)
+
+        assertEquals(1, power.killedCached)
+    }
+
+    @Test
+    fun nfr1_a_minimized_task_keeps_cached_apps_alive() {
+        val lifecycle = Lifecycle(power, { true }, log, hasOpenTasks = { true })
+
+        lifecycle.handle(Envelope.newBuilder().setScreenState(ScreenState.newBuilder().setOn(false)).build())
+
+        assertEquals(0, power.killedCached)
+        assertTrue(power.calls.contains("forceIdle"))
+    }
 
     @Test
     fun fr10_screen_off_from_the_host_turns_the_display_off_and_forces_doze() {

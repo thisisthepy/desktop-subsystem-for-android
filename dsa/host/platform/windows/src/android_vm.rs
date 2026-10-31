@@ -20,7 +20,8 @@ use crate::console_pipe::ConsoleCapture;
 use crate::guid::Guid;
 use crate::hcs::{grant_vm_access, ComputeSystem};
 use crate::vm::{
-    hosting_process_name_suffix_supported, AndroidVmConfig, HOSTING_PROCESS_NAME_SUFFIX,
+    fine_grained_memory_supported, hosting_process_name_suffix_supported, AndroidVmConfig,
+    HOSTING_PROCESS_NAME_SUFFIX,
 };
 use crate::vm_listener::VmIdSlot;
 
@@ -201,6 +202,8 @@ impl GuestLauncher for AndroidVmLauncher {
         {
             config.hosting_process_name_suffix = Some(HOSTING_PROCESS_NAME_SUFFIX.into());
         }
+        config.fine_grained_memory =
+            windows_build().is_some_and(|(build, ubr)| fine_grained_memory_supported(build, ubr));
         let document = config
             .to_hcs_document()
             .map_err(|e| e.to_string())?
@@ -298,7 +301,7 @@ impl GuestLauncher for AndroidVmLauncher {
 }
 
 /// This Windows build's number and update revision, as the registry records them.
-fn windows_build() -> Option<(u32, u32)> {
+pub(crate) fn windows_build() -> Option<(u32, u32)> {
     use std::ptr::null_mut;
     use windows_sys::Win32::Foundation::ERROR_SUCCESS;
     use windows_sys::Win32::System::Registry::{

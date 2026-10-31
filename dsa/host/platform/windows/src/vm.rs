@@ -7,6 +7,10 @@
 //!   (`EnableColdDiscardHint` plus `page_reporting.page_reporting_order` on the kernel
 //!   command line, and `EnableColdHint` for zeroed pages). `EnableHotHint` is left off: it
 //!   lets the guest pull pages in ahead of use, which returns nothing to the host;
+//! - on Windows builds that can take it, small backing pages and 64 KiB fault clusters
+//!   (`BackingPageSize`, `FaultClusterSizeShift`, `DirectMapFaultClusterSizeShift`). Without
+//!   them one touched guest page can commit far more than itself on the host, and a freed
+//!   128 KiB block need not free anything there;
 //! - the kernel booted directly (`LinuxKernelDirect`), straight into Android's init;
 //! - the system image attached read only, the user data on a disk that may stay sparse;
 //! - Hyper-V sockets limited to SYSTEM and the user the VM belongs to;
@@ -77,6 +81,28 @@ pub struct AndroidVmConfig {
     /// `vmmem`, which is what Windows builds without the setting need: they reject a
     /// document that names it. See [`hosting_process_name_suffix_supported`].
     pub hosting_process_name_suffix: Option<String>,
+    /// Back the VM with small pages and fault 64 KiB at a time, which keeps the host's share
+    /// close to what the guest uses. Only for builds where
+    /// [`fine_grained_memory_supported`] says so.
+    pub fine_grained_memory: bool,
+}
+
+/// The fault cluster for fine-grained memory, as a power of two of 4 KiB pages: 64 KiB. Free
+/// page reporting's order must be at least this, which its least value, 5, is.
+const FAULT_CLUSTER_SHIFT: u32 = 4;
+
+/// Whether this Windows build can back a VM with small pages and short fault clusters: those
+/// with the fix for the deadlock such a VM can hit when it is torn down. These are the same
+/// builds and revisions WSL checks before it sets the same fields.
+pub fn fine_grained_memory_supported(build: u32, update_revision: u32) -> bool {
+    const GERMANIUM: u32 = 26100;
+    const COBALT: u32 = 22000;
+    const IRON: u32 = 20348;
+    const VIBRANIUM_22H2: u32 = 19045;
+    build >= GERMANIUM
+        || (build >= COBALT && update_revision >= 2360)
+        || (build >= IRON && update_revision >= 1970)
+        || (build >= VIBRANIUM_22H2 && update_revision >= 3393)
 }
 
 /// The suffix DSA gives its memory process, which Task Manager then shows as `VmmemDSA`.
@@ -255,6 +281,11 @@ impl AndroidVmConfig {
             // from the VM's working set. A guest without support for it is unaffected.
             "EnableColdHint": true,
         });
+        if self.fine_grained_memory {
+            memory["BackingPageSize"] = json!("Small");
+            memory["FaultClusterSizeShift"] = json!(FAULT_CLUSTER_SHIFT);
+            memory["DirectMapFaultClusterSizeShift"] = json!(FAULT_CLUSTER_SHIFT);
+        }
         if let Some(suffix) = &self.hosting_process_name_suffix {
             memory["HostingProcessNameSuffix"] = Value::String(suffix.clone());
         }

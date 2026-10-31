@@ -78,6 +78,8 @@ UNNEEDED_APPS = [
     "WallpaperPicker",
     # Bluetooth MIDI needs the Bluetooth stack, which has no controller here.
     "BluetoothMidiService",
+    # The secure element service is a persistent process, and no secure element exists here.
+    "SecureElement",
     # The search widget lives on the launcher, which is removed.
     "QuickSearchBox",
     # Developer and demo apps.
@@ -158,6 +160,15 @@ USER_PROPS = {
 # once less than a tenth of the swap is free or the swap is 90% used, instead of letting the
 # guest thrash through a full zram. Thrashing past 30% of the time reclaiming counts as
 # pressure too, as on Android Go devices, which have the same small-memory, zram-backed shape.
+#
+# ART keeps less free space in each process's heap, with the values of a 1 GiB phone: the
+# heap is 75% full rather than 60% after a collection, with at most 8 MiB free. Cuttlefish's
+# values are for a 4 GiB phone that has nothing else to do with its memory. The cost is more
+# frequent collections in apps that allocate a lot. The limits on how far a heap may grow stay
+# as they are, so no app has less memory to work with.
+#
+# ro.config.low_ram is not set, whatever it would save: it turns off multi-window, and every
+# task here is a freeform window.
 MEMORY_PROPS = {
     "sys.use_memfd": "true",
     "ro.lmk.use_psi": "true",
@@ -165,6 +176,9 @@ MEMORY_PROPS = {
     "ro.lmk.swap_free_low_percentage": "10",
     "ro.lmk.swap_util_max": "90",
     "ro.lmk.thrashing_limit": "30",
+    "dalvik.vm.heaptargetutilization": "0.75",
+    "dalvik.vm.heapminfree": "512k",
+    "dalvik.vm.heapmaxfree": "8m",
 }
 
 GRAPHICS_PROPS = {
