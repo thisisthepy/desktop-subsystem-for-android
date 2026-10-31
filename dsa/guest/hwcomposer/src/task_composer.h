@@ -137,7 +137,8 @@ class TaskComposer {
     RefreshRequest mRefresh;
 
     // Reaches the host again after the connection broke, then asks for a frame. It also asks
-    // for a frame when a task held back after a resize runs out of time (mRefreshAtMs).
+    // for a frame when a task held back after a resize has waited long enough to be logged
+    // (mRefreshAtMs).
     std::mutex mReconnectMutex;
     std::condition_variable mReconnectWake;
     bool mStopping = false;

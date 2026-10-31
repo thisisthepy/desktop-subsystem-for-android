@@ -45,13 +45,14 @@ pub enum WindowChange {
     /// Close the task's window.
     Close { task_id: i32 },
     /// The task's size in the guest, which the window measures its pointer input in, and the
-    /// largest client area the window may have. It changes with every size the window asks
-    /// for, without the window itself changing.
+    /// largest and smallest client areas the guest gives it. It changes with every size the
+    /// window asks for, without the window itself changing.
     TaskSize {
         task_id: i32,
         width: u32,
         height: u32,
         max: Option<(u32, u32)>,
+        min: Option<(u32, u32)>,
     },
     /// The cursor of the editor focused in the task is here, in the window's client pixels:
     /// the window puts its input method's windows beside it.
@@ -125,7 +126,7 @@ fn open(task: &Task) -> WindowChange {
 }
 
 /// A task's size in the guest, and the largest client area its window may have.
-type TaskSize = ((u32, u32), Option<(u32, u32)>);
+use super::window_sizing::TaskSize;
 
 /// The compositor's tasks and their windows.
 #[derive(Debug, Default)]
@@ -309,19 +310,20 @@ impl TaskWindows {
                     .tasks
                     .get(&task_id)
                     .map(|task| window_size(&task.bounds))?;
-                (shown, None)
+                (shown, None, None)
             }
         };
         if told == now {
             return None;
         }
         self.told_sizes.insert(task_id, now);
-        let ((width, height), max) = now;
+        let ((width, height), max, min) = now;
         Some(WindowChange::TaskSize {
             task_id,
             width,
             height,
             max,
+            min,
         })
     }
 
@@ -834,6 +836,7 @@ mod tests {
             width,
             height,
             max: Some((1920, 1080)),
+            min: None,
         };
         assert_eq!(
             windows.apply(&TaskEvent::Updated(clock.clone())),
@@ -847,6 +850,25 @@ mod tests {
             vec![size(500, 300)]
         );
         assert!(windows.apply(&TaskEvent::Updated(clock)).is_empty());
+    }
+
+    #[test]
+    fn fr4_a_window_hears_the_minimum_its_app_declares() {
+        let mut windows = TaskWindows::new();
+        let mut clock = task(1, "Clock", 800, 600);
+        windows.apply(&TaskEvent::Updated(clock.clone()));
+        clock.min_width = 700;
+        clock.min_height = 500;
+        assert_eq!(
+            windows.apply(&TaskEvent::Updated(clock)),
+            vec![WindowChange::TaskSize {
+                task_id: 1,
+                width: 800,
+                height: 600,
+                max: None,
+                min: Some((700, 500)),
+            }]
+        );
     }
 
     #[test]

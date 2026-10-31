@@ -73,12 +73,14 @@ pub enum ToHost {
     Close {
         task_id: i32,
     },
-    /// The task's size in the guest and the largest client area the window may have.
+    /// The task's size in the guest and the largest and smallest client areas the window may
+    /// have.
     TaskSize {
         task_id: i32,
         width: u32,
         height: u32,
         max: Option<(u32, u32)>,
+        min: Option<(u32, u32)>,
     },
     /// Where the cursor of the task's focused editor is, in the window's client pixels.
     ImeCursor {
@@ -331,11 +333,13 @@ impl WindowHosts {
                 width,
                 height,
                 max,
+                min,
             } => self.forward(ToHost::TaskSize {
                 task_id: *task_id,
                 width: *width,
                 height: *height,
                 max: *max,
+                min: *min,
             }),
             WindowChange::ImeCursor { task_id, cursor } => self.forward(ToHost::ImeCursor {
                 task_id: *task_id,
@@ -643,14 +647,18 @@ pub fn to_wire(message: &ToHost) -> Body {
             width,
             height,
             max,
+            min,
         } => {
             let (max_width, max_height) = max.unwrap_or((0, 0));
+            let (min_width, min_height) = min.unwrap_or((0, 0));
             Body::TaskSize(dsa_protocol::window_host::types::TaskSize {
                 task_id,
                 width,
                 height,
                 max_width,
                 max_height,
+                min_width,
+                min_height,
             })
         }
         ToHost::ImeCursor { task_id, cursor } => {
@@ -693,6 +701,8 @@ pub fn to_host_from_wire(body: &Body) -> Option<ToHost> {
             height: size.height,
             max: (size.max_width > 0 && size.max_height > 0)
                 .then_some((size.max_width, size.max_height)),
+            min: (size.min_width > 0 || size.min_height > 0)
+                .then_some((size.min_width, size.min_height)),
         },
         Body::ImeCursor(cursor) => ToHost::ImeCursor {
             task_id: cursor.task_id,
@@ -1190,12 +1200,14 @@ mod tests {
                 width: 600,
                 height: 400,
                 max: Some((1920, 1080)),
+                min: Some((700, 500)),
             },
             ToHost::TaskSize {
                 task_id: 6,
                 width: 600,
                 height: 400,
                 max: None,
+                min: None,
             },
             ToHost::ImeCursor {
                 task_id: 7,

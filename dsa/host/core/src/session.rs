@@ -1169,6 +1169,8 @@ impl Worker {
                     density_dpi: update.density_dpi,
                     max_width: update.max_width,
                     max_height: update.max_height,
+                    min_width: update.min_width,
+                    min_height: update.min_height,
                 }));
             }
             Some(Body::TaskRemoved(removed)) => {

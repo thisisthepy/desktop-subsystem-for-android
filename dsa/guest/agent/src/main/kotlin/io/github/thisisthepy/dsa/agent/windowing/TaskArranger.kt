@@ -19,10 +19,12 @@ import io.github.thisisthepy.dsa.agent.tasks.TaskSnapshot
  * The host asks for a task's size when the user resizes its window ([resize]), and for its
  * density when the window moves to a monitor of another scale ([setDensity]). Only the
  * latest of each counts. The task keeps its top left corner, within the display, and takes
- * the new size; if it then overlaps another task, the usual plan moves whichever of the two
- * is newer. A size and a density asked for together are applied in one change. While a
- * resize is under way, the next one waits for it to land, so the window manager never works
- * through a backlog of sizes the user has already dragged past.
+ * the new size, never less than the smallest size the framework gives it; if it then overlaps
+ * another task, the usual plan moves whichever of the two is newer. A size and a density asked
+ * for together are applied in one change. While a resize is under way, the next one waits for
+ * it to land, so the window manager never works through a backlog of sizes the user has
+ * already dragged past. It waits [RESIZE_PATIENCE_MILLIS] at most: a size that does not land
+ * by then must not stop the task following the user's drag for the whole of [giveUpMillis].
  *
  * A size the host marks live is a step of a drag the user has not finished. A change of a
  * task's screen size in dp recreates its activities, which takes far longer than a frame, so
@@ -122,8 +124,12 @@ class TaskArranger(
     fun arrange(apps: List<TaskSnapshot>): Map<Int, TaskBounds> {
         val current = LinkedHashMap<Int, TaskBounds>()
         val screens = HashMap<Int, ScreenDp?>()
+        val smallest = HashMap<Int, Size>()
         for (task in apps) {
-            if (current.putIfAbsent(task.taskId, task.bounds) == null) screens[task.taskId] = task.screenDp
+            if (current.putIfAbsent(task.taskId, task.bounds) == null) {
+                screens[task.taskId] = task.screenDp
+                smallest[task.taskId] = Size(task.minWidth, task.minHeight)
+            }
         }
         settle(current)
         wanted.keys.retainAll(current.keys)
@@ -144,9 +150,10 @@ class TaskArranger(
             for ((taskId, want) in wanted.entries.toList()) {
                 // One resize at a time: the next waits for this one to land. What it asks
                 // for stays in wanted meanwhile, so the end of a drag is never lost.
-                if (pending[taskId]?.resize == true) continue
+                val under = pending[taskId]
+                if (under != null && under.resize && giveUpMillis - under.millisLeft < RESIZE_PATIENCE_MILLIS) continue
                 val now = layout.getValue(taskId)
-                want.size?.let { layout[taskId] = sized(now, it, size) }
+                want.size?.let { layout[taskId] = sized(now, it, size, smallest[taskId]) }
                 resized[taskId] = want
                 wanted.remove(taskId)
             }
@@ -257,13 +264,19 @@ class TaskArranger(
         /** About one frame at 60 Hz. */
         const val RESIZE_CHECK_MILLIS = 16L
 
+        /** The longest a task's next size waits for its last one to land. */
+        const val RESIZE_PATIENCE_MILLIS = 250L
+
         /**
          * [now] given [size], keeping its top left corner unless that would put it past the
-         * display's edge, and never larger than the display.
+         * display's edge, never larger than the display and never smaller than [smallest],
+         * the size the framework would give it anyway.
          */
-        fun sized(now: TaskBounds, size: Size, display: Size): TaskBounds {
-            val width = size.width.coerceIn(1, maxOf(1, display.width))
-            val height = size.height.coerceIn(1, maxOf(1, display.height))
+        fun sized(now: TaskBounds, size: Size, display: Size, smallest: Size? = null): TaskBounds {
+            val maxWidth = maxOf(1, display.width)
+            val maxHeight = maxOf(1, display.height)
+            val width = size.width.coerceIn((smallest?.width ?: 1).coerceIn(1, maxWidth), maxWidth)
+            val height = size.height.coerceIn((smallest?.height ?: 1).coerceIn(1, maxHeight), maxHeight)
             val left = if (now.isEmpty()) 0 else now.left.coerceIn(0, maxOf(0, display.width - width))
             val top = if (now.isEmpty()) 0 else now.top.coerceIn(0, maxOf(0, display.height - height))
             return TaskBounds(left, top, left + width, top + height)

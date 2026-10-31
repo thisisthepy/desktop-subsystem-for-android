@@ -582,6 +582,36 @@ class AgentTest {
     }
 
     @Test
+    fun fr4_a_size_below_the_tasks_smallest_is_asked_at_its_smallest_and_reported_so() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 500, 400)).copy(minWidth = 300, minHeight = 250))
+        started()
+
+        resize(1, 200, 100, live = true)
+        scheduler.runDue()
+
+        assertEquals(TaskBounds(0, 0, 300, 250), actions.resizedLive.single().second)
+        val reported = daemon.sentMessages().filter { it.hasTaskUpdated() }.last { it.taskUpdated.taskId == 1 }.taskUpdated
+        assertEquals(300, reported.bounds.right)
+        assertEquals(250, reported.bounds.bottom)
+    }
+
+    @Test
+    fun fr4_a_size_that_does_not_land_holds_up_the_next_one_only_briefly() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 500, 400)))
+        started()
+
+        resize(1, 600, 400, live = true)
+        scheduler.runDue()
+        // The framework does not take it, and the user drags on.
+        resize(1, 700, 400, live = true)
+        scheduler.advance(100)
+        assertEquals(1, actions.resizedLive.size)
+        scheduler.advance(300)
+
+        assertEquals(TaskBounds(0, 0, 700, 400), actions.resizedLive.last().second)
+    }
+
+    @Test
     fun fr4_a_task_dragged_into_a_newer_one_moves_the_newer_one() {
         tasks.running = listOf(
             appTask(1, bounds = TaskBounds(0, 0, 500, 400)),
@@ -626,6 +656,22 @@ class AgentTest {
         scheduler.runDue()
 
         assertEquals(sent, daemon.sent.size)
+    }
+
+    @Test
+    fun fr4_the_host_hears_the_smallest_size_a_task_can_have_and_any_change_to_it() {
+        tasks.running = listOf(appTask(1).copy(minWidth = 700, minHeight = 500))
+        started()
+
+        val update = daemon.sentMessages().single().taskUpdated
+        assertEquals(700, update.minWidth)
+        assertEquals(500, update.minHeight)
+
+        // Another activity on top of the task declares another minimum.
+        tasks.change(listOf(appTask(1).copy(minWidth = 800, minHeight = 500)))
+        scheduler.runDue()
+
+        assertEquals(800, daemon.sentMessages().last().taskUpdated.minWidth)
     }
 
     @Test

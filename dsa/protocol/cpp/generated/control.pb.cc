@@ -116,6 +116,8 @@ PROTOBUF_CONSTEXPR TaskUpdated::TaskUpdated(
   , /*decltype(_impl_.density_dpi_)*/0u
   , /*decltype(_impl_.max_width_)*/0u
   , /*decltype(_impl_.max_height_)*/0u
+  , /*decltype(_impl_.min_width_)*/0u
+  , /*decltype(_impl_.min_height_)*/0u
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct TaskUpdatedDefaultTypeInternal {
   PROTOBUF_CONSTEXPR TaskUpdatedDefaultTypeInternal()
@@ -2299,6 +2301,8 @@ TaskUpdated::TaskUpdated(const TaskUpdated& from)
     , decltype(_impl_.density_dpi_){}
     , decltype(_impl_.max_width_){}
     , decltype(_impl_.max_height_){}
+    , decltype(_impl_.min_width_){}
+    , decltype(_impl_.min_height_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
@@ -2322,8 +2326,8 @@ TaskUpdated::TaskUpdated(const TaskUpdated& from)
     _this->_impl_.bounds_ = new ::dsa::control::v1::Rect(*from._impl_.bounds_);
   }
   ::memcpy(&_impl_.task_id_, &from._impl_.task_id_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.max_height_) -
-    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.max_height_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.min_height_) -
+    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.min_height_));
   // @@protoc_insertion_point(copy_constructor:dsa.control.v1.TaskUpdated)
 }
 
@@ -2340,6 +2344,8 @@ inline void TaskUpdated::SharedCtor(
     , decltype(_impl_.density_dpi_){0u}
     , decltype(_impl_.max_width_){0u}
     , decltype(_impl_.max_height_){0u}
+    , decltype(_impl_.min_width_){0u}
+    , decltype(_impl_.min_height_){0u}
     , /*decltype(_impl_._cached_size_)*/{}
   };
   _impl_.package_name_.InitDefault();
@@ -2385,8 +2391,8 @@ void TaskUpdated::Clear() {
   }
   _impl_.bounds_ = nullptr;
   ::memset(&_impl_.task_id_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.max_height_) -
-      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.max_height_));
+      reinterpret_cast<char*>(&_impl_.min_height_) -
+      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.min_height_));
   _internal_metadata_.Clear<std::string>();
 }
 
@@ -2460,6 +2466,22 @@ const char* TaskUpdated::_InternalParse(const char* ptr, ::_pbi::ParseContext* c
       case 8:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 64)) {
           _impl_.max_height_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 min_width = 9;
+      case 9:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 72)) {
+          _impl_.min_width_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 min_height = 10;
+      case 10:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 80)) {
+          _impl_.min_height_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -2550,6 +2572,18 @@ uint8_t* TaskUpdated::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(8, this->_internal_max_height(), target);
   }
 
+  // uint32 min_width = 9;
+  if (this->_internal_min_width() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(9, this->_internal_min_width(), target);
+  }
+
+  // uint32 min_height = 10;
+  if (this->_internal_min_height() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(10, this->_internal_min_height(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -2612,6 +2646,16 @@ size_t TaskUpdated::ByteSizeLong() const {
     total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_max_height());
   }
 
+  // uint32 min_width = 9;
+  if (this->_internal_min_width() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_min_width());
+  }
+
+  // uint32 min_height = 10;
+  if (this->_internal_min_height() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_min_height());
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
   }
@@ -2658,6 +2702,12 @@ void TaskUpdated::MergeFrom(const TaskUpdated& from) {
   if (from._internal_max_height() != 0) {
     _this->_internal_set_max_height(from._internal_max_height());
   }
+  if (from._internal_min_width() != 0) {
+    _this->_internal_set_min_width(from._internal_min_width());
+  }
+  if (from._internal_min_height() != 0) {
+    _this->_internal_set_min_height(from._internal_min_height());
+  }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
@@ -2686,8 +2736,8 @@ void TaskUpdated::InternalSwap(TaskUpdated* other) {
       &other->_impl_.label_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(TaskUpdated, _impl_.max_height_)
-      + sizeof(TaskUpdated::_impl_.max_height_)
+      PROTOBUF_FIELD_OFFSET(TaskUpdated, _impl_.min_height_)
+      + sizeof(TaskUpdated::_impl_.min_height_)
       - PROTOBUF_FIELD_OFFSET(TaskUpdated, _impl_.bounds_)>(
           reinterpret_cast<char*>(&_impl_.bounds_),
           reinterpret_cast<char*>(&other->_impl_.bounds_));

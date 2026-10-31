@@ -103,11 +103,25 @@ struct LayerFill {
     Rect frame;
     // It shows a buffer an app drew (not a solid colour).
     bool drawn = false;
+    // The buffer's size and the part of it the layer shows; 0 when that is not known, as for
+    // a layer SurfaceFlinger composes itself.
+    int64_t bufferWidth = 0;
+    int64_t bufferHeight = 0;
+    float cropWidth = 0;
+    float cropHeight = 0;
 };
 
 // Whether the task's app has drawn at the size of `bounds`: one of its drawn layers fills the
-// bounds exactly. Until then the task's own surface still has its old size.
+// bounds exactly. Until then the task's own surface still has its old size. When a task
+// shrinks, SurfaceFlinger clips the old, larger surface to the task, so its frame fills the
+// bounds at once; that layer shows part of a larger buffer 1:1, which is the old picture cut
+// off, and does not count.
 bool drawnAtSize(const Rect& bounds, const std::vector<LayerFill>& layers);
+
+// A value that changes when the app changes its drawn layers: where they are in the task, and
+// the size of their buffers. It does not change when the task moves or clips an old surface, or
+// when the app draws a new picture into the same layout.
+uint64_t drawnGeometry(const Rect& bounds, const std::vector<LayerFill>& layers);
 
 // Whether a task's frame goes to the host, after the task's size changed.
 //
@@ -116,32 +130,66 @@ bool drawnAtSize(const Rect& bounds, const std::vector<LayerFill>& layers);
 // old picture in one corner and nothing beside it. The host meanwhile stretches the last
 // frame it has over the resized window, which shows no empty space. So after a size change
 // the task's frames are held until its app has drawn at the new size, and the first frame
-// that goes is a whole one. A task whose app does not draw within kHoldMs is sent as it is,
-// so its window never stays stretched.
+// that goes is a whole one.
+//
+// Only what was filling is held, and the same goes for a frame of the size the host has: an app
+// being recreated at the end of a drag has an incomplete frame too.
+//   - A first frame goes as it is.
+//   - A frame that fills the task goes.
+//   - If the last frame sent did not fill the task (a dialog, a window with margins), every frame
+//     goes: such a window has no full frame to keep, and must keep updating.
+//   - Otherwise the last frame stays, stretched, with no time limit while the app has not
+//     responded, because a stale frame would show empty space. One held for kSlowMs at one size
+//     is logged once (HoldSlow).
+//   - Once the app has responded by changing its drawn layers (drawnGeometry) and they have been
+//     stable for kSettleMs, the frame goes even though it does not fill the task (PostSettled):
+//     that is the app's real layout at this size.
 class ResizeGate {
    public:
-    static constexpr int64_t kHoldMs = 500;
+    static constexpr int64_t kSettleMs = 500;
+    static constexpr int64_t kSlowMs = 2000;
 
     enum class Decision {
         // Send the frame.
         Post,
-        // Keep the host's last frame; look again at the next frame or at nextDeadline().
+        // Keep the host's last frame; look again at the next frame.
         Hold,
-        // The app did not draw at the new size in time; send the frame as it is.
-        PostLate,
+        // Keep the host's last frame, and log that the app has been slow. Once per size.
+        HoldSlow,
+        // Send the frame, which does not fill the task: the app has settled on this layout.
+        PostSettled,
     };
 
     // `posted` is the size the task's frames last had on the host (0 x 0 before the first),
-    // `bounds` the task's bounds now, `drawn` whether its app has drawn at their size.
+    // `bounds` the task's bounds now, `drawn` whether its app has drawn at their size,
+    // `geometry` the task's drawnGeometry().
     Decision decide(int32_t task, int64_t postedWidth, int64_t postedHeight, const Rect& bounds,
-                    bool drawn, int64_t nowMs);
-    void forget(int32_t task) { mHeldSince.erase(task); }
-    void clear() { mHeldSince.clear(); }
-    // When the first held task runs out of time, if any is held.
+                    bool drawn, int64_t nowMs, uint64_t geometry);
+    void forget(int32_t task) { mTasks.erase(task); }
+    void clear() { mTasks.clear(); }
+    // When a frame must be looked at, in case nothing else changes: to send a layout that has
+    // settled, or to log a slow app. Empty when no held task is due either.
     std::optional<int64_t> nextDeadline() const;
 
    private:
-    std::map<int32_t, int64_t> mHeldSince;
+    struct Held {
+        int64_t width = 0;
+        int64_t height = 0;
+        int64_t sinceMs = 0;
+        int64_t stableSinceMs = 0;
+        // The app's drawn layers differ from those of the last frame sent.
+        bool responded = false;
+        uint64_t geometry = 0;
+        bool logged = false;
+    };
+    struct TaskState {
+        // The last frame sent filled the task.
+        bool filled = false;
+        // The drawn layers of the last frame sent.
+        uint64_t geometry = 0;
+        std::optional<Held> held;
+    };
+    std::map<int32_t, TaskState> mTasks;
 };
 
 // The size of a task's ColorBuffers on the host. Each frame is composed into their top-left

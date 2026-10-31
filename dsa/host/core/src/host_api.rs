@@ -295,6 +295,8 @@ fn task_to_wire(task: Task) -> types::Task {
         density_dpi: task.density_dpi,
         max_width: task.max_width,
         max_height: task.max_height,
+        min_width: task.min_width,
+        min_height: task.min_height,
     }
 }
 
@@ -314,6 +316,8 @@ fn task_from_wire(task: types::Task) -> Task {
         density_dpi: task.density_dpi,
         max_width: task.max_width,
         max_height: task.max_height,
+        min_width: task.min_width,
+        min_height: task.min_height,
     }
 }
 
