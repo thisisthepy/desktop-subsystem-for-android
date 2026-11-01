@@ -1188,7 +1188,10 @@ pub fn host_clipboard_reaches_the_caller(make: MakeLocal<'_>) {
     let android = androids.of(&user).expect("the caller's Android");
     assert_eq!(
         host_texts(&android, 2),
-        vec!["copied on the host".to_string(), "\u{d55c}\u{ae00}".to_string()]
+        vec![
+            "copied on the host".to_string(),
+            "\u{d55c}\u{ae00}".to_string()
+        ]
     );
 }
 
@@ -1216,7 +1219,10 @@ pub fn clipboard_setting_reaches_the_caller(make: MakeLocal<'_>) {
         HostApiService::new(androids.clone(), "test service").with_settings(store.clone(), facts());
     let _service = RunningService::start_service(listener, service);
     let mut client = connect(&mut *connector);
-    assert!(client.settings().unwrap().settings.clipboard, "on by default");
+    assert!(
+        client.settings().unwrap().settings.clipboard,
+        "on by default"
+    );
     let off = client
         .set_settings(&Settings {
             clipboard: false,

@@ -1354,7 +1354,9 @@ impl Worker {
             // A new agent takes the clipboards to be shared, and has none of the host's text.
             self.clipboard_last = None;
             if !self.clipboard_sharing {
-                self.send_body(Body::ClipboardSharing(control::ClipboardSharing { on: false }));
+                self.send_body(Body::ClipboardSharing(control::ClipboardSharing {
+                    on: false,
+                }));
             }
         } else {
             self.agent_lost_at = Some(now);
@@ -1663,6 +1665,14 @@ impl Worker {
             }
             Command::Power(state) => {
                 self.set_power(state);
+                true
+            }
+            Command::HostClipboard(text) => {
+                self.host_clipboard(text);
+                true
+            }
+            Command::ShareClipboard(on) => {
+                self.share_clipboard(on);
                 true
             }
             Command::Stop => {

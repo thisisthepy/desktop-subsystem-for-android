@@ -98,7 +98,9 @@ pub fn sync(
                     if let Err(why) = clipboard.set_text(&text) {
                         note(
                             logger.as_deref(),
-                            &format!("could not put text copied in Android on the clipboard: {why}"),
+                            &format!(
+                                "could not put text copied in Android on the clipboard: {why}"
+                            ),
                         );
                     }
                     from_android = Some(text);
