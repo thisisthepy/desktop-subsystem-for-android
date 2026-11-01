@@ -21,6 +21,7 @@ pub mod clipboard;
 pub mod display_gpu;
 pub mod frames;
 pub mod hosts;
+pub mod links;
 pub mod log;
 pub mod present;
 pub mod shutdown;

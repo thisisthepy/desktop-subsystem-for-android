@@ -102,7 +102,7 @@ mod tests {
             "https://",
             "http:///etc/passwd",
             "https://exa mple.com",
-            "https://example.com/\n",
+            "https://example.com/a\nb",
             "http://\\\\server\\share",
         ] {
             assert!(web_url(bad).is_err(), "{bad:?} was accepted");
