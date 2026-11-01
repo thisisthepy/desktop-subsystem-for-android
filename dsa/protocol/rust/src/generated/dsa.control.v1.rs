@@ -581,12 +581,157 @@ pub struct ClockAnswer {
     #[prost(uint64, tag = "2")]
     pub guest_mono_ns: u64,
 }
+/// Host to guest, to the agent: whether a host accessibility client (a screen reader, an
+/// inspection tool) wants the accessibility tree of a task's window. While one does (`on`),
+/// the agent reads the task's accessibility nodes and sends them as AccessibilityTree
+/// messages: a full tree first, then changes. Once no task is watched, the agent's
+/// accessibility service is off and reads nothing, so a user who uses no such client pays
+/// nothing for it. The host says `on` again for every watched task each time the agent
+/// connects, and a repeated `on` makes the agent send a full tree again.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AccessibilityWatch {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(bool, tag = "2")]
+    pub on: bool,
+}
+/// The range a slider or a progress bar has, and where it stands in it.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct NodeRange {
+    #[prost(float, tag = "1")]
+    pub min: f32,
+    #[prost(float, tag = "2")]
+    pub max: f32,
+    #[prost(float, tag = "3")]
+    pub current: f32,
+}
+/// One accessibility node of a task, as the guest's accessibility framework describes it.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AccessibilityNode {
+    /// Unique among the nodes of one tree epoch, never 0. A node keeps its ID for as long as
+    /// the epoch lasts.
+    #[prost(uint32, tag = "1")]
+    pub id: u32,
+    /// The node's children, in order. Every child is a node of the same tree.
+    #[prost(uint32, repeated, tag = "2")]
+    pub child_ids: ::prost::alloc::vec::Vec<u32>,
+    /// The Android class the node says it is (android.widget.Button, say), from which the host
+    /// works out its role.
+    #[prost(string, tag = "3")]
+    pub class_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub text: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub content_description: ::prost::alloc::string::String,
+    /// What an empty editable node asks for.
+    #[prost(string, tag = "6")]
+    pub hint: ::prost::alloc::string::String,
+    /// The resource name of the node's view (com.android.settings:id/title), when it has one.
+    #[prost(string, tag = "7")]
+    pub view_id: ::prost::alloc::string::String,
+    /// Where the node is, in pixels of the task's window: (0, 0) is the window's top left.
+    #[prost(message, optional, tag = "8")]
+    pub bounds: ::core::option::Option<Rect>,
+    #[prost(bool, tag = "9")]
+    pub checkable: bool,
+    #[prost(bool, tag = "10")]
+    pub checked: bool,
+    #[prost(bool, tag = "11")]
+    pub selected: bool,
+    #[prost(bool, tag = "12")]
+    pub enabled: bool,
+    #[prost(bool, tag = "13")]
+    pub focusable: bool,
+    #[prost(bool, tag = "14")]
+    pub focused: bool,
+    #[prost(bool, tag = "15")]
+    pub scrollable: bool,
+    #[prost(bool, tag = "16")]
+    pub clickable: bool,
+    #[prost(bool, tag = "17")]
+    pub long_clickable: bool,
+    #[prost(bool, tag = "18")]
+    pub editable: bool,
+    #[prost(bool, tag = "19")]
+    pub password: bool,
+    #[prost(bool, tag = "20")]
+    pub heading: bool,
+    /// Set for a slider or a progress bar.
+    #[prost(message, optional, tag = "21")]
+    pub range: ::core::option::Option<NodeRange>,
+    /// What the node can do, in the order of NodeAction.
+    #[prost(enumeration = "NodeAction", repeated, tag = "22")]
+    pub actions: ::prost::alloc::vec::Vec<i32>,
+    /// The node's state in words, when the app gives one ("On", "50 percent").
+    #[prost(string, tag = "23")]
+    pub state_description: ::prost::alloc::string::String,
+}
+/// Guest to host, from the agent: a task's accessibility tree, or what changed in it. A full
+/// tree (`full`) replaces whatever the host had and starts a new epoch; node IDs of earlier
+/// epochs mean nothing in it. A change carries the epoch it applies to, each node that is new
+/// or changed (whole), and the IDs of the nodes that are gone. The agent sends a few of these
+/// a second at most, however fast the task's content changes.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AccessibilityTree {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub epoch: u32,
+    #[prost(bool, tag = "3")]
+    pub full: bool,
+    /// The nodes that have no parent in the task (the root of each of its windows), in order.
+    #[prost(uint32, repeated, tag = "4")]
+    pub root_ids: ::prost::alloc::vec::Vec<u32>,
+    #[prost(message, repeated, tag = "5")]
+    pub nodes: ::prost::alloc::vec::Vec<AccessibilityNode>,
+    #[prost(uint32, repeated, tag = "6")]
+    pub removed_ids: ::prost::alloc::vec::Vec<u32>,
+    /// The node with the input focus, or 0 for none.
+    #[prost(uint32, tag = "7")]
+    pub focused_id: u32,
+}
+/// Host to guest, to the agent: do something to a node of a task, for a host accessibility
+/// client (an Invoke from a screen reader, say). The agent answers with
+/// AccessibilityActionResult.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AccessibilityAction {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    /// The epoch the node's ID belongs to. An action for an earlier epoch is refused, because
+    /// its ID may now name another node.
+    #[prost(uint32, tag = "2")]
+    pub epoch: u32,
+    #[prost(uint32, tag = "3")]
+    pub node_id: u32,
+    #[prost(enumeration = "NodeAction", tag = "4")]
+    pub action: i32,
+    /// The new text, for NODE_ACTION_SET_TEXT.
+    #[prost(string, tag = "5")]
+    pub text: ::prost::alloc::string::String,
+    /// Names the action in its answer.
+    #[prost(uint32, tag = "6")]
+    pub request_id: u32,
+}
+/// Guest to host, from the agent: what came of an AccessibilityAction.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AccessibilityActionResult {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub request_id: u32,
+    /// True when the node did it.
+    #[prost(bool, tag = "3")]
+    pub done: bool,
+    /// Why it was not done, in words a person can act on. Empty when it was.
+    #[prost(string, tag = "4")]
+    pub error: ::prost::alloc::string::String,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 42, 60, 61, 62, 63, 64, 50, 51, 52, 53, 54"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 42, 60, 61, 62, 63, 64, 50, 51, 52, 53, 54, 80, 81, 82, 83"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -676,6 +821,14 @@ pub mod envelope {
         FileChunk(super::FileChunk),
         #[prost(message, tag = "54")]
         FileProgress(super::FileProgress),
+        #[prost(message, tag = "80")]
+        AccessibilityWatch(super::AccessibilityWatch),
+        #[prost(message, tag = "81")]
+        AccessibilityTree(super::AccessibilityTree),
+        #[prost(message, tag = "82")]
+        AccessibilityAction(super::AccessibilityAction),
+        #[prost(message, tag = "83")]
+        AccessibilityActionResult(super::AccessibilityActionResult),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -987,6 +1140,61 @@ impl FileAction {
             "FILE_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
             "FILE_ACTION_VIEW" => Some(Self::View),
             "FILE_ACTION_SEND" => Some(Self::Send),
+            _ => None,
+        }
+    }
+}
+/// What can be done to an accessibility node, as the host asks it and as a node says it
+/// supports.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum NodeAction {
+    Unspecified = 0,
+    /// Press it, as a tap would, without touching the screen.
+    Click = 1,
+    LongClick = 2,
+    /// Replace an editable node's text with AccessibilityAction.text.
+    SetText = 3,
+    /// Scroll a scrollable node by a page, forward (down or right) or backward.
+    ScrollForward = 4,
+    ScrollBackward = 5,
+    /// Give it the input focus.
+    Focus = 6,
+    /// Give it the accessibility focus, which a screen reader's cursor follows.
+    AccessibilityFocus = 7,
+    /// Select it, as an item of a list or a tab.
+    Select = 8,
+}
+impl NodeAction {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "NODE_ACTION_UNSPECIFIED",
+            Self::Click => "NODE_ACTION_CLICK",
+            Self::LongClick => "NODE_ACTION_LONG_CLICK",
+            Self::SetText => "NODE_ACTION_SET_TEXT",
+            Self::ScrollForward => "NODE_ACTION_SCROLL_FORWARD",
+            Self::ScrollBackward => "NODE_ACTION_SCROLL_BACKWARD",
+            Self::Focus => "NODE_ACTION_FOCUS",
+            Self::AccessibilityFocus => "NODE_ACTION_ACCESSIBILITY_FOCUS",
+            Self::Select => "NODE_ACTION_SELECT",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "NODE_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
+            "NODE_ACTION_CLICK" => Some(Self::Click),
+            "NODE_ACTION_LONG_CLICK" => Some(Self::LongClick),
+            "NODE_ACTION_SET_TEXT" => Some(Self::SetText),
+            "NODE_ACTION_SCROLL_FORWARD" => Some(Self::ScrollForward),
+            "NODE_ACTION_SCROLL_BACKWARD" => Some(Self::ScrollBackward),
+            "NODE_ACTION_FOCUS" => Some(Self::Focus),
+            "NODE_ACTION_ACCESSIBILITY_FOCUS" => Some(Self::AccessibilityFocus),
+            "NODE_ACTION_SELECT" => Some(Self::Select),
             _ => None,
         }
     }

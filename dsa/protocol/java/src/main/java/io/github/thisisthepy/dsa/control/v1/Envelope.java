@@ -61,6 +61,10 @@ public  final class Envelope extends
     OPEN_FILE(52),
     FILE_CHUNK(53),
     FILE_PROGRESS(54),
+    ACCESSIBILITY_WATCH(80),
+    ACCESSIBILITY_TREE(81),
+    ACCESSIBILITY_ACTION(82),
+    ACCESSIBILITY_ACTION_RESULT(83),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -117,6 +121,10 @@ public  final class Envelope extends
         case 52: return OPEN_FILE;
         case 53: return FILE_CHUNK;
         case 54: return FILE_PROGRESS;
+        case 80: return ACCESSIBILITY_WATCH;
+        case 81: return ACCESSIBILITY_TREE;
+        case 82: return ACCESSIBILITY_ACTION;
+        case 83: return ACCESSIBILITY_ACTION_RESULT;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -2183,6 +2191,206 @@ public  final class Envelope extends
    */
   private void clearFileProgress() {
     if (bodyCase_ == 54) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int ACCESSIBILITY_WATCH_FIELD_NUMBER = 80;
+  /**
+   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+   */
+  @java.lang.Override
+  public boolean hasAccessibilityWatch() {
+    return bodyCase_ == 80;
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.AccessibilityWatch getAccessibilityWatch() {
+    if (bodyCase_ == 80) {
+       return (io.github.thisisthepy.dsa.control.v1.AccessibilityWatch) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.AccessibilityWatch.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+   */
+  private void setAccessibilityWatch(io.github.thisisthepy.dsa.control.v1.AccessibilityWatch value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 80;
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+   */
+  private void mergeAccessibilityWatch(io.github.thisisthepy.dsa.control.v1.AccessibilityWatch value) {
+    value.getClass();
+  if (bodyCase_ == 80 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.AccessibilityWatch.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.AccessibilityWatch.newBuilder((io.github.thisisthepy.dsa.control.v1.AccessibilityWatch) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 80;
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+   */
+  private void clearAccessibilityWatch() {
+    if (bodyCase_ == 80) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int ACCESSIBILITY_TREE_FIELD_NUMBER = 81;
+  /**
+   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+   */
+  @java.lang.Override
+  public boolean hasAccessibilityTree() {
+    return bodyCase_ == 81;
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.AccessibilityTree getAccessibilityTree() {
+    if (bodyCase_ == 81) {
+       return (io.github.thisisthepy.dsa.control.v1.AccessibilityTree) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.AccessibilityTree.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+   */
+  private void setAccessibilityTree(io.github.thisisthepy.dsa.control.v1.AccessibilityTree value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 81;
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+   */
+  private void mergeAccessibilityTree(io.github.thisisthepy.dsa.control.v1.AccessibilityTree value) {
+    value.getClass();
+  if (bodyCase_ == 81 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.AccessibilityTree.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.AccessibilityTree.newBuilder((io.github.thisisthepy.dsa.control.v1.AccessibilityTree) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 81;
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+   */
+  private void clearAccessibilityTree() {
+    if (bodyCase_ == 81) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int ACCESSIBILITY_ACTION_FIELD_NUMBER = 82;
+  /**
+   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+   */
+  @java.lang.Override
+  public boolean hasAccessibilityAction() {
+    return bodyCase_ == 82;
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.AccessibilityAction getAccessibilityAction() {
+    if (bodyCase_ == 82) {
+       return (io.github.thisisthepy.dsa.control.v1.AccessibilityAction) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.AccessibilityAction.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+   */
+  private void setAccessibilityAction(io.github.thisisthepy.dsa.control.v1.AccessibilityAction value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 82;
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+   */
+  private void mergeAccessibilityAction(io.github.thisisthepy.dsa.control.v1.AccessibilityAction value) {
+    value.getClass();
+  if (bodyCase_ == 82 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.AccessibilityAction.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.AccessibilityAction.newBuilder((io.github.thisisthepy.dsa.control.v1.AccessibilityAction) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 82;
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+   */
+  private void clearAccessibilityAction() {
+    if (bodyCase_ == 82) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int ACCESSIBILITY_ACTION_RESULT_FIELD_NUMBER = 83;
+  /**
+   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+   */
+  @java.lang.Override
+  public boolean hasAccessibilityActionResult() {
+    return bodyCase_ == 83;
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult getAccessibilityActionResult() {
+    if (bodyCase_ == 83) {
+       return (io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+   */
+  private void setAccessibilityActionResult(io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 83;
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+   */
+  private void mergeAccessibilityActionResult(io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult value) {
+    value.getClass();
+  if (bodyCase_ == 83 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult.newBuilder((io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 83;
+  }
+  /**
+   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+   */
+  private void clearAccessibilityActionResult() {
+    if (bodyCase_ == 83) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -4267,6 +4475,198 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+     */
+    @java.lang.Override
+    public boolean hasAccessibilityWatch() {
+      return instance.hasAccessibilityWatch();
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.AccessibilityWatch getAccessibilityWatch() {
+      return instance.getAccessibilityWatch();
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+     */
+    public Builder setAccessibilityWatch(io.github.thisisthepy.dsa.control.v1.AccessibilityWatch value) {
+      copyOnWrite();
+      instance.setAccessibilityWatch(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+     */
+    public Builder setAccessibilityWatch(
+        io.github.thisisthepy.dsa.control.v1.AccessibilityWatch.Builder builderForValue) {
+      copyOnWrite();
+      instance.setAccessibilityWatch(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+     */
+    public Builder mergeAccessibilityWatch(io.github.thisisthepy.dsa.control.v1.AccessibilityWatch value) {
+      copyOnWrite();
+      instance.mergeAccessibilityWatch(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+     */
+    public Builder clearAccessibilityWatch() {
+      copyOnWrite();
+      instance.clearAccessibilityWatch();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+     */
+    @java.lang.Override
+    public boolean hasAccessibilityTree() {
+      return instance.hasAccessibilityTree();
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.AccessibilityTree getAccessibilityTree() {
+      return instance.getAccessibilityTree();
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+     */
+    public Builder setAccessibilityTree(io.github.thisisthepy.dsa.control.v1.AccessibilityTree value) {
+      copyOnWrite();
+      instance.setAccessibilityTree(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+     */
+    public Builder setAccessibilityTree(
+        io.github.thisisthepy.dsa.control.v1.AccessibilityTree.Builder builderForValue) {
+      copyOnWrite();
+      instance.setAccessibilityTree(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+     */
+    public Builder mergeAccessibilityTree(io.github.thisisthepy.dsa.control.v1.AccessibilityTree value) {
+      copyOnWrite();
+      instance.mergeAccessibilityTree(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+     */
+    public Builder clearAccessibilityTree() {
+      copyOnWrite();
+      instance.clearAccessibilityTree();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+     */
+    @java.lang.Override
+    public boolean hasAccessibilityAction() {
+      return instance.hasAccessibilityAction();
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.AccessibilityAction getAccessibilityAction() {
+      return instance.getAccessibilityAction();
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+     */
+    public Builder setAccessibilityAction(io.github.thisisthepy.dsa.control.v1.AccessibilityAction value) {
+      copyOnWrite();
+      instance.setAccessibilityAction(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+     */
+    public Builder setAccessibilityAction(
+        io.github.thisisthepy.dsa.control.v1.AccessibilityAction.Builder builderForValue) {
+      copyOnWrite();
+      instance.setAccessibilityAction(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+     */
+    public Builder mergeAccessibilityAction(io.github.thisisthepy.dsa.control.v1.AccessibilityAction value) {
+      copyOnWrite();
+      instance.mergeAccessibilityAction(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+     */
+    public Builder clearAccessibilityAction() {
+      copyOnWrite();
+      instance.clearAccessibilityAction();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+     */
+    @java.lang.Override
+    public boolean hasAccessibilityActionResult() {
+      return instance.hasAccessibilityActionResult();
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult getAccessibilityActionResult() {
+      return instance.getAccessibilityActionResult();
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+     */
+    public Builder setAccessibilityActionResult(io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult value) {
+      copyOnWrite();
+      instance.setAccessibilityActionResult(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+     */
+    public Builder setAccessibilityActionResult(
+        io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult.Builder builderForValue) {
+      copyOnWrite();
+      instance.setAccessibilityActionResult(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+     */
+    public Builder mergeAccessibilityActionResult(io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult value) {
+      copyOnWrite();
+      instance.mergeAccessibilityActionResult(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+     */
+    public Builder clearAccessibilityActionResult() {
+      copyOnWrite();
+      instance.clearAccessibilityActionResult();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -4326,14 +4726,19 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.CancelInstall.class,
             io.github.thisisthepy.dsa.control.v1.InstallProgress.class,
             io.github.thisisthepy.dsa.control.v1.InstallResult.class,
+            io.github.thisisthepy.dsa.control.v1.AccessibilityWatch.class,
+            io.github.thisisthepy.dsa.control.v1.AccessibilityTree.class,
+            io.github.thisisthepy.dsa.control.v1.AccessibilityAction.class,
+            io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult.class,
           };
           java.lang.String info =
-              "\u0000)\u0001\u0000\u0001@)\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<\u0000" +
+              "\u0000-\u0001\u0000\u0001S-\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<\u0000" +
               "\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<\u0000\u000b" +
               "<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012<\u0000\u0013" +
               "<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000\u0019<\u0000" +
               "\u001a<\u0000\u001b<\u0000\u001c<\u0000\u001d<\u0000(<\u0000)<\u0000*<\u00002<\u0000" +
-              "3<\u00004<\u00005<\u00006<\u0000<<\u0000=<\u0000><\u0000?<\u0000@<\u0000";
+              "3<\u00004<\u00005<\u00006<\u0000<<\u0000=<\u0000><\u0000?<\u0000@<\u0000P<\u0000" +
+              "Q<\u0000R<\u0000S<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through
