@@ -315,3 +315,16 @@ starting a second VM, for any project that wants it.
 구간은 `app.pointer`, `agent.inject`, `driver.flush`, `hwc.frame`, `wm.frame`, `app.present` 순이다. 호스트와 게스트의 시계 차이는 합친 간격에 포함된다.
 
 **결정**: 위 원인을 고친다(PR 참조). 수치 예산은 실측 뒤에 정한다.
+
+## R6. 커널 명령줄에서 같은 `androidboot` 값을 두 번 주면 어느 쪽이 이기는가 (FR-4)
+
+**배경**: 게스트 디스플레이 크기를 호스트가 정하려면, 이미지의 `kernel_cmdline`에 이미 있는 `androidboot.dsa.display_width` 뒤에 값을 덧붙이면 되는지 확인해야 했다.
+
+**확인 방법**: AOSP `system/core/init/property_service.cpp`(`android16-release`)를 읽었다. 실제 부팅으로는 확인하지 않았다.
+
+**결과**:
+- `PropertyInit`은 `ProcessKernelDt`, `ProcessKernelCmdline`, `ProcessBootconfig` 순으로 부른다.
+- `PropertySet`은 `ro.*` 속성을 한 번만 쓰게 하고, 다시 쓰면 "Read-only property was already set"으로 거절한다.
+- 따라서 **앞의 값이 이긴다**. 뒤에 덧붙인 값도, bootconfig의 값도 이미지의 명령줄 값을 덮지 못한다.
+
+**결정**: 호스트는 이미지의 너비와 높이 단어를 지우고 자기 값을 넣는다(`dsa_host_core::guest_display::with_display_size`).
