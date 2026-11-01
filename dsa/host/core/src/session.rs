@@ -60,8 +60,8 @@ use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{self, envelope::Body};
 use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 
-use crate::clock_trace::ClockTrace;
 use crate::clipboard;
+use crate::clock_trace::ClockTrace;
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::PointerEvent;
 use crate::keys::KeyEvent;
