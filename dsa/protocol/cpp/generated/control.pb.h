@@ -63,6 +63,12 @@ extern ClipboardSharingDefaultTypeInternal _ClipboardSharing_default_instance_;
 class ClipboardText;
 struct ClipboardTextDefaultTypeInternal;
 extern ClipboardTextDefaultTypeInternal _ClipboardText_default_instance_;
+class ClockAnswer;
+struct ClockAnswerDefaultTypeInternal;
+extern ClockAnswerDefaultTypeInternal _ClockAnswer_default_instance_;
+class ClockProbe;
+struct ClockProbeDefaultTypeInternal;
+extern ClockProbeDefaultTypeInternal _ClockProbe_default_instance_;
 class CloseTask;
 struct CloseTaskDefaultTypeInternal;
 extern CloseTaskDefaultTypeInternal _CloseTask_default_instance_;
@@ -166,6 +172,8 @@ template<> ::dsa::control::v1::AuthChallenge* Arena::CreateMaybeMessage<::dsa::c
 template<> ::dsa::control::v1::AuthProof* Arena::CreateMaybeMessage<::dsa::control::v1::AuthProof>(Arena*);
 template<> ::dsa::control::v1::ClipboardSharing* Arena::CreateMaybeMessage<::dsa::control::v1::ClipboardSharing>(Arena*);
 template<> ::dsa::control::v1::ClipboardText* Arena::CreateMaybeMessage<::dsa::control::v1::ClipboardText>(Arena*);
+template<> ::dsa::control::v1::ClockAnswer* Arena::CreateMaybeMessage<::dsa::control::v1::ClockAnswer>(Arena*);
+template<> ::dsa::control::v1::ClockProbe* Arena::CreateMaybeMessage<::dsa::control::v1::ClockProbe>(Arena*);
 template<> ::dsa::control::v1::CloseTask* Arena::CreateMaybeMessage<::dsa::control::v1::CloseTask>(Arena*);
 template<> ::dsa::control::v1::DeviceIdle* Arena::CreateMaybeMessage<::dsa::control::v1::DeviceIdle>(Arena*);
 template<> ::dsa::control::v1::Envelope* Arena::CreateMaybeMessage<::dsa::control::v1::Envelope>(Arena*);
@@ -5994,6 +6002,277 @@ class FileProgress final :
 };
 // -------------------------------------------------------------------
 
+class ClockProbe final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.ClockProbe) */ {
+ public:
+  inline ClockProbe() : ClockProbe(nullptr) {}
+  ~ClockProbe() override;
+  explicit PROTOBUF_CONSTEXPR ClockProbe(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  ClockProbe(const ClockProbe& from);
+  ClockProbe(ClockProbe&& from) noexcept
+    : ClockProbe() {
+    *this = ::std::move(from);
+  }
+
+  inline ClockProbe& operator=(const ClockProbe& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ClockProbe& operator=(ClockProbe&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ClockProbe& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const ClockProbe* internal_default_instance() {
+    return reinterpret_cast<const ClockProbe*>(
+               &_ClockProbe_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    36;
+
+  friend void swap(ClockProbe& a, ClockProbe& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ClockProbe* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(ClockProbe* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  ClockProbe* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ClockProbe>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const ClockProbe& from);
+  void MergeFrom(const ClockProbe& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(ClockProbe* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.ClockProbe";
+  }
+  protected:
+  explicit ClockProbe(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kHostSentNsFieldNumber = 1,
+  };
+  // uint64 host_sent_ns = 1;
+  void clear_host_sent_ns();
+  uint64_t host_sent_ns() const;
+  void set_host_sent_ns(uint64_t value);
+  private:
+  uint64_t _internal_host_sent_ns() const;
+  void _internal_set_host_sent_ns(uint64_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.ClockProbe)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    uint64_t host_sent_ns_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class ClockAnswer final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.ClockAnswer) */ {
+ public:
+  inline ClockAnswer() : ClockAnswer(nullptr) {}
+  ~ClockAnswer() override;
+  explicit PROTOBUF_CONSTEXPR ClockAnswer(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  ClockAnswer(const ClockAnswer& from);
+  ClockAnswer(ClockAnswer&& from) noexcept
+    : ClockAnswer() {
+    *this = ::std::move(from);
+  }
+
+  inline ClockAnswer& operator=(const ClockAnswer& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ClockAnswer& operator=(ClockAnswer&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ClockAnswer& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const ClockAnswer* internal_default_instance() {
+    return reinterpret_cast<const ClockAnswer*>(
+               &_ClockAnswer_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    37;
+
+  friend void swap(ClockAnswer& a, ClockAnswer& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ClockAnswer* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(ClockAnswer* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  ClockAnswer* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ClockAnswer>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const ClockAnswer& from);
+  void MergeFrom(const ClockAnswer& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(ClockAnswer* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.ClockAnswer";
+  }
+  protected:
+  explicit ClockAnswer(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kHostSentNsFieldNumber = 1,
+    kGuestMonoNsFieldNumber = 2,
+  };
+  // uint64 host_sent_ns = 1;
+  void clear_host_sent_ns();
+  uint64_t host_sent_ns() const;
+  void set_host_sent_ns(uint64_t value);
+  private:
+  uint64_t _internal_host_sent_ns() const;
+  void _internal_set_host_sent_ns(uint64_t value);
+  public:
+
+  // uint64 guest_mono_ns = 2;
+  void clear_guest_mono_ns();
+  uint64_t guest_mono_ns() const;
+  void set_guest_mono_ns(uint64_t value);
+  private:
+  uint64_t _internal_guest_mono_ns() const;
+  void _internal_set_guest_mono_ns(uint64_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.ClockAnswer)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    uint64_t host_sent_ns_;
+    uint64_t guest_mono_ns_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class Envelope final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.Envelope) */ {
  public:
@@ -6055,6 +6334,8 @@ class Envelope final :
     kGuestBoot = 25,
     kClipboardText = 26,
     kClipboardSharing = 27,
+    kClockProbe = 28,
+    kClockAnswer = 29,
     kScreenState = 40,
     kPowerState = 41,
     kDeviceIdle = 42,
@@ -6071,7 +6352,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    36;
+    38;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -6161,6 +6442,8 @@ class Envelope final :
     kGuestBootFieldNumber = 25,
     kClipboardTextFieldNumber = 26,
     kClipboardSharingFieldNumber = 27,
+    kClockProbeFieldNumber = 28,
+    kClockAnswerFieldNumber = 29,
     kScreenStateFieldNumber = 40,
     kPowerStateFieldNumber = 41,
     kDeviceIdleFieldNumber = 42,
@@ -6638,6 +6921,42 @@ class Envelope final :
       ::dsa::control::v1::ClipboardSharing* clipboard_sharing);
   ::dsa::control::v1::ClipboardSharing* unsafe_arena_release_clipboard_sharing();
 
+  // .dsa.control.v1.ClockProbe clock_probe = 28;
+  bool has_clock_probe() const;
+  private:
+  bool _internal_has_clock_probe() const;
+  public:
+  void clear_clock_probe();
+  const ::dsa::control::v1::ClockProbe& clock_probe() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::ClockProbe* release_clock_probe();
+  ::dsa::control::v1::ClockProbe* mutable_clock_probe();
+  void set_allocated_clock_probe(::dsa::control::v1::ClockProbe* clock_probe);
+  private:
+  const ::dsa::control::v1::ClockProbe& _internal_clock_probe() const;
+  ::dsa::control::v1::ClockProbe* _internal_mutable_clock_probe();
+  public:
+  void unsafe_arena_set_allocated_clock_probe(
+      ::dsa::control::v1::ClockProbe* clock_probe);
+  ::dsa::control::v1::ClockProbe* unsafe_arena_release_clock_probe();
+
+  // .dsa.control.v1.ClockAnswer clock_answer = 29;
+  bool has_clock_answer() const;
+  private:
+  bool _internal_has_clock_answer() const;
+  public:
+  void clear_clock_answer();
+  const ::dsa::control::v1::ClockAnswer& clock_answer() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::ClockAnswer* release_clock_answer();
+  ::dsa::control::v1::ClockAnswer* mutable_clock_answer();
+  void set_allocated_clock_answer(::dsa::control::v1::ClockAnswer* clock_answer);
+  private:
+  const ::dsa::control::v1::ClockAnswer& _internal_clock_answer() const;
+  ::dsa::control::v1::ClockAnswer* _internal_mutable_clock_answer();
+  public:
+  void unsafe_arena_set_allocated_clock_answer(
+      ::dsa::control::v1::ClockAnswer* clock_answer);
+  ::dsa::control::v1::ClockAnswer* unsafe_arena_release_clock_answer();
+
   // .dsa.control.v1.ScreenState screen_state = 40;
   bool has_screen_state() const;
   private:
@@ -6813,6 +7132,8 @@ class Envelope final :
   void set_has_guest_boot();
   void set_has_clipboard_text();
   void set_has_clipboard_sharing();
+  void set_has_clock_probe();
+  void set_has_clock_answer();
   void set_has_screen_state();
   void set_has_power_state();
   void set_has_device_idle();
@@ -6858,6 +7179,8 @@ class Envelope final :
       ::dsa::control::v1::GuestBoot* guest_boot_;
       ::dsa::control::v1::ClipboardText* clipboard_text_;
       ::dsa::control::v1::ClipboardSharing* clipboard_sharing_;
+      ::dsa::control::v1::ClockProbe* clock_probe_;
+      ::dsa::control::v1::ClockAnswer* clock_answer_;
       ::dsa::control::v1::ScreenState* screen_state_;
       ::dsa::control::v1::PowerState* power_state_;
       ::dsa::control::v1::DeviceIdle* device_idle_;
@@ -10182,6 +10505,74 @@ inline void FileProgress::set_allocated_error(std::string* error) {
 
 // -------------------------------------------------------------------
 
+// ClockProbe
+
+// uint64 host_sent_ns = 1;
+inline void ClockProbe::clear_host_sent_ns() {
+  _impl_.host_sent_ns_ = uint64_t{0u};
+}
+inline uint64_t ClockProbe::_internal_host_sent_ns() const {
+  return _impl_.host_sent_ns_;
+}
+inline uint64_t ClockProbe::host_sent_ns() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ClockProbe.host_sent_ns)
+  return _internal_host_sent_ns();
+}
+inline void ClockProbe::_internal_set_host_sent_ns(uint64_t value) {
+  
+  _impl_.host_sent_ns_ = value;
+}
+inline void ClockProbe::set_host_sent_ns(uint64_t value) {
+  _internal_set_host_sent_ns(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ClockProbe.host_sent_ns)
+}
+
+// -------------------------------------------------------------------
+
+// ClockAnswer
+
+// uint64 host_sent_ns = 1;
+inline void ClockAnswer::clear_host_sent_ns() {
+  _impl_.host_sent_ns_ = uint64_t{0u};
+}
+inline uint64_t ClockAnswer::_internal_host_sent_ns() const {
+  return _impl_.host_sent_ns_;
+}
+inline uint64_t ClockAnswer::host_sent_ns() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ClockAnswer.host_sent_ns)
+  return _internal_host_sent_ns();
+}
+inline void ClockAnswer::_internal_set_host_sent_ns(uint64_t value) {
+  
+  _impl_.host_sent_ns_ = value;
+}
+inline void ClockAnswer::set_host_sent_ns(uint64_t value) {
+  _internal_set_host_sent_ns(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ClockAnswer.host_sent_ns)
+}
+
+// uint64 guest_mono_ns = 2;
+inline void ClockAnswer::clear_guest_mono_ns() {
+  _impl_.guest_mono_ns_ = uint64_t{0u};
+}
+inline uint64_t ClockAnswer::_internal_guest_mono_ns() const {
+  return _impl_.guest_mono_ns_;
+}
+inline uint64_t ClockAnswer::guest_mono_ns() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ClockAnswer.guest_mono_ns)
+  return _internal_guest_mono_ns();
+}
+inline void ClockAnswer::_internal_set_guest_mono_ns(uint64_t value) {
+  
+  _impl_.guest_mono_ns_ = value;
+}
+inline void ClockAnswer::set_guest_mono_ns(uint64_t value) {
+  _internal_set_guest_mono_ns(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ClockAnswer.guest_mono_ns)
+}
+
+// -------------------------------------------------------------------
+
 // Envelope
 
 // .dsa.control.v1.Hello hello = 1;
@@ -12108,6 +12499,154 @@ inline ::dsa::control::v1::ClipboardSharing* Envelope::mutable_clipboard_sharing
   return _msg;
 }
 
+// .dsa.control.v1.ClockProbe clock_probe = 28;
+inline bool Envelope::_internal_has_clock_probe() const {
+  return body_case() == kClockProbe;
+}
+inline bool Envelope::has_clock_probe() const {
+  return _internal_has_clock_probe();
+}
+inline void Envelope::set_has_clock_probe() {
+  _impl_._oneof_case_[0] = kClockProbe;
+}
+inline void Envelope::clear_clock_probe() {
+  if (_internal_has_clock_probe()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.clock_probe_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::ClockProbe* Envelope::release_clock_probe() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.clock_probe)
+  if (_internal_has_clock_probe()) {
+    clear_has_body();
+    ::dsa::control::v1::ClockProbe* temp = _impl_.body_.clock_probe_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.clock_probe_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::ClockProbe& Envelope::_internal_clock_probe() const {
+  return _internal_has_clock_probe()
+      ? *_impl_.body_.clock_probe_
+      : reinterpret_cast< ::dsa::control::v1::ClockProbe&>(::dsa::control::v1::_ClockProbe_default_instance_);
+}
+inline const ::dsa::control::v1::ClockProbe& Envelope::clock_probe() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.clock_probe)
+  return _internal_clock_probe();
+}
+inline ::dsa::control::v1::ClockProbe* Envelope::unsafe_arena_release_clock_probe() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.clock_probe)
+  if (_internal_has_clock_probe()) {
+    clear_has_body();
+    ::dsa::control::v1::ClockProbe* temp = _impl_.body_.clock_probe_;
+    _impl_.body_.clock_probe_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_clock_probe(::dsa::control::v1::ClockProbe* clock_probe) {
+  clear_body();
+  if (clock_probe) {
+    set_has_clock_probe();
+    _impl_.body_.clock_probe_ = clock_probe;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.clock_probe)
+}
+inline ::dsa::control::v1::ClockProbe* Envelope::_internal_mutable_clock_probe() {
+  if (!_internal_has_clock_probe()) {
+    clear_body();
+    set_has_clock_probe();
+    _impl_.body_.clock_probe_ = CreateMaybeMessage< ::dsa::control::v1::ClockProbe >(GetArenaForAllocation());
+  }
+  return _impl_.body_.clock_probe_;
+}
+inline ::dsa::control::v1::ClockProbe* Envelope::mutable_clock_probe() {
+  ::dsa::control::v1::ClockProbe* _msg = _internal_mutable_clock_probe();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.clock_probe)
+  return _msg;
+}
+
+// .dsa.control.v1.ClockAnswer clock_answer = 29;
+inline bool Envelope::_internal_has_clock_answer() const {
+  return body_case() == kClockAnswer;
+}
+inline bool Envelope::has_clock_answer() const {
+  return _internal_has_clock_answer();
+}
+inline void Envelope::set_has_clock_answer() {
+  _impl_._oneof_case_[0] = kClockAnswer;
+}
+inline void Envelope::clear_clock_answer() {
+  if (_internal_has_clock_answer()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.clock_answer_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::ClockAnswer* Envelope::release_clock_answer() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.clock_answer)
+  if (_internal_has_clock_answer()) {
+    clear_has_body();
+    ::dsa::control::v1::ClockAnswer* temp = _impl_.body_.clock_answer_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.clock_answer_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::ClockAnswer& Envelope::_internal_clock_answer() const {
+  return _internal_has_clock_answer()
+      ? *_impl_.body_.clock_answer_
+      : reinterpret_cast< ::dsa::control::v1::ClockAnswer&>(::dsa::control::v1::_ClockAnswer_default_instance_);
+}
+inline const ::dsa::control::v1::ClockAnswer& Envelope::clock_answer() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.clock_answer)
+  return _internal_clock_answer();
+}
+inline ::dsa::control::v1::ClockAnswer* Envelope::unsafe_arena_release_clock_answer() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.clock_answer)
+  if (_internal_has_clock_answer()) {
+    clear_has_body();
+    ::dsa::control::v1::ClockAnswer* temp = _impl_.body_.clock_answer_;
+    _impl_.body_.clock_answer_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_clock_answer(::dsa::control::v1::ClockAnswer* clock_answer) {
+  clear_body();
+  if (clock_answer) {
+    set_has_clock_answer();
+    _impl_.body_.clock_answer_ = clock_answer;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.clock_answer)
+}
+inline ::dsa::control::v1::ClockAnswer* Envelope::_internal_mutable_clock_answer() {
+  if (!_internal_has_clock_answer()) {
+    clear_body();
+    set_has_clock_answer();
+    _impl_.body_.clock_answer_ = CreateMaybeMessage< ::dsa::control::v1::ClockAnswer >(GetArenaForAllocation());
+  }
+  return _impl_.body_.clock_answer_;
+}
+inline ::dsa::control::v1::ClockAnswer* Envelope::mutable_clock_answer() {
+  ::dsa::control::v1::ClockAnswer* _msg = _internal_mutable_clock_answer();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.clock_answer)
+  return _msg;
+}
+
 // .dsa.control.v1.ScreenState screen_state = 40;
 inline bool Envelope::_internal_has_screen_state() const {
   return body_case() == kScreenState;
@@ -12712,6 +13251,10 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

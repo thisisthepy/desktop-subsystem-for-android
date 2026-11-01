@@ -501,12 +501,34 @@ pub struct FileProgress {
     #[prost(string, tag = "3")]
     pub error: ::prost::alloc::string::String,
 }
+/// Host to guest, to the control daemon: a probe that pairs the host's clock with the guest's,
+/// so trace lines from both can be put on one time line. The daemon answers at once with
+/// ClockAnswer and passes the probe to no one else. Sent only while the host traces input.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ClockProbe {
+    /// When the host sent the probe, in nanoseconds on its monotonic clock, which every host
+    /// process shares.
+    #[prost(uint64, tag = "1")]
+    pub host_sent_ns: u64,
+}
+/// Guest to host, from the control daemon: the answer to a ClockProbe, sent as soon as the
+/// probe is read.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ClockAnswer {
+    /// The probe's host_sent_ns, unchanged.
+    #[prost(uint64, tag = "1")]
+    pub host_sent_ns: u64,
+    /// When the daemon read the probe, in nanoseconds on the guest's CLOCK_MONOTONIC, the clock
+    /// the guest's trace lines use.
+    #[prost(uint64, tag = "2")]
+    pub guest_mono_ns: u64,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 40, 41, 42, 50, 51, 52, 53, 54"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 42, 50, 51, 52, 53, 54"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -566,6 +588,10 @@ pub mod envelope {
         ClipboardText(super::ClipboardText),
         #[prost(message, tag = "27")]
         ClipboardSharing(super::ClipboardSharing),
+        #[prost(message, tag = "28")]
+        ClockProbe(super::ClockProbe),
+        #[prost(message, tag = "29")]
+        ClockAnswer(super::ClockAnswer),
         #[prost(message, tag = "40")]
         ScreenState(super::ScreenState),
         #[prost(message, tag = "41")]
