@@ -54,10 +54,10 @@ mod windows_host {
         SetConsoleCtrlHandler, SetStdHandle, STD_ERROR_HANDLE,
     };
 
+    use dsa_host_core::guest_display::{display_for, with_display_size};
     use dsa_host_core::handshake::ControlHandshake;
     use dsa_host_core::power::PowerHub;
     use dsa_host_core::session::{Session, SessionState};
-    use dsa_host_core::guest_display::{display_for, with_display_size};
     use dsa_host_windows::account::current_user_sid;
     use dsa_host_windows::android_vm::AndroidVmLauncher;
     use dsa_host_windows::guid::Guid;
