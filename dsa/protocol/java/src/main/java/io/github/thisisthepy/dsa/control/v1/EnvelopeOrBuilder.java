@@ -272,6 +272,28 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.GuestBoot getGuestBoot();
 
   /**
+   * <code>.dsa.control.v1.ClipboardText clipboard_text = 26;</code>
+   * @return Whether the clipboardText field is set.
+   */
+  boolean hasClipboardText();
+  /**
+   * <code>.dsa.control.v1.ClipboardText clipboard_text = 26;</code>
+   * @return The clipboardText.
+   */
+  io.github.thisisthepy.dsa.control.v1.ClipboardText getClipboardText();
+
+  /**
+   * <code>.dsa.control.v1.ClipboardSharing clipboard_sharing = 27;</code>
+   * @return Whether the clipboardSharing field is set.
+   */
+  boolean hasClipboardSharing();
+  /**
+   * <code>.dsa.control.v1.ClipboardSharing clipboard_sharing = 27;</code>
+   * @return The clipboardSharing.
+   */
+  io.github.thisisthepy.dsa.control.v1.ClipboardSharing getClipboardSharing();
+
+  /**
    * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
    * @return Whether the clockProbe field is set.
    */

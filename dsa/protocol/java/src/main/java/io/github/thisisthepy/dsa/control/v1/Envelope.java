@@ -44,6 +44,8 @@ public  final class Envelope extends
     INSTALLED_APPS(23),
     AGENT_CONNECTED(24),
     GUEST_BOOT(25),
+    CLIPBOARD_TEXT(26),
+    CLIPBOARD_SHARING(27),
     CLOCK_PROBE(28),
     CLOCK_ANSWER(29),
     SCREEN_STATE(40),
@@ -88,6 +90,8 @@ public  final class Envelope extends
         case 23: return INSTALLED_APPS;
         case 24: return AGENT_CONNECTED;
         case 25: return GUEST_BOOT;
+        case 26: return CLIPBOARD_TEXT;
+        case 27: return CLIPBOARD_SHARING;
         case 28: return CLOCK_PROBE;
         case 29: return CLOCK_ANSWER;
         case 40: return SCREEN_STATE;
@@ -1309,6 +1313,106 @@ public  final class Envelope extends
    */
   private void clearGuestBoot() {
     if (bodyCase_ == 25) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int CLIPBOARD_TEXT_FIELD_NUMBER = 26;
+  /**
+   * <code>.dsa.control.v1.ClipboardText clipboard_text = 26;</code>
+   */
+  @java.lang.Override
+  public boolean hasClipboardText() {
+    return bodyCase_ == 26;
+  }
+  /**
+   * <code>.dsa.control.v1.ClipboardText clipboard_text = 26;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ClipboardText getClipboardText() {
+    if (bodyCase_ == 26) {
+       return (io.github.thisisthepy.dsa.control.v1.ClipboardText) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ClipboardText.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ClipboardText clipboard_text = 26;</code>
+   */
+  private void setClipboardText(io.github.thisisthepy.dsa.control.v1.ClipboardText value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 26;
+  }
+  /**
+   * <code>.dsa.control.v1.ClipboardText clipboard_text = 26;</code>
+   */
+  private void mergeClipboardText(io.github.thisisthepy.dsa.control.v1.ClipboardText value) {
+    value.getClass();
+  if (bodyCase_ == 26 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ClipboardText.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ClipboardText.newBuilder((io.github.thisisthepy.dsa.control.v1.ClipboardText) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 26;
+  }
+  /**
+   * <code>.dsa.control.v1.ClipboardText clipboard_text = 26;</code>
+   */
+  private void clearClipboardText() {
+    if (bodyCase_ == 26) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int CLIPBOARD_SHARING_FIELD_NUMBER = 27;
+  /**
+   * <code>.dsa.control.v1.ClipboardSharing clipboard_sharing = 27;</code>
+   */
+  @java.lang.Override
+  public boolean hasClipboardSharing() {
+    return bodyCase_ == 27;
+  }
+  /**
+   * <code>.dsa.control.v1.ClipboardSharing clipboard_sharing = 27;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ClipboardSharing getClipboardSharing() {
+    if (bodyCase_ == 27) {
+       return (io.github.thisisthepy.dsa.control.v1.ClipboardSharing) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ClipboardSharing.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ClipboardSharing clipboard_sharing = 27;</code>
+   */
+  private void setClipboardSharing(io.github.thisisthepy.dsa.control.v1.ClipboardSharing value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 27;
+  }
+  /**
+   * <code>.dsa.control.v1.ClipboardSharing clipboard_sharing = 27;</code>
+   */
+  private void mergeClipboardSharing(io.github.thisisthepy.dsa.control.v1.ClipboardSharing value) {
+    value.getClass();
+  if (bodyCase_ == 27 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ClipboardSharing.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ClipboardSharing.newBuilder((io.github.thisisthepy.dsa.control.v1.ClipboardSharing) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 27;
+  }
+  /**
+   * <code>.dsa.control.v1.ClipboardSharing clipboard_sharing = 27;</code>
+   */
+  private void clearClipboardSharing() {
+    if (bodyCase_ == 27) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -2828,6 +2932,102 @@ public  final class Envelope extends
     }
 
     /**
+     * <code>.dsa.control.v1.ClipboardText clipboard_text = 26;</code>
+     */
+    @java.lang.Override
+    public boolean hasClipboardText() {
+      return instance.hasClipboardText();
+    }
+    /**
+     * <code>.dsa.control.v1.ClipboardText clipboard_text = 26;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ClipboardText getClipboardText() {
+      return instance.getClipboardText();
+    }
+    /**
+     * <code>.dsa.control.v1.ClipboardText clipboard_text = 26;</code>
+     */
+    public Builder setClipboardText(io.github.thisisthepy.dsa.control.v1.ClipboardText value) {
+      copyOnWrite();
+      instance.setClipboardText(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ClipboardText clipboard_text = 26;</code>
+     */
+    public Builder setClipboardText(
+        io.github.thisisthepy.dsa.control.v1.ClipboardText.Builder builderForValue) {
+      copyOnWrite();
+      instance.setClipboardText(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ClipboardText clipboard_text = 26;</code>
+     */
+    public Builder mergeClipboardText(io.github.thisisthepy.dsa.control.v1.ClipboardText value) {
+      copyOnWrite();
+      instance.mergeClipboardText(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ClipboardText clipboard_text = 26;</code>
+     */
+    public Builder clearClipboardText() {
+      copyOnWrite();
+      instance.clearClipboardText();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.ClipboardSharing clipboard_sharing = 27;</code>
+     */
+    @java.lang.Override
+    public boolean hasClipboardSharing() {
+      return instance.hasClipboardSharing();
+    }
+    /**
+     * <code>.dsa.control.v1.ClipboardSharing clipboard_sharing = 27;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ClipboardSharing getClipboardSharing() {
+      return instance.getClipboardSharing();
+    }
+    /**
+     * <code>.dsa.control.v1.ClipboardSharing clipboard_sharing = 27;</code>
+     */
+    public Builder setClipboardSharing(io.github.thisisthepy.dsa.control.v1.ClipboardSharing value) {
+      copyOnWrite();
+      instance.setClipboardSharing(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ClipboardSharing clipboard_sharing = 27;</code>
+     */
+    public Builder setClipboardSharing(
+        io.github.thisisthepy.dsa.control.v1.ClipboardSharing.Builder builderForValue) {
+      copyOnWrite();
+      instance.setClipboardSharing(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ClipboardSharing clipboard_sharing = 27;</code>
+     */
+    public Builder mergeClipboardSharing(io.github.thisisthepy.dsa.control.v1.ClipboardSharing value) {
+      copyOnWrite();
+      instance.mergeClipboardSharing(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ClipboardSharing clipboard_sharing = 27;</code>
+     */
+    public Builder clearClipboardSharing() {
+      copyOnWrite();
+      instance.clearClipboardSharing();
+      return this;
+    }
+
+    /**
      * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
      */
     @java.lang.Override
@@ -3109,6 +3309,8 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.InstalledApps.class,
             io.github.thisisthepy.dsa.control.v1.AgentConnected.class,
             io.github.thisisthepy.dsa.control.v1.GuestBoot.class,
+            io.github.thisisthepy.dsa.control.v1.ClipboardText.class,
+            io.github.thisisthepy.dsa.control.v1.ClipboardSharing.class,
             io.github.thisisthepy.dsa.control.v1.ClockProbe.class,
             io.github.thisisthepy.dsa.control.v1.ClockAnswer.class,
             io.github.thisisthepy.dsa.control.v1.ScreenState.class,
@@ -3116,11 +3318,12 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.DeviceIdle.class,
           };
           java.lang.String info =
-              "\u0000\u001d\u0001\u0000\u0001*\u001d\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000" +
+              "\u0000\u001f\u0001\u0000\u0001*\u001f\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000" +
               "\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000" +
               "\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012" +
               "<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000" +
-              "\u0019<\u0000\u001c<\u0000\u001d<\u0000(<\u0000)<\u0000*<\u0000";
+              "\u0019<\u0000\u001a<\u0000\u001b<\u0000\u001c<\u0000\u001d<\u0000(<\u0000)<\u0000" +
+              "*<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through
