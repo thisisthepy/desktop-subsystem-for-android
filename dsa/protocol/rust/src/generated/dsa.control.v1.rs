@@ -341,6 +341,24 @@ pub struct DeviceIdle {
     #[prost(bool, tag = "1")]
     pub idle: bool,
 }
+/// Text on a clipboard, in either direction. Host to guest: the user's host clipboard got new
+/// text, which becomes the guest's primary clip. Guest to host: the guest's primary clip changed
+/// to text, which becomes the user's host clipboard. Neither side sends back what it was just
+/// given. A sender drops text longer than 256 KiB of UTF-8 instead of cutting it, so a paste is
+/// either the whole text or nothing.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ClipboardText {
+    #[prost(string, tag = "1")]
+    pub text: ::prost::alloc::string::String,
+}
+/// Host to guest: whether the clipboards are shared. The agent takes them to be shared when it
+/// connects; the host says so when they are not, and on every change after that. While they
+/// are not, the agent sends no ClipboardText and ignores the host's.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ClipboardSharing {
+    #[prost(bool, tag = "1")]
+    pub on: bool,
+}
 /// Host to guest: asks the agent for a GuestMemory report now, instead of at its next
 /// periodic one.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -425,7 +443,7 @@ pub struct GuestBoot {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 40, 41, 42"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 40, 41, 42"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -481,6 +499,10 @@ pub mod envelope {
         AgentConnected(super::AgentConnected),
         #[prost(message, tag = "25")]
         GuestBoot(super::GuestBoot),
+        #[prost(message, tag = "26")]
+        ClipboardText(super::ClipboardText),
+        #[prost(message, tag = "27")]
+        ClipboardSharing(super::ClipboardSharing),
         #[prost(message, tag = "40")]
         ScreenState(super::ScreenState),
         #[prost(message, tag = "41")]

@@ -118,6 +118,20 @@ pub struct SetWindowsShown {
 /// notifications, alarms and widgets stop with them. Returns at once with the status.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct FreezeSession {}
+/// Turns the connection into the caller's clipboard: after the answer (Done), the client sends
+/// a ClipboardText each time the user's host clipboard gets new text, and the service sends a
+/// ClipboardText each time the caller's Android copies text, which the client puts on the host
+/// clipboard. Neither is answered. The service passes on nothing while the user has turned
+/// clipboard sharing off. The connection lasts across restarts of the Android: the service keeps
+/// the host's latest text and gives it to the Android when it is next ready.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WatchClipboard {}
+/// Text on a clipboard, on a connection that carries the clipboard (WatchClipboard).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ClipboardText {
+    #[prost(string, tag = "1")]
+    pub text: ::prost::alloc::string::String,
+}
 /// Pointer input in a task's window, sent on a connection that streams input.
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct PointerEvent {
@@ -469,8 +483,8 @@ pub struct SetSettings {
     #[prost(message, optional, tag = "1")]
     pub settings: ::core::option::Option<Settings>,
 }
-/// The settings of the caller's DSA. `render_gpu` and `freeze` are the caller's own; the
-/// update settings are the machine's, shared by every user of it.
+/// The settings of the caller's DSA. `render_gpu`, `freeze` and `clipboard` are the caller's
+/// own; the update settings are the machine's, shared by every user of it.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Settings {
     /// The GPU the caller's window manager renders on: "display" (the GPU that drives the
@@ -501,6 +515,10 @@ pub struct Settings {
     /// change it.
     #[prost(string, tag = "8")]
     pub log_dir: ::prost::alloc::string::String,
+    /// Whether text copied on the host can be pasted in the caller's Android, and the reverse.
+    /// On unless the user turns it off.
+    #[prost(bool, tag = "9")]
+    pub clipboard: bool,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Error {
@@ -517,7 +535,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -561,6 +579,8 @@ pub mod request {
         SetWindowsShown(super::SetWindowsShown),
         #[prost(message, tag = "21")]
         FreezeSession(super::FreezeSession),
+        #[prost(message, tag = "22")]
+        WatchClipboard(super::WatchClipboard),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -597,7 +617,7 @@ pub mod response {
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
-    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10")]
+    #[prost(oneof = "envelope::Body", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11")]
     pub body: ::core::option::Option<envelope::Body>,
 }
 /// Nested message and enum types in `Envelope`.
@@ -624,6 +644,8 @@ pub mod envelope {
         ImeComposition(super::ImeComposition),
         #[prost(message, tag = "10")]
         ImeCommit(super::ImeCommit),
+        #[prost(message, tag = "11")]
+        ClipboardText(super::ClipboardText),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.

@@ -381,6 +381,32 @@ struct DeviceIdleDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DeviceIdleDefaultTypeInternal _DeviceIdle_default_instance_;
+PROTOBUF_CONSTEXPR ClipboardText::ClipboardText(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.text_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct ClipboardTextDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ClipboardTextDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ClipboardTextDefaultTypeInternal() {}
+  union {
+    ClipboardText _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ClipboardTextDefaultTypeInternal _ClipboardText_default_instance_;
+PROTOBUF_CONSTEXPR ClipboardSharing::ClipboardSharing(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.on_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct ClipboardSharingDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ClipboardSharingDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ClipboardSharingDefaultTypeInternal() {}
+  union {
+    ClipboardSharing _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ClipboardSharingDefaultTypeInternal _ClipboardSharing_default_instance_;
 PROTOBUF_CONSTEXPR RequestGuestMemory::RequestGuestMemory(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_._cached_size_)*/{}} {}
@@ -6995,6 +7021,391 @@ std::string DeviceIdle::GetTypeName() const {
 
 // ===================================================================
 
+class ClipboardText::_Internal {
+ public:
+};
+
+ClipboardText::ClipboardText(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ClipboardText)
+}
+ClipboardText::ClipboardText(const ClipboardText& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ClipboardText* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.text_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.text_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.text_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_text().empty()) {
+    _this->_impl_.text_.Set(from._internal_text(), 
+      _this->GetArenaForAllocation());
+  }
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ClipboardText)
+}
+
+inline void ClipboardText::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.text_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.text_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.text_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+ClipboardText::~ClipboardText() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ClipboardText)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ClipboardText::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.text_.Destroy();
+}
+
+void ClipboardText::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ClipboardText::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ClipboardText)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.text_.ClearToEmpty();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ClipboardText::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // string text = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          auto str = _internal_mutable_text();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ClipboardText::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ClipboardText)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // string text = 1;
+  if (!this->_internal_text().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_text().data(), static_cast<int>(this->_internal_text().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.ClipboardText.text");
+    target = stream->WriteStringMaybeAliased(
+        1, this->_internal_text(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ClipboardText)
+  return target;
+}
+
+size_t ClipboardText::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ClipboardText)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string text = 1;
+  if (!this->_internal_text().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_text());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ClipboardText::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ClipboardText*>(
+      &from));
+}
+
+void ClipboardText::MergeFrom(const ClipboardText& from) {
+  ClipboardText* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ClipboardText)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_text().empty()) {
+    _this->_internal_set_text(from._internal_text());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ClipboardText::CopyFrom(const ClipboardText& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ClipboardText)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ClipboardText::IsInitialized() const {
+  return true;
+}
+
+void ClipboardText::InternalSwap(ClipboardText* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.text_, lhs_arena,
+      &other->_impl_.text_, rhs_arena
+  );
+}
+
+std::string ClipboardText::GetTypeName() const {
+  return "dsa.control.v1.ClipboardText";
+}
+
+
+// ===================================================================
+
+class ClipboardSharing::_Internal {
+ public:
+};
+
+ClipboardSharing::ClipboardSharing(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ClipboardSharing)
+}
+ClipboardSharing::ClipboardSharing(const ClipboardSharing& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ClipboardSharing* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.on_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _this->_impl_.on_ = from._impl_.on_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ClipboardSharing)
+}
+
+inline void ClipboardSharing::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.on_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+ClipboardSharing::~ClipboardSharing() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ClipboardSharing)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ClipboardSharing::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void ClipboardSharing::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ClipboardSharing::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ClipboardSharing)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.on_ = false;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ClipboardSharing::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // bool on = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.on_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ClipboardSharing::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ClipboardSharing)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // bool on = 1;
+  if (this->_internal_on() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(1, this->_internal_on(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ClipboardSharing)
+  return target;
+}
+
+size_t ClipboardSharing::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ClipboardSharing)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // bool on = 1;
+  if (this->_internal_on() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ClipboardSharing::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ClipboardSharing*>(
+      &from));
+}
+
+void ClipboardSharing::MergeFrom(const ClipboardSharing& from) {
+  ClipboardSharing* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ClipboardSharing)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_on() != 0) {
+    _this->_internal_set_on(from._internal_on());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ClipboardSharing::CopyFrom(const ClipboardSharing& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ClipboardSharing)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ClipboardSharing::IsInitialized() const {
+  return true;
+}
+
+void ClipboardSharing::InternalSwap(ClipboardSharing* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_.on_, other->_impl_.on_);
+}
+
+std::string ClipboardSharing::GetTypeName() const {
+  return "dsa.control.v1.ClipboardSharing";
+}
+
+
+// ===================================================================
+
 class RequestGuestMemory::_Internal {
  public:
 };
@@ -8330,6 +8741,8 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::InstalledApps& installed_apps(const Envelope* msg);
   static const ::dsa::control::v1::AgentConnected& agent_connected(const Envelope* msg);
   static const ::dsa::control::v1::GuestBoot& guest_boot(const Envelope* msg);
+  static const ::dsa::control::v1::ClipboardText& clipboard_text(const Envelope* msg);
+  static const ::dsa::control::v1::ClipboardSharing& clipboard_sharing(const Envelope* msg);
   static const ::dsa::control::v1::ScreenState& screen_state(const Envelope* msg);
   static const ::dsa::control::v1::PowerState& power_state(const Envelope* msg);
   static const ::dsa::control::v1::DeviceIdle& device_idle(const Envelope* msg);
@@ -8430,6 +8843,14 @@ Envelope::_Internal::agent_connected(const Envelope* msg) {
 const ::dsa::control::v1::GuestBoot&
 Envelope::_Internal::guest_boot(const Envelope* msg) {
   return *msg->_impl_.body_.guest_boot_;
+}
+const ::dsa::control::v1::ClipboardText&
+Envelope::_Internal::clipboard_text(const Envelope* msg) {
+  return *msg->_impl_.body_.clipboard_text_;
+}
+const ::dsa::control::v1::ClipboardSharing&
+Envelope::_Internal::clipboard_sharing(const Envelope* msg) {
+  return *msg->_impl_.body_.clipboard_sharing_;
 }
 const ::dsa::control::v1::ScreenState&
 Envelope::_Internal::screen_state(const Envelope* msg) {
@@ -8803,6 +9224,36 @@ void Envelope::set_allocated_guest_boot(::dsa::control::v1::GuestBoot* guest_boo
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.guest_boot)
 }
+void Envelope::set_allocated_clipboard_text(::dsa::control::v1::ClipboardText* clipboard_text) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (clipboard_text) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(clipboard_text);
+    if (message_arena != submessage_arena) {
+      clipboard_text = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, clipboard_text, submessage_arena);
+    }
+    set_has_clipboard_text();
+    _impl_.body_.clipboard_text_ = clipboard_text;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.clipboard_text)
+}
+void Envelope::set_allocated_clipboard_sharing(::dsa::control::v1::ClipboardSharing* clipboard_sharing) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (clipboard_sharing) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(clipboard_sharing);
+    if (message_arena != submessage_arena) {
+      clipboard_sharing = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, clipboard_sharing, submessage_arena);
+    }
+    set_has_clipboard_sharing();
+    _impl_.body_.clipboard_sharing_ = clipboard_sharing;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.clipboard_sharing)
+}
 void Envelope::set_allocated_screen_state(::dsa::control::v1::ScreenState* screen_state) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
   clear_body();
@@ -8983,6 +9434,16 @@ Envelope::Envelope(const Envelope& from)
     case kGuestBoot: {
       _this->_internal_mutable_guest_boot()->::dsa::control::v1::GuestBoot::MergeFrom(
           from._internal_guest_boot());
+      break;
+    }
+    case kClipboardText: {
+      _this->_internal_mutable_clipboard_text()->::dsa::control::v1::ClipboardText::MergeFrom(
+          from._internal_clipboard_text());
+      break;
+    }
+    case kClipboardSharing: {
+      _this->_internal_mutable_clipboard_sharing()->::dsa::control::v1::ClipboardSharing::MergeFrom(
+          from._internal_clipboard_sharing());
       break;
     }
     case kScreenState: {
@@ -9183,6 +9644,18 @@ void Envelope::clear_body() {
     case kGuestBoot: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.guest_boot_;
+      }
+      break;
+    }
+    case kClipboardText: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.clipboard_text_;
+      }
+      break;
+    }
+    case kClipboardSharing: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.clipboard_sharing_;
       }
       break;
     }
@@ -9420,6 +9893,22 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.ClipboardText clipboard_text = 26;
+      case 26:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 210)) {
+          ptr = ctx->ParseMessage(_internal_mutable_clipboard_text(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.ClipboardSharing clipboard_sharing = 27;
+      case 27:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 218)) {
+          ptr = ctx->ParseMessage(_internal_mutable_clipboard_sharing(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       // .dsa.control.v1.ScreenState screen_state = 40;
       case 40:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 66)) {
@@ -9641,6 +10130,20 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::guest_boot(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.ClipboardText clipboard_text = 26;
+  if (_internal_has_clipboard_text()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(26, _Internal::clipboard_text(this),
+        _Internal::clipboard_text(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.ClipboardSharing clipboard_sharing = 27;
+  if (_internal_has_clipboard_sharing()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(27, _Internal::clipboard_sharing(this),
+        _Internal::clipboard_sharing(this).GetCachedSize(), target, stream);
+  }
+
   // .dsa.control.v1.ScreenState screen_state = 40;
   if (_internal_has_screen_state()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
@@ -9847,6 +10350,20 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.guest_boot_);
       break;
     }
+    // .dsa.control.v1.ClipboardText clipboard_text = 26;
+    case kClipboardText: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.clipboard_text_);
+      break;
+    }
+    // .dsa.control.v1.ClipboardSharing clipboard_sharing = 27;
+    case kClipboardSharing: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.clipboard_sharing_);
+      break;
+    }
     // .dsa.control.v1.ScreenState screen_state = 40;
     case kScreenState: {
       total_size += 2 +
@@ -10014,6 +10531,16 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_guest_boot());
       break;
     }
+    case kClipboardText: {
+      _this->_internal_mutable_clipboard_text()->::dsa::control::v1::ClipboardText::MergeFrom(
+          from._internal_clipboard_text());
+      break;
+    }
+    case kClipboardSharing: {
+      _this->_internal_mutable_clipboard_sharing()->::dsa::control::v1::ClipboardSharing::MergeFrom(
+          from._internal_clipboard_sharing());
+      break;
+    }
     case kScreenState: {
       _this->_internal_mutable_screen_state()->::dsa::control::v1::ScreenState::MergeFrom(
           from._internal_screen_state());
@@ -10159,6 +10686,14 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::PowerState >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::DeviceIdle*
 Arena::CreateMaybeMessage< ::dsa::control::v1::DeviceIdle >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::DeviceIdle >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ClipboardText*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ClipboardText >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ClipboardText >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ClipboardSharing*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ClipboardSharing >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ClipboardSharing >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::RequestGuestMemory*
 Arena::CreateMaybeMessage< ::dsa::control::v1::RequestGuestMemory >(Arena* arena) {

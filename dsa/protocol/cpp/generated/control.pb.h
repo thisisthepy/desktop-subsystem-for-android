@@ -57,6 +57,12 @@ extern AuthChallengeDefaultTypeInternal _AuthChallenge_default_instance_;
 class AuthProof;
 struct AuthProofDefaultTypeInternal;
 extern AuthProofDefaultTypeInternal _AuthProof_default_instance_;
+class ClipboardSharing;
+struct ClipboardSharingDefaultTypeInternal;
+extern ClipboardSharingDefaultTypeInternal _ClipboardSharing_default_instance_;
+class ClipboardText;
+struct ClipboardTextDefaultTypeInternal;
+extern ClipboardTextDefaultTypeInternal _ClipboardText_default_instance_;
 class CloseTask;
 struct CloseTaskDefaultTypeInternal;
 extern CloseTaskDefaultTypeInternal _CloseTask_default_instance_;
@@ -143,6 +149,8 @@ template<> ::dsa::control::v1::AgentConnected* Arena::CreateMaybeMessage<::dsa::
 template<> ::dsa::control::v1::AppInfo* Arena::CreateMaybeMessage<::dsa::control::v1::AppInfo>(Arena*);
 template<> ::dsa::control::v1::AuthChallenge* Arena::CreateMaybeMessage<::dsa::control::v1::AuthChallenge>(Arena*);
 template<> ::dsa::control::v1::AuthProof* Arena::CreateMaybeMessage<::dsa::control::v1::AuthProof>(Arena*);
+template<> ::dsa::control::v1::ClipboardSharing* Arena::CreateMaybeMessage<::dsa::control::v1::ClipboardSharing>(Arena*);
+template<> ::dsa::control::v1::ClipboardText* Arena::CreateMaybeMessage<::dsa::control::v1::ClipboardText>(Arena*);
 template<> ::dsa::control::v1::CloseTask* Arena::CreateMaybeMessage<::dsa::control::v1::CloseTask>(Arena*);
 template<> ::dsa::control::v1::DeviceIdle* Arena::CreateMaybeMessage<::dsa::control::v1::DeviceIdle>(Arena*);
 template<> ::dsa::control::v1::Envelope* Arena::CreateMaybeMessage<::dsa::control::v1::Envelope>(Arena*);
@@ -4107,6 +4115,271 @@ class DeviceIdle final :
 };
 // -------------------------------------------------------------------
 
+class ClipboardText final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.ClipboardText) */ {
+ public:
+  inline ClipboardText() : ClipboardText(nullptr) {}
+  ~ClipboardText() override;
+  explicit PROTOBUF_CONSTEXPR ClipboardText(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  ClipboardText(const ClipboardText& from);
+  ClipboardText(ClipboardText&& from) noexcept
+    : ClipboardText() {
+    *this = ::std::move(from);
+  }
+
+  inline ClipboardText& operator=(const ClipboardText& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ClipboardText& operator=(ClipboardText&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ClipboardText& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const ClipboardText* internal_default_instance() {
+    return reinterpret_cast<const ClipboardText*>(
+               &_ClipboardText_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    24;
+
+  friend void swap(ClipboardText& a, ClipboardText& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ClipboardText* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(ClipboardText* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  ClipboardText* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ClipboardText>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const ClipboardText& from);
+  void MergeFrom(const ClipboardText& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(ClipboardText* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.ClipboardText";
+  }
+  protected:
+  explicit ClipboardText(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kTextFieldNumber = 1,
+  };
+  // string text = 1;
+  void clear_text();
+  const std::string& text() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_text(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_text();
+  PROTOBUF_NODISCARD std::string* release_text();
+  void set_allocated_text(std::string* text);
+  private:
+  const std::string& _internal_text() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_text(const std::string& value);
+  std::string* _internal_mutable_text();
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.ClipboardText)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr text_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class ClipboardSharing final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.ClipboardSharing) */ {
+ public:
+  inline ClipboardSharing() : ClipboardSharing(nullptr) {}
+  ~ClipboardSharing() override;
+  explicit PROTOBUF_CONSTEXPR ClipboardSharing(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  ClipboardSharing(const ClipboardSharing& from);
+  ClipboardSharing(ClipboardSharing&& from) noexcept
+    : ClipboardSharing() {
+    *this = ::std::move(from);
+  }
+
+  inline ClipboardSharing& operator=(const ClipboardSharing& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ClipboardSharing& operator=(ClipboardSharing&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ClipboardSharing& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const ClipboardSharing* internal_default_instance() {
+    return reinterpret_cast<const ClipboardSharing*>(
+               &_ClipboardSharing_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    25;
+
+  friend void swap(ClipboardSharing& a, ClipboardSharing& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ClipboardSharing* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(ClipboardSharing* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  ClipboardSharing* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ClipboardSharing>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const ClipboardSharing& from);
+  void MergeFrom(const ClipboardSharing& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(ClipboardSharing* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.ClipboardSharing";
+  }
+  protected:
+  explicit ClipboardSharing(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kOnFieldNumber = 1,
+  };
+  // bool on = 1;
+  void clear_on();
+  bool on() const;
+  void set_on(bool value);
+  private:
+  bool _internal_on() const;
+  void _internal_set_on(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.ClipboardSharing)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    bool on_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class RequestGuestMemory final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.RequestGuestMemory) */ {
  public:
@@ -4146,7 +4419,7 @@ class RequestGuestMemory final :
                &_RequestGuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    24;
+    26;
 
   friend void swap(RequestGuestMemory& a, RequestGuestMemory& b) {
     a.Swap(&b);
@@ -4263,7 +4536,7 @@ class ProcessMemory final :
                &_ProcessMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    25;
+    27;
 
   friend void swap(ProcessMemory& a, ProcessMemory& b) {
     a.Swap(&b);
@@ -4431,7 +4704,7 @@ class GuestMemory final :
                &_GuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    26;
+    28;
 
   friend void swap(GuestMemory& a, GuestMemory& b) {
     a.Swap(&b);
@@ -4713,7 +4986,7 @@ class AgentConnected final :
                &_AgentConnected_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    27;
+    29;
 
   friend void swap(AgentConnected& a, AgentConnected& b) {
     a.Swap(&b);
@@ -4830,7 +5103,7 @@ class GuestBoot final :
                &_GuestBoot_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    28;
+    30;
 
   friend void swap(GuestBoot& a, GuestBoot& b) {
     a.Swap(&b);
@@ -4991,6 +5264,8 @@ class Envelope final :
     kInstalledApps = 23,
     kAgentConnected = 24,
     kGuestBoot = 25,
+    kClipboardText = 26,
+    kClipboardSharing = 27,
     kScreenState = 40,
     kPowerState = 41,
     kDeviceIdle = 42,
@@ -5002,7 +5277,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    29;
+    31;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -5090,6 +5365,8 @@ class Envelope final :
     kInstalledAppsFieldNumber = 23,
     kAgentConnectedFieldNumber = 24,
     kGuestBootFieldNumber = 25,
+    kClipboardTextFieldNumber = 26,
+    kClipboardSharingFieldNumber = 27,
     kScreenStateFieldNumber = 40,
     kPowerStateFieldNumber = 41,
     kDeviceIdleFieldNumber = 42,
@@ -5526,6 +5803,42 @@ class Envelope final :
       ::dsa::control::v1::GuestBoot* guest_boot);
   ::dsa::control::v1::GuestBoot* unsafe_arena_release_guest_boot();
 
+  // .dsa.control.v1.ClipboardText clipboard_text = 26;
+  bool has_clipboard_text() const;
+  private:
+  bool _internal_has_clipboard_text() const;
+  public:
+  void clear_clipboard_text();
+  const ::dsa::control::v1::ClipboardText& clipboard_text() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::ClipboardText* release_clipboard_text();
+  ::dsa::control::v1::ClipboardText* mutable_clipboard_text();
+  void set_allocated_clipboard_text(::dsa::control::v1::ClipboardText* clipboard_text);
+  private:
+  const ::dsa::control::v1::ClipboardText& _internal_clipboard_text() const;
+  ::dsa::control::v1::ClipboardText* _internal_mutable_clipboard_text();
+  public:
+  void unsafe_arena_set_allocated_clipboard_text(
+      ::dsa::control::v1::ClipboardText* clipboard_text);
+  ::dsa::control::v1::ClipboardText* unsafe_arena_release_clipboard_text();
+
+  // .dsa.control.v1.ClipboardSharing clipboard_sharing = 27;
+  bool has_clipboard_sharing() const;
+  private:
+  bool _internal_has_clipboard_sharing() const;
+  public:
+  void clear_clipboard_sharing();
+  const ::dsa::control::v1::ClipboardSharing& clipboard_sharing() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::ClipboardSharing* release_clipboard_sharing();
+  ::dsa::control::v1::ClipboardSharing* mutable_clipboard_sharing();
+  void set_allocated_clipboard_sharing(::dsa::control::v1::ClipboardSharing* clipboard_sharing);
+  private:
+  const ::dsa::control::v1::ClipboardSharing& _internal_clipboard_sharing() const;
+  ::dsa::control::v1::ClipboardSharing* _internal_mutable_clipboard_sharing();
+  public:
+  void unsafe_arena_set_allocated_clipboard_sharing(
+      ::dsa::control::v1::ClipboardSharing* clipboard_sharing);
+  ::dsa::control::v1::ClipboardSharing* unsafe_arena_release_clipboard_sharing();
+
   // .dsa.control.v1.ScreenState screen_state = 40;
   bool has_screen_state() const;
   private:
@@ -5609,6 +5922,8 @@ class Envelope final :
   void set_has_installed_apps();
   void set_has_agent_connected();
   void set_has_guest_boot();
+  void set_has_clipboard_text();
+  void set_has_clipboard_sharing();
   void set_has_screen_state();
   void set_has_power_state();
   void set_has_device_idle();
@@ -5647,6 +5962,8 @@ class Envelope final :
       ::dsa::control::v1::InstalledApps* installed_apps_;
       ::dsa::control::v1::AgentConnected* agent_connected_;
       ::dsa::control::v1::GuestBoot* guest_boot_;
+      ::dsa::control::v1::ClipboardText* clipboard_text_;
+      ::dsa::control::v1::ClipboardSharing* clipboard_sharing_;
       ::dsa::control::v1::ScreenState* screen_state_;
       ::dsa::control::v1::PowerState* power_state_;
       ::dsa::control::v1::DeviceIdle* device_idle_;
@@ -8038,6 +8355,84 @@ inline void DeviceIdle::set_idle(bool value) {
 
 // -------------------------------------------------------------------
 
+// ClipboardText
+
+// string text = 1;
+inline void ClipboardText::clear_text() {
+  _impl_.text_.ClearToEmpty();
+}
+inline const std::string& ClipboardText::text() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ClipboardText.text)
+  return _internal_text();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void ClipboardText::set_text(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.text_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ClipboardText.text)
+}
+inline std::string* ClipboardText::mutable_text() {
+  std::string* _s = _internal_mutable_text();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.ClipboardText.text)
+  return _s;
+}
+inline const std::string& ClipboardText::_internal_text() const {
+  return _impl_.text_.Get();
+}
+inline void ClipboardText::_internal_set_text(const std::string& value) {
+  
+  _impl_.text_.Set(value, GetArenaForAllocation());
+}
+inline std::string* ClipboardText::_internal_mutable_text() {
+  
+  return _impl_.text_.Mutable(GetArenaForAllocation());
+}
+inline std::string* ClipboardText::release_text() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.ClipboardText.text)
+  return _impl_.text_.Release();
+}
+inline void ClipboardText::set_allocated_text(std::string* text) {
+  if (text != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.text_.SetAllocated(text, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.text_.IsDefault()) {
+    _impl_.text_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.ClipboardText.text)
+}
+
+// -------------------------------------------------------------------
+
+// ClipboardSharing
+
+// bool on = 1;
+inline void ClipboardSharing::clear_on() {
+  _impl_.on_ = false;
+}
+inline bool ClipboardSharing::_internal_on() const {
+  return _impl_.on_;
+}
+inline bool ClipboardSharing::on() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ClipboardSharing.on)
+  return _internal_on();
+}
+inline void ClipboardSharing::_internal_set_on(bool value) {
+  
+  _impl_.on_ = value;
+}
+inline void ClipboardSharing::set_on(bool value) {
+  _internal_set_on(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ClipboardSharing.on)
+}
+
+// -------------------------------------------------------------------
+
 // RequestGuestMemory
 
 // -------------------------------------------------------------------
@@ -10286,6 +10681,154 @@ inline ::dsa::control::v1::GuestBoot* Envelope::mutable_guest_boot() {
   return _msg;
 }
 
+// .dsa.control.v1.ClipboardText clipboard_text = 26;
+inline bool Envelope::_internal_has_clipboard_text() const {
+  return body_case() == kClipboardText;
+}
+inline bool Envelope::has_clipboard_text() const {
+  return _internal_has_clipboard_text();
+}
+inline void Envelope::set_has_clipboard_text() {
+  _impl_._oneof_case_[0] = kClipboardText;
+}
+inline void Envelope::clear_clipboard_text() {
+  if (_internal_has_clipboard_text()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.clipboard_text_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::ClipboardText* Envelope::release_clipboard_text() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.clipboard_text)
+  if (_internal_has_clipboard_text()) {
+    clear_has_body();
+    ::dsa::control::v1::ClipboardText* temp = _impl_.body_.clipboard_text_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.clipboard_text_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::ClipboardText& Envelope::_internal_clipboard_text() const {
+  return _internal_has_clipboard_text()
+      ? *_impl_.body_.clipboard_text_
+      : reinterpret_cast< ::dsa::control::v1::ClipboardText&>(::dsa::control::v1::_ClipboardText_default_instance_);
+}
+inline const ::dsa::control::v1::ClipboardText& Envelope::clipboard_text() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.clipboard_text)
+  return _internal_clipboard_text();
+}
+inline ::dsa::control::v1::ClipboardText* Envelope::unsafe_arena_release_clipboard_text() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.clipboard_text)
+  if (_internal_has_clipboard_text()) {
+    clear_has_body();
+    ::dsa::control::v1::ClipboardText* temp = _impl_.body_.clipboard_text_;
+    _impl_.body_.clipboard_text_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_clipboard_text(::dsa::control::v1::ClipboardText* clipboard_text) {
+  clear_body();
+  if (clipboard_text) {
+    set_has_clipboard_text();
+    _impl_.body_.clipboard_text_ = clipboard_text;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.clipboard_text)
+}
+inline ::dsa::control::v1::ClipboardText* Envelope::_internal_mutable_clipboard_text() {
+  if (!_internal_has_clipboard_text()) {
+    clear_body();
+    set_has_clipboard_text();
+    _impl_.body_.clipboard_text_ = CreateMaybeMessage< ::dsa::control::v1::ClipboardText >(GetArenaForAllocation());
+  }
+  return _impl_.body_.clipboard_text_;
+}
+inline ::dsa::control::v1::ClipboardText* Envelope::mutable_clipboard_text() {
+  ::dsa::control::v1::ClipboardText* _msg = _internal_mutable_clipboard_text();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.clipboard_text)
+  return _msg;
+}
+
+// .dsa.control.v1.ClipboardSharing clipboard_sharing = 27;
+inline bool Envelope::_internal_has_clipboard_sharing() const {
+  return body_case() == kClipboardSharing;
+}
+inline bool Envelope::has_clipboard_sharing() const {
+  return _internal_has_clipboard_sharing();
+}
+inline void Envelope::set_has_clipboard_sharing() {
+  _impl_._oneof_case_[0] = kClipboardSharing;
+}
+inline void Envelope::clear_clipboard_sharing() {
+  if (_internal_has_clipboard_sharing()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.clipboard_sharing_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::ClipboardSharing* Envelope::release_clipboard_sharing() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.clipboard_sharing)
+  if (_internal_has_clipboard_sharing()) {
+    clear_has_body();
+    ::dsa::control::v1::ClipboardSharing* temp = _impl_.body_.clipboard_sharing_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.clipboard_sharing_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::ClipboardSharing& Envelope::_internal_clipboard_sharing() const {
+  return _internal_has_clipboard_sharing()
+      ? *_impl_.body_.clipboard_sharing_
+      : reinterpret_cast< ::dsa::control::v1::ClipboardSharing&>(::dsa::control::v1::_ClipboardSharing_default_instance_);
+}
+inline const ::dsa::control::v1::ClipboardSharing& Envelope::clipboard_sharing() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.clipboard_sharing)
+  return _internal_clipboard_sharing();
+}
+inline ::dsa::control::v1::ClipboardSharing* Envelope::unsafe_arena_release_clipboard_sharing() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.clipboard_sharing)
+  if (_internal_has_clipboard_sharing()) {
+    clear_has_body();
+    ::dsa::control::v1::ClipboardSharing* temp = _impl_.body_.clipboard_sharing_;
+    _impl_.body_.clipboard_sharing_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_clipboard_sharing(::dsa::control::v1::ClipboardSharing* clipboard_sharing) {
+  clear_body();
+  if (clipboard_sharing) {
+    set_has_clipboard_sharing();
+    _impl_.body_.clipboard_sharing_ = clipboard_sharing;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.clipboard_sharing)
+}
+inline ::dsa::control::v1::ClipboardSharing* Envelope::_internal_mutable_clipboard_sharing() {
+  if (!_internal_has_clipboard_sharing()) {
+    clear_body();
+    set_has_clipboard_sharing();
+    _impl_.body_.clipboard_sharing_ = CreateMaybeMessage< ::dsa::control::v1::ClipboardSharing >(GetArenaForAllocation());
+  }
+  return _impl_.body_.clipboard_sharing_;
+}
+inline ::dsa::control::v1::ClipboardSharing* Envelope::mutable_clipboard_sharing() {
+  ::dsa::control::v1::ClipboardSharing* _msg = _internal_mutable_clipboard_sharing();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.clipboard_sharing)
+  return _msg;
+}
+
 // .dsa.control.v1.ScreenState screen_state = 40;
 inline bool Envelope::_internal_has_screen_state() const {
   return body_case() == kScreenState;
@@ -10520,6 +11063,10 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
