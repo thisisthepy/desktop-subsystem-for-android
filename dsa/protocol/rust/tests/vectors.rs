@@ -20,6 +20,10 @@ use dsa_protocol::control::{
     ProcessMemory, Rect, RejectReason, RequestGuestMemory, ResizeTask, Role, ScreenState,
     SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
+use dsa_protocol::control::{
+    AddWidget, ListWidgetProviders, RemoveWidget, ResizeWidget, WidgetAdded, WidgetFrame,
+    WidgetList, WidgetPointer, WidgetProvider, WidgetProviders, WidgetUpdated,
+};
 use dsa_protocol::{decode, encode};
 
 /// The key of the notification in the notification cases.

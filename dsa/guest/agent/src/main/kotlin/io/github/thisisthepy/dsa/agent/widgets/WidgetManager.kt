@@ -206,6 +206,9 @@ class WidgetManager(
     private val shown = mutableMapOf<Int, WidgetSize>()
     private val lastFrame = mutableMapOf<Int, ByteArray>()
 
+    /** Whether the host has heard which widgets are placed since the agent started. */
+    private var listed = false
+
     /** Starts drawing the placed widgets; [post] runs work on the agent's thread. */
     fun start(post: (() -> Unit) -> Unit) {
         this.post = post
@@ -267,12 +270,14 @@ class WidgetManager(
     }
 
     private fun announce() {
+        val before = placed().size
         val alive = prune()
         for ((id, info) in alive) {
             send(updated(id, info))
             if (id !in shown) show(id, store.sizes()[id] ?: WidgetSize.defaultOf(info))
         }
-        sendList()
+        // A guest that never had a widget says nothing about widgets.
+        if (alive.isNotEmpty() || before > 0 || listed) sendList()
     }
 
     private fun updated(id: Int, info: WidgetInfo) = Envelope.newBuilder()
@@ -280,6 +285,7 @@ class WidgetManager(
         .build().toByteArray()
 
     private fun sendList() {
+        listed = true
         send(
             Envelope.newBuilder()
                 .setWidgetList(WidgetList.newBuilder().addAllWidgetIds(placed()))
