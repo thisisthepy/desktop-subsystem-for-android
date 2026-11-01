@@ -65,10 +65,11 @@
 (allow dsa_channeld hal_graphics_composer_server (binder (call transfer)))
 
 ; A caller that says it is the agent has its process name read, from /proc/<pid>/cmdline.
+; Reading it checks getattr as well, which the kernel would otherwise refuse and log each time.
 (allow dsa_channeld system_app (dir (search)))
-(allow dsa_channeld system_app (file (read open)))
+(allow dsa_channeld system_app (file (read open getattr)))
 (allow dsa_channeld platform_app (dir (search)))
-(allow dsa_channeld platform_app (file (read open)))
+(allow dsa_channeld platform_app (file (read open getattr)))
 ; An app's process carries MLS categories (s0:c512,c768), and without this the kernel refuses the
 ; read even though the rules above allow it. What the daemon may touch is still only what this
 ; file allows.

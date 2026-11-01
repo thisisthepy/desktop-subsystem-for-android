@@ -688,8 +688,11 @@ class ImageLayoutTests(unittest.TestCase):
                 # Only the daemon registers the service.
                 self.assertEqual(policy.count("(service_manager (add"), 1)
                 # The agent's process carries MLS categories; without this the daemon cannot read
-                # its name, refuses it as the sender, and every boot ends Stalled.
-                self.assertIn("(allow dsa_channeld platform_app (file (read open)))", policy)
+                # its name, refuses it as the sender, and every boot ends Stalled. Opening
+                # /proc/<pid>/cmdline also checks getattr, and a refusal is logged on every call.
+                for client in ["system_app", "platform_app"]:
+                    self.assertIn(f"(allow dsa_channeld {client} (dir (search)))", policy)
+                    self.assertIn(f"(allow dsa_channeld {client} (file (read open getattr)))", policy)
                 self.assertIn("(typeattributeset mlstrustedsubject (dsa_channeld))", policy)
 
     def test_fr3_the_channel_service_is_labelled_without_vendor_service_contexts(self):
