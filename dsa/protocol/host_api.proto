@@ -165,6 +165,46 @@ message SetWindowsShown {
 // notifications, alarms and widgets stop with them. Returns at once with the status.
 message FreezeSession {}
 
+// Turns the connection into the web links the caller's Android opens: after the answer
+// (Done), the service sends an OpenLink each time an app in it opens an http or https link
+// while the user has links open on the host (Settings.links_in_android off), and the client
+// opens it in the user's default browser. Nothing is answered. The connection lasts across
+// restarts of the Android.
+message WatchLinks {}
+
+// A web link an app in the caller's Android opened, on a connection that carries links
+// (WatchLinks). The service sends only http and https links; the client checks again.
+message OpenLink {
+  string url = 1;
+}
+
+// What the user wants done with a file sent to their Android.
+enum FileAction {
+  FILE_ACTION_UNSPECIFIED = 0;
+  // Open it in an app the user picks.
+  FILE_ACTION_VIEW = 1;
+  // Share it with an app the user picks.
+  FILE_ACTION_SEND = 2;
+}
+
+// Sends a file from the host to the caller's Android, which asks the user which app opens or
+// takes it. The service answers at once: Done when it takes a file of this name and size, or
+// an error. After Done the client sends the file's `size` bytes in FileChunk frames, which
+// are not answered, and the service answers the same request id once more: Done once Android
+// has the whole file and has asked the user, or an error. The connection then ends.
+message OpenFile {
+  // The file's name, without any folder.
+  string name = 1;
+  // The file's length in bytes.
+  uint64 size = 2;
+  FileAction action = 3;
+}
+
+// Part of a file's content, on a connection that sends a file (OpenFile).
+message FileChunk {
+  bytes data = 1;
+}
+
 // Turns the connection into the caller's clipboard: after the answer (Done), the client sends
 // a ClipboardText each time the user's host clipboard gets new text, and the service sends a
 // ClipboardText each time the caller's Android copies text, which the client puts on the host
@@ -519,8 +559,8 @@ message SetSettings {
   Settings settings = 1;
 }
 
-// The settings of the caller's DSA. `render_gpu`, `freeze` and `clipboard` are the caller's
-// own; the update settings are the machine's, shared by every user of it.
+// The settings of the caller's DSA. `render_gpu`, `freeze`, `clipboard` and `links_in_android` are
+// the caller's own; the update settings are the machine's, shared by every user of it.
 message Settings {
   // The GPU the caller's window manager renders on: "display" (the GPU that drives the
   // primary monitor, the default), "integrated", "discrete", or part of a GPU's name. The
@@ -542,6 +582,9 @@ message Settings {
   // The folder the service writes its log to. Empty when it keeps none. A client cannot
   // change it.
   string log_dir = 8;
+  // Whether the web links apps in the caller's Android open go to apps in it, as on a phone.
+  // Off by default: they open in the user's default browser on the host.
+  bool links_in_android = 10;
   // Whether text copied on the host can be pasted in the caller's Android, and the reverse.
   // On unless the user turns it off.
   bool clipboard = 9;
@@ -564,6 +607,9 @@ enum ErrorCode {
   // The request changes something that applies to every user of the machine, and the caller
   // is not acting as an administrator.
   ERROR_CODE_NOT_ALLOWED = 6;
+  // A file sent to Android was refused: it is too large, its name cannot be used, it did not
+  // arrive whole, or Android could not take it. The detail says which.
+  ERROR_CODE_FILE_REFUSED = 7;
 }
 
 message Error {
@@ -594,6 +640,8 @@ message Request {
     SetSettings set_settings = 17;
     SetWindowsShown set_windows_shown = 20;
     FreezeSession freeze_session = 21;
+    WatchLinks watch_links = 25;
+    OpenFile open_file = 26;
     WatchClipboard watch_clipboard = 22;
     WatchNotifications watch_notifications = 23;
     ActOnNotification act_on_notification = 24;
@@ -628,8 +676,10 @@ message Envelope {
     KeyEvent key_event = 8;
     ImeComposition ime_composition = 9;
     ImeCommit ime_commit = 10;
+    OpenLink open_link = 12;
+    FileChunk file_chunk = 13;
     ClipboardText clipboard_text = 11;
-    Notification notification = 12;
-    NotificationRemoved notification_removed = 13;
+    Notification notification = 14;
+    NotificationRemoved notification_removed = 15;
   }
 }

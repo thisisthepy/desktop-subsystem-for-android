@@ -46,13 +46,16 @@ public  final class Envelope extends
     GUEST_BOOT(25),
     CLIPBOARD_TEXT(26),
     CLIPBOARD_SHARING(27),
+    CLOCK_PROBE(28),
+    CLOCK_ANSWER(29),
     SCREEN_STATE(40),
     POWER_STATE(41),
     DEVICE_IDLE(42),
-    NOTIFICATION(70),
-    NOTIFICATION_REMOVED(71),
-    NOTIFICATION_CLICKED(72),
-    NOTIFICATION_DISMISSED(73),
+    OPEN_LINK(50),
+    LINK_HANDLING(51),
+    OPEN_FILE(52),
+    FILE_CHUNK(53),
+    FILE_PROGRESS(54),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -94,13 +97,16 @@ public  final class Envelope extends
         case 25: return GUEST_BOOT;
         case 26: return CLIPBOARD_TEXT;
         case 27: return CLIPBOARD_SHARING;
+        case 28: return CLOCK_PROBE;
+        case 29: return CLOCK_ANSWER;
         case 40: return SCREEN_STATE;
         case 41: return POWER_STATE;
         case 42: return DEVICE_IDLE;
-        case 70: return NOTIFICATION;
-        case 71: return NOTIFICATION_REMOVED;
-        case 72: return NOTIFICATION_CLICKED;
-        case 73: return NOTIFICATION_DISMISSED;
+        case 50: return OPEN_LINK;
+        case 51: return LINK_HANDLING;
+        case 52: return OPEN_FILE;
+        case 53: return FILE_CHUNK;
+        case 54: return FILE_PROGRESS;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -1422,6 +1428,106 @@ public  final class Envelope extends
     }
   }
 
+  public static final int CLOCK_PROBE_FIELD_NUMBER = 28;
+  /**
+   * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+   */
+  @java.lang.Override
+  public boolean hasClockProbe() {
+    return bodyCase_ == 28;
+  }
+  /**
+   * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ClockProbe getClockProbe() {
+    if (bodyCase_ == 28) {
+       return (io.github.thisisthepy.dsa.control.v1.ClockProbe) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ClockProbe.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+   */
+  private void setClockProbe(io.github.thisisthepy.dsa.control.v1.ClockProbe value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 28;
+  }
+  /**
+   * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+   */
+  private void mergeClockProbe(io.github.thisisthepy.dsa.control.v1.ClockProbe value) {
+    value.getClass();
+  if (bodyCase_ == 28 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ClockProbe.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ClockProbe.newBuilder((io.github.thisisthepy.dsa.control.v1.ClockProbe) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 28;
+  }
+  /**
+   * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+   */
+  private void clearClockProbe() {
+    if (bodyCase_ == 28) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int CLOCK_ANSWER_FIELD_NUMBER = 29;
+  /**
+   * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+   */
+  @java.lang.Override
+  public boolean hasClockAnswer() {
+    return bodyCase_ == 29;
+  }
+  /**
+   * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ClockAnswer getClockAnswer() {
+    if (bodyCase_ == 29) {
+       return (io.github.thisisthepy.dsa.control.v1.ClockAnswer) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ClockAnswer.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+   */
+  private void setClockAnswer(io.github.thisisthepy.dsa.control.v1.ClockAnswer value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 29;
+  }
+  /**
+   * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+   */
+  private void mergeClockAnswer(io.github.thisisthepy.dsa.control.v1.ClockAnswer value) {
+    value.getClass();
+  if (bodyCase_ == 29 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ClockAnswer.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ClockAnswer.newBuilder((io.github.thisisthepy.dsa.control.v1.ClockAnswer) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 29;
+  }
+  /**
+   * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+   */
+  private void clearClockAnswer() {
+    if (bodyCase_ == 29) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
   public static final int SCREEN_STATE_FIELD_NUMBER = 40;
   /**
    * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
@@ -1572,201 +1678,251 @@ public  final class Envelope extends
     }
   }
 
-  public static final int NOTIFICATION_FIELD_NUMBER = 70;
+  public static final int OPEN_LINK_FIELD_NUMBER = 50;
   /**
-   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
    */
   @java.lang.Override
-  public boolean hasNotification() {
-    return bodyCase_ == 70;
+  public boolean hasOpenLink() {
+    return bodyCase_ == 50;
   }
   /**
-   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
    */
   @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.GuestNotification getNotification() {
-    if (bodyCase_ == 70) {
-       return (io.github.thisisthepy.dsa.control.v1.GuestNotification) body_;
+  public io.github.thisisthepy.dsa.control.v1.OpenLink getOpenLink() {
+    if (bodyCase_ == 50) {
+       return (io.github.thisisthepy.dsa.control.v1.OpenLink) body_;
     }
-    return io.github.thisisthepy.dsa.control.v1.GuestNotification.getDefaultInstance();
+    return io.github.thisisthepy.dsa.control.v1.OpenLink.getDefaultInstance();
   }
   /**
-   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
    */
-  private void setNotification(io.github.thisisthepy.dsa.control.v1.GuestNotification value) {
+  private void setOpenLink(io.github.thisisthepy.dsa.control.v1.OpenLink value) {
     value.getClass();
   body_ = value;
-    bodyCase_ = 70;
+    bodyCase_ = 50;
   }
   /**
-   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
    */
-  private void mergeNotification(io.github.thisisthepy.dsa.control.v1.GuestNotification value) {
+  private void mergeOpenLink(io.github.thisisthepy.dsa.control.v1.OpenLink value) {
     value.getClass();
-  if (bodyCase_ == 70 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.GuestNotification.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.GuestNotification.newBuilder((io.github.thisisthepy.dsa.control.v1.GuestNotification) body_)
+  if (bodyCase_ == 50 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.OpenLink.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.OpenLink.newBuilder((io.github.thisisthepy.dsa.control.v1.OpenLink) body_)
           .mergeFrom(value).buildPartial();
     } else {
       body_ = value;
     }
-    bodyCase_ = 70;
+    bodyCase_ = 50;
   }
   /**
-   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
    */
-  private void clearNotification() {
-    if (bodyCase_ == 70) {
+  private void clearOpenLink() {
+    if (bodyCase_ == 50) {
       bodyCase_ = 0;
       body_ = null;
     }
   }
 
-  public static final int NOTIFICATION_REMOVED_FIELD_NUMBER = 71;
+  public static final int LINK_HANDLING_FIELD_NUMBER = 51;
   /**
-   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
    */
   @java.lang.Override
-  public boolean hasNotificationRemoved() {
-    return bodyCase_ == 71;
+  public boolean hasLinkHandling() {
+    return bodyCase_ == 51;
   }
   /**
-   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
    */
   @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.NotificationRemoved getNotificationRemoved() {
-    if (bodyCase_ == 71) {
-       return (io.github.thisisthepy.dsa.control.v1.NotificationRemoved) body_;
+  public io.github.thisisthepy.dsa.control.v1.LinkHandling getLinkHandling() {
+    if (bodyCase_ == 51) {
+       return (io.github.thisisthepy.dsa.control.v1.LinkHandling) body_;
     }
-    return io.github.thisisthepy.dsa.control.v1.NotificationRemoved.getDefaultInstance();
+    return io.github.thisisthepy.dsa.control.v1.LinkHandling.getDefaultInstance();
   }
   /**
-   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
    */
-  private void setNotificationRemoved(io.github.thisisthepy.dsa.control.v1.NotificationRemoved value) {
+  private void setLinkHandling(io.github.thisisthepy.dsa.control.v1.LinkHandling value) {
     value.getClass();
   body_ = value;
-    bodyCase_ = 71;
+    bodyCase_ = 51;
   }
   /**
-   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
    */
-  private void mergeNotificationRemoved(io.github.thisisthepy.dsa.control.v1.NotificationRemoved value) {
+  private void mergeLinkHandling(io.github.thisisthepy.dsa.control.v1.LinkHandling value) {
     value.getClass();
-  if (bodyCase_ == 71 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.NotificationRemoved.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.NotificationRemoved.newBuilder((io.github.thisisthepy.dsa.control.v1.NotificationRemoved) body_)
+  if (bodyCase_ == 51 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.LinkHandling.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.LinkHandling.newBuilder((io.github.thisisthepy.dsa.control.v1.LinkHandling) body_)
           .mergeFrom(value).buildPartial();
     } else {
       body_ = value;
     }
-    bodyCase_ = 71;
+    bodyCase_ = 51;
   }
   /**
-   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
    */
-  private void clearNotificationRemoved() {
-    if (bodyCase_ == 71) {
+  private void clearLinkHandling() {
+    if (bodyCase_ == 51) {
       bodyCase_ = 0;
       body_ = null;
     }
   }
 
-  public static final int NOTIFICATION_CLICKED_FIELD_NUMBER = 72;
+  public static final int OPEN_FILE_FIELD_NUMBER = 52;
   /**
-   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
    */
   @java.lang.Override
-  public boolean hasNotificationClicked() {
-    return bodyCase_ == 72;
+  public boolean hasOpenFile() {
+    return bodyCase_ == 52;
   }
   /**
-   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
    */
   @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.NotificationClicked getNotificationClicked() {
-    if (bodyCase_ == 72) {
-       return (io.github.thisisthepy.dsa.control.v1.NotificationClicked) body_;
+  public io.github.thisisthepy.dsa.control.v1.OpenFile getOpenFile() {
+    if (bodyCase_ == 52) {
+       return (io.github.thisisthepy.dsa.control.v1.OpenFile) body_;
     }
-    return io.github.thisisthepy.dsa.control.v1.NotificationClicked.getDefaultInstance();
+    return io.github.thisisthepy.dsa.control.v1.OpenFile.getDefaultInstance();
   }
   /**
-   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
    */
-  private void setNotificationClicked(io.github.thisisthepy.dsa.control.v1.NotificationClicked value) {
+  private void setOpenFile(io.github.thisisthepy.dsa.control.v1.OpenFile value) {
     value.getClass();
   body_ = value;
-    bodyCase_ = 72;
+    bodyCase_ = 52;
   }
   /**
-   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
    */
-  private void mergeNotificationClicked(io.github.thisisthepy.dsa.control.v1.NotificationClicked value) {
+  private void mergeOpenFile(io.github.thisisthepy.dsa.control.v1.OpenFile value) {
     value.getClass();
-  if (bodyCase_ == 72 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.NotificationClicked.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.NotificationClicked.newBuilder((io.github.thisisthepy.dsa.control.v1.NotificationClicked) body_)
+  if (bodyCase_ == 52 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.OpenFile.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.OpenFile.newBuilder((io.github.thisisthepy.dsa.control.v1.OpenFile) body_)
           .mergeFrom(value).buildPartial();
     } else {
       body_ = value;
     }
-    bodyCase_ = 72;
+    bodyCase_ = 52;
   }
   /**
-   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
    */
-  private void clearNotificationClicked() {
-    if (bodyCase_ == 72) {
+  private void clearOpenFile() {
+    if (bodyCase_ == 52) {
       bodyCase_ = 0;
       body_ = null;
     }
   }
 
-  public static final int NOTIFICATION_DISMISSED_FIELD_NUMBER = 73;
+  public static final int FILE_CHUNK_FIELD_NUMBER = 53;
   /**
-   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
    */
   @java.lang.Override
-  public boolean hasNotificationDismissed() {
-    return bodyCase_ == 73;
+  public boolean hasFileChunk() {
+    return bodyCase_ == 53;
   }
   /**
-   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
    */
   @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.NotificationDismissed getNotificationDismissed() {
-    if (bodyCase_ == 73) {
-       return (io.github.thisisthepy.dsa.control.v1.NotificationDismissed) body_;
+  public io.github.thisisthepy.dsa.control.v1.FileChunk getFileChunk() {
+    if (bodyCase_ == 53) {
+       return (io.github.thisisthepy.dsa.control.v1.FileChunk) body_;
     }
-    return io.github.thisisthepy.dsa.control.v1.NotificationDismissed.getDefaultInstance();
+    return io.github.thisisthepy.dsa.control.v1.FileChunk.getDefaultInstance();
   }
   /**
-   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
    */
-  private void setNotificationDismissed(io.github.thisisthepy.dsa.control.v1.NotificationDismissed value) {
+  private void setFileChunk(io.github.thisisthepy.dsa.control.v1.FileChunk value) {
     value.getClass();
   body_ = value;
-    bodyCase_ = 73;
+    bodyCase_ = 53;
   }
   /**
-   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
    */
-  private void mergeNotificationDismissed(io.github.thisisthepy.dsa.control.v1.NotificationDismissed value) {
+  private void mergeFileChunk(io.github.thisisthepy.dsa.control.v1.FileChunk value) {
     value.getClass();
-  if (bodyCase_ == 73 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.NotificationDismissed.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.NotificationDismissed.newBuilder((io.github.thisisthepy.dsa.control.v1.NotificationDismissed) body_)
+  if (bodyCase_ == 53 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.FileChunk.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.FileChunk.newBuilder((io.github.thisisthepy.dsa.control.v1.FileChunk) body_)
           .mergeFrom(value).buildPartial();
     } else {
       body_ = value;
     }
-    bodyCase_ = 73;
+    bodyCase_ = 53;
   }
   /**
-   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
    */
-  private void clearNotificationDismissed() {
-    if (bodyCase_ == 73) {
+  private void clearFileChunk() {
+    if (bodyCase_ == 53) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int FILE_PROGRESS_FIELD_NUMBER = 54;
+  /**
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   */
+  @java.lang.Override
+  public boolean hasFileProgress() {
+    return bodyCase_ == 54;
+  }
+  /**
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.FileProgress getFileProgress() {
+    if (bodyCase_ == 54) {
+       return (io.github.thisisthepy.dsa.control.v1.FileProgress) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.FileProgress.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   */
+  private void setFileProgress(io.github.thisisthepy.dsa.control.v1.FileProgress value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 54;
+  }
+  /**
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   */
+  private void mergeFileProgress(io.github.thisisthepy.dsa.control.v1.FileProgress value) {
+    value.getClass();
+  if (bodyCase_ == 54 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.FileProgress.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.FileProgress.newBuilder((io.github.thisisthepy.dsa.control.v1.FileProgress) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 54;
+  }
+  /**
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   */
+  private void clearFileProgress() {
+    if (bodyCase_ == 54) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -3132,6 +3288,102 @@ public  final class Envelope extends
     }
 
     /**
+     * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+     */
+    @java.lang.Override
+    public boolean hasClockProbe() {
+      return instance.hasClockProbe();
+    }
+    /**
+     * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ClockProbe getClockProbe() {
+      return instance.getClockProbe();
+    }
+    /**
+     * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+     */
+    public Builder setClockProbe(io.github.thisisthepy.dsa.control.v1.ClockProbe value) {
+      copyOnWrite();
+      instance.setClockProbe(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+     */
+    public Builder setClockProbe(
+        io.github.thisisthepy.dsa.control.v1.ClockProbe.Builder builderForValue) {
+      copyOnWrite();
+      instance.setClockProbe(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+     */
+    public Builder mergeClockProbe(io.github.thisisthepy.dsa.control.v1.ClockProbe value) {
+      copyOnWrite();
+      instance.mergeClockProbe(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+     */
+    public Builder clearClockProbe() {
+      copyOnWrite();
+      instance.clearClockProbe();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+     */
+    @java.lang.Override
+    public boolean hasClockAnswer() {
+      return instance.hasClockAnswer();
+    }
+    /**
+     * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ClockAnswer getClockAnswer() {
+      return instance.getClockAnswer();
+    }
+    /**
+     * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+     */
+    public Builder setClockAnswer(io.github.thisisthepy.dsa.control.v1.ClockAnswer value) {
+      copyOnWrite();
+      instance.setClockAnswer(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+     */
+    public Builder setClockAnswer(
+        io.github.thisisthepy.dsa.control.v1.ClockAnswer.Builder builderForValue) {
+      copyOnWrite();
+      instance.setClockAnswer(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+     */
+    public Builder mergeClockAnswer(io.github.thisisthepy.dsa.control.v1.ClockAnswer value) {
+      copyOnWrite();
+      instance.mergeClockAnswer(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+     */
+    public Builder clearClockAnswer() {
+      copyOnWrite();
+      instance.clearClockAnswer();
+      return this;
+    }
+
+    /**
      * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
      */
     @java.lang.Override
@@ -3276,194 +3528,242 @@ public  final class Envelope extends
     }
 
     /**
-     * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+     * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
      */
     @java.lang.Override
-    public boolean hasNotification() {
-      return instance.hasNotification();
+    public boolean hasOpenLink() {
+      return instance.hasOpenLink();
     }
     /**
-     * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+     * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
      */
     @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.GuestNotification getNotification() {
-      return instance.getNotification();
+    public io.github.thisisthepy.dsa.control.v1.OpenLink getOpenLink() {
+      return instance.getOpenLink();
     }
     /**
-     * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+     * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
      */
-    public Builder setNotification(io.github.thisisthepy.dsa.control.v1.GuestNotification value) {
+    public Builder setOpenLink(io.github.thisisthepy.dsa.control.v1.OpenLink value) {
       copyOnWrite();
-      instance.setNotification(value);
+      instance.setOpenLink(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+     * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
      */
-    public Builder setNotification(
-        io.github.thisisthepy.dsa.control.v1.GuestNotification.Builder builderForValue) {
+    public Builder setOpenLink(
+        io.github.thisisthepy.dsa.control.v1.OpenLink.Builder builderForValue) {
       copyOnWrite();
-      instance.setNotification(builderForValue.build());
+      instance.setOpenLink(builderForValue.build());
       return this;
     }
     /**
-     * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+     * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
      */
-    public Builder mergeNotification(io.github.thisisthepy.dsa.control.v1.GuestNotification value) {
+    public Builder mergeOpenLink(io.github.thisisthepy.dsa.control.v1.OpenLink value) {
       copyOnWrite();
-      instance.mergeNotification(value);
+      instance.mergeOpenLink(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+     * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
      */
-    public Builder clearNotification() {
+    public Builder clearOpenLink() {
       copyOnWrite();
-      instance.clearNotification();
+      instance.clearOpenLink();
       return this;
     }
 
     /**
-     * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+     * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
      */
     @java.lang.Override
-    public boolean hasNotificationRemoved() {
-      return instance.hasNotificationRemoved();
+    public boolean hasLinkHandling() {
+      return instance.hasLinkHandling();
     }
     /**
-     * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+     * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
      */
     @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.NotificationRemoved getNotificationRemoved() {
-      return instance.getNotificationRemoved();
+    public io.github.thisisthepy.dsa.control.v1.LinkHandling getLinkHandling() {
+      return instance.getLinkHandling();
     }
     /**
-     * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+     * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
      */
-    public Builder setNotificationRemoved(io.github.thisisthepy.dsa.control.v1.NotificationRemoved value) {
+    public Builder setLinkHandling(io.github.thisisthepy.dsa.control.v1.LinkHandling value) {
       copyOnWrite();
-      instance.setNotificationRemoved(value);
+      instance.setLinkHandling(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+     * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
      */
-    public Builder setNotificationRemoved(
-        io.github.thisisthepy.dsa.control.v1.NotificationRemoved.Builder builderForValue) {
+    public Builder setLinkHandling(
+        io.github.thisisthepy.dsa.control.v1.LinkHandling.Builder builderForValue) {
       copyOnWrite();
-      instance.setNotificationRemoved(builderForValue.build());
+      instance.setLinkHandling(builderForValue.build());
       return this;
     }
     /**
-     * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+     * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
      */
-    public Builder mergeNotificationRemoved(io.github.thisisthepy.dsa.control.v1.NotificationRemoved value) {
+    public Builder mergeLinkHandling(io.github.thisisthepy.dsa.control.v1.LinkHandling value) {
       copyOnWrite();
-      instance.mergeNotificationRemoved(value);
+      instance.mergeLinkHandling(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+     * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
      */
-    public Builder clearNotificationRemoved() {
+    public Builder clearLinkHandling() {
       copyOnWrite();
-      instance.clearNotificationRemoved();
+      instance.clearLinkHandling();
       return this;
     }
 
     /**
-     * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+     * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
      */
     @java.lang.Override
-    public boolean hasNotificationClicked() {
-      return instance.hasNotificationClicked();
+    public boolean hasOpenFile() {
+      return instance.hasOpenFile();
     }
     /**
-     * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+     * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
      */
     @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.NotificationClicked getNotificationClicked() {
-      return instance.getNotificationClicked();
+    public io.github.thisisthepy.dsa.control.v1.OpenFile getOpenFile() {
+      return instance.getOpenFile();
     }
     /**
-     * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+     * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
      */
-    public Builder setNotificationClicked(io.github.thisisthepy.dsa.control.v1.NotificationClicked value) {
+    public Builder setOpenFile(io.github.thisisthepy.dsa.control.v1.OpenFile value) {
       copyOnWrite();
-      instance.setNotificationClicked(value);
+      instance.setOpenFile(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+     * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
      */
-    public Builder setNotificationClicked(
-        io.github.thisisthepy.dsa.control.v1.NotificationClicked.Builder builderForValue) {
+    public Builder setOpenFile(
+        io.github.thisisthepy.dsa.control.v1.OpenFile.Builder builderForValue) {
       copyOnWrite();
-      instance.setNotificationClicked(builderForValue.build());
+      instance.setOpenFile(builderForValue.build());
       return this;
     }
     /**
-     * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+     * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
      */
-    public Builder mergeNotificationClicked(io.github.thisisthepy.dsa.control.v1.NotificationClicked value) {
+    public Builder mergeOpenFile(io.github.thisisthepy.dsa.control.v1.OpenFile value) {
       copyOnWrite();
-      instance.mergeNotificationClicked(value);
+      instance.mergeOpenFile(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+     * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
      */
-    public Builder clearNotificationClicked() {
+    public Builder clearOpenFile() {
       copyOnWrite();
-      instance.clearNotificationClicked();
+      instance.clearOpenFile();
       return this;
     }
 
     /**
-     * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+     * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
      */
     @java.lang.Override
-    public boolean hasNotificationDismissed() {
-      return instance.hasNotificationDismissed();
+    public boolean hasFileChunk() {
+      return instance.hasFileChunk();
     }
     /**
-     * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+     * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
      */
     @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.NotificationDismissed getNotificationDismissed() {
-      return instance.getNotificationDismissed();
+    public io.github.thisisthepy.dsa.control.v1.FileChunk getFileChunk() {
+      return instance.getFileChunk();
     }
     /**
-     * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+     * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
      */
-    public Builder setNotificationDismissed(io.github.thisisthepy.dsa.control.v1.NotificationDismissed value) {
+    public Builder setFileChunk(io.github.thisisthepy.dsa.control.v1.FileChunk value) {
       copyOnWrite();
-      instance.setNotificationDismissed(value);
+      instance.setFileChunk(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+     * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
      */
-    public Builder setNotificationDismissed(
-        io.github.thisisthepy.dsa.control.v1.NotificationDismissed.Builder builderForValue) {
+    public Builder setFileChunk(
+        io.github.thisisthepy.dsa.control.v1.FileChunk.Builder builderForValue) {
       copyOnWrite();
-      instance.setNotificationDismissed(builderForValue.build());
+      instance.setFileChunk(builderForValue.build());
       return this;
     }
     /**
-     * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+     * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
      */
-    public Builder mergeNotificationDismissed(io.github.thisisthepy.dsa.control.v1.NotificationDismissed value) {
+    public Builder mergeFileChunk(io.github.thisisthepy.dsa.control.v1.FileChunk value) {
       copyOnWrite();
-      instance.mergeNotificationDismissed(value);
+      instance.mergeFileChunk(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+     * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
      */
-    public Builder clearNotificationDismissed() {
+    public Builder clearFileChunk() {
       copyOnWrite();
-      instance.clearNotificationDismissed();
+      instance.clearFileChunk();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+     */
+    @java.lang.Override
+    public boolean hasFileProgress() {
+      return instance.hasFileProgress();
+    }
+    /**
+     * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.FileProgress getFileProgress() {
+      return instance.getFileProgress();
+    }
+    /**
+     * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+     */
+    public Builder setFileProgress(io.github.thisisthepy.dsa.control.v1.FileProgress value) {
+      copyOnWrite();
+      instance.setFileProgress(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+     */
+    public Builder setFileProgress(
+        io.github.thisisthepy.dsa.control.v1.FileProgress.Builder builderForValue) {
+      copyOnWrite();
+      instance.setFileProgress(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+     */
+    public Builder mergeFileProgress(io.github.thisisthepy.dsa.control.v1.FileProgress value) {
+      copyOnWrite();
+      instance.mergeFileProgress(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+     */
+    public Builder clearFileProgress() {
+      copyOnWrite();
+      instance.clearFileProgress();
       return this;
     }
 
@@ -3511,21 +3811,24 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.GuestBoot.class,
             io.github.thisisthepy.dsa.control.v1.ClipboardText.class,
             io.github.thisisthepy.dsa.control.v1.ClipboardSharing.class,
+            io.github.thisisthepy.dsa.control.v1.ClockProbe.class,
+            io.github.thisisthepy.dsa.control.v1.ClockAnswer.class,
             io.github.thisisthepy.dsa.control.v1.ScreenState.class,
             io.github.thisisthepy.dsa.control.v1.PowerState.class,
             io.github.thisisthepy.dsa.control.v1.DeviceIdle.class,
-            io.github.thisisthepy.dsa.control.v1.GuestNotification.class,
-            io.github.thisisthepy.dsa.control.v1.NotificationRemoved.class,
-            io.github.thisisthepy.dsa.control.v1.NotificationClicked.class,
-            io.github.thisisthepy.dsa.control.v1.NotificationDismissed.class,
+            io.github.thisisthepy.dsa.control.v1.OpenLink.class,
+            io.github.thisisthepy.dsa.control.v1.LinkHandling.class,
+            io.github.thisisthepy.dsa.control.v1.OpenFile.class,
+            io.github.thisisthepy.dsa.control.v1.FileChunk.class,
+            io.github.thisisthepy.dsa.control.v1.FileProgress.class,
           };
           java.lang.String info =
-              "\u0000!\u0001\u0000\u0001I!\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<\u0000" +
+              "\u0000$\u0001\u0000\u00016$\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<\u0000" +
               "\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<\u0000\u000b" +
               "<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012<\u0000\u0013" +
               "<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000\u0019<\u0000" +
-              "\u001a<\u0000\u001b<\u0000(<\u0000)<\u0000*<\u0000F<\u0000G<\u0000H<\u0000I<\u0000" +
-              "";
+              "\u001a<\u0000\u001b<\u0000\u001c<\u0000\u001d<\u0000(<\u0000)<\u0000*<\u00002<\u0000" +
+              "3<\u00004<\u00005<\u00006<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

@@ -261,6 +261,14 @@ public final class VectorsTest {
         cases.put("guest_boot", Envelope.newBuilder()
                 .setGuestBoot(GuestBoot.newBuilder().setBootCompleted(true).setAgentConnected(true))
                 .build());
+        cases.put("clock_probe", Envelope.newBuilder()
+                .setClockProbe(ClockProbe.newBuilder().setHostSentNs(1_234_567_890_123L))
+                .build());
+        cases.put("clock_answer", Envelope.newBuilder()
+                .setClockAnswer(ClockAnswer.newBuilder()
+                        .setHostSentNs(1_234_567_890_123L)
+                        .setGuestMonoNs(987_654_321_098L))
+                .build());
         cases.put("hello_rejected_authentication", Envelope.newBuilder()
                 .setHelloRejected(HelloRejected.newBuilder()
                         .setReason(RejectReason.REJECT_REASON_AUTHENTICATION_FAILED)
@@ -280,6 +288,31 @@ public final class VectorsTest {
                                 .setName("system")
                                 .setPssKb(180000)
                                 .setSwapPssKb(1000)))
+                .build());
+        cases.put("open_link", Envelope.newBuilder()
+                .setOpenLink(OpenLink.newBuilder().setUrl("https://example.com/"))
+                .build());
+        cases.put("link_handling", Envelope.newBuilder()
+                .setLinkHandling(LinkHandling.newBuilder().setInGuest(true))
+                .build());
+        cases.put("open_file", Envelope.newBuilder()
+                .setOpenFile(OpenFile.newBuilder()
+                        .setTransferId(3)
+                        .setName("photo.jpg")
+                        .setSize(1000)
+                        .setAction(FileAction.FILE_ACTION_SEND))
+                .build());
+        cases.put("file_chunk", Envelope.newBuilder()
+                .setFileChunk(FileChunk.newBuilder()
+                        .setTransferId(3)
+                        .setOffset(131072)
+                        .setData(ByteString.copyFrom(new byte[] {1, 2, 3})))
+                .build());
+        cases.put("file_progress", Envelope.newBuilder()
+                .setFileProgress(FileProgress.newBuilder()
+                        .setTransferId(3)
+                        .setReceived(1000)
+                        .setError("storage is full"))
                 .build());
         return cases;
     }

@@ -144,6 +144,40 @@ public class ViewModelTests
     }
 
     [Fact]
+    public async Task Fr9_the_links_switch_is_off_by_default_and_changed_through_the_service()
+    {
+        var withLinks = Settings.Replace("\"freeze\":false", "\"freeze\":false,\"links_in_android\":false");
+        var cli = new FakeCli()
+            .Answer("settings --json", withLinks)
+            .Fail("gpus --json", "dsa: no GPU list")
+            .Answer("settings set links-in-android on --json",
+                withLinks.Replace("\"links_in_android\":false", "\"links_in_android\":true"))
+            .Answer("settings set links-in-android off --json", withLinks);
+        var vm = new SettingsViewModel(new DsaService(cli), new KeyText());
+        await vm.LoadAsync();
+        Assert.False(vm.LinksInAndroid);
+
+        await vm.SetLinksInAndroidAsync(true);
+        Assert.True(vm.LinksInAndroid);
+        Assert.False(vm.Freeze, "one change keeps the others");
+        await vm.SetLinksInAndroidAsync(false);
+        Assert.False(vm.LinksInAndroid);
+        Assert.Contains("settings set links-in-android on --json", cli.Calls);
+        Assert.Contains("settings set links-in-android off --json", cli.Calls);
+    }
+
+    [Fact]
+    public async Task Fr9_a_service_that_does_not_report_the_links_switch_opens_links_on_the_host()
+    {
+        var cli = new FakeCli()
+            .Answer("settings --json", Settings)
+            .Fail("gpus --json", "dsa: no GPU list");
+        var vm = new SettingsViewModel(new DsaService(cli), new KeyText());
+        await vm.LoadAsync();
+        Assert.False(vm.LinksInAndroid);
+    }
+
+    [Fact]
     public async Task Fr13_the_clipboard_switch_is_on_by_default_and_changed_through_the_service()
     {
         var withClipboard = Settings.Replace("\"freeze\":false", "\"freeze\":false,\"clipboard\":true");

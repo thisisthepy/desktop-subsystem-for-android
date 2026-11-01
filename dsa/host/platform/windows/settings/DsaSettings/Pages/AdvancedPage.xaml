@@ -33,6 +33,17 @@
                                  IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnFreezeToggled" />
             </ui:CardControl>
 
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Link24}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="{l:Text LinksCard.Header}" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{l:Text LinksCard.Description}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <ui:ToggleSwitch x:Name="LinksSwitch" IsChecked="{Binding LinksInAndroid, Mode=OneWay}"
+                                 IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnLinksToggled" />
+            </ui:CardControl>
+
             <TextBlock Text="{l:Text LogsHeader.Text}" Style="{StaticResource SectionHeader}" />
             <ui:CardAction Icon="{ui:SymbolIcon Folder24}" Click="OnOpenUserLogs" Margin="0,0,0,4">
                 <StackPanel>

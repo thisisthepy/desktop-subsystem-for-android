@@ -29,6 +29,11 @@
 //! Each presenter measures how long its window waited for a frame of its new size
 //! (`ResizeLatency`) and logs a summary every 20 resizes and when the window closes, and a
 //! warning when a window is left showing a stretched frame.
+//!
+//! While the input trace is on, each presenter also finds out when its presents reached the
+//! screen: it notes each present's count, reads the swapchain's frame statistics at the next
+//! present and at each tick, and logs `app.shown` with the vertical blank on the host clock
+//! for every present they show to be on the screen (see `PresentWatch`).
 
 use std::ffi::c_void;
 use std::sync::{Arc, Condvar, Mutex};
@@ -38,6 +43,7 @@ use dsa_host_core::compositor::frame_buffers::{
     content_region, sample_points, swapchain_buffers, swapchain_change, uniform_colour,
     visual_scale, SwapchainChange, SAMPLE_GRID,
 };
+use dsa_host_core::compositor::present_watch::{FrameStatistics, PresentWatch};
 use dsa_host_core::compositor::resize_latency::ResizeLatency;
 use dsa_host_core::compositor::resize_sync::{self, frame_action, FrameAction, ResizeSync, Step};
 use windows::core::{Interface, BOOL, PCWSTR};
@@ -61,13 +67,17 @@ use windows::Win32::Graphics::Dxgi::Common::{
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory2, IDXGIAdapter, IDXGIDevice, IDXGIFactory2, IDXGIFactory4, IDXGIResource1,
-    IDXGISwapChain2, DXGI_CREATE_FACTORY_FLAGS, DXGI_PRESENT, DXGI_SCALING_STRETCH,
-    DXGI_SHARED_RESOURCE_READ, DXGI_SHARED_RESOURCE_WRITE, DXGI_SWAP_CHAIN_DESC1,
-    DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
+    IDXGISwapChain2, DXGI_CREATE_FACTORY_FLAGS, DXGI_ERROR_FRAME_STATISTICS_DISJOINT,
+    DXGI_FRAME_STATISTICS, DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SHARED_RESOURCE_READ,
+    DXGI_SHARED_RESOURCE_WRITE, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_CHAIN_FLAG,
+    DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
 };
 use windows_numerics::Matrix3x2;
 
-use super::log::{note, trace_detailed, trace_stage, trace_summary, CompositorLogger};
+use super::log::{
+    input_trace, input_trace_on, note, qpc_frequency, trace_detailed, trace_stage, trace_summary,
+    CompositorLogger,
+};
 use dsa_host_core::resize_trace::millis;
 
 /// How long a present waits for the GPU to finish reading the shared texture.
@@ -314,6 +324,10 @@ struct State {
     latency: ResizeLatency,
     /// Whether a step of a drag waits for its frame, and for how long.
     sync: ResizeSync,
+    /// The presents not yet known to be on the screen, while the input trace is on.
+    presents: PresentWatch,
+    /// The swapchain gives no frame statistics; said once in the log.
+    no_statistics: bool,
 }
 
 /// A size the window has asked the guest for and not yet taken.
@@ -393,6 +407,8 @@ impl WindowPresenter {
                 closed: false,
                 latency: ResizeLatency::new(),
                 sync: ResizeSync::new(),
+                presents: PresentWatch::new(),
+                no_statistics: false,
             }),
             shown: Mutex::new((0, 0)),
             arrived: Condvar::new(),
@@ -553,6 +569,7 @@ impl WindowPresenter {
         {
             self.show_hold(&mut state);
         }
+        self.trace_shown(&mut state);
         if let Some(((width, height), waited)) = state.latency.stuck(Instant::now()) {
             note(
                 self.logger.as_deref(),
@@ -833,6 +850,12 @@ impl WindowPresenter {
                 .SetSourceSize(width, height)
                 .map_err(|e| failed("setting the size a task window shows", e))?;
         }
+        let swapchain = swapchain.clone();
+        let tracing = input_trace_on();
+        if tracing {
+            // What the presents before this one did, before this one changes the statistics.
+            self.trace_shown(state);
+        }
         let context = self.gpu.context.lock().unwrap_or_else(|e| e.into_inner());
         // Sync interval 0: the present is queued without waiting for a vertical blank.
         swapchain
@@ -840,8 +863,64 @@ impl WindowPresenter {
             .ok()
             .map_err(|e| failed("presenting a task window's frame", e))?;
         drop(context);
+        if tracing && !state.no_statistics {
+            if let Ok(count) = swapchain.GetLastPresentCount() {
+                state.presents.presented(count);
+            }
+        }
         state.frame = (width, height);
         Ok(new_size)
+    }
+
+    /// When the input trace is on, logs `app.shown` for each present the swapchain's frame
+    /// statistics show to have reached the screen since the last look. A swapchain without
+    /// statistics is said once, and not asked again.
+    fn trace_shown(&self, state: &mut State) {
+        if !input_trace_on() || state.no_statistics || state.presents.pending() == 0 {
+            return;
+        }
+        let Some(swapchain) = state.swapchain.clone() else {
+            return;
+        };
+        let mut statistics = DXGI_FRAME_STATISTICS::default();
+        // SAFETY: a plain COM call writing one local structure.
+        match unsafe { swapchain.GetFrameStatistics(&mut statistics) } {
+            Ok(()) => {}
+            // The display path changed meanwhile; the next reading is good again.
+            Err(error) if error.code() == DXGI_ERROR_FRAME_STATISTICS_DISJOINT => return,
+            Err(error) => {
+                state.no_statistics = true;
+                state.presents.forget();
+                note(
+                    self.logger.as_deref(),
+                    &format!(
+                        "task {}: this window's swapchain gives no frame statistics ({error}), \
+                         so the input trace has no app.shown lines for it",
+                        self.task_id
+                    ),
+                );
+                return;
+            }
+        }
+        let shown = state.presents.statistics(
+            FrameStatistics {
+                present_count: statistics.PresentCount,
+                sync_qpc: statistics.SyncQPCTime,
+            },
+            qpc_frequency(),
+        );
+        for present in shown {
+            input_trace(
+                "app.shown",
+                self.task_id,
+                &format!(
+                    "present={} vblank={:.3} exact={}",
+                    present.present,
+                    present.vblank.as_secs_f64() * 1000.0,
+                    present.exact
+                ),
+            );
+        }
     }
 
     fn present_locked(
@@ -914,6 +993,10 @@ impl WindowPresenter {
                 SwapchainChange::Keep => {}
             }
             let remade = change != SwapchainChange::Keep;
+            if remade {
+                // The old buffers' presents are not reported any more.
+                state.presents.forget();
+            }
             state.buffers = Some(texture_size);
             // How long making or resizing the swapchain took, when it happened.
             let resize_buffers = remade.then(|| started.elapsed());

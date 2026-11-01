@@ -118,6 +118,42 @@ pub struct SetWindowsShown {
 /// notifications, alarms and widgets stop with them. Returns at once with the status.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct FreezeSession {}
+/// Turns the connection into the web links the caller's Android opens: after the answer
+/// (Done), the service sends an OpenLink each time an app in it opens an http or https link
+/// while the user has links open on the host (Settings.links_in_android off), and the client
+/// opens it in the user's default browser. Nothing is answered. The connection lasts across
+/// restarts of the Android.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WatchLinks {}
+/// A web link an app in the caller's Android opened, on a connection that carries links
+/// (WatchLinks). The service sends only http and https links; the client checks again.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OpenLink {
+    #[prost(string, tag = "1")]
+    pub url: ::prost::alloc::string::String,
+}
+/// Sends a file from the host to the caller's Android, which asks the user which app opens or
+/// takes it. The service answers at once: Done when it takes a file of this name and size, or
+/// an error. After Done the client sends the file's `size` bytes in FileChunk frames, which
+/// are not answered, and the service answers the same request id once more: Done once Android
+/// has the whole file and has asked the user, or an error. The connection then ends.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OpenFile {
+    /// The file's name, without any folder.
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    /// The file's length in bytes.
+    #[prost(uint64, tag = "2")]
+    pub size: u64,
+    #[prost(enumeration = "FileAction", tag = "3")]
+    pub action: i32,
+}
+/// Part of a file's content, on a connection that sends a file (OpenFile).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct FileChunk {
+    #[prost(bytes = "vec", tag = "1")]
+    pub data: ::prost::alloc::vec::Vec<u8>,
+}
 /// Turns the connection into the caller's clipboard: after the answer (Done), the client sends
 /// a ClipboardText each time the user's host clipboard gets new text, and the service sends a
 /// ClipboardText each time the caller's Android copies text, which the client puts on the host
@@ -131,56 +167,6 @@ pub struct WatchClipboard {}
 pub struct ClipboardText {
     #[prost(string, tag = "1")]
     pub text: ::prost::alloc::string::String,
-}
-/// Turns the connection into a watch of the notifications of the caller's Android: after the
-/// answer (Done), the service sends a Notification each time an app posts one or changes one,
-/// and a NotificationRemoved when one is gone, including every one that was shown when the
-/// Android stops. The client sends nothing more on it. The watch lasts across restarts of the
-/// Android.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct WatchNotifications {}
-/// A notification of the caller's Android, on a connection that watches them
-/// (WatchNotifications). One with the key of an earlier one replaces it.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct Notification {
-    #[prost(string, tag = "1")]
-    pub key: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub package_name: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub app_label: ::prost::alloc::string::String,
-    #[prost(string, tag = "4")]
-    pub title: ::prost::alloc::string::String,
-    #[prost(string, tag = "5")]
-    pub text: ::prost::alloc::string::String,
-    /// A PNG image; empty for none.
-    #[prost(bytes = "vec", tag = "6")]
-    pub icon_png: ::prost::alloc::vec::Vec<u8>,
-    /// As Android numbers it: 1 minimum, 2 low, 3 default, 4 high.
-    #[prost(int32, tag = "7")]
-    pub importance: i32,
-    #[prost(bool, tag = "8")]
-    pub high_priority: bool,
-    /// Whether the user may dismiss it.
-    #[prost(bool, tag = "9")]
-    pub clearable: bool,
-    #[prost(int64, tag = "10")]
-    pub when_millis: i64,
-}
-/// The notification with this key is gone, on a connection that watches them.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct NotificationRemoved {
-    #[prost(string, tag = "1")]
-    pub key: ::prost::alloc::string::String,
-}
-/// Passes what the user did with a notification of the caller's Android to it. Answered with
-/// Done.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ActOnNotification {
-    #[prost(string, tag = "1")]
-    pub key: ::prost::alloc::string::String,
-    #[prost(enumeration = "NotificationAction", tag = "2")]
-    pub action: i32,
 }
 /// Pointer input in a task's window, sent on a connection that streams input.
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
@@ -533,8 +519,8 @@ pub struct SetSettings {
     #[prost(message, optional, tag = "1")]
     pub settings: ::core::option::Option<Settings>,
 }
-/// The settings of the caller's DSA. `render_gpu`, `freeze` and `clipboard` are the caller's
-/// own; the update settings are the machine's, shared by every user of it.
+/// The settings of the caller's DSA. `render_gpu`, `freeze`, `clipboard` and `links_in_android` are
+/// the caller's own; the update settings are the machine's, shared by every user of it.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Settings {
     /// The GPU the caller's window manager renders on: "display" (the GPU that drives the
@@ -565,6 +551,10 @@ pub struct Settings {
     /// change it.
     #[prost(string, tag = "8")]
     pub log_dir: ::prost::alloc::string::String,
+    /// Whether the web links apps in the caller's Android open go to apps in it, as on a phone.
+    /// Off by default: they open in the user's default browser on the host.
+    #[prost(bool, tag = "10")]
+    pub links_in_android: bool,
     /// Whether text copied on the host can be pasted in the caller's Android, and the reverse.
     /// On unless the user turns it off.
     #[prost(bool, tag = "9")]
@@ -585,7 +575,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -629,12 +619,12 @@ pub mod request {
         SetWindowsShown(super::SetWindowsShown),
         #[prost(message, tag = "21")]
         FreezeSession(super::FreezeSession),
+        #[prost(message, tag = "25")]
+        WatchLinks(super::WatchLinks),
+        #[prost(message, tag = "26")]
+        OpenFile(super::OpenFile),
         #[prost(message, tag = "22")]
         WatchClipboard(super::WatchClipboard),
-        #[prost(message, tag = "23")]
-        WatchNotifications(super::WatchNotifications),
-        #[prost(message, tag = "24")]
-        ActOnNotification(super::ActOnNotification),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -673,7 +663,7 @@ pub mod response {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -701,12 +691,12 @@ pub mod envelope {
         ImeComposition(super::ImeComposition),
         #[prost(message, tag = "10")]
         ImeCommit(super::ImeCommit),
+        #[prost(message, tag = "12")]
+        OpenLink(super::OpenLink),
+        #[prost(message, tag = "13")]
+        FileChunk(super::FileChunk),
         #[prost(message, tag = "11")]
         ClipboardText(super::ClipboardText),
-        #[prost(message, tag = "12")]
-        Notification(super::Notification),
-        #[prost(message, tag = "13")]
-        NotificationRemoved(super::NotificationRemoved),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -851,35 +841,34 @@ impl SessionState {
         }
     }
 }
-/// What the user did with a notification on the host.
+/// What the user wants done with a file sent to their Android.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
-pub enum NotificationAction {
+pub enum FileAction {
     Unspecified = 0,
-    /// Clicked it: the app opens it, and its task shows as a window. Android leaves Doze first.
-    Open = 1,
-    /// Dismissed it: it is removed in Android too, unless the app made it one the user cannot
-    /// dismiss.
-    Dismiss = 2,
+    /// Open it in an app the user picks.
+    View = 1,
+    /// Share it with an app the user picks.
+    Send = 2,
 }
-impl NotificationAction {
+impl FileAction {
     /// String value of the enum field names used in the ProtoBuf definition.
     ///
     /// The values are not transformed in any way and thus are considered stable
     /// (if the ProtoBuf definition does not change) and safe for programmatic use.
     pub fn as_str_name(&self) -> &'static str {
         match self {
-            Self::Unspecified => "NOTIFICATION_ACTION_UNSPECIFIED",
-            Self::Open => "NOTIFICATION_ACTION_OPEN",
-            Self::Dismiss => "NOTIFICATION_ACTION_DISMISS",
+            Self::Unspecified => "FILE_ACTION_UNSPECIFIED",
+            Self::View => "FILE_ACTION_VIEW",
+            Self::Send => "FILE_ACTION_SEND",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
-            "NOTIFICATION_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
-            "NOTIFICATION_ACTION_OPEN" => Some(Self::Open),
-            "NOTIFICATION_ACTION_DISMISS" => Some(Self::Dismiss),
+            "FILE_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
+            "FILE_ACTION_VIEW" => Some(Self::View),
+            "FILE_ACTION_SEND" => Some(Self::Send),
             _ => None,
         }
     }
@@ -1024,6 +1013,9 @@ pub enum ErrorCode {
     /// The request changes something that applies to every user of the machine, and the caller
     /// is not acting as an administrator.
     NotAllowed = 6,
+    /// A file sent to Android was refused: it is too large, its name cannot be used, it did not
+    /// arrive whole, or Android could not take it. The detail says which.
+    FileRefused = 7,
 }
 impl ErrorCode {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1039,6 +1031,7 @@ impl ErrorCode {
             Self::NotRunning => "ERROR_CODE_NOT_RUNNING",
             Self::InvalidSetting => "ERROR_CODE_INVALID_SETTING",
             Self::NotAllowed => "ERROR_CODE_NOT_ALLOWED",
+            Self::FileRefused => "ERROR_CODE_FILE_REFUSED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1051,6 +1044,7 @@ impl ErrorCode {
             "ERROR_CODE_NOT_RUNNING" => Some(Self::NotRunning),
             "ERROR_CODE_INVALID_SETTING" => Some(Self::InvalidSetting),
             "ERROR_CODE_NOT_ALLOWED" => Some(Self::NotAllowed),
+            "ERROR_CODE_FILE_REFUSED" => Some(Self::FileRefused),
             _ => None,
         }
     }

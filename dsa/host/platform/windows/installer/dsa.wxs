@@ -154,6 +154,27 @@
             <Component Id="AppWindowExe" Guid="*">
                 <File Id="AppWindowExe" Source="$(SourceDir)\dsa-app-window.exe" KeyPath="yes" />
             </Component>
+            <!-- Two entries in the context menu of every file (on Windows 11, under Show more
+                 options): the installed window host sends the file to the user's Android, which
+                 asks which app opens it or takes it. They are the machine's, like the rest of
+                 the installation, so uninstalling removes them for every user at once; entries
+                 written into each user's profile would outlive DSA there. -->
+            <Component Id="OpenFileInAndroid" Guid="9c6f4b1e-5d2a-4f8e-a3b7-1e0d6c9f2a41">
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\DsaOpenInAndroidApp"
+                               Name="MUIVerb" Type="string" Value="Open in an Android app" KeyPath="yes" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\DsaOpenInAndroidApp"
+                               Name="Icon" Type="string" Value="&quot;[INSTALLFOLDER]dsa-app-window.exe&quot;,0" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\DsaOpenInAndroidApp\command"
+                               Type="string" Value="&quot;[INSTALLFOLDER]dsa-app-window.exe&quot; --open-file &quot;%1&quot;" />
+            </Component>
+            <Component Id="ShareFileWithAndroid" Guid="2b8e7d30-6c41-4a9f-9e25-7f3a0b1c8d52">
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\DsaShareWithAndroidApp"
+                               Name="MUIVerb" Type="string" Value="Share with an Android app" KeyPath="yes" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\DsaShareWithAndroidApp"
+                               Name="Icon" Type="string" Value="&quot;[INSTALLFOLDER]dsa-app-window.exe&quot;,0" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\DsaShareWithAndroidApp\command"
+                               Type="string" Value="&quot;[INSTALLFOLDER]dsa-app-window.exe&quot; --share-file &quot;%1&quot;" />
+            </Component>
             <Component Id="GfxstreamBackendDll" Guid="*">
                 <File Id="GfxstreamBackendDll" Source="$(SourceDir)\gfxstream_backend.dll" KeyPath="yes" />
             </Component>

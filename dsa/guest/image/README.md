@@ -117,6 +117,54 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
 - Every APK, APEX and verified boot image is re-signed. The published build is signed with
   AOSP's test keys, whose private halves are public.
 
+## Tracing a click
+
+The input trace follows one click from the host window to the screen. Each process on the
+path writes `input-trace stage=...` lines:
+
+| Stage | Where | Placed at |
+|---|---|---|
+| `app.pointer` | the app window host, when Windows hands it the press or release | `host=` |
+| `agent.inject` | the agent, when the framework has taken the event | guest `mono=` |
+| `app.frame` | the agent, from the app's `gfxinfo framestats`: main thread `late`, `input`, `animation`, `traversal`, `record`; render thread `sync`, `issue`, `swap`, `dequeue`, `gpu` | its intended vsync |
+| `sf.frame` | the agent, from `dumpsys SurfaceFlinger --latency` of each of the app's layers: `desired`, `ready`, `actual` | `actual`, when SurfaceFlinger presented it |
+| `hwc.frame` | the hwcomposer, when it has composed and posted the task's frame | guest `mono=` |
+| `wm.frame` | the window manager, when the window host has copied the frame out | `host=` |
+| `app.present` | the window host, after its `Present` | `host=` |
+| `app.shown` | the window host, from the swap chain's frame statistics: the vertical blank the present was shown at | `vblank=` |
+| `clock` | the service, once a second: the guest's clock against the host's | |
+
+Host lines carry `host=`, milliseconds on the performance counter, which every host process
+shares. Guest lines carry `mono=`, the guest's `CLOCK_MONOTONIC`. The service pairs the two:
+it sends the guest's control daemon its send time, the daemon answers at once with its own
+clock, and the `clock` line gives the round trip and the guest's offset from the trip's
+midpoint.
+
+To take a trace:
+
+1. Turn the host's side on: create the empty file `%LOCALAPPDATA%\DSA\input-trace` (or set
+   `DSA_INPUT_TRACE=1` for the processes in the user's session).
+2. Turn the guest's side on: add `androidboot.hardware.dsa_input_trace=1` to `kernel_cmdline`
+   in the service's configuration. The service probes the clocks only for a guest that boots
+   with it.
+3. Restart DSA (the service and the user's processes), so every process reads the setting.
+4. Click in an app window, with a second or more between clicks.
+5. Lay the clicks out on the host clock:
+
+   ```
+   uv run scripts/input-trace.py
+   ```
+
+   With no arguments it reads `%LOCALAPPDATA%\DSA\logs\*.log` and
+   `C:\ProgramData\DSA\logs\*.log` (the service's log, with the `clock` lines, and the guest
+   console, `android-<user>.log`). Files or folders given as arguments are read instead.
+   For each press and release it prints the stages that follow on the same task or app,
+   until the next press or release, with the time since the press and the gap to the stage
+   before.
+
+Turn the trace off again by removing the file and the kernel command line setting. While on,
+it writes a line per stage and the agent reads the app's frame timings after each release.
+
 ## What comes out
 
 In `dsa/target/image/<version>/`:

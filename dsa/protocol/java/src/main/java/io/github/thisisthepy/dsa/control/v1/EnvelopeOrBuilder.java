@@ -294,6 +294,28 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.ClipboardSharing getClipboardSharing();
 
   /**
+   * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+   * @return Whether the clockProbe field is set.
+   */
+  boolean hasClockProbe();
+  /**
+   * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+   * @return The clockProbe.
+   */
+  io.github.thisisthepy.dsa.control.v1.ClockProbe getClockProbe();
+
+  /**
+   * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+   * @return Whether the clockAnswer field is set.
+   */
+  boolean hasClockAnswer();
+  /**
+   * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+   * @return The clockAnswer.
+   */
+  io.github.thisisthepy.dsa.control.v1.ClockAnswer getClockAnswer();
+
+  /**
    * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
    * @return Whether the screenState field is set.
    */
@@ -327,48 +349,59 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.DeviceIdle getDeviceIdle();
 
   /**
-   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
-   * @return Whether the notification field is set.
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+   * @return Whether the openLink field is set.
    */
-  boolean hasNotification();
+  boolean hasOpenLink();
   /**
-   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
-   * @return The notification.
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+   * @return The openLink.
    */
-  io.github.thisisthepy.dsa.control.v1.GuestNotification getNotification();
+  io.github.thisisthepy.dsa.control.v1.OpenLink getOpenLink();
 
   /**
-   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
-   * @return Whether the notificationRemoved field is set.
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+   * @return Whether the linkHandling field is set.
    */
-  boolean hasNotificationRemoved();
+  boolean hasLinkHandling();
   /**
-   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
-   * @return The notificationRemoved.
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+   * @return The linkHandling.
    */
-  io.github.thisisthepy.dsa.control.v1.NotificationRemoved getNotificationRemoved();
+  io.github.thisisthepy.dsa.control.v1.LinkHandling getLinkHandling();
 
   /**
-   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
-   * @return Whether the notificationClicked field is set.
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+   * @return Whether the openFile field is set.
    */
-  boolean hasNotificationClicked();
+  boolean hasOpenFile();
   /**
-   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
-   * @return The notificationClicked.
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+   * @return The openFile.
    */
-  io.github.thisisthepy.dsa.control.v1.NotificationClicked getNotificationClicked();
+  io.github.thisisthepy.dsa.control.v1.OpenFile getOpenFile();
 
   /**
-   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
-   * @return Whether the notificationDismissed field is set.
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+   * @return Whether the fileChunk field is set.
    */
-  boolean hasNotificationDismissed();
+  boolean hasFileChunk();
   /**
-   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
-   * @return The notificationDismissed.
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+   * @return The fileChunk.
    */
-  io.github.thisisthepy.dsa.control.v1.NotificationDismissed getNotificationDismissed();
+  io.github.thisisthepy.dsa.control.v1.FileChunk getFileChunk();
+
+  /**
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   * @return Whether the fileProgress field is set.
+   */
+  boolean hasFileProgress();
+  /**
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   * @return The fileProgress.
+   */
+  io.github.thisisthepy.dsa.control.v1.FileProgress getFileProgress();
 
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

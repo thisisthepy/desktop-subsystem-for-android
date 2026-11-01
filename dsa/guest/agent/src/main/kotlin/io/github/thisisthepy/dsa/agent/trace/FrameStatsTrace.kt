@@ -32,6 +32,9 @@ import java.util.Locale
  * milliseconds; `-` where the app did not record the stage. A frame that waited for an
  * activity to start shows it as `late`.
  *
+ * With [surfaceFlinger], SurfaceFlinger's timings of the app's layers are read at the same time
+ * ([SurfaceFlingerTrace]).
+ *
  * The read runs on [scheduler]'s thread, which must not be one input or the agent's work waits
  * on. Off unless the boot asks for the input trace.
  */
@@ -43,6 +46,7 @@ class FrameStatsTrace(
     private val delayMillis: Long = DELAY_MILLIS,
     private val monoMillis: () -> Double = { System.nanoTime() / 1_000_000.0 },
     private val wallMillis: () -> Long = System::currentTimeMillis,
+    private val surfaceFlinger: SurfaceFlingerTrace? = null,
 ) {
     private val pending: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
 
@@ -54,6 +58,7 @@ class FrameStatsTrace(
         if (!enabled || packageName == null || !pending.add(packageName)) return
         scheduler.postDelayed(delayMillis) {
             pending.remove(packageName)
+            surfaceFlinger?.read(packageName)
             val text = try {
                 dump(packageName)
             } catch (e: Exception) {

@@ -6,6 +6,7 @@ import android.os.Process
 import io.github.thisisthepy.dsa.agent.Agent
 import io.github.thisisthepy.dsa.agent.trace.FrameStatsTrace
 import io.github.thisisthepy.dsa.agent.trace.InputTrace
+import io.github.thisisthepy.dsa.agent.trace.SurfaceFlingerTrace
 
 /**
  * The agent's process. The activity manager starts it at boot because it is persistent, and
@@ -24,7 +25,18 @@ class AgentApplication : Application() {
         // so it has a thread of its own, made only when the trace is on.
         val frameTrace = if (traced) {
             val reads = HandlerThread("dsa-frame-trace").apply { start() }
-            FrameStatsTrace(log, enabled = true, scheduler = HandlerScheduler(reads.looper), dump = AndroidFrameStats::dump)
+            val surfaceFlinger = SurfaceFlingerTrace(
+                log,
+                list = AndroidFrameStats::surfaceFlingerLayers,
+                latency = AndroidFrameStats::surfaceFlingerLatency,
+            )
+            FrameStatsTrace(
+                log,
+                enabled = true,
+                scheduler = HandlerScheduler(reads.looper),
+                dump = AndroidFrameStats::dump,
+                surfaceFlinger = surfaceFlinger,
+            )
         } else {
             null
         }
@@ -52,15 +64,27 @@ class AgentApplication : Application() {
             inputTrace = InputTrace(log, enabled = traced),
             frameTrace = frameTrace,
             touchSounds = AndroidTouchSounds(this),
+            browserRole = AndroidBrowserRole(this, log),
+            guestBrowser = AndroidGuestBrowser(this, log),
+            fileStore = io.github.thisisthepy.dsa.agent.files.TransferStore(hostFilesDir(this)),
+            fileOpener = AndroidFileOpener(this),
             clipboard = AndroidClipboard(this, log),
             notifications = AndroidNotifications(this, log),
         )
+        AgentApplication.agent = agent
         HostInputMethod.onCursor = { rect -> agent.cursorMoved(rect.left, rect.top, rect.right, rect.bottom) }
         agent.start()
         // Starting windows draw on a thread of their own, so a slow app theme never holds up
         // the agent's work or the home activity on the main thread.
         val splash = HandlerThread("dsa-splash").apply { start() }
         AndroidStartingWindows(this, splash.looper, log).start()
+    }
+
+    companion object {
+        /** The running agent, for the link activity, which runs in the same process. */
+        @Volatile
+        var agent: Agent? = null
+            private set
     }
 
     /** SystemProperties is not in the SDK and is called by reflection; off when it fails. */

@@ -13,7 +13,8 @@
 //! itself, without passing through the window manager. While no task window is open, it gives
 //! back the memory it is not using ([`trim`]). It also carries the text clipboard between
 //! the user and their Android ([`clipboard`]), since the service cannot reach the user's
-//! clipboard. It shows the notifications of the user's Android as toasts, and passes the
+//! clipboard, and opens the web links apps in Android open in the user's default browser
+//! ([`links`]). It shows the notifications of the user's Android as toasts, and passes the
 //! user's dismissals back ([`notifications`]).
 
 pub mod adapter;
@@ -21,8 +22,9 @@ pub mod clipboard;
 pub mod display_gpu;
 pub mod frames;
 pub mod hosts;
-pub mod notifications;
+pub mod links;
 pub mod log;
+pub mod notifications;
 pub mod present;
 pub mod shutdown;
 pub mod single_instance;
@@ -108,6 +110,8 @@ pub struct Compositor {
     windows: Arc<Mutex<Vec<i32>>>,
     /// Where the apps' Start menu shortcuts go, when they are kept.
     start_menu: Option<StartMenuSetup>,
+    /// What opens the web links the user's Android opens, when they are followed.
+    link_opener: Option<Box<dyn links::LinkOpener>>,
     /// Whether the user's clipboard is shared with their Android.
     share_clipboard: bool,
     /// Whether the notifications of the user's Android are shown as toasts.
@@ -186,6 +190,7 @@ impl Compositor {
             launcher: None,
             windows: Arc::new(Mutex::new(Vec::new())),
             start_menu: crate::start_menu::StartMenuSetup::default_for_user(),
+            link_opener: Some(Box::new(links::ShellOpener)),
             share_clipboard: true,
             show_notifications: true,
         }
@@ -213,6 +218,7 @@ impl Compositor {
             launcher: None,
             windows: Arc::new(Mutex::new(Vec::new())),
             start_menu: None,
+            link_opener: None,
             share_clipboard: false,
             show_notifications: false,
         }
@@ -223,6 +229,33 @@ impl Compositor {
     pub fn with_start_menu(mut self, setup: StartMenuSetup) -> Compositor {
         self.start_menu = Some(setup);
         self
+    }
+
+    /// Opens the web links the user's Android opens with `opener`. [`Compositor::new`] opens
+    /// them in the user's default browser.
+    pub fn with_link_opener(mut self, opener: Box<dyn links::LinkOpener>) -> Compositor {
+        self.link_opener = Some(opener);
+        self
+    }
+
+    /// Starts opening the web links the user's Android opens, on a thread of its own that
+    /// ends with `stop`.
+    fn start_links(&mut self, stop: &Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
+        let mut opener = self.link_opener.take()?;
+        let connector = (self.local_api_connector)();
+        let stop = Arc::clone(stop);
+        let logger = self.logger.clone();
+        let failed = self.logger.clone();
+        thread::Builder::new()
+            .name("dsa-wm-links".into())
+            .spawn(move || links::follow(connector, &mut *opener, stop, logger))
+            .map_err(|e| {
+                note(
+                    failed.as_deref(),
+                    &format!("could not start the links' thread: {e}"),
+                )
+            })
+            .ok()
     }
 
     /// Takes the app window hosts' connections from `listener`, and starts each app's window
@@ -285,6 +318,7 @@ impl Compositor {
         // 0. The app window hosts, the watch of the guest's tasks, and the requests to end
         // them.
         let task_windows = self.start_task_windows(&stop);
+        let links_thread = self.start_links(&stop);
         let clipboard_thread = self.start_clipboard(&stop);
         let notifications_thread = self.start_notifications(&stop);
 
@@ -467,6 +501,9 @@ impl Compositor {
         let _ = monitor_thread.join();
         let _ = cmd_thread.join();
         let _ = proc_thread.join();
+        if let Some(thread) = links_thread {
+            let _ = thread.join();
+        }
         if let Some(thread) = clipboard_thread {
             let _ = thread.join();
         }
