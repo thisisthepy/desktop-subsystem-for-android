@@ -71,11 +71,13 @@ public sealed class GeneralViewModel : ObservableObject
     public string StateText => _text.Get($"State_{State}");
     public string LastReason => _status?.LastReason ?? "";
     public bool HasLastReason => !string.IsNullOrEmpty(_status?.LastReason);
+    public string Problem => _status?.Problem ?? "";
+    public bool HasProblem => !string.IsNullOrEmpty(_status?.Problem);
     public string UpdateNotice => _status?.UpdateNotice ?? "";
     public bool HasUpdateNotice => !string.IsNullOrEmpty(_status?.UpdateNotice);
     public bool IsBusy => _busy;
     public bool CanStart => !_busy && State == SessionState.Stopped;
-    public bool CanStop => !_busy && State is SessionState.Starting or SessionState.Active
+    public bool CanStop => !_busy && State is SessionState.Starting or SessionState.Stalled or SessionState.Active
         or SessionState.Dozing or SessionState.Frozen;
     public string Error => _error ?? "";
     public bool HasError => _error is not null;

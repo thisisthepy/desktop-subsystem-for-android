@@ -45,6 +45,9 @@ struct TableStruct_control_2eproto {
 namespace dsa {
 namespace control {
 namespace v1 {
+class AgentConnected;
+struct AgentConnectedDefaultTypeInternal;
+extern AgentConnectedDefaultTypeInternal _AgentConnected_default_instance_;
 class AppInfo;
 struct AppInfoDefaultTypeInternal;
 extern AppInfoDefaultTypeInternal _AppInfo_default_instance_;
@@ -63,6 +66,9 @@ extern DeviceIdleDefaultTypeInternal _DeviceIdle_default_instance_;
 class Envelope;
 struct EnvelopeDefaultTypeInternal;
 extern EnvelopeDefaultTypeInternal _Envelope_default_instance_;
+class GuestBoot;
+struct GuestBootDefaultTypeInternal;
+extern GuestBootDefaultTypeInternal _GuestBoot_default_instance_;
 class GuestMemory;
 struct GuestMemoryDefaultTypeInternal;
 extern GuestMemoryDefaultTypeInternal _GuestMemory_default_instance_;
@@ -133,12 +139,14 @@ extern TaskUpdatedDefaultTypeInternal _TaskUpdated_default_instance_;
 }  // namespace control
 }  // namespace dsa
 PROTOBUF_NAMESPACE_OPEN
+template<> ::dsa::control::v1::AgentConnected* Arena::CreateMaybeMessage<::dsa::control::v1::AgentConnected>(Arena*);
 template<> ::dsa::control::v1::AppInfo* Arena::CreateMaybeMessage<::dsa::control::v1::AppInfo>(Arena*);
 template<> ::dsa::control::v1::AuthChallenge* Arena::CreateMaybeMessage<::dsa::control::v1::AuthChallenge>(Arena*);
 template<> ::dsa::control::v1::AuthProof* Arena::CreateMaybeMessage<::dsa::control::v1::AuthProof>(Arena*);
 template<> ::dsa::control::v1::CloseTask* Arena::CreateMaybeMessage<::dsa::control::v1::CloseTask>(Arena*);
 template<> ::dsa::control::v1::DeviceIdle* Arena::CreateMaybeMessage<::dsa::control::v1::DeviceIdle>(Arena*);
 template<> ::dsa::control::v1::Envelope* Arena::CreateMaybeMessage<::dsa::control::v1::Envelope>(Arena*);
+template<> ::dsa::control::v1::GuestBoot* Arena::CreateMaybeMessage<::dsa::control::v1::GuestBoot>(Arena*);
 template<> ::dsa::control::v1::GuestMemory* Arena::CreateMaybeMessage<::dsa::control::v1::GuestMemory>(Arena*);
 template<> ::dsa::control::v1::Hello* Arena::CreateMaybeMessage<::dsa::control::v1::Hello>(Arena*);
 template<> ::dsa::control::v1::HelloAccepted* Arena::CreateMaybeMessage<::dsa::control::v1::HelloAccepted>(Arena*);
@@ -4666,6 +4674,264 @@ class GuestMemory final :
 };
 // -------------------------------------------------------------------
 
+class AgentConnected final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AgentConnected) */ {
+ public:
+  inline AgentConnected() : AgentConnected(nullptr) {}
+  ~AgentConnected() override;
+  explicit PROTOBUF_CONSTEXPR AgentConnected(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  AgentConnected(const AgentConnected& from);
+  AgentConnected(AgentConnected&& from) noexcept
+    : AgentConnected() {
+    *this = ::std::move(from);
+  }
+
+  inline AgentConnected& operator=(const AgentConnected& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline AgentConnected& operator=(AgentConnected&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const AgentConnected& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const AgentConnected* internal_default_instance() {
+    return reinterpret_cast<const AgentConnected*>(
+               &_AgentConnected_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    27;
+
+  friend void swap(AgentConnected& a, AgentConnected& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(AgentConnected* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(AgentConnected* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  AgentConnected* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<AgentConnected>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const AgentConnected& from);
+  void MergeFrom(const AgentConnected& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(AgentConnected* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.AgentConnected";
+  }
+  protected:
+  explicit AgentConnected(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.AgentConnected)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class GuestBoot final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.GuestBoot) */ {
+ public:
+  inline GuestBoot() : GuestBoot(nullptr) {}
+  ~GuestBoot() override;
+  explicit PROTOBUF_CONSTEXPR GuestBoot(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  GuestBoot(const GuestBoot& from);
+  GuestBoot(GuestBoot&& from) noexcept
+    : GuestBoot() {
+    *this = ::std::move(from);
+  }
+
+  inline GuestBoot& operator=(const GuestBoot& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline GuestBoot& operator=(GuestBoot&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const GuestBoot& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const GuestBoot* internal_default_instance() {
+    return reinterpret_cast<const GuestBoot*>(
+               &_GuestBoot_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    28;
+
+  friend void swap(GuestBoot& a, GuestBoot& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(GuestBoot* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(GuestBoot* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  GuestBoot* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<GuestBoot>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const GuestBoot& from);
+  void MergeFrom(const GuestBoot& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(GuestBoot* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.GuestBoot";
+  }
+  protected:
+  explicit GuestBoot(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kBootCompletedFieldNumber = 1,
+    kAgentConnectedFieldNumber = 2,
+  };
+  // bool boot_completed = 1;
+  void clear_boot_completed();
+  bool boot_completed() const;
+  void set_boot_completed(bool value);
+  private:
+  bool _internal_boot_completed() const;
+  void _internal_set_boot_completed(bool value);
+  public:
+
+  // bool agent_connected = 2;
+  void clear_agent_connected();
+  bool agent_connected() const;
+  void set_agent_connected(bool value);
+  private:
+  bool _internal_agent_connected() const;
+  void _internal_set_agent_connected(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.GuestBoot)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    bool boot_completed_;
+    bool agent_connected_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class Envelope final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.Envelope) */ {
  public:
@@ -4723,6 +4989,8 @@ class Envelope final :
     kGuestMemory = 21,
     kInstalledApp = 22,
     kInstalledApps = 23,
+    kAgentConnected = 24,
+    kGuestBoot = 25,
     kScreenState = 40,
     kPowerState = 41,
     kDeviceIdle = 42,
@@ -4734,7 +5002,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    27;
+    29;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -4820,6 +5088,8 @@ class Envelope final :
     kGuestMemoryFieldNumber = 21,
     kInstalledAppFieldNumber = 22,
     kInstalledAppsFieldNumber = 23,
+    kAgentConnectedFieldNumber = 24,
+    kGuestBootFieldNumber = 25,
     kScreenStateFieldNumber = 40,
     kPowerStateFieldNumber = 41,
     kDeviceIdleFieldNumber = 42,
@@ -5220,6 +5490,42 @@ class Envelope final :
       ::dsa::control::v1::InstalledApps* installed_apps);
   ::dsa::control::v1::InstalledApps* unsafe_arena_release_installed_apps();
 
+  // .dsa.control.v1.AgentConnected agent_connected = 24;
+  bool has_agent_connected() const;
+  private:
+  bool _internal_has_agent_connected() const;
+  public:
+  void clear_agent_connected();
+  const ::dsa::control::v1::AgentConnected& agent_connected() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::AgentConnected* release_agent_connected();
+  ::dsa::control::v1::AgentConnected* mutable_agent_connected();
+  void set_allocated_agent_connected(::dsa::control::v1::AgentConnected* agent_connected);
+  private:
+  const ::dsa::control::v1::AgentConnected& _internal_agent_connected() const;
+  ::dsa::control::v1::AgentConnected* _internal_mutable_agent_connected();
+  public:
+  void unsafe_arena_set_allocated_agent_connected(
+      ::dsa::control::v1::AgentConnected* agent_connected);
+  ::dsa::control::v1::AgentConnected* unsafe_arena_release_agent_connected();
+
+  // .dsa.control.v1.GuestBoot guest_boot = 25;
+  bool has_guest_boot() const;
+  private:
+  bool _internal_has_guest_boot() const;
+  public:
+  void clear_guest_boot();
+  const ::dsa::control::v1::GuestBoot& guest_boot() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::GuestBoot* release_guest_boot();
+  ::dsa::control::v1::GuestBoot* mutable_guest_boot();
+  void set_allocated_guest_boot(::dsa::control::v1::GuestBoot* guest_boot);
+  private:
+  const ::dsa::control::v1::GuestBoot& _internal_guest_boot() const;
+  ::dsa::control::v1::GuestBoot* _internal_mutable_guest_boot();
+  public:
+  void unsafe_arena_set_allocated_guest_boot(
+      ::dsa::control::v1::GuestBoot* guest_boot);
+  ::dsa::control::v1::GuestBoot* unsafe_arena_release_guest_boot();
+
   // .dsa.control.v1.ScreenState screen_state = 40;
   bool has_screen_state() const;
   private:
@@ -5301,6 +5607,8 @@ class Envelope final :
   void set_has_guest_memory();
   void set_has_installed_app();
   void set_has_installed_apps();
+  void set_has_agent_connected();
+  void set_has_guest_boot();
   void set_has_screen_state();
   void set_has_power_state();
   void set_has_device_idle();
@@ -5337,6 +5645,8 @@ class Envelope final :
       ::dsa::control::v1::GuestMemory* guest_memory_;
       ::dsa::control::v1::InstalledApp* installed_app_;
       ::dsa::control::v1::InstalledApps* installed_apps_;
+      ::dsa::control::v1::AgentConnected* agent_connected_;
+      ::dsa::control::v1::GuestBoot* guest_boot_;
       ::dsa::control::v1::ScreenState* screen_state_;
       ::dsa::control::v1::PowerState* power_state_;
       ::dsa::control::v1::DeviceIdle* device_idle_;
@@ -8150,6 +8460,54 @@ GuestMemory::top_processes() const {
 
 // -------------------------------------------------------------------
 
+// AgentConnected
+
+// -------------------------------------------------------------------
+
+// GuestBoot
+
+// bool boot_completed = 1;
+inline void GuestBoot::clear_boot_completed() {
+  _impl_.boot_completed_ = false;
+}
+inline bool GuestBoot::_internal_boot_completed() const {
+  return _impl_.boot_completed_;
+}
+inline bool GuestBoot::boot_completed() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestBoot.boot_completed)
+  return _internal_boot_completed();
+}
+inline void GuestBoot::_internal_set_boot_completed(bool value) {
+  
+  _impl_.boot_completed_ = value;
+}
+inline void GuestBoot::set_boot_completed(bool value) {
+  _internal_set_boot_completed(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestBoot.boot_completed)
+}
+
+// bool agent_connected = 2;
+inline void GuestBoot::clear_agent_connected() {
+  _impl_.agent_connected_ = false;
+}
+inline bool GuestBoot::_internal_agent_connected() const {
+  return _impl_.agent_connected_;
+}
+inline bool GuestBoot::agent_connected() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestBoot.agent_connected)
+  return _internal_agent_connected();
+}
+inline void GuestBoot::_internal_set_agent_connected(bool value) {
+  
+  _impl_.agent_connected_ = value;
+}
+inline void GuestBoot::set_agent_connected(bool value) {
+  _internal_set_agent_connected(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestBoot.agent_connected)
+}
+
+// -------------------------------------------------------------------
+
 // Envelope
 
 // .dsa.control.v1.Hello hello = 1;
@@ -9780,6 +10138,154 @@ inline ::dsa::control::v1::InstalledApps* Envelope::mutable_installed_apps() {
   return _msg;
 }
 
+// .dsa.control.v1.AgentConnected agent_connected = 24;
+inline bool Envelope::_internal_has_agent_connected() const {
+  return body_case() == kAgentConnected;
+}
+inline bool Envelope::has_agent_connected() const {
+  return _internal_has_agent_connected();
+}
+inline void Envelope::set_has_agent_connected() {
+  _impl_._oneof_case_[0] = kAgentConnected;
+}
+inline void Envelope::clear_agent_connected() {
+  if (_internal_has_agent_connected()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.agent_connected_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::AgentConnected* Envelope::release_agent_connected() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.agent_connected)
+  if (_internal_has_agent_connected()) {
+    clear_has_body();
+    ::dsa::control::v1::AgentConnected* temp = _impl_.body_.agent_connected_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.agent_connected_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::AgentConnected& Envelope::_internal_agent_connected() const {
+  return _internal_has_agent_connected()
+      ? *_impl_.body_.agent_connected_
+      : reinterpret_cast< ::dsa::control::v1::AgentConnected&>(::dsa::control::v1::_AgentConnected_default_instance_);
+}
+inline const ::dsa::control::v1::AgentConnected& Envelope::agent_connected() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.agent_connected)
+  return _internal_agent_connected();
+}
+inline ::dsa::control::v1::AgentConnected* Envelope::unsafe_arena_release_agent_connected() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.agent_connected)
+  if (_internal_has_agent_connected()) {
+    clear_has_body();
+    ::dsa::control::v1::AgentConnected* temp = _impl_.body_.agent_connected_;
+    _impl_.body_.agent_connected_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_agent_connected(::dsa::control::v1::AgentConnected* agent_connected) {
+  clear_body();
+  if (agent_connected) {
+    set_has_agent_connected();
+    _impl_.body_.agent_connected_ = agent_connected;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.agent_connected)
+}
+inline ::dsa::control::v1::AgentConnected* Envelope::_internal_mutable_agent_connected() {
+  if (!_internal_has_agent_connected()) {
+    clear_body();
+    set_has_agent_connected();
+    _impl_.body_.agent_connected_ = CreateMaybeMessage< ::dsa::control::v1::AgentConnected >(GetArenaForAllocation());
+  }
+  return _impl_.body_.agent_connected_;
+}
+inline ::dsa::control::v1::AgentConnected* Envelope::mutable_agent_connected() {
+  ::dsa::control::v1::AgentConnected* _msg = _internal_mutable_agent_connected();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.agent_connected)
+  return _msg;
+}
+
+// .dsa.control.v1.GuestBoot guest_boot = 25;
+inline bool Envelope::_internal_has_guest_boot() const {
+  return body_case() == kGuestBoot;
+}
+inline bool Envelope::has_guest_boot() const {
+  return _internal_has_guest_boot();
+}
+inline void Envelope::set_has_guest_boot() {
+  _impl_._oneof_case_[0] = kGuestBoot;
+}
+inline void Envelope::clear_guest_boot() {
+  if (_internal_has_guest_boot()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.guest_boot_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::GuestBoot* Envelope::release_guest_boot() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.guest_boot)
+  if (_internal_has_guest_boot()) {
+    clear_has_body();
+    ::dsa::control::v1::GuestBoot* temp = _impl_.body_.guest_boot_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.guest_boot_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::GuestBoot& Envelope::_internal_guest_boot() const {
+  return _internal_has_guest_boot()
+      ? *_impl_.body_.guest_boot_
+      : reinterpret_cast< ::dsa::control::v1::GuestBoot&>(::dsa::control::v1::_GuestBoot_default_instance_);
+}
+inline const ::dsa::control::v1::GuestBoot& Envelope::guest_boot() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.guest_boot)
+  return _internal_guest_boot();
+}
+inline ::dsa::control::v1::GuestBoot* Envelope::unsafe_arena_release_guest_boot() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.guest_boot)
+  if (_internal_has_guest_boot()) {
+    clear_has_body();
+    ::dsa::control::v1::GuestBoot* temp = _impl_.body_.guest_boot_;
+    _impl_.body_.guest_boot_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_guest_boot(::dsa::control::v1::GuestBoot* guest_boot) {
+  clear_body();
+  if (guest_boot) {
+    set_has_guest_boot();
+    _impl_.body_.guest_boot_ = guest_boot;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.guest_boot)
+}
+inline ::dsa::control::v1::GuestBoot* Envelope::_internal_mutable_guest_boot() {
+  if (!_internal_has_guest_boot()) {
+    clear_body();
+    set_has_guest_boot();
+    _impl_.body_.guest_boot_ = CreateMaybeMessage< ::dsa::control::v1::GuestBoot >(GetArenaForAllocation());
+  }
+  return _impl_.body_.guest_boot_;
+}
+inline ::dsa::control::v1::GuestBoot* Envelope::mutable_guest_boot() {
+  ::dsa::control::v1::GuestBoot* _msg = _internal_mutable_guest_boot();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.guest_boot)
+  return _msg;
+}
+
 // .dsa.control.v1.ScreenState screen_state = 40;
 inline bool Envelope::_internal_has_screen_state() const {
   return body_case() == kScreenState;
@@ -10014,6 +10520,10 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

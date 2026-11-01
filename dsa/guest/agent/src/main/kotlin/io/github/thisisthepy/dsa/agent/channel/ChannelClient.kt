@@ -46,6 +46,7 @@ class ChannelClient(
     private var endpoint: ChannelEndpoint? = null
     private var generation = 0
     private var started = false
+    private var looksFailed = 0
 
     val connected: Boolean get() = endpoint != null
 
@@ -76,9 +77,16 @@ class ChannelClient(
             null
         }
         if (found == null) {
+            // The daemon is up within seconds of the guest starting, so this long without it is
+            // not a slow start. The service's name is refused to a process in the wrong SELinux
+            // domain, as for an agent the package manager gave certificates from an older disk.
+            if (++looksFailed == WARN_AFTER_LOOKS) {
+                log.warn("the control daemon's service has not been found after $WARN_AFTER_LOOKS looks; the host gets nothing from this agent. If the log shows SELinux denying this service, the data disk was made under an image signed with other keys")
+            }
             scheduler.postDelayed(retryMillis) { connect() }
             return
         }
+        looksFailed = 0
         val mine = ++generation
         try {
             found.onGone { scheduler.post { lost(mine) } }
@@ -101,5 +109,9 @@ class ChannelClient(
         generation++
         log.warn("the control daemon is gone; waiting for it to come back")
         scheduler.postDelayed(retryMillis) { connect() }
+    }
+
+    private companion object {
+        const val WARN_AFTER_LOOKS = 60
     }
 }

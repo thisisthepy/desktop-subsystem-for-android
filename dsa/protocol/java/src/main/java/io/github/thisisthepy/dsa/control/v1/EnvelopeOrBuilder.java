@@ -250,6 +250,28 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.InstalledApps getInstalledApps();
 
   /**
+   * <code>.dsa.control.v1.AgentConnected agent_connected = 24;</code>
+   * @return Whether the agentConnected field is set.
+   */
+  boolean hasAgentConnected();
+  /**
+   * <code>.dsa.control.v1.AgentConnected agent_connected = 24;</code>
+   * @return The agentConnected.
+   */
+  io.github.thisisthepy.dsa.control.v1.AgentConnected getAgentConnected();
+
+  /**
+   * <code>.dsa.control.v1.GuestBoot guest_boot = 25;</code>
+   * @return Whether the guestBoot field is set.
+   */
+  boolean hasGuestBoot();
+  /**
+   * <code>.dsa.control.v1.GuestBoot guest_boot = 25;</code>
+   * @return The guestBoot.
+   */
+  io.github.thisisthepy.dsa.control.v1.GuestBoot getGuestBoot();
+
+  /**
    * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
    * @return Whether the screenState field is set.
    */

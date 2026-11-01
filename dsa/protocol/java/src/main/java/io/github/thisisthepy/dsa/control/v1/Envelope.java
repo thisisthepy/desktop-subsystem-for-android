@@ -42,6 +42,8 @@ public  final class Envelope extends
     GUEST_MEMORY(21),
     INSTALLED_APP(22),
     INSTALLED_APPS(23),
+    AGENT_CONNECTED(24),
+    GUEST_BOOT(25),
     SCREEN_STATE(40),
     POWER_STATE(41),
     DEVICE_IDLE(42),
@@ -82,6 +84,8 @@ public  final class Envelope extends
         case 21: return GUEST_MEMORY;
         case 22: return INSTALLED_APP;
         case 23: return INSTALLED_APPS;
+        case 24: return AGENT_CONNECTED;
+        case 25: return GUEST_BOOT;
         case 40: return SCREEN_STATE;
         case 41: return POWER_STATE;
         case 42: return DEVICE_IDLE;
@@ -1201,6 +1205,106 @@ public  final class Envelope extends
    */
   private void clearInstalledApps() {
     if (bodyCase_ == 23) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int AGENT_CONNECTED_FIELD_NUMBER = 24;
+  /**
+   * <code>.dsa.control.v1.AgentConnected agent_connected = 24;</code>
+   */
+  @java.lang.Override
+  public boolean hasAgentConnected() {
+    return bodyCase_ == 24;
+  }
+  /**
+   * <code>.dsa.control.v1.AgentConnected agent_connected = 24;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.AgentConnected getAgentConnected() {
+    if (bodyCase_ == 24) {
+       return (io.github.thisisthepy.dsa.control.v1.AgentConnected) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.AgentConnected.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.AgentConnected agent_connected = 24;</code>
+   */
+  private void setAgentConnected(io.github.thisisthepy.dsa.control.v1.AgentConnected value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 24;
+  }
+  /**
+   * <code>.dsa.control.v1.AgentConnected agent_connected = 24;</code>
+   */
+  private void mergeAgentConnected(io.github.thisisthepy.dsa.control.v1.AgentConnected value) {
+    value.getClass();
+  if (bodyCase_ == 24 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.AgentConnected.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.AgentConnected.newBuilder((io.github.thisisthepy.dsa.control.v1.AgentConnected) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 24;
+  }
+  /**
+   * <code>.dsa.control.v1.AgentConnected agent_connected = 24;</code>
+   */
+  private void clearAgentConnected() {
+    if (bodyCase_ == 24) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int GUEST_BOOT_FIELD_NUMBER = 25;
+  /**
+   * <code>.dsa.control.v1.GuestBoot guest_boot = 25;</code>
+   */
+  @java.lang.Override
+  public boolean hasGuestBoot() {
+    return bodyCase_ == 25;
+  }
+  /**
+   * <code>.dsa.control.v1.GuestBoot guest_boot = 25;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.GuestBoot getGuestBoot() {
+    if (bodyCase_ == 25) {
+       return (io.github.thisisthepy.dsa.control.v1.GuestBoot) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.GuestBoot.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.GuestBoot guest_boot = 25;</code>
+   */
+  private void setGuestBoot(io.github.thisisthepy.dsa.control.v1.GuestBoot value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 25;
+  }
+  /**
+   * <code>.dsa.control.v1.GuestBoot guest_boot = 25;</code>
+   */
+  private void mergeGuestBoot(io.github.thisisthepy.dsa.control.v1.GuestBoot value) {
+    value.getClass();
+  if (bodyCase_ == 25 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.GuestBoot.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.GuestBoot.newBuilder((io.github.thisisthepy.dsa.control.v1.GuestBoot) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 25;
+  }
+  /**
+   * <code>.dsa.control.v1.GuestBoot guest_boot = 25;</code>
+   */
+  private void clearGuestBoot() {
+    if (bodyCase_ == 25) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -2524,6 +2628,102 @@ public  final class Envelope extends
     }
 
     /**
+     * <code>.dsa.control.v1.AgentConnected agent_connected = 24;</code>
+     */
+    @java.lang.Override
+    public boolean hasAgentConnected() {
+      return instance.hasAgentConnected();
+    }
+    /**
+     * <code>.dsa.control.v1.AgentConnected agent_connected = 24;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.AgentConnected getAgentConnected() {
+      return instance.getAgentConnected();
+    }
+    /**
+     * <code>.dsa.control.v1.AgentConnected agent_connected = 24;</code>
+     */
+    public Builder setAgentConnected(io.github.thisisthepy.dsa.control.v1.AgentConnected value) {
+      copyOnWrite();
+      instance.setAgentConnected(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AgentConnected agent_connected = 24;</code>
+     */
+    public Builder setAgentConnected(
+        io.github.thisisthepy.dsa.control.v1.AgentConnected.Builder builderForValue) {
+      copyOnWrite();
+      instance.setAgentConnected(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AgentConnected agent_connected = 24;</code>
+     */
+    public Builder mergeAgentConnected(io.github.thisisthepy.dsa.control.v1.AgentConnected value) {
+      copyOnWrite();
+      instance.mergeAgentConnected(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.AgentConnected agent_connected = 24;</code>
+     */
+    public Builder clearAgentConnected() {
+      copyOnWrite();
+      instance.clearAgentConnected();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.GuestBoot guest_boot = 25;</code>
+     */
+    @java.lang.Override
+    public boolean hasGuestBoot() {
+      return instance.hasGuestBoot();
+    }
+    /**
+     * <code>.dsa.control.v1.GuestBoot guest_boot = 25;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.GuestBoot getGuestBoot() {
+      return instance.getGuestBoot();
+    }
+    /**
+     * <code>.dsa.control.v1.GuestBoot guest_boot = 25;</code>
+     */
+    public Builder setGuestBoot(io.github.thisisthepy.dsa.control.v1.GuestBoot value) {
+      copyOnWrite();
+      instance.setGuestBoot(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GuestBoot guest_boot = 25;</code>
+     */
+    public Builder setGuestBoot(
+        io.github.thisisthepy.dsa.control.v1.GuestBoot.Builder builderForValue) {
+      copyOnWrite();
+      instance.setGuestBoot(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GuestBoot guest_boot = 25;</code>
+     */
+    public Builder mergeGuestBoot(io.github.thisisthepy.dsa.control.v1.GuestBoot value) {
+      copyOnWrite();
+      instance.mergeGuestBoot(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GuestBoot guest_boot = 25;</code>
+     */
+    public Builder clearGuestBoot() {
+      copyOnWrite();
+      instance.clearGuestBoot();
+      return this;
+    }
+
+    /**
      * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
      */
     @java.lang.Override
@@ -2707,16 +2907,18 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.GuestMemory.class,
             io.github.thisisthepy.dsa.control.v1.InstalledApp.class,
             io.github.thisisthepy.dsa.control.v1.InstalledApps.class,
+            io.github.thisisthepy.dsa.control.v1.AgentConnected.class,
+            io.github.thisisthepy.dsa.control.v1.GuestBoot.class,
             io.github.thisisthepy.dsa.control.v1.ScreenState.class,
             io.github.thisisthepy.dsa.control.v1.PowerState.class,
             io.github.thisisthepy.dsa.control.v1.DeviceIdle.class,
           };
           java.lang.String info =
-              "\u0000\u0019\u0001\u0000\u0001*\u0019\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000" +
+              "\u0000\u001b\u0001\u0000\u0001*\u001b\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000" +
               "\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000" +
               "\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012" +
-              "<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000(<\u0000" +
-              ")<\u0000*<\u0000";
+              "<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000" +
+              "\u0019<\u0000(<\u0000)<\u0000*<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

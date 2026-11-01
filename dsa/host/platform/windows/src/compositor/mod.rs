@@ -323,6 +323,7 @@ impl Compositor {
                             let new_id = if matches!(
                                 status.state,
                                 SessionState::Starting
+                                    | SessionState::Stalled
                                     | SessionState::Active
                                     | SessionState::Dozing
                                     | SessionState::Frozen

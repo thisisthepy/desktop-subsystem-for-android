@@ -9,11 +9,11 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use dsa_protocol::control::{
-    envelope::Body, AppInfo, AuthChallenge, AuthProof, CloseTask, DeviceIdle, Envelope,
-    GuestMemory, Hello, HelloAccepted, HelloRejected, ImeCommit, ImeComposition, ImeCursor,
-    KeyAction, KeyEvent, LaunchApp, PointerAction, PointerEvent, PointerTool, PowerState,
-    ProcessMemory, Rect, RejectReason, RequestGuestMemory, ResizeTask, Role, ScreenState,
-    SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
+    envelope::Body, AgentConnected, AppInfo, AuthChallenge, AuthProof, CloseTask, DeviceIdle,
+    Envelope, GuestBoot, GuestMemory, Hello, HelloAccepted, HelloRejected, ImeCommit,
+    ImeComposition, ImeCursor, KeyAction, KeyEvent, LaunchApp, PointerAction, PointerEvent,
+    PointerTool, PowerState, ProcessMemory, Rect, RejectReason, RequestGuestMemory, ResizeTask,
+    Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
 
@@ -313,6 +313,17 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
         (
             "device_idle",
             wrap(Body::DeviceIdle(DeviceIdle { idle: true })),
+        ),
+        (
+            "agent_connected",
+            wrap(Body::AgentConnected(AgentConnected {})),
+        ),
+        (
+            "guest_boot",
+            wrap(Body::GuestBoot(GuestBoot {
+                boot_completed: true,
+                agent_connected: true,
+            })),
         ),
         (
             "hello_rejected_authentication",

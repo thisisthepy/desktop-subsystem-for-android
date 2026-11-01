@@ -37,6 +37,7 @@ import os
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -103,6 +104,23 @@ REMOVED_APEXES = [
     "com.google.cf.nfc",
     "com.google.cf.rild",
 ]
+
+# Settings controllers that crash without the Bluetooth service. With the Bluetooth features
+# withdrawn, system_server does not start it, so SettingsLib's LocalBluetoothManager is null,
+# and LocalMediaManager is left without the InfoMediaManager it calls into. These two call it
+# as soon as the sound screen opens (MediaOutputPreferenceController.onStart, and
+# RemoteVolumeGroupController's constructor), which takes down the Settings process and its
+# window. The preferences they drive pick a media output and set a cast session's volume,
+# neither of which the guest has without Bluetooth. They are removed from the compiled screen
+# in Settings.apk, which is signed again with the rest. Bluetooth comes back as a host HAL,
+# and these go back in with it.
+SETTINGS_APK = "/priv-app/Settings/Settings.apk"
+SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH = {
+    "res/xml/sound_settings.xml": [
+        "com.android.settings.sound.MediaOutputPreferenceController",
+        "com.android.settings.notification.RemoteVolumeGroupController",
+    ],
+}
 
 # Cuttlefish's logger writes to a virtio console Hyper-V does not have, so it exits as soon as
 # it starts. init starts it again every five seconds, and each exit runs flags_health_check.
@@ -207,18 +225,6 @@ LOADER_PROPS = {
 # PersistentDataBlockService nor, without an oemlock HAL, OemLockService.
 FRP_PROPS = {
     "ro.frp.pst": "",
-}
-
-# How ART compiles apps at a disk's first boot and at the first boot after an update. AOSP
-# leaves both at verify: the apps are checked but not compiled, so each runs interpreted and
-# JIT compiled until the background dexopt job compiles it, a job that waits for the device to
-# be idle and charging. speed-profile compiles the methods a profile names: at first boot the
-# profile an app ships (embedded in its APK or beside it), and after an update the profile
-# collected while it was used. An app without one is still only verified, so the first boot
-# grows by the apps that ship a profile, and an update's first boot by the apps used before.
-DEXOPT_PROPS = {
-    "pm.dexopt.first-boot": "speed-profile",
-    "pm.dexopt.boot-after-ota": "speed-profile",
 }
 
 # Cuttlefish ships selectable vendor APEX implementations. Its launcher passes
@@ -430,29 +436,101 @@ def find_aapt2():
     return None
 
 
-def embedded_profiles(z):
-    """The APKs in target_files that carry their own ART profile, which speed-profile compiles
-    at first boot: an embedded baseline profile, or a dex metadata file beside the APK."""
-    names = set(z.namelist())
-    found = []
-    for name in sorted(names):
-        if not name.endswith(".apk"):
-            continue
-        if name[:-4] + ".dm" in names:
-            found.append(name)
-            continue
-        try:
-            with zipfile.ZipFile(io.BytesIO(z.read(name))) as apk:
-                if "assets/dexopt/baseline.prof" in apk.namelist():
-                    found.append(name)
-        except zipfile.BadZipFile:
-            continue
-    return found
+def xml_strings(axml, offset):
+    """The strings of the compiled XML string pool at `offset`."""
+    _, header_size, _, count, _, flags, strings_start, _ = struct.unpack_from("<HHIIIIII", axml, offset)
+    utf8 = flags & XML_UTF8
+    strings = []
+    for i in range(count):
+        (start,) = struct.unpack_from("<I", axml, offset + header_size + 4 * i)
+        at = offset + strings_start + start
+        if utf8:
+            # The length in characters, then in bytes; each is one byte, or two with the high bit set.
+            for _ in range(2):
+                length = axml[at]
+                at += 1
+                if length & 0x80:
+                    length = ((length & 0x7F) << 8) | axml[at]
+                    at += 1
+            strings.append(axml[at:at + length].decode("utf-8"))
+        else:
+            (length,) = struct.unpack_from("<H", axml, at)
+            at += 2
+            if length & 0x8000:
+                (low,) = struct.unpack_from("<H", axml, at)
+                length = ((length & 0x7FFF) << 16) | low
+                at += 2
+            strings.append(axml[at:at + 2 * length].decode("utf-16-le"))
+    return strings
+
+
+def remove_xml_elements(axml, attribute, values):
+    """Removes from compiled XML each element, with everything inside it, whose `attribute`
+    (in any namespace) is one of `values`. Returns the new file and the values it removed."""
+    file_type, file_header, _ = struct.unpack_from("<HHI", axml, 0)
+    if file_type != XML_FILE:
+        raise ValueError("not a compiled Android XML file")
+    strings = []
+    kept = [axml[:file_header]]
+    removed_values = []
+    skipping = 0
+    offset = file_header
+    while offset < len(axml):
+        chunk_type, header_size, size = struct.unpack_from("<HHI", axml, offset)
+        chunk = axml[offset:offset + size]
+        if chunk_type == XML_STRING_POOL:
+            strings = xml_strings(axml, offset)
+        if skipping:
+            if chunk_type == XML_START_ELEMENT:
+                skipping += 1
+            elif chunk_type == XML_END_ELEMENT:
+                skipping -= 1
+        elif chunk_type == XML_START_ELEMENT:
+            attribute_start, attribute_size, attribute_count = struct.unpack_from(
+                "<HHH", axml, offset + header_size + 8)
+            for i in range(attribute_count):
+                at = offset + header_size + attribute_start + i * attribute_size
+                _, name, raw, _, _, data_type, data = struct.unpack_from("<IIIHBBI", axml, at)
+                index = raw if raw != XML_NO_INDEX else (data if data_type == XML_TYPE_STRING else None)
+                if strings[name] == attribute and index is not None and strings[index] in values:
+                    removed_values.append(strings[index])
+                    skipping = 1
+                    break
+            if not skipping:
+                kept.append(chunk)
+        else:
+            kept.append(chunk)
+        offset += size
+    result = b"".join(kept)
+    return result[:4] + struct.pack("<I", len(result)) + result[8:], removed_values
+
+
+def edit_settings_apk(data, name):
+    """Settings.apk without the preferences whose controllers need the Bluetooth service."""
+    replacements = {}
+    with zipfile.ZipFile(io.BytesIO(data)) as apk:
+        files = set(apk.namelist())
+        for xml, controllers in SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH.items():
+            if xml not in files:
+                continue
+            edited, removed_controllers = remove_xml_elements(apk.read(xml), "controller", set(controllers))
+            for controller in removed_controllers:
+                print(f"removing {controller} from {name}:{xml}", flush=True)
+            if removed_controllers:
+                replacements[xml] = edited
+        if not replacements:
+            return data
+        out = io.BytesIO()
+        # Each entry keeps its compression; signing aligns the stored ones again and replaces
+        # the signature this edit invalidates.
+        with zipfile.ZipFile(out, "w") as edited_apk:
+            for info in apk.infolist():
+                edited_apk.writestr(info, replacements.get(info.filename) or apk.read(info))
+    return out.getvalue()
 
 
 def edit_props(text):
-    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS, **FRP_PROPS,
-                      **DEXOPT_PROPS}
+    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS, **FRP_PROPS}
     out = []
     for line in text.splitlines():
         key = line.split("=", 1)[0]
@@ -554,6 +632,9 @@ RECLAIM_PROPERTY_CONTEXT = f"{RECLAIM_PROPERTY} u:object_r:dsa_memory_prop:s0 ex
 # The gentler property for the gradual trim while apps are open: init drops only the page cache.
 TRIM_PROPERTY = "vendor.dsa.memory.trim"
 TRIM_PROPERTY_CONTEXT = f"{TRIM_PROPERTY} u:object_r:dsa_memory_prop:s0 exact bool"
+# init sets this when Android has finished booting, and the daemon tells the host.
+BOOT_PROPERTY = "vendor.dsa.boot_completed"
+BOOT_PROPERTY_CONTEXT = f"{BOOT_PROPERTY} u:object_r:dsa_boot_prop:s0 exact bool"
 # Features the VM lacks; SystemConfig drops them wherever else they are declared.
 UNAVAILABLE_FEATURES = "VENDOR/etc/permissions/dsa-unavailable-features.xml"
 
@@ -648,12 +729,14 @@ def update_vendor_service_contexts(text):
 
 
 def update_vendor_property_contexts(text):
-    """Gives the daemon's reclaim property its type in vendor_property_contexts if it has none."""
+    """Gives the daemon's properties their types in vendor_property_contexts if they have none."""
     lines = text.splitlines()
     if not any(line.split()[:1] == [RECLAIM_PROPERTY] for line in lines):
         lines.append(RECLAIM_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [TRIM_PROPERTY] for line in lines):
         lines.append(TRIM_PROPERTY_CONTEXT)
+    if not any(line.split()[:1] == [BOOT_PROPERTY] for line in lines):
+        lines.append(BOOT_PROPERTY_CONTEXT)
     return "\n".join(lines) + "\n"
 
 
@@ -986,6 +1069,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     data = edit_props(data.decode()).encode()
                 elif name == WIFI_RC:
                     data = edit_wifi_rc(data.decode()).encode()
+                elif name.endswith(SETTINGS_APK):
+                    data = edit_settings_apk(data, name)
                 elif name.endswith("lib/modules/modules.load") or name.endswith("lib/modules/modules.dep"):
                     data = b""
                 elif name == "META/apexkeys.txt":
@@ -1349,14 +1434,10 @@ def main():
 
     framework_overlay = None
     aapt2 = args.aapt2 or find_aapt2()
-    with zipfile.ZipFile(target_files) as z:
-        profiled = embedded_profiles(z)
-        print(f"{len(profiled)} apps carry an ART profile that first boot compiles with: "
-              f"{', '.join(Path(n).name for n in profiled) or 'none'}", flush=True)
-        if aapt2:
-            framework_res = work / "framework-res.apk"
-            framework_res.write_bytes(z.read("SYSTEM/framework/framework-res.apk"))
     if aapt2:
+        framework_res = work / "framework-res.apk"
+        with zipfile.ZipFile(target_files) as z:
+            framework_res.write_bytes(z.read("SYSTEM/framework/framework-res.apk"))
         framework_overlay = build_framework_overlay(aapt2, framework_res, work)
     else:
         print("no aapt2, so the image has no framework overlay", flush=True)

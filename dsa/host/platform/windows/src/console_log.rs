@@ -130,12 +130,98 @@ pub fn clean_line(raw: &[u8]) -> String {
     }
 }
 
+/// What a boot's console has shown that explains a guest that is late, counted line by line.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConsoleSigns {
+    /// Lines where SELinux refused someone the control daemon's service.
+    pub channel_denials: u64,
+    /// The SELinux domain last refused it, such as `priv_app`.
+    pub denied_domain: Option<String>,
+    /// Lines where the hwcomposer could not reach the host's renderer.
+    pub renderer_unreachable: u64,
+}
+
+impl ConsoleSigns {
+    /// Whether the agent was refused the channel for running as `priv_app`, which is what the
+    /// package manager makes of a disk from other signing keys. Another domain refused says
+    /// nothing about the disk.
+    pub fn agent_refused_for_keys(&self) -> bool {
+        self.channel_denials > 0 && self.denied_domain.as_deref() == Some("priv_app")
+    }
+
+    fn read(&mut self, line: &str) {
+        if line.contains("denied") && line.contains("IChannel/default") {
+            self.channel_denials += 1;
+            if let Some((_, rest)) = line.split_once("scontext=u:r:") {
+                self.denied_domain = rest.split([':', ' ']).next().map(str::to_string);
+            }
+        } else if line.contains("cannot reach the host renderer") {
+            self.renderer_unreachable += 1;
+        }
+    }
+}
+
+/// What to tell the user about a guest that has not finished booting.
+pub fn explain_unfinished_boot(signs: &ConsoleSigns, log: &Path) -> String {
+    if signs.renderer_unreachable > 0 {
+        format!(
+            "Android could not reach its renderer {} times, so it cannot draw and keeps \
+             restarting. The renderer is in the DSA Window Manager (dsa-wm.exe), which must run \
+             in your Windows session; its log is %LOCALAPPDATA%\\DSA\\logs\\dsa-wm.log. The \
+             whole boot is in {}.",
+            signs.renderer_unreachable,
+            log.display()
+        )
+    } else {
+        format!(
+            "The whole boot is in {}. A first boot on a new disk can take several minutes.",
+            log.display()
+        )
+    }
+}
+
+/// What to tell the user about a guest that has booted without its agent.
+pub fn explain_unreachable_agent(
+    signs: &ConsoleSigns,
+    log: &Path,
+    data_disk: Option<&Path>,
+) -> String {
+    let disk = data_disk
+        .map(|disk| disk.display().to_string())
+        .unwrap_or_else(|| "the Android data disk".to_string());
+    let remedy = format!(
+        "To start over, run `dsa stop` and move {disk} somewhere else: Android makes a new disk at \
+         its next start, without your apps and their data, which stay in the file you moved."
+    );
+    if signs.channel_denials > 0 {
+        let domain = signs
+            .denied_domain
+            .as_deref()
+            .map(|domain| format!(" (it runs as {domain}, not platform_app)"))
+            .unwrap_or_default();
+        format!(
+            "SELinux refused the agent the control channel {} times{domain}. That usually means \
+             the data disk was made under an Android image signed with other keys, whose \
+             certificates the package manager keeps using. {remedy} The whole boot is in {}.",
+            signs.channel_denials,
+            log.display()
+        )
+    } else {
+        format!(
+            "The agent may have crashed; the whole boot is in {}. If the data disk was made \
+             under an Android image signed with other keys, that also stops the agent. {remedy}",
+            log.display()
+        )
+    }
+}
+
 /// The last non-empty lines of a byte stream that arrives in pieces of any size.
 #[derive(Debug, Clone)]
 pub struct ConsoleTail {
     lines: VecDeque<String>,
     partial: Vec<u8>,
     keep: usize,
+    signs: ConsoleSigns,
 }
 
 impl ConsoleTail {
@@ -145,10 +231,13 @@ impl ConsoleTail {
             lines: VecDeque::with_capacity(keep),
             partial: Vec::new(),
             keep,
+            signs: ConsoleSigns::default(),
         }
     }
 
     fn finish_line(&mut self) {
+        // Before the line is cut to a length a report can carry.
+        self.signs.read(&String::from_utf8_lossy(&self.partial));
         let line = clean_line(&self.partial);
         self.partial.clear();
         if line.is_empty() || self.keep == 0 {
@@ -172,6 +261,11 @@ impl ConsoleTail {
                 }
             }
         }
+    }
+
+    /// What the finished lines have shown.
+    pub fn signs(&self) -> &ConsoleSigns {
+        &self.signs
     }
 
     /// The last non-empty lines, oldest first, including a last line that has not ended.
@@ -273,6 +367,11 @@ impl ConsoleLog {
     /// The last non-empty console lines of this boot, oldest first.
     pub fn tail(&self) -> Vec<String> {
         self.tail.lines()
+    }
+
+    /// What this boot's console has shown about why it is late.
+    pub fn signs(&self) -> ConsoleSigns {
+        self.tail.signs().clone()
     }
 
     /// Why the log file could not be written, if it could not.

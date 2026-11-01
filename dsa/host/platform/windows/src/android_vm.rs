@@ -12,10 +12,12 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use dsa_host_core::bootconfig;
-use dsa_host_core::session::GuestLauncher;
+use dsa_host_core::session::{GuestLauncher, GuestStall};
 use dsa_protocol::auth::{bootconfig_entry, BootSecret};
 
-use crate::console_log::{boot_header, ConsoleLog};
+use crate::console_log::{
+    boot_header, explain_unfinished_boot, explain_unreachable_agent, ConsoleLog,
+};
 use crate::console_pipe::ConsoleCapture;
 use crate::guid::Guid;
 use crate::hcs::{grant_vm_access, ComputeSystem};
@@ -53,7 +55,14 @@ pub struct AndroidVmLauncher {
     console_report: Option<String>,
     /// Where each boot's initrd, with its secret, is written while the VM starts.
     boot_dir: PathBuf,
+    /// Says what the VM cannot run without and is missing, and tries to provide it.
+    prerequisite: Option<Prerequisite>,
+    /// The disk the running VM boots from, for what a stalled boot tells the user to do.
+    data_disk: Option<PathBuf>,
 }
+
+/// See [`AndroidVmLauncher::with_prerequisite`].
+pub type Prerequisite = Box<dyn FnMut() -> Option<String> + Send>;
 
 /// A file that is removed when this is dropped.
 struct TransientFile(PathBuf);
@@ -97,7 +106,16 @@ impl AndroidVmLauncher {
             console: None,
             console_report: None,
             boot_dir: std::env::temp_dir(),
+            prerequisite: None,
+            data_disk: None,
         }
+    }
+
+    /// Has the session ask `prerequisite` for what the VM cannot run without: it tries to
+    /// provide that, and says what is missing, if anything. The VM does not start without it.
+    pub fn with_prerequisite(mut self, prerequisite: Prerequisite) -> AndroidVmLauncher {
+        self.prerequisite = Some(prerequisite);
+        self
     }
 
     /// Writes each boot's initrd into `dir` instead of the temporary folder.
@@ -180,6 +198,7 @@ impl GuestLauncher for AndroidVmLauncher {
         self.end_console(Duration::ZERO);
         self.console_report = None;
         let mut config = (self.config)()?;
+        self.data_disk = Some(config.data_disk.clone());
         let Some(initrd) = config.initrd.clone() else {
             return Err(
                 "the Android VM has no initrd, which is what carries the boot's secret to \
@@ -276,6 +295,27 @@ impl GuestLauncher for AndroidVmLauncher {
 
     fn vm_id(&self) -> Option<String> {
         self.runtime_id().ok().map(|g| g.to_string())
+    }
+
+    fn prerequisite(&mut self) -> Option<String> {
+        self.prerequisite.as_mut().and_then(|check| check())
+    }
+
+    fn agent_refused_for_keys(&mut self) -> bool {
+        self.console
+            .as_ref()
+            .is_some_and(|console| console.signs().agent_refused_for_keys())
+    }
+
+    fn explain_stall(&mut self, stall: GuestStall) -> Option<String> {
+        let console = self.console.as_ref()?;
+        let (signs, log) = (console.signs(), console.log_path());
+        Some(match stall {
+            GuestStall::BootUnfinished => explain_unfinished_boot(&signs, &log),
+            GuestStall::AgentUnreachable => {
+                explain_unreachable_agent(&signs, &log, self.data_disk.as_deref())
+            }
+        })
     }
 
     /// Pauses the whole VM. Its memory stays allocated to the VM process, where Windows can

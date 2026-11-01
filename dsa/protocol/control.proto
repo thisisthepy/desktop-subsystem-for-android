@@ -398,6 +398,21 @@ message GuestMemory {
   repeated ProcessMemory top_processes = 14;
 }
 
+// From the agent to the guest's control daemon, on each connection to it: the agent has
+// subscribed and takes the host's frames. It stops at the daemon, which tells the host with
+// GuestBoot and notices when the agent's process dies.
+message AgentConnected {}
+
+// Guest to host, from the control daemon: how far the guest has got. The daemon connects long
+// before Android has finished starting, so a connection says only that the kernel and init
+// run. Sent on each connection and on each change.
+message GuestBoot {
+  // Android has finished booting (sys.boot_completed).
+  bool boot_completed = 1;
+  // The agent is connected to the daemon, so the host's requests reach it.
+  bool agent_connected = 2;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -423,6 +438,8 @@ message Envelope {
     GuestMemory guest_memory = 21;
     InstalledApp installed_app = 22;
     InstalledApps installed_apps = 23;
+    AgentConnected agent_connected = 24;
+    GuestBoot guest_boot = 25;
     ScreenState screen_state = 40;
     PowerState power_state = 41;
     DeviceIdle device_idle = 42;

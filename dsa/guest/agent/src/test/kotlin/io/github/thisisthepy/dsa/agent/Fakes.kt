@@ -116,7 +116,10 @@ class FakeEndpoint : ChannelEndpoint {
         gone?.invoke()
     }
 
-    fun sentMessages(): List<Envelope> = sent.map(::decode)
+    /** What the agent sent for the host: all but its word to the daemon that it is there. */
+    fun sentMessages(): List<Envelope> = sent.map(::decode).filterNot { it.hasAgentConnected() }
+
+    val connectionsAnnounced: Int get() = sent.map(::decode).count { it.hasAgentConnected() }
 }
 
 /** The service manager: the daemon's service is there once [up] is set. */

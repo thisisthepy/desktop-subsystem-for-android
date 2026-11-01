@@ -79,6 +79,7 @@ fn write_config(dir: &Path, pipe: &str) -> PathBuf {
         "pipe_sddl": "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)",
         "log_file": dir.join("dsa-hostd.log"),
         "connect_timeout_secs": 5,
+            "keep_window_manager": false,
         "stop_timeout_secs": 5,
     });
     let path = dir.join("dsa-hostd.json");
@@ -221,6 +222,7 @@ fn fr14_a_new_image_that_does_not_boot_is_undone_by_the_service() {
             "data_dir": dir.join("users"),
             "data_disk_size_gb": 8,
             "connect_timeout_secs": 5,
+            "keep_window_manager": false,
             "stop_timeout_secs": 5,
         })
         .to_string(),
@@ -413,6 +415,7 @@ fn nfr5_service_keeps_running_when_update_store_has_bad_file() {
             "pipe_sddl": "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)",
             "log_file": dir.join("dsa-hostd.log"),
             "connect_timeout_secs": 5,
+            "keep_window_manager": false,
             "stop_timeout_secs": 5,
         })
         .to_string(),
@@ -480,6 +483,7 @@ fn fr3_serve_registers_graphics_service_guids_at_startup() {
             "pipe_sddl": "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)",
             "log_file": dir.join("dsa-hostd.log"),
             "connect_timeout_secs": 5,
+            "keep_window_manager": false,
             "stop_timeout_secs": 5,
         })
         .to_string(),
@@ -551,6 +555,7 @@ fn nfr5_serve_survives_graphics_service_guid_registration_error() {
             "pipe_sddl": "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)",
             "log_file": dir.join("dsa-hostd.log"),
             "connect_timeout_secs": 5,
+            "keep_window_manager": false,
             "stop_timeout_secs": 5,
         })
         .to_string(),

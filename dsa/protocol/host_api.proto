@@ -81,6 +81,9 @@ enum SessionState {
   SESSION_STATE_DOZING = 4;
   SESSION_STATE_FROZEN = 5;
   SESSION_STATE_STOPPING = 6;
+  // The guest runs but is not ready and has taken too long; Status.problem says why. It
+  // leaves this state by itself when the cause goes away.
+  SESSION_STATE_STALLED = 7;
 }
 
 // Asks for the state of the caller's Android.
@@ -425,6 +428,9 @@ message Status {
   // next start, an update applied, or one that did not start and was undone. Empty when
   // there is nothing to tell.
   string update_notice = 3;
+  // What keeps a running or starting Android from being ready, and what to do about it, in
+  // words a person can act on. Empty when nothing does.
+  string problem = 4;
 }
 
 // The answer to UpdateProgram.

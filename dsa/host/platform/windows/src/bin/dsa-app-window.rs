@@ -20,7 +20,7 @@ fn main() -> std::process::ExitCode {
     use std::sync::Arc;
 
     use dsa_host_windows::app_window::launch::{
-        ensure_android, ensure_window_manager, pipe_exists, run_program, tell_user,
+        ensure_android, ensure_window_manager, pipe_exists, prepare_app, run_program, tell_user,
         window_manager_path, StartingWindow, POLL, START_WINDOW_MANAGER,
     };
     use dsa_host_windows::app_window::{
@@ -66,27 +66,31 @@ fn main() -> std::process::ExitCode {
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_else(|| package.clone());
 
-    // Opened by the user (from the Start menu, a pinned button or Windows search): Android
-    // and the window manager are started first when they are not running.
+    // Opened by the user (from the Start menu, a pinned button or Windows search): the window
+    // manager and Android are started first when they are not running.
     let mut starting = None;
     if launch {
-        let prepared = ensure_android(
-            &mut NamedPipeConnector {
-                name: api_pipe.into(),
+        let prepared = prepare_app(
+            || {
+                ensure_window_manager(
+                    || pipe_exists(&window_manager_pipe),
+                    || match window_manager_path(Some(program.as_path())) {
+                        Some(window_manager) => run_program(&window_manager, ""),
+                        None => Err("the DSA Window Manager is not installed".into()),
+                    },
+                    START_WINDOW_MANAGER,
+                    POLL,
+                )
             },
-            || starting = Some(StartingWindow::show(&title)),
-        )
-        .and_then(|()| {
-            ensure_window_manager(
-                || pipe_exists(&window_manager_pipe),
-                || match window_manager_path(Some(program.as_path())) {
-                    Some(window_manager) => run_program(&window_manager, ""),
-                    None => Err("the DSA Window Manager is not installed".into()),
-                },
-                START_WINDOW_MANAGER,
-                POLL,
-            )
-        });
+            || {
+                ensure_android(
+                    &mut NamedPipeConnector {
+                        name: api_pipe.into(),
+                    },
+                    || starting = Some(StartingWindow::show(&title)),
+                )
+            },
+        );
         if let Err(why) = prepared {
             note(logger.as_deref(), &format!("{package}: {why}"));
             drop(starting);

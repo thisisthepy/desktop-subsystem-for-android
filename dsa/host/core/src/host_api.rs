@@ -46,6 +46,10 @@ pub trait UserAndroid: Send + Sync {
     fn state(&self) -> SessionState;
     /// Why it last stopped, in words a person can act on.
     fn last_reason(&self) -> Option<String>;
+    /// What keeps it from being ready, and what to do, while something does.
+    fn problem(&self) -> Option<String> {
+        None
+    }
     fn start(&self);
     fn stop(&self);
     /// News about the Android image for the user, if there is any.
@@ -107,6 +111,9 @@ impl UserAndroid for Session {
     fn last_reason(&self) -> Option<String> {
         Session::last_reason(self).map(|reason| reason.to_string())
     }
+    fn problem(&self) -> Option<String> {
+        Session::problem(self).map(|problem| problem.to_string())
+    }
     /// On a stopped session, returns once it has moved on, so that what the caller reads
     /// next is the start's progress or its failure, never the state from before it.
     fn start(&self) {
@@ -154,6 +161,11 @@ impl UserAndroid for Session {
 
 fn request_error(error: SessionError) -> TaskRequestError {
     match error {
+        SessionError::NotActive(state @ (SessionState::Starting | SessionState::Stalled)) => {
+            TaskRequestError::NotRunning(format!(
+                "Android is {state}, not ready yet; `dsa status` says how far it has got"
+            ))
+        }
         SessionError::NotActive(state) => TaskRequestError::NotRunning(format!(
             "Android is {state}, not running; start it first (dsa start)"
         )),
@@ -277,6 +289,7 @@ fn to_wire(state: SessionState) -> types::SessionState {
         SessionState::Dozing => types::SessionState::Dozing,
         SessionState::Frozen => types::SessionState::Frozen,
         SessionState::Stopping => types::SessionState::Stopping,
+        SessionState::Stalled => types::SessionState::Stalled,
     }
 }
 
@@ -466,6 +479,7 @@ fn from_wire(state: i32) -> Option<SessionState> {
         types::SessionState::Dozing => Some(SessionState::Dozing),
         types::SessionState::Frozen => Some(SessionState::Frozen),
         types::SessionState::Stopping => Some(SessionState::Stopping),
+        types::SessionState::Stalled => Some(SessionState::Stalled),
     }
 }
 
@@ -1143,6 +1157,7 @@ fn status(android: &dyn UserAndroid) -> response::Body {
         state: to_wire(android.state()) as i32,
         last_reason: android.last_reason().unwrap_or_default(),
         update_notice: android.update_notice().unwrap_or_default(),
+        problem: android.problem().unwrap_or_default(),
     })
 }
 
@@ -1153,6 +1168,8 @@ pub struct Status {
     pub last_reason: Option<String>,
     /// News about the Android image, such as an update waiting for the next start.
     pub update_notice: Option<String>,
+    /// What keeps it from being ready, and what to do, while something does.
+    pub problem: Option<String>,
 }
 
 /// The tasks of the caller's Android as the service reported them.
@@ -1349,10 +1366,11 @@ impl HostApiClient {
         }
     }
 
-    /// Makes sure the caller's Android is running: starts it when it is stopped, and waits at
-    /// most `timeout` for it to be running, asking every `poll`. `waiting` is called once
-    /// whenever the state it waits through changes, so the caller can show progress. A start
-    /// that fails is an error carrying the reason the service gives.
+    /// Makes sure the caller's Android is ready: starts it when it is stopped, and waits at
+    /// most `timeout` for it to have finished booting with its agent connected, asking every
+    /// `poll`. `waiting` is called once whenever the state it waits through changes, so the
+    /// caller can show progress. A start that fails, or an Android that has stalled, is an error
+    /// carrying the reason the service gives.
     pub fn ensure_running(
         &mut self,
         timeout: Duration,
@@ -1366,6 +1384,14 @@ impl HostApiClient {
         loop {
             match status.state {
                 SessionState::Active | SessionState::Dozing | SessionState::Frozen => return Ok(()),
+                SessionState::Stalled => {
+                    return Err(ClientError::Service {
+                        code: ErrorCode::Unavailable,
+                        detail: status.problem.unwrap_or_else(|| {
+                            "Android runs but has taken too long to be ready".into()
+                        }),
+                    })
+                }
                 SessionState::Stopped if started => {
                     return Err(ClientError::Service {
                         code: ErrorCode::Unavailable,
@@ -1501,6 +1527,7 @@ impl HostApiClient {
                 })?,
                 last_reason: Some(status.last_reason).filter(|reason| !reason.is_empty()),
                 update_notice: Some(status.update_notice).filter(|notice| !notice.is_empty()),
+                problem: Some(status.problem).filter(|problem| !problem.is_empty()),
             }),
             _ => Err(ClientError::Malformed("expected a status".into())),
         }

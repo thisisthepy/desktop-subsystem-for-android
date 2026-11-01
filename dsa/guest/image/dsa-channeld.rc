@@ -3,11 +3,18 @@
 service dsa_channeld /vendor/bin/dsa-channeld
     class core
     user system
-    group system
+    # readproc: /proc is mounted so that only this group sees other users' processes, and the
+    # daemon reads the name of a caller that says it is the agent.
+    group system readproc
     stdio_to_kmsg
     # Every pointer event passes through here on its way to the agent; it must not wait
     # behind apps. Only the framework's display and input threads go ahead of it.
     priority -10
+
+# Tells the daemon, which tells the host, that Android has finished booting. A property of the
+# daemon's own, because the policy that lets a vendor process read system properties varies.
+on property:sys.boot_completed=1
+    setprop vendor.dsa.boot_completed 1
 
 # Handing idle memory back to the host. dsa-channeld sets this when no task is in use for a
 # while, or the guest holds mostly cache. A guest with memory to spare is never short, so the

@@ -1,9 +1,10 @@
 //! Opening an app from its Start menu shortcut, a pinned taskbar button or Windows search.
 //!
 //! The app's window program then starts with no window manager behind it, and maybe no
-//! Android either. Before it becomes the app's window host it makes sure both run: it asks the
-//! service to start the user's Android and waits until it runs, and it starts the window
-//! manager when its pipe is not there. While it waits it shows a small window under the app's
+//! Android either. Before it becomes the app's window host it makes sure both run: it starts the
+//! window manager when its pipe is not there, because Android cannot finish booting without the
+//! renderer in it, then asks the service to start the user's Android and waits until it is
+//! ready. While it waits it shows a small window under the app's
 //! name and icon, so the taskbar shows the app at once. Then it connects to the window manager
 //! as the app's window host, which asks Android for the app; if the app has a window host
 //! already, that one gets the app and this program ends, so an app never has two.
@@ -35,7 +36,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 /// How long Android may take to start before opening the app gives up.
-pub const START_ANDROID: Duration = Duration::from_secs(180);
+pub const START_ANDROID: Duration = Duration::from_secs(360);
 
 /// How long the window manager may take to open its pipe once started.
 pub const START_WINDOW_MANAGER: Duration = Duration::from_secs(20);
@@ -98,6 +99,16 @@ pub fn ensure_window_manager(
         thread::sleep(poll);
     }
     Ok(())
+}
+
+/// Makes sure what an app needs runs, in the order that works: Android cannot finish booting
+/// until the window manager serves its renderer.
+pub fn prepare_app(
+    window_manager: impl FnOnce() -> Result<(), String>,
+    android: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    window_manager()?;
+    android()
 }
 
 fn wide(text: &str) -> Vec<u16> {

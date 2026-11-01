@@ -715,6 +715,9 @@ impl UserAndroid for WithProgramStatus {
             _ => self.android.last_reason(),
         }
     }
+    fn problem(&self) -> Option<String> {
+        self.android.problem()
+    }
     fn start(&self) {
         if self.status.installing().is_none() {
             self.android.start();

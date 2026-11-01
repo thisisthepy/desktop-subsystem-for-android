@@ -382,6 +382,64 @@ fn fr7_opening_an_app_while_android_stops_starts_it_again_once_stopped() {
     assert_eq!(android.starts(), 1);
 }
 
+/// An Android that runs but has stalled, and says why.
+struct Stalled;
+
+impl UserAndroid for Stalled {
+    fn state(&self) -> SessionState {
+        SessionState::Stalled
+    }
+    fn last_reason(&self) -> Option<String> {
+        None
+    }
+    fn problem(&self) -> Option<String> {
+        Some("the window manager cannot start".into())
+    }
+    fn start(&self) {}
+    fn stop(&self) {}
+    fn pointer(&self, _: &PointerEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn key(&self, _: &KeyEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn ime(&self, _: &ImeEvent) -> Result<(), TaskRequestError> {
+        Err(TaskRequestError::Failed("no input here".into()))
+    }
+}
+
+fn stalled_client() -> (HostApiClient, RunningService) {
+    let (listener, mut connector) = local::pair();
+    let androids = Arc::new(PerUser::new(move |_: &str| {
+        Ok(Arc::new(Stalled) as Arc<dyn UserAndroid>)
+    }));
+    let service = RunningService::start(Box::new(listener), androids);
+    let client = HostApiClient::connect(&mut connector, "test", WAIT).unwrap();
+    (client, service)
+}
+
+#[test]
+fn fr2_the_status_carries_the_stalled_state_and_the_problem() {
+    let (mut client, _service) = stalled_client();
+    let status = client.status().unwrap();
+    assert_eq!(status.state, SessionState::Stalled);
+    assert_eq!(
+        status.problem.as_deref(),
+        Some("the window manager cannot start")
+    );
+}
+
+#[test]
+fn fr7_opening_an_app_on_a_stalled_android_says_why_at_once() {
+    let (mut client, _service) = stalled_client();
+    match client.ensure_running(WAIT, Duration::from_millis(1), |_| {}) {
+        Err(dsa_host_core::host_api::ClientError::Service { detail, .. }) => {
+            assert!(detail.contains("window manager"), "{detail}")
+        }
+        other => panic!("expected the problem, got {other:?}"),
+    }
+}
+
 #[test]
 fn fr7_an_android_that_does_not_start_says_why() {
     let android = Arc::new(Booting::new(SessionState::Stopped, 0, true));

@@ -55,6 +55,9 @@
   <data name="StopButton.Content" xml:space="preserve">
     <value>종료</value>
   </data>
+  <data name="ProblemBar.Title" xml:space="preserve">
+    <value>Android가 준비되지 않았습니다</value>
+  </data>
   <data name="LastReasonBar.Title" xml:space="preserve">
     <value>마지막 종료 이유</value>
   </data>
@@ -96,6 +99,9 @@
   </data>
   <data name="State_Stopping" xml:space="preserve">
     <value>종료하는 중</value>
+  </data>
+  <data name="State_Stalled" xml:space="preserve">
+    <value>준비되지 않음</value>
   </data>
   <data name="Problem_CliMissing" xml:space="preserve">
     <value>dsa 명령을 실행할 수 없습니다. DSA를 다시 설치하십시오.</value>

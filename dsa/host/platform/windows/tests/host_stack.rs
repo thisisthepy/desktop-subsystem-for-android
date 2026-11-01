@@ -98,6 +98,16 @@ fn guest(bindings: &Bindings, vm: u32) -> Box<dyn Connection> {
                 WAIT,
             )
             .unwrap();
+            connection
+                .send(&dsa_protocol::encode(&dsa_protocol::control::Envelope {
+                    body: Some(dsa_protocol::control::envelope::Body::GuestBoot(
+                        dsa_protocol::control::GuestBoot {
+                            boot_completed: true,
+                            agent_connected: true,
+                        },
+                    )),
+                }))
+                .unwrap();
             return connection;
         }
         thread::sleep(Duration::from_millis(5));

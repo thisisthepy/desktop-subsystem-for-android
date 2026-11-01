@@ -188,6 +188,7 @@ fn fr14_dsa_shows_news_about_an_update_on_its_own_line() {
         state: SessionState::Active,
         last_reason: None,
         update_notice: Some("Android was updated to 16.0.3".into()),
+        problem: None,
     });
     assert_eq!(
         line,
@@ -204,12 +205,45 @@ fn fr2_dsa_shows_the_guest_console_of_a_failed_start_below_the_status_line() {
             "the Android VM exited during boot\nlast console lines:\n  Kernel panic".into(),
         ),
         update_notice: None,
+        problem: None,
     });
     assert_eq!(
         line,
         "Android: Stopped (last stopped: the Android VM exited during boot)\n\
          last console lines:\n  Kernel panic"
     );
+}
+
+#[test]
+fn fr2_dsa_says_what_keeps_a_stalled_android_from_being_ready() {
+    use dsa_host_core::host_api::Status;
+    let status = Status {
+        state: SessionState::Stalled,
+        last_reason: None,
+        update_notice: None,
+        problem: Some("Android has not finished booting after 300 s\nthe log is there".into()),
+    };
+    assert_eq!(
+        dsa_cli::describe(&status),
+        "Android: Stalled\nProblem: Android has not finished booting after 300 s\n\
+         Problem: the log is there"
+    );
+    let json = dsa_cli::status_json(&status);
+    assert_eq!(json["state"], "Stalled");
+    assert!(json["problem"]
+        .as_str()
+        .unwrap()
+        .contains("has not finished booting"));
+}
+
+#[test]
+fn fr2_dsa_start_waits_longer_than_android_may_take_to_be_called_stalled() {
+    let start = parse(&args("start --wait")).unwrap();
+    assert!(start.timeout > dsa_host_core::session::DEFAULT_READY_TIMEOUT);
+    let stop = parse(&args("stop --wait")).unwrap();
+    assert_eq!(stop.timeout, Duration::from_secs(120));
+    let told = parse(&args("start --wait --timeout 5")).unwrap();
+    assert_eq!(told.timeout, Duration::from_secs(5));
 }
 
 #[test]
@@ -356,6 +390,7 @@ fn fr15_dsa_shows_news_about_the_image_and_the_program_on_their_own_lines() {
              is not running"
                 .into(),
         ),
+        problem: None,
     });
     assert_eq!(
         line,
