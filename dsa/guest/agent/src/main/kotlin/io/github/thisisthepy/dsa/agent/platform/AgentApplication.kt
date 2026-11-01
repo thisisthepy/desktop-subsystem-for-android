@@ -71,6 +71,8 @@ class AgentApplication : Application() {
             clipboard = AndroidClipboard(this, log),
             notifications = AndroidNotifications(this, log),
             packageInstaller = AndroidPackageInstaller(this, log),
+            widgets = AndroidWidgets(this, log),
+            widgetStore = AndroidWidgetStore(this),
         )
         AgentApplication.agent = agent
         HostInputMethod.onCursor = { rect -> agent.cursorMoved(rect.left, rect.top, rect.right, rect.bottom) }

@@ -23,5 +23,6 @@
         <permission name="android.permission.INSTALL_PACKAGES" />
         <permission name="android.permission.MANAGE_ROLE_HOLDERS" />
         <permission name="android.permission.MANAGE_NOTIFICATION_LISTENERS" />
+        <permission name="android.permission.BIND_APPWIDGET" />
     </privapp-permissions>
 </permissions>

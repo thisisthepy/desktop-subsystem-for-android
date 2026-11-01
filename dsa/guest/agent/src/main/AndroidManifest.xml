@@ -8,7 +8,8 @@
   nothing. Its first service is the guest's input method (platform/HostInputMethod.kt), which
   shows nothing and types what the host's input method composes. Its other service is its
   notification listener (platform/AndroidNotifications.kt), which hands the guest's
-  notifications to the host.
+  notifications to the host. It is also the guest's widget host (platform/AndroidWidgets.kt),
+  which draws the widgets the user placed on the host's desktop.
   Every permission here is also in privapp-permissions-dsa-agent.xml.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -58,6 +59,11 @@
       allows one: the guest has no screen to ask on.
     -->
     <uses-permission android:name="android.permission.MANAGE_NOTIFICATION_LISTENERS" />
+    <!--
+      Placing the widgets the user picks on the host without asking them to allow each one:
+      the guest has no screen to ask on.
+    -->
+    <uses-permission android:name="android.permission.BIND_APPWIDGET" />
 
     <application
         android:name=".platform.AgentApplication"
@@ -109,6 +115,18 @@
                 <data android:scheme="https" />
             </intent-filter>
         </activity>
+
+        <!--
+          Runs a widget's setup when the user places it: it shows nothing, starts the setup of
+          the widget's app, which shows as a task window, and finishes with its answer. It is
+          not exported: only the agent starts it.
+        -->
+        <activity
+            android:name=".platform.WidgetConfigureActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!--
           The files the host sends, read only, to the app the user picks. Not exported: an app
