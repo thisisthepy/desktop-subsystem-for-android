@@ -218,6 +218,174 @@ pub struct ActOnNotification {
     #[prost(enumeration = "NotificationAction", tag = "2")]
     pub action: i32,
 }
+/// Asks for the widgets the apps in the caller's Android offer. The answer is WidgetProviders.
+/// Needs the caller's Android to be running.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListWidgetProviders {}
+/// One widget an app in the caller's Android offers.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetProvider {
+    /// The provider's component, as `package/class`. AddWidget names it.
+    #[prost(string, tag = "1")]
+    pub provider: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub package_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub label: ::prost::alloc::string::String,
+    /// A PNG image of at most 160 pixels on a side; empty for none.
+    #[prost(bytes = "vec", tag = "4")]
+    pub preview_png: ::prost::alloc::vec::Vec<u8>,
+    /// Sizes in density-independent pixels (dp), which are the host's device-independent
+    /// pixels: a dp is one pixel at a scale of 100%. A maximum of 0 means no limit.
+    #[prost(uint32, tag = "5")]
+    pub min_width_dp: u32,
+    #[prost(uint32, tag = "6")]
+    pub min_height_dp: u32,
+    #[prost(uint32, tag = "7")]
+    pub default_width_dp: u32,
+    #[prost(uint32, tag = "8")]
+    pub default_height_dp: u32,
+    #[prost(uint32, tag = "9")]
+    pub max_width_dp: u32,
+    #[prost(uint32, tag = "10")]
+    pub max_height_dp: u32,
+    /// 1 horizontally, 2 vertically, 3 both, 0 not at all.
+    #[prost(uint32, tag = "11")]
+    pub resize_mode: u32,
+    /// Whether the app asks the user to set the widget up when it is placed.
+    #[prost(bool, tag = "12")]
+    pub needs_configuration: bool,
+}
+/// The answer to ListWidgetProviders, in label order.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct WidgetProviders {
+    #[prost(message, repeated, tag = "1")]
+    pub providers: ::prost::alloc::vec::Vec<WidgetProvider>,
+}
+/// Places a new widget of `provider` on the caller's desktop. When the app asks the user to set
+/// it up, its setup shows as a window first, and the answer waits for the user. The answer is
+/// the new Widget, or ERROR_CODE_WIDGET_REFUSED with the reason.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AddWidget {
+    #[prost(string, tag = "1")]
+    pub provider: ::prost::alloc::string::String,
+}
+/// Removes a widget: Android forgets it, its window closes, and its place is forgotten.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveWidget {
+    #[prost(int32, tag = "1")]
+    pub widget_id: i32,
+}
+/// Where a widget's window is on the caller's desktop. The position is in the host's
+/// physical screen pixels; the size is in dp, so it stays the same on a monitor of another
+/// scale.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetPlacement {
+    #[prost(int32, tag = "1")]
+    pub x: i32,
+    #[prost(int32, tag = "2")]
+    pub y: i32,
+    #[prost(uint32, tag = "3")]
+    pub width_dp: u32,
+    #[prost(uint32, tag = "4")]
+    pub height_dp: u32,
+}
+/// One widget placed on the caller's desktop.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Widget {
+    #[prost(int32, tag = "1")]
+    pub widget_id: i32,
+    #[prost(message, optional, tag = "2")]
+    pub provider: ::core::option::Option<WidgetProvider>,
+    /// Where its window goes: where the user left it, else a place the service picked.
+    #[prost(message, optional, tag = "3")]
+    pub placement: ::core::option::Option<WidgetPlacement>,
+}
+/// Asks for the widgets placed on the caller's desktop. The answer is Widgets.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListWidgets {}
+/// The answer to ListWidgets: the widgets Android has placed, in ID order.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct Widgets {
+    #[prost(message, repeated, tag = "1")]
+    pub widgets: ::prost::alloc::vec::Vec<Widget>,
+    /// How many widgets the service remembers a place for. Above 0 while Android is stopped,
+    /// its widgets come back once it runs.
+    #[prost(uint32, tag = "2")]
+    pub remembered: u32,
+}
+/// Watches the caller's widgets. The answer is Widgets, and the connection then carries a
+/// WidgetEvent for each change. The client sends nothing more on it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WatchWidgets {}
+/// What a widget shows now: a PNG image of `width` by `height` pixels with an alpha channel.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetFrame {
+    #[prost(int32, tag = "1")]
+    pub widget_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub width: u32,
+    #[prost(uint32, tag = "3")]
+    pub height: u32,
+    #[prost(bytes = "vec", tag = "4")]
+    pub png: ::prost::alloc::vec::Vec<u8>,
+}
+/// A widget was removed.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetRemoved {
+    #[prost(int32, tag = "1")]
+    pub widget_id: i32,
+}
+/// A change to the caller's widgets, on a connection that watches them.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetEvent {
+    #[prost(oneof = "widget_event::Body", tags = "1, 2, 3")]
+    pub body: ::core::option::Option<widget_event::Body>,
+}
+/// Nested message and enum types in `WidgetEvent`.
+pub mod widget_event {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Body {
+        /// A widget was placed, or Android described it again, as when it starts.
+        #[prost(message, tag = "1")]
+        Placed(super::Widget),
+        #[prost(message, tag = "2")]
+        Frame(super::WidgetFrame),
+        #[prost(message, tag = "3")]
+        Removed(super::WidgetRemoved),
+    }
+}
+/// The user moved or resized a widget's window. The service remembers the placement and
+/// tells Android the window's size, which the widget then draws at.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PlaceWidget {
+    #[prost(int32, tag = "1")]
+    pub widget_id: i32,
+    #[prost(message, optional, tag = "2")]
+    pub placement: ::core::option::Option<WidgetPlacement>,
+    /// The window's size in its monitor's pixels, and the monitor's density (160 at a scale of
+    /// 100%).
+    #[prost(uint32, tag = "3")]
+    pub width: u32,
+    #[prost(uint32, tag = "4")]
+    pub height: u32,
+    #[prost(uint32, tag = "5")]
+    pub density_dpi: u32,
+}
+/// Pointer input in a widget's window, in the pixels the widget is drawn at.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct WidgetPointer {
+    #[prost(int32, tag = "1")]
+    pub widget_id: i32,
+    #[prost(enumeration = "PointerAction", tag = "2")]
+    pub action: i32,
+    #[prost(uint32, tag = "3")]
+    pub pointer_id: u32,
+    #[prost(float, tag = "4")]
+    pub x: f32,
+    #[prost(float, tag = "5")]
+    pub y: f32,
+}
 /// Installs an APK in the caller's Android. The service answers at once: Done when it takes an
 /// APK of this name and size, or an error. After Done the client sends the APK's `size` bytes
 /// in ApkChunk frames, which are not answered, and the service answers the same request id once
@@ -651,19 +819,19 @@ pub struct Error {
 }
 /// A request from the client. The service answers each with one Response carrying the same
 /// id, in the order the requests arrived.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Request {
     #[prost(uint64, tag = "1")]
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 28, 29, 30, 31, 32, 33, 34"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
 /// Nested message and enum types in `Request`.
 pub mod request {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
     pub enum Body {
         #[prost(message, tag = "2")]
         GetStatus(super::GetStatus),
@@ -713,13 +881,30 @@ pub mod request {
         ActOnNotification(super::ActOnNotification),
         #[prost(message, tag = "27")]
         InstallApk(super::InstallApk),
+        #[prost(message, tag = "28")]
+        ListWidgetProviders(super::ListWidgetProviders),
+        #[prost(message, tag = "29")]
+        AddWidget(super::AddWidget),
+        #[prost(message, tag = "30")]
+        RemoveWidget(super::RemoveWidget),
+        #[prost(message, tag = "31")]
+        ListWidgets(super::ListWidgets),
+        #[prost(message, tag = "32")]
+        WatchWidgets(super::WatchWidgets),
+        #[prost(message, tag = "33")]
+        PlaceWidget(super::PlaceWidget),
+        #[prost(message, tag = "34")]
+        WidgetPointer(super::WidgetPointer),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Response {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "response::Body", tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11")]
+    #[prost(
+        oneof = "response::Body",
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14"
+    )]
     pub body: ::core::option::Option<response::Body>,
 }
 /// Nested message and enum types in `Response`.
@@ -746,6 +931,12 @@ pub mod response {
         Settings(super::Settings),
         #[prost(message, tag = "11")]
         InstallResult(super::InstallResult),
+        #[prost(message, tag = "12")]
+        WidgetProviders(super::WidgetProviders),
+        #[prost(message, tag = "13")]
+        Widget(super::Widget),
+        #[prost(message, tag = "14")]
+        Widgets(super::Widgets),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.
@@ -753,7 +944,7 @@ pub mod response {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11, 15, 16, 14"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11, 15, 16, 14, 17"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -793,6 +984,8 @@ pub mod envelope {
         NotificationRemoved(super::NotificationRemoved),
         #[prost(message, tag = "14")]
         ApkChunk(super::ApkChunk),
+        #[prost(message, tag = "17")]
+        WidgetEvent(super::WidgetEvent),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -1202,6 +1395,9 @@ pub enum ErrorCode {
     /// An APK was not taken: it is too large, its name is not an APK's, or it did not arrive
     /// whole. The detail says which. An APK Android refused is answered with InstallResult.
     InstallRefused = 8,
+    /// A widget was not placed: its app offers no such widget, Android did not allow it, or the
+    /// user canceled its setup. The detail says which.
+    WidgetRefused = 9,
 }
 impl ErrorCode {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1219,6 +1415,7 @@ impl ErrorCode {
             Self::NotAllowed => "ERROR_CODE_NOT_ALLOWED",
             Self::FileRefused => "ERROR_CODE_FILE_REFUSED",
             Self::InstallRefused => "ERROR_CODE_INSTALL_REFUSED",
+            Self::WidgetRefused => "ERROR_CODE_WIDGET_REFUSED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1233,6 +1430,7 @@ impl ErrorCode {
             "ERROR_CODE_NOT_ALLOWED" => Some(Self::NotAllowed),
             "ERROR_CODE_FILE_REFUSED" => Some(Self::FileRefused),
             "ERROR_CODE_INSTALL_REFUSED" => Some(Self::InstallRefused),
+            "ERROR_CODE_WIDGET_REFUSED" => Some(Self::WidgetRefused),
             _ => None,
         }
     }

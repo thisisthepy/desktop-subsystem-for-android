@@ -642,12 +642,162 @@ pub struct ClockAnswer {
     #[prost(uint64, tag = "2")]
     pub guest_mono_ns: u64,
 }
+/// Host to guest: asks the agent for the widgets the apps in the guest offer. The agent
+/// answers with one or more WidgetProviders of the same `request_id`, the last one marked
+/// `complete`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListWidgetProviders {
+    #[prost(uint32, tag = "1")]
+    pub request_id: u32,
+}
+/// One widget an app in the guest offers, as a gallery shows it.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetProvider {
+    /// The provider's component, as `package/class` (ComponentName.flattenToString).
+    #[prost(string, tag = "1")]
+    pub provider: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub package_name: ::prost::alloc::string::String,
+    /// The widget's name, as the app labels it.
+    #[prost(string, tag = "3")]
+    pub label: ::prost::alloc::string::String,
+    /// The widget's preview, else the app's icon, as a PNG image of at most 160 pixels on a
+    /// side and 48 KiB. Empty when there is none, or it is larger.
+    #[prost(bytes = "vec", tag = "4")]
+    pub preview_png: ::prost::alloc::vec::Vec<u8>,
+    /// Sizes in density-independent pixels (dp). The minimum is the smallest the widget may be
+    /// made; the default is the size it is placed at; a maximum of 0 means no limit.
+    #[prost(uint32, tag = "5")]
+    pub min_width_dp: u32,
+    #[prost(uint32, tag = "6")]
+    pub min_height_dp: u32,
+    #[prost(uint32, tag = "7")]
+    pub default_width_dp: u32,
+    #[prost(uint32, tag = "8")]
+    pub default_height_dp: u32,
+    #[prost(uint32, tag = "9")]
+    pub max_width_dp: u32,
+    #[prost(uint32, tag = "10")]
+    pub max_height_dp: u32,
+    /// How the widget may be resized: 1 horizontally, 2 vertically, 3 both, 0 not at all.
+    #[prost(uint32, tag = "11")]
+    pub resize_mode: u32,
+    /// Whether the app asks the user to set the widget up when it is placed.
+    #[prost(bool, tag = "12")]
+    pub needs_configuration: bool,
+}
+/// Guest to host, from the agent: part of the answer to ListWidgetProviders. Each message is
+/// kept under 256 KiB, so a long list comes in several; `complete` marks the last.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct WidgetProviders {
+    #[prost(uint32, tag = "1")]
+    pub request_id: u32,
+    #[prost(message, repeated, tag = "2")]
+    pub providers: ::prost::alloc::vec::Vec<WidgetProvider>,
+    #[prost(bool, tag = "3")]
+    pub complete: bool,
+}
+/// Host to guest: place a new widget of `provider`. The agent allocates a widget ID, binds it
+/// to the provider, runs the provider's configuration activity when it has one (which shows
+/// as a task window), and answers with WidgetAdded.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AddWidget {
+    #[prost(uint32, tag = "1")]
+    pub request_id: u32,
+    #[prost(string, tag = "2")]
+    pub provider: ::prost::alloc::string::String,
+}
+/// Guest to host, from the agent: the answer to AddWidget. A `widget_id` above 0 is the new
+/// widget, which a WidgetUpdated describes before this; else `error` says, in words a person
+/// can act on, why it was not placed.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetAdded {
+    #[prost(uint32, tag = "1")]
+    pub request_id: u32,
+    #[prost(int32, tag = "2")]
+    pub widget_id: i32,
+    #[prost(string, tag = "3")]
+    pub error: ::prost::alloc::string::String,
+}
+/// Guest to host, from the agent: a placed widget, sent when it is placed and for each one on
+/// every connection. Every field is sent each time.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetUpdated {
+    #[prost(int32, tag = "1")]
+    pub widget_id: i32,
+    #[prost(message, optional, tag = "2")]
+    pub provider: ::core::option::Option<WidgetProvider>,
+}
+/// Guest to host, from the agent: every placed widget, in ID order. Sent on each connection
+/// after the WidgetUpdated of each, and whenever one is removed; a widget it no longer names
+/// is gone, as when its app was uninstalled.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetList {
+    #[prost(int32, repeated, tag = "1")]
+    pub widget_ids: ::prost::alloc::vec::Vec<i32>,
+}
+/// Host to guest: the user removed the widget. The agent deletes its widget ID and answers
+/// with WidgetList.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveWidget {
+    #[prost(int32, tag = "1")]
+    pub widget_id: i32,
+}
+/// Host to guest: the size of the widget's host window. The agent draws the widget at `width`
+/// by `height` pixels at `density_dpi` (160 at a scale of 100%), and tells the widget's app
+/// its size in dp, so a widget with layouts for several sizes picks the one that fits.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResizeWidget {
+    #[prost(int32, tag = "1")]
+    pub widget_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub width: u32,
+    #[prost(uint32, tag = "3")]
+    pub height: u32,
+    #[prost(uint32, tag = "4")]
+    pub density_dpi: u32,
+    #[prost(uint32, tag = "5")]
+    pub width_dp: u32,
+    #[prost(uint32, tag = "6")]
+    pub height_dp: u32,
+}
+/// Guest to host, from the agent: what the widget shows now, as a PNG image of `width` by
+/// `height` pixels with an alpha channel. Sent only when it changed, at most a few times a
+/// second, and at most once a second while the guest is in Doze. At most 512 KiB: a larger
+/// image is not sent.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidgetFrame {
+    #[prost(int32, tag = "1")]
+    pub widget_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub width: u32,
+    #[prost(uint32, tag = "3")]
+    pub height: u32,
+    #[prost(bytes = "vec", tag = "4")]
+    pub png: ::prost::alloc::vec::Vec<u8>,
+}
+/// Host to guest: pointer input in the widget's host window. The agent hands it to the
+/// widget's view, so its click actions and lists work as they do on a phone.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct WidgetPointer {
+    #[prost(int32, tag = "1")]
+    pub widget_id: i32,
+    #[prost(enumeration = "PointerAction", tag = "2")]
+    pub action: i32,
+    #[prost(uint32, tag = "3")]
+    pub pointer_id: u32,
+    /// The position from the widget's top left corner, in the pixels it is drawn at.
+    #[prost(float, tag = "4")]
+    pub x: f32,
+    #[prost(float, tag = "5")]
+    pub y: f32,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 42, 60, 61, 62, 63, 64, 50, 51, 52, 53, 54, 70, 71, 72, 73"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 42, 60, 61, 62, 63, 64, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -745,6 +895,26 @@ pub mod envelope {
         NotificationClicked(super::NotificationClicked),
         #[prost(message, tag = "73")]
         NotificationDismissed(super::NotificationDismissed),
+        #[prost(message, tag = "90")]
+        ListWidgetProviders(super::ListWidgetProviders),
+        #[prost(message, tag = "91")]
+        WidgetProviders(super::WidgetProviders),
+        #[prost(message, tag = "92")]
+        AddWidget(super::AddWidget),
+        #[prost(message, tag = "93")]
+        WidgetAdded(super::WidgetAdded),
+        #[prost(message, tag = "94")]
+        WidgetUpdated(super::WidgetUpdated),
+        #[prost(message, tag = "95")]
+        WidgetList(super::WidgetList),
+        #[prost(message, tag = "96")]
+        RemoveWidget(super::RemoveWidget),
+        #[prost(message, tag = "97")]
+        ResizeWidget(super::ResizeWidget),
+        #[prost(message, tag = "98")]
+        WidgetFrame(super::WidgetFrame),
+        #[prost(message, tag = "99")]
+        WidgetPointer(super::WidgetPointer),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.

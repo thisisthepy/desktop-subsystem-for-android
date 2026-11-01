@@ -502,5 +502,115 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.NotificationDismissed getNotificationDismissed();
 
+  /**
+   * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
+   * @return Whether the listWidgetProviders field is set.
+   */
+  boolean hasListWidgetProviders();
+  /**
+   * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
+   * @return The listWidgetProviders.
+   */
+  io.github.thisisthepy.dsa.control.v1.ListWidgetProviders getListWidgetProviders();
+
+  /**
+   * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
+   * @return Whether the widgetProviders field is set.
+   */
+  boolean hasWidgetProviders();
+  /**
+   * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
+   * @return The widgetProviders.
+   */
+  io.github.thisisthepy.dsa.control.v1.WidgetProviders getWidgetProviders();
+
+  /**
+   * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
+   * @return Whether the addWidget field is set.
+   */
+  boolean hasAddWidget();
+  /**
+   * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
+   * @return The addWidget.
+   */
+  io.github.thisisthepy.dsa.control.v1.AddWidget getAddWidget();
+
+  /**
+   * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
+   * @return Whether the widgetAdded field is set.
+   */
+  boolean hasWidgetAdded();
+  /**
+   * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
+   * @return The widgetAdded.
+   */
+  io.github.thisisthepy.dsa.control.v1.WidgetAdded getWidgetAdded();
+
+  /**
+   * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
+   * @return Whether the widgetUpdated field is set.
+   */
+  boolean hasWidgetUpdated();
+  /**
+   * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
+   * @return The widgetUpdated.
+   */
+  io.github.thisisthepy.dsa.control.v1.WidgetUpdated getWidgetUpdated();
+
+  /**
+   * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
+   * @return Whether the widgetList field is set.
+   */
+  boolean hasWidgetList();
+  /**
+   * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
+   * @return The widgetList.
+   */
+  io.github.thisisthepy.dsa.control.v1.WidgetList getWidgetList();
+
+  /**
+   * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
+   * @return Whether the removeWidget field is set.
+   */
+  boolean hasRemoveWidget();
+  /**
+   * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
+   * @return The removeWidget.
+   */
+  io.github.thisisthepy.dsa.control.v1.RemoveWidget getRemoveWidget();
+
+  /**
+   * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
+   * @return Whether the resizeWidget field is set.
+   */
+  boolean hasResizeWidget();
+  /**
+   * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
+   * @return The resizeWidget.
+   */
+  io.github.thisisthepy.dsa.control.v1.ResizeWidget getResizeWidget();
+
+  /**
+   * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
+   * @return Whether the widgetFrame field is set.
+   */
+  boolean hasWidgetFrame();
+  /**
+   * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
+   * @return The widgetFrame.
+   */
+  io.github.thisisthepy.dsa.control.v1.WidgetFrame getWidgetFrame();
+
+  /**
+   * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
+   * @return Whether the widgetPointer field is set.
+   */
+  boolean hasWidgetPointer();
+  /**
+   * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
+   * @return The widgetPointer.
+   */
+  io.github.thisisthepy.dsa.control.v1.WidgetPointer getWidgetPointer();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

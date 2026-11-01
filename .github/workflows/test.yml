@@ -148,11 +148,6 @@ jobs:
             exit 1
           fi
 
-      - name: Print the generated protocol patch
-        if: failure()
-        run: |
-          echo PATCH-BEGIN; gzip -c "$RUNNER_TEMP/generated-protocol.patch" | base64 -w0; echo; echo PATCH-END; sha256sum "$RUNNER_TEMP/generated-protocol.patch"
-
       - name: Keep the generated protocol code that differs
         if: failure()
         uses: actions/upload-artifact@v4
