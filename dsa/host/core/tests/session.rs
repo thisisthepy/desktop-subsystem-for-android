@@ -1599,6 +1599,7 @@ fn fr10_the_word_on_shown_windows_is_kept_while_the_guest_is_stopped() {
             stop_timeout: WAIT,
             doze_delay: DOZE_DELAY,
             freeze_after: None,
+            ..SessionConfig::default()
         },
     );
     session
