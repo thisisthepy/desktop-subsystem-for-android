@@ -95,7 +95,7 @@ class AccessibilityExportTest {
 
     private fun started(): Agent {
         locator.up = daemon
-        tasks.change(listOf(appTask(3, bounds = TaskBounds(30, 20, 430, 620))))
+        tasks.running = listOf(appTask(3, bounds = TaskBounds(30, 20, 430, 620)))
         val agent = Agent(
             AGENT, tasks, FakeActions(), locator, FakeWindowing(), FakeInjector(), scheduler, log,
             accessibility = service,
