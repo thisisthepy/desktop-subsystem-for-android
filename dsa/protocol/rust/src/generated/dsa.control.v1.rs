@@ -447,7 +447,7 @@ pub struct ClockAnswer {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 40, 41, 42"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 28, 29, 40, 41, 42"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -503,9 +503,9 @@ pub mod envelope {
         AgentConnected(super::AgentConnected),
         #[prost(message, tag = "25")]
         GuestBoot(super::GuestBoot),
-        #[prost(message, tag = "26")]
+        #[prost(message, tag = "28")]
         ClockProbe(super::ClockProbe),
-        #[prost(message, tag = "27")]
+        #[prost(message, tag = "29")]
         ClockAnswer(super::ClockAnswer),
         #[prost(message, tag = "40")]
         ScreenState(super::ScreenState),

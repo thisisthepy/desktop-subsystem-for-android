@@ -9902,17 +9902,17 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
-      // .dsa.control.v1.ClockProbe clock_probe = 26;
-      case 26:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 210)) {
+      // .dsa.control.v1.ClockProbe clock_probe = 28;
+      case 28:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 226)) {
           ptr = ctx->ParseMessage(_internal_mutable_clock_probe(), ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
         continue;
-      // .dsa.control.v1.ClockAnswer clock_answer = 27;
-      case 27:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 218)) {
+      // .dsa.control.v1.ClockAnswer clock_answer = 29;
+      case 29:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 234)) {
           ptr = ctx->ParseMessage(_internal_mutable_clock_answer(), ptr);
           CHK_(ptr);
         } else
@@ -10139,17 +10139,17 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::guest_boot(this).GetCachedSize(), target, stream);
   }
 
-  // .dsa.control.v1.ClockProbe clock_probe = 26;
+  // .dsa.control.v1.ClockProbe clock_probe = 28;
   if (_internal_has_clock_probe()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      InternalWriteMessage(26, _Internal::clock_probe(this),
+      InternalWriteMessage(28, _Internal::clock_probe(this),
         _Internal::clock_probe(this).GetCachedSize(), target, stream);
   }
 
-  // .dsa.control.v1.ClockAnswer clock_answer = 27;
+  // .dsa.control.v1.ClockAnswer clock_answer = 29;
   if (_internal_has_clock_answer()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      InternalWriteMessage(27, _Internal::clock_answer(this),
+      InternalWriteMessage(29, _Internal::clock_answer(this),
         _Internal::clock_answer(this).GetCachedSize(), target, stream);
   }
 
@@ -10359,14 +10359,14 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.guest_boot_);
       break;
     }
-    // .dsa.control.v1.ClockProbe clock_probe = 26;
+    // .dsa.control.v1.ClockProbe clock_probe = 28;
     case kClockProbe: {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.body_.clock_probe_);
       break;
     }
-    // .dsa.control.v1.ClockAnswer clock_answer = 27;
+    // .dsa.control.v1.ClockAnswer clock_answer = 29;
     case kClockAnswer: {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(

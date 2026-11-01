@@ -5270,8 +5270,8 @@ class Envelope final :
     kInstalledApps = 23,
     kAgentConnected = 24,
     kGuestBoot = 25,
-    kClockProbe = 26,
-    kClockAnswer = 27,
+    kClockProbe = 28,
+    kClockAnswer = 29,
     kScreenState = 40,
     kPowerState = 41,
     kDeviceIdle = 42,
@@ -5371,8 +5371,8 @@ class Envelope final :
     kInstalledAppsFieldNumber = 23,
     kAgentConnectedFieldNumber = 24,
     kGuestBootFieldNumber = 25,
-    kClockProbeFieldNumber = 26,
-    kClockAnswerFieldNumber = 27,
+    kClockProbeFieldNumber = 28,
+    kClockAnswerFieldNumber = 29,
     kScreenStateFieldNumber = 40,
     kPowerStateFieldNumber = 41,
     kDeviceIdleFieldNumber = 42,
@@ -5809,7 +5809,7 @@ class Envelope final :
       ::dsa::control::v1::GuestBoot* guest_boot);
   ::dsa::control::v1::GuestBoot* unsafe_arena_release_guest_boot();
 
-  // .dsa.control.v1.ClockProbe clock_probe = 26;
+  // .dsa.control.v1.ClockProbe clock_probe = 28;
   bool has_clock_probe() const;
   private:
   bool _internal_has_clock_probe() const;
@@ -5827,7 +5827,7 @@ class Envelope final :
       ::dsa::control::v1::ClockProbe* clock_probe);
   ::dsa::control::v1::ClockProbe* unsafe_arena_release_clock_probe();
 
-  // .dsa.control.v1.ClockAnswer clock_answer = 27;
+  // .dsa.control.v1.ClockAnswer clock_answer = 29;
   bool has_clock_answer() const;
   private:
   bool _internal_has_clock_answer() const;
@@ -10677,7 +10677,7 @@ inline ::dsa::control::v1::GuestBoot* Envelope::mutable_guest_boot() {
   return _msg;
 }
 
-// .dsa.control.v1.ClockProbe clock_probe = 26;
+// .dsa.control.v1.ClockProbe clock_probe = 28;
 inline bool Envelope::_internal_has_clock_probe() const {
   return body_case() == kClockProbe;
 }
@@ -10751,7 +10751,7 @@ inline ::dsa::control::v1::ClockProbe* Envelope::mutable_clock_probe() {
   return _msg;
 }
 
-// .dsa.control.v1.ClockAnswer clock_answer = 27;
+// .dsa.control.v1.ClockAnswer clock_answer = 29;
 inline bool Envelope::_internal_has_clock_answer() const {
   return body_case() == kClockAnswer;
 }

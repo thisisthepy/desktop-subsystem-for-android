@@ -44,8 +44,8 @@ public  final class Envelope extends
     INSTALLED_APPS(23),
     AGENT_CONNECTED(24),
     GUEST_BOOT(25),
-    CLOCK_PROBE(26),
-    CLOCK_ANSWER(27),
+    CLOCK_PROBE(28),
+    CLOCK_ANSWER(29),
     SCREEN_STATE(40),
     POWER_STATE(41),
     DEVICE_IDLE(42),
@@ -88,8 +88,8 @@ public  final class Envelope extends
         case 23: return INSTALLED_APPS;
         case 24: return AGENT_CONNECTED;
         case 25: return GUEST_BOOT;
-        case 26: return CLOCK_PROBE;
-        case 27: return CLOCK_ANSWER;
+        case 28: return CLOCK_PROBE;
+        case 29: return CLOCK_ANSWER;
         case 40: return SCREEN_STATE;
         case 41: return POWER_STATE;
         case 42: return DEVICE_IDLE;
@@ -1314,101 +1314,101 @@ public  final class Envelope extends
     }
   }
 
-  public static final int CLOCK_PROBE_FIELD_NUMBER = 26;
+  public static final int CLOCK_PROBE_FIELD_NUMBER = 28;
   /**
-   * <code>.dsa.control.v1.ClockProbe clock_probe = 26;</code>
+   * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
    */
   @java.lang.Override
   public boolean hasClockProbe() {
-    return bodyCase_ == 26;
+    return bodyCase_ == 28;
   }
   /**
-   * <code>.dsa.control.v1.ClockProbe clock_probe = 26;</code>
+   * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
    */
   @java.lang.Override
   public io.github.thisisthepy.dsa.control.v1.ClockProbe getClockProbe() {
-    if (bodyCase_ == 26) {
+    if (bodyCase_ == 28) {
        return (io.github.thisisthepy.dsa.control.v1.ClockProbe) body_;
     }
     return io.github.thisisthepy.dsa.control.v1.ClockProbe.getDefaultInstance();
   }
   /**
-   * <code>.dsa.control.v1.ClockProbe clock_probe = 26;</code>
+   * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
    */
   private void setClockProbe(io.github.thisisthepy.dsa.control.v1.ClockProbe value) {
     value.getClass();
   body_ = value;
-    bodyCase_ = 26;
+    bodyCase_ = 28;
   }
   /**
-   * <code>.dsa.control.v1.ClockProbe clock_probe = 26;</code>
+   * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
    */
   private void mergeClockProbe(io.github.thisisthepy.dsa.control.v1.ClockProbe value) {
     value.getClass();
-  if (bodyCase_ == 26 &&
+  if (bodyCase_ == 28 &&
         body_ != io.github.thisisthepy.dsa.control.v1.ClockProbe.getDefaultInstance()) {
       body_ = io.github.thisisthepy.dsa.control.v1.ClockProbe.newBuilder((io.github.thisisthepy.dsa.control.v1.ClockProbe) body_)
           .mergeFrom(value).buildPartial();
     } else {
       body_ = value;
     }
-    bodyCase_ = 26;
+    bodyCase_ = 28;
   }
   /**
-   * <code>.dsa.control.v1.ClockProbe clock_probe = 26;</code>
+   * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
    */
   private void clearClockProbe() {
-    if (bodyCase_ == 26) {
+    if (bodyCase_ == 28) {
       bodyCase_ = 0;
       body_ = null;
     }
   }
 
-  public static final int CLOCK_ANSWER_FIELD_NUMBER = 27;
+  public static final int CLOCK_ANSWER_FIELD_NUMBER = 29;
   /**
-   * <code>.dsa.control.v1.ClockAnswer clock_answer = 27;</code>
+   * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
    */
   @java.lang.Override
   public boolean hasClockAnswer() {
-    return bodyCase_ == 27;
+    return bodyCase_ == 29;
   }
   /**
-   * <code>.dsa.control.v1.ClockAnswer clock_answer = 27;</code>
+   * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
    */
   @java.lang.Override
   public io.github.thisisthepy.dsa.control.v1.ClockAnswer getClockAnswer() {
-    if (bodyCase_ == 27) {
+    if (bodyCase_ == 29) {
        return (io.github.thisisthepy.dsa.control.v1.ClockAnswer) body_;
     }
     return io.github.thisisthepy.dsa.control.v1.ClockAnswer.getDefaultInstance();
   }
   /**
-   * <code>.dsa.control.v1.ClockAnswer clock_answer = 27;</code>
+   * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
    */
   private void setClockAnswer(io.github.thisisthepy.dsa.control.v1.ClockAnswer value) {
     value.getClass();
   body_ = value;
-    bodyCase_ = 27;
+    bodyCase_ = 29;
   }
   /**
-   * <code>.dsa.control.v1.ClockAnswer clock_answer = 27;</code>
+   * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
    */
   private void mergeClockAnswer(io.github.thisisthepy.dsa.control.v1.ClockAnswer value) {
     value.getClass();
-  if (bodyCase_ == 27 &&
+  if (bodyCase_ == 29 &&
         body_ != io.github.thisisthepy.dsa.control.v1.ClockAnswer.getDefaultInstance()) {
       body_ = io.github.thisisthepy.dsa.control.v1.ClockAnswer.newBuilder((io.github.thisisthepy.dsa.control.v1.ClockAnswer) body_)
           .mergeFrom(value).buildPartial();
     } else {
       body_ = value;
     }
-    bodyCase_ = 27;
+    bodyCase_ = 29;
   }
   /**
-   * <code>.dsa.control.v1.ClockAnswer clock_answer = 27;</code>
+   * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
    */
   private void clearClockAnswer() {
-    if (bodyCase_ == 27) {
+    if (bodyCase_ == 29) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -2828,21 +2828,21 @@ public  final class Envelope extends
     }
 
     /**
-     * <code>.dsa.control.v1.ClockProbe clock_probe = 26;</code>
+     * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
      */
     @java.lang.Override
     public boolean hasClockProbe() {
       return instance.hasClockProbe();
     }
     /**
-     * <code>.dsa.control.v1.ClockProbe clock_probe = 26;</code>
+     * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
      */
     @java.lang.Override
     public io.github.thisisthepy.dsa.control.v1.ClockProbe getClockProbe() {
       return instance.getClockProbe();
     }
     /**
-     * <code>.dsa.control.v1.ClockProbe clock_probe = 26;</code>
+     * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
      */
     public Builder setClockProbe(io.github.thisisthepy.dsa.control.v1.ClockProbe value) {
       copyOnWrite();
@@ -2850,7 +2850,7 @@ public  final class Envelope extends
       return this;
     }
     /**
-     * <code>.dsa.control.v1.ClockProbe clock_probe = 26;</code>
+     * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
      */
     public Builder setClockProbe(
         io.github.thisisthepy.dsa.control.v1.ClockProbe.Builder builderForValue) {
@@ -2859,7 +2859,7 @@ public  final class Envelope extends
       return this;
     }
     /**
-     * <code>.dsa.control.v1.ClockProbe clock_probe = 26;</code>
+     * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
      */
     public Builder mergeClockProbe(io.github.thisisthepy.dsa.control.v1.ClockProbe value) {
       copyOnWrite();
@@ -2867,7 +2867,7 @@ public  final class Envelope extends
       return this;
     }
     /**
-     * <code>.dsa.control.v1.ClockProbe clock_probe = 26;</code>
+     * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
      */
     public Builder clearClockProbe() {
       copyOnWrite();
@@ -2876,21 +2876,21 @@ public  final class Envelope extends
     }
 
     /**
-     * <code>.dsa.control.v1.ClockAnswer clock_answer = 27;</code>
+     * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
      */
     @java.lang.Override
     public boolean hasClockAnswer() {
       return instance.hasClockAnswer();
     }
     /**
-     * <code>.dsa.control.v1.ClockAnswer clock_answer = 27;</code>
+     * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
      */
     @java.lang.Override
     public io.github.thisisthepy.dsa.control.v1.ClockAnswer getClockAnswer() {
       return instance.getClockAnswer();
     }
     /**
-     * <code>.dsa.control.v1.ClockAnswer clock_answer = 27;</code>
+     * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
      */
     public Builder setClockAnswer(io.github.thisisthepy.dsa.control.v1.ClockAnswer value) {
       copyOnWrite();
@@ -2898,7 +2898,7 @@ public  final class Envelope extends
       return this;
     }
     /**
-     * <code>.dsa.control.v1.ClockAnswer clock_answer = 27;</code>
+     * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
      */
     public Builder setClockAnswer(
         io.github.thisisthepy.dsa.control.v1.ClockAnswer.Builder builderForValue) {
@@ -2907,7 +2907,7 @@ public  final class Envelope extends
       return this;
     }
     /**
-     * <code>.dsa.control.v1.ClockAnswer clock_answer = 27;</code>
+     * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
      */
     public Builder mergeClockAnswer(io.github.thisisthepy.dsa.control.v1.ClockAnswer value) {
       copyOnWrite();
@@ -2915,7 +2915,7 @@ public  final class Envelope extends
       return this;
     }
     /**
-     * <code>.dsa.control.v1.ClockAnswer clock_answer = 27;</code>
+     * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
      */
     public Builder clearClockAnswer() {
       copyOnWrite();
@@ -3120,7 +3120,7 @@ public  final class Envelope extends
               "\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000" +
               "\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012" +
               "<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000" +
-              "\u0019<\u0000\u001a<\u0000\u001b<\u0000(<\u0000)<\u0000*<\u0000";
+              "\u0019<\u0000\u001c<\u0000\u001d<\u0000(<\u0000)<\u0000*<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through
