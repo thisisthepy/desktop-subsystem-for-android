@@ -61,7 +61,6 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
 - `unavailable-features.xml` withdraws the Bluetooth features, so system_server does not
   start a Bluetooth stack that has no controller to talk to, and the UWB feature, so nothing
   waits for its removed HAL.
-<<<<<<< HEAD
 - A static overlay (`/vendor/overlay/DsaFrameworkOverlay.apk`) sets the framework's tap
   timeout to 0. A view inside anything that scrolls, which includes every list row, waits that
   long before it shows that it is pressed, in case the touch becomes a scroll, so a mouse
@@ -71,7 +70,6 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
 - With the input trace on (`androidboot.hardware.dsa_input_trace=1`), `dsa-trace.rc` makes every
   app's main thread log each message it takes 16 ms or more to handle, or starts 16 ms or more
   late.
-=======
 - Settings' sound screen loses its media output switcher and its cast volume group. Their
   controllers need the Bluetooth service, which system_server does not start without the
   Bluetooth features: SettingsLib's media manager is then built without its routing half, and
@@ -79,7 +77,6 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
   the two preferences from the compiled `res/xml/sound_settings.xml` in `Settings.apk`
   (`SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH`), and prints each one it removes. Settings is
   re-signed with every other app. They come back with Bluetooth.
->>>>>>> origin/develop
 - Cuttlefish's `seriallogging.rc` is removed. Its logger writes to a virtio console Hyper-V
   does not have, and init would restart it every five seconds for as long as the guest runs.
 - `sepolicy/memory.cil` lets the audio HAL and the software codecs share memory through
@@ -119,6 +116,54 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
   port traps out of the VM and takes time from vsync and input.
 - Every APK, APEX and verified boot image is re-signed. The published build is signed with
   AOSP's test keys, whose private halves are public.
+
+## Tracing a click
+
+The input trace follows one click from the host window to the screen. Each process on the
+path writes `input-trace stage=...` lines:
+
+| Stage | Where | Placed at |
+|---|---|---|
+| `app.pointer` | the app window host, when Windows hands it the press or release | `host=` |
+| `agent.inject` | the agent, when the framework has taken the event | guest `mono=` |
+| `app.frame` | the agent, from the app's `gfxinfo framestats`: main thread `late`, `input`, `animation`, `traversal`, `record`; render thread `sync`, `issue`, `swap`, `dequeue`, `gpu` | its intended vsync |
+| `sf.frame` | the agent, from `dumpsys SurfaceFlinger --latency` of each of the app's layers: `desired`, `ready`, `actual` | `actual`, when SurfaceFlinger presented it |
+| `hwc.frame` | the hwcomposer, when it has composed and posted the task's frame | guest `mono=` |
+| `wm.frame` | the window manager, when the window host has copied the frame out | `host=` |
+| `app.present` | the window host, after its `Present` | `host=` |
+| `app.shown` | the window host, from the swap chain's frame statistics: the vertical blank the present was shown at | `vblank=` |
+| `clock` | the service, once a second: the guest's clock against the host's | |
+
+Host lines carry `host=`, milliseconds on the performance counter, which every host process
+shares. Guest lines carry `mono=`, the guest's `CLOCK_MONOTONIC`. The service pairs the two:
+it sends the guest's control daemon its send time, the daemon answers at once with its own
+clock, and the `clock` line gives the round trip and the guest's offset from the trip's
+midpoint.
+
+To take a trace:
+
+1. Turn the host's side on: create the empty file `%LOCALAPPDATA%\DSA\input-trace` (or set
+   `DSA_INPUT_TRACE=1` for the processes in the user's session).
+2. Turn the guest's side on: add `androidboot.hardware.dsa_input_trace=1` to `kernel_cmdline`
+   in the service's configuration. The service probes the clocks only for a guest that boots
+   with it.
+3. Restart DSA (the service and the user's processes), so every process reads the setting.
+4. Click in an app window, with a second or more between clicks.
+5. Lay the clicks out on the host clock:
+
+   ```
+   uv run scripts/input-trace.py
+   ```
+
+   With no arguments it reads `%LOCALAPPDATA%\DSA\logs\*.log` and
+   `C:\ProgramData\DSA\logs\*.log` (the service's log, with the `clock` lines, and the guest
+   console, `android-<user>.log`). Files or folders given as arguments are read instead.
+   For each press and release it prints the stages that follow on the same task or app,
+   until the next press or release, with the time since the press and the gap to the stage
+   before.
+
+Turn the trace off again by removing the file and the kernel command line setting. While on,
+it writes a line per stage and the agent reads the app's frame timings after each release.
 
 ## What comes out
 
