@@ -438,12 +438,70 @@ pub struct GuestBoot {
     #[prost(bool, tag = "2")]
     pub agent_connected: bool,
 }
+/// Host to guest: install an APK, whose content follows in ApkChunk messages of the same
+/// `transfer_id`, in order. The agent writes them into an install session as they come and
+/// commits it once it has all `size` bytes. The host sends at most a few chunks ahead of the
+/// agent's InstallProgress, and one install at a time.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InstallApk {
+    /// Unique among the installs of one connection.
+    #[prost(uint32, tag = "1")]
+    pub transfer_id: u32,
+    /// The file's name on the host, for the guest's log.
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    /// The APK's length in bytes.
+    #[prost(uint64, tag = "3")]
+    pub size: u64,
+}
+/// Host to guest: part of the APK an InstallApk announced.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApkChunk {
+    #[prost(uint32, tag = "1")]
+    pub transfer_id: u32,
+    /// Where `data` starts in the APK.
+    #[prost(uint64, tag = "2")]
+    pub offset: u64,
+    #[prost(bytes = "vec", tag = "3")]
+    pub data: ::prost::alloc::vec::Vec<u8>,
+}
+/// Host to guest: stop an install whose APK will not arrive whole. The agent abandons its
+/// install session and answers with InstallResult.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CancelInstall {
+    #[prost(uint32, tag = "1")]
+    pub transfer_id: u32,
+}
+/// Guest to host, from the agent: how many bytes of an APK the agent has written. Sent after
+/// each chunk, which is what lets the host send the next ones.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InstallProgress {
+    #[prost(uint32, tag = "1")]
+    pub transfer_id: u32,
+    #[prost(uint64, tag = "2")]
+    pub received: u64,
+}
+/// Guest to host, from the agent: the end of an install, whichever way it went. It may come at
+/// any point of the transfer, as when the agent cannot open an install session.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InstallResult {
+    #[prost(uint32, tag = "1")]
+    pub transfer_id: u32,
+    #[prost(enumeration = "InstallStatus", tag = "2")]
+    pub status: i32,
+    /// The package that was installed, or that the APK is, when the guest says.
+    #[prost(string, tag = "3")]
+    pub package_name: ::prost::alloc::string::String,
+    /// The guest's own words on what happened; empty when it gave none.
+    #[prost(string, tag = "4")]
+    pub message: ::prost::alloc::string::String,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 40, 41, 42"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 40, 41, 42, 60, 61, 62, 63, 64"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -509,6 +567,16 @@ pub mod envelope {
         PowerState(super::PowerState),
         #[prost(message, tag = "42")]
         DeviceIdle(super::DeviceIdle),
+        #[prost(message, tag = "60")]
+        InstallApk(super::InstallApk),
+        #[prost(message, tag = "61")]
+        ApkChunk(super::ApkChunk),
+        #[prost(message, tag = "62")]
+        CancelInstall(super::CancelInstall),
+        #[prost(message, tag = "63")]
+        InstallProgress(super::InstallProgress),
+        #[prost(message, tag = "64")]
+        InstallResult(super::InstallResult),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -730,6 +798,64 @@ impl KeyAction {
             "KEY_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
             "KEY_ACTION_DOWN" => Some(Self::Down),
             "KEY_ACTION_UP" => Some(Self::Up),
+            _ => None,
+        }
+    }
+}
+/// Whether an APK was installed, and if not, why. The reasons are stable, so the host can say
+/// in the user's language what went wrong; the message beside them gives the guest's own words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum InstallStatus {
+    Unspecified = 0,
+    /// The app is installed.
+    Success = 1,
+    /// The app does not run on this device: its ABI, its minimum Android version or a feature it
+    /// requires is not there.
+    Incompatible = 2,
+    /// An app of the same package is installed, signed with another key. Uninstall it first.
+    ConflictingSignature = 3,
+    /// The file is not an APK the guest can read, or it is not signed.
+    InvalidApk = 4,
+    /// The guest has no room for the app.
+    InsufficientStorage = 5,
+    /// A newer version of the app is installed.
+    Downgrade = 6,
+    /// A policy of the guest does not allow the app.
+    Blocked = 7,
+    /// Anything else, including a transfer that did not arrive whole. The message says what.
+    Other = 8,
+}
+impl InstallStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "INSTALL_STATUS_UNSPECIFIED",
+            Self::Success => "INSTALL_STATUS_SUCCESS",
+            Self::Incompatible => "INSTALL_STATUS_INCOMPATIBLE",
+            Self::ConflictingSignature => "INSTALL_STATUS_CONFLICTING_SIGNATURE",
+            Self::InvalidApk => "INSTALL_STATUS_INVALID_APK",
+            Self::InsufficientStorage => "INSTALL_STATUS_INSUFFICIENT_STORAGE",
+            Self::Downgrade => "INSTALL_STATUS_DOWNGRADE",
+            Self::Blocked => "INSTALL_STATUS_BLOCKED",
+            Self::Other => "INSTALL_STATUS_OTHER",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "INSTALL_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "INSTALL_STATUS_SUCCESS" => Some(Self::Success),
+            "INSTALL_STATUS_INCOMPATIBLE" => Some(Self::Incompatible),
+            "INSTALL_STATUS_CONFLICTING_SIGNATURE" => Some(Self::ConflictingSignature),
+            "INSTALL_STATUS_INVALID_APK" => Some(Self::InvalidApk),
+            "INSTALL_STATUS_INSUFFICIENT_STORAGE" => Some(Self::InsufficientStorage),
+            "INSTALL_STATUS_DOWNGRADE" => Some(Self::Downgrade),
+            "INSTALL_STATUS_BLOCKED" => Some(Self::Blocked),
+            "INSTALL_STATUS_OTHER" => Some(Self::Other),
             _ => None,
         }
     }
