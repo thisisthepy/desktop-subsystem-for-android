@@ -365,6 +365,44 @@ Davey는 이 로그에 2건뿐이고 둘 다 액티비티 전환이다. 리플�
 - 앱이 쓰는 시간이 재지 않은 채로 남아 있으므로 `debug.sf.late.app.duration`을 줄이는 것은 보류한다. 놓치는 프레임이 늘 수 있다.
 - 작업이 열린 동안의 `MostlyCache` 회수(02:21:53)는 익명 메모리 1 GiB를 zram으로 보내고 캐시를 버린다. 3분 뒤 첫 누름의 `inject=16.1`과 첫 페이지의 비용에 얼마나 기여하는지 재지 않았다.
 
+## 클릭 반응의 100 ms와 300 ms 공백 (FR-5)
+
+**확인 대상**: AOSP android16-qpr1-release 소스(GitHub 미러의 `platform_frameworks_base`, `platform_packages_apps_settings`), ART Service(LineageOS `android_art` lineage-23.0, 같은 Android 16 기반), androidx RecyclerView(androidx-main). 실측은 소유자 PC의 Android 16 이미지 16.0.0-15581820-7, 새 디스크, Settings 앱이다.
+
+**실측 (PC 세션)**
+
+- 누름에서 게스트 첫 `hwc.frame`까지 p50 26 ms(20회). 입력 경로는 병목이 아니다.
+- 길게 누름에서 화면의 첫 픽셀 변화까지 p50 101 ms, 대부분 98~105 ms(20회). 이전 빌드는 136 ms였다.
+- 20 ms 클릭에서 첫 픽셀 변화까지 419 ms(1회). 게스트 프레임은 누른 뒤 33, 67 ms에 나오고 384 ms까지 없다. 33, 67 ms 프레임에는 눈에 보이는 변화가 없다. 그 클릭의 `SubSettings` `Displayed`는 +314ms다.
+- Settings는 ArtService 로그에서 `CompilerFilter=verify`다.
+
+**방법**: 소스를 읽었다. 이 조사에서는 빌드도 실행도 하지 않았으므로, 아래의 시간은 소스의 상수이거나 계산이다.
+
+**찾은 것**
+
+1. **목록 행의 누름 표시는 탭 타임아웃만큼 늦게 시작한다.** `View.onTouchEvent`는 `ACTION_DOWN`에서 `isInScrollingContainer()`이면 `setPressed`를 바로 부르지 않고 `postDelayed(mPendingCheckForTap, mTapTimeoutMillis)`로 미룬다(View.java 18396~18411). 조상 중 하나라도 `shouldDelayChildPressedState()`가 참이면 그렇다. `ViewGroup`의 기본값이 참이고 RecyclerView는 이를 바꾸지 않으므로, Settings의 모든 행이 이 경로를 탄다. 마우스 원본(`SOURCE_MOUSE`)도 예외가 없다. 마우스를 다르게 다루는 곳은 보조 버튼의 상황 메뉴뿐이다(8372). 값은 프레임워크 리소스 `config_tapTimeoutMillis`(100)이고, 프로세스마다 한 번 읽는다(ViewConfiguration.java 1605~1639). 시스템 속성이나 `Settings.Secure`로는 바꿀 수 없다.
+2. **Android 16의 리플은 처음 80 ms쯤 거의 보이지 않는다.** `RippleDrawable`은 `FORCE_PATTERNED_STYLE = true`(161)라 패턴 리플을 쓴다. 진입 애니메이션은 450 ms 동안 진행도를 0에서 0.5로 올리고(`RippleAnimationSession` 42, 175~186), 셰이더는 진행도 0.13까지 알파를 0에서 1로 올리며 반지름은 0에서 시작한다(RippleShader.java 102~122). 보간 곡선(0.4, 0, 0.2, 1)으로 계산하면, `setPressed` 뒤 33 ms에 알파 5%와 반지름 0.7%, 67 ms에 25%와 3.2%, 100 ms에 67%와 8.8%다. 짧은 클릭에서도 진입 450 ms는 줄지 않는다(`computeDelay`, 136~139). 이 상수들은 컴파일 시점 값이라 이미지로 바꿀 수 없다.
+3. **누르기 직전의 호버 해제가 다시 그리기를 부른다.** `ACTION_HOVER_EXIT`는 `setHovered(false)`와 `refreshDrawableState()`를 거쳐, 리플 배경의 호버 표시(불투명도 0.2)를 80 ms 동안 선형으로 지운다(RippleDrawable 150, 832~884). 26 ms의 첫 프레임은 이것일 가능성이 높다(추론).
+4. **클릭은 누름 표시를 기다리지 않는다.** `ACTION_UP`에서 `PerformClick`을 바로 `post`하고, 누름 해제만 64 ms 뒤로 미룬다(View.java 18333~18366). Settings의 `onPreferenceStartFragment`에서 `SubSettingLauncher.launch()`를 거쳐 `startActivity`까지, 지연을 넣는 코드는 없다. 클릭 뒤 300 ms 공백은 액티비티 시작과 첫 그리기이며, Settings 쪽이 일부러 기다리는 것이 아니다.
+5. **ART는 첫 부팅에 앱을 컴파일하지 않는다.** 첫 부팅의 dexopt(`ArtManagerLocal.onBoot`)는 모든 패키지를 `pm.dexopt.first-boot`로 처리한다(`getDefaultPackages`, `REASON_FIRST_BOOT`). AOSP 기본값은 `verify`라서 검사만 하고, 앱은 인터프리터와 JIT로 돈다. 사용 중 모인 프로파일로 컴파일하는 백그라운드 dexopt 작업은 기기가 유휴이면서 충전 중이고 배터리가 부족하지 않을 때만, 하루 간격으로 돈다(BackgroundDexoptJob.java 135~143). 에이전트는 배터리가 없는 호스트에서 상태를 `UNKNOWN`으로 둔다. 그러면 JobScheduler가 충전 중으로 보지 않아 이 작업이 아예 돌지 않을 수 있다(추론, 확인하지 않음). `cmd package compile`은 root나 shell만 부를 수 있어서(`ArtShellCommand.enforceRootOrShell`) 에이전트가 대신할 수 없다.
+
+**측정과 맞지 않는 점**: 1과 2만으로는 길게 누름의 첫 변화가 100 ms보다 늦어야 한다. `CheckForTap`은 뷰가 `DOWN`을 처리한 뒤 100 ms에 돌고, 그다음 프레임에서 시작한 리플은 몇 프레임 동안 거의 투명하다. 98~105 ms에 보이는 변화는 탭 타임아웃의 리플이 아니거나, 측정의 시작 시각이 게스트 주입 시각과 어긋나 있다. 다른 후보는 3의 호버 해제지만, 그것은 26 ms에 시작해 106 ms쯤 끝나므로 "첫 변화"와 잘 맞지 않는다. 호버 없이(누르기 전에 그 행 위로 움직이지 않고) 길게 누르면 갈린다.
+
+**결정**
+
+- 정적 프레임워크 오버레이로 `config_tapTimeoutMillis`를 0으로 둔다(PR 참조). 대가로, 터치로 목록을 스크롤하기 시작하면 손가락이 터치 슬롭을 넘을 때까지 행이 눌린 것으로 보인다.
+- 첫 부팅과 업데이트 뒤 첫 부팅의 dexopt를 `speed-profile`로 둔다. 첫 부팅에는 프로파일을 함께 싣고 온 앱만 컴파일되므로, Settings가 프로파일을 싣고 있는지는 이미지 빌드 로그(`apps carry an ART profile`)로 확인한다. 업데이트 뒤에는 사용하며 모인 프로파일로 컴파일된다.
+- 시스템 앱 전부를 `speed`로 첫 부팅에 컴파일하는 것은 하지 않는다. 첫 부팅이 앱 수에 비례해 늘어나는데, 지금 첫 부팅이 이미 55초이고 정지 판정이 300초라서다. 첫 실행과 두 번째 실행의 차이를 잰 뒤 다시 본다.
+- 리플의 모양과 속도(2)는 프레임워크 상수라 이미지에서 줄일 수 없다.
+- 추적을 더한다. 입력 추적을 켜면, 에이전트가 뗀 지 1초 뒤 그 앱의 `gfxinfo framestats`를 읽어 프레임마다 메인 스레드(`late`, `input`, `animation`, `traversal`, `record`)와 렌더 스레드(`sync`, `issue`, `swap`, `dequeue`, `gpu`) 시간을 `input-trace stage=app.frame` 줄로 남긴다. `dsa-trace.rc`는 모든 앱의 메인 스레드가 16 ms 이상 걸린 메시지를 `Slow dispatch`로 남기게 한다.
+
+**다음 측정에서 확인할 것**
+
+- 같은 화면을 처음 열 때와 다시 열 때의 클릭 지연. 두 번째가 크게 빠르면 컴파일이 300 ms 공백의 큰 몫이다.
+- 오버레이를 넣은 빌드에서 길게 누름의 첫 변화와, 호버 없이 누를 때의 첫 변화.
+- `app.frame`의 `late`가 큰 프레임과 같은 때의 `Slow dispatch` 줄: 액티비티 시작의 어느 단계가 메인 스레드를 잡는지.
+- 백그라운드 dexopt가 이 VM에서 실제로 도는지(ArtService의 `bg-dexopt` 로그).
+
 ## R6. 커널 명령줄에서 같은 `androidboot` 값을 두 번 주면 어느 쪽이 이기는가 (FR-4)
 
 **배경**: 게스트 디스플레이 크기를 호스트가 정하려면, 이미지의 `kernel_cmdline`에 이미 있는 `androidboot.dsa.display_width` 뒤에 값을 덧붙이면 되는지 확인해야 했다.
