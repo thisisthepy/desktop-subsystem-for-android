@@ -69,9 +69,55 @@ pub fn visual_scale(buffers: (u32, u32), view: (u32, u32)) -> (f32, f32) {
     (scale(buffers.0, view.0), scale(buffers.1, view.1))
 }
 
+/// How many pixels a side the resize trace samples of a frame to see if it is all one colour.
+pub const SAMPLE_GRID: u32 = 8;
+
+/// The pixels of a frame of `region` pixels the trace samples: the centres of an even grid,
+/// row by row, [`SAMPLE_GRID`] to a side.
+pub fn sample_points((width, height): (u32, u32)) -> Vec<(u32, u32)> {
+    let along = |size: u32, i: u32| {
+        ((2 * u64::from(i) + 1) * u64::from(size) / (2 * u64::from(SAMPLE_GRID))) as u32
+    };
+    (0..SAMPLE_GRID)
+        .flat_map(|row| {
+            (0..SAMPLE_GRID).map(move |column| (along(width, column), along(height, row)))
+        })
+        .collect()
+}
+
+/// The colour every one of `pixels` has, or `None` when they differ. An app's frame is hardly
+/// ever one colour across a whole grid, and a frame nothing was drawn into always is.
+pub fn uniform_colour(pixels: &[[u8; 4]]) -> Option<[u8; 4]> {
+    let first = *pixels.first()?;
+    pixels.iter().all(|pixel| *pixel == first).then_some(first)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fr4_the_samples_of_a_frame_spread_over_it_and_stay_inside() {
+        let points = sample_points((900, 747));
+        assert_eq!(points.len(), (SAMPLE_GRID * SAMPLE_GRID) as usize);
+        assert!(points.iter().all(|&(x, y)| x < 900 && y < 747));
+        assert!(points.iter().any(|&(x, _)| x < 100));
+        assert!(points.iter().any(|&(x, _)| x > 800));
+        assert!(points.iter().any(|&(_, y)| y < 100));
+        assert!(points.iter().any(|&(_, y)| y > 650));
+        // The smallest frame still names pixels it has.
+        assert!(sample_points((1, 1)).iter().all(|&point| point == (0, 0)));
+    }
+
+    #[test]
+    fn fr4_a_frame_all_one_colour_is_told_apart_from_a_drawn_one() {
+        let black = [0, 0, 0, 255];
+        assert_eq!(uniform_colour(&[black; 64]), Some(black));
+        let mut drawn = [black; 64];
+        drawn[63] = [255, 255, 255, 255];
+        assert_eq!(uniform_colour(&drawn), None);
+        assert_eq!(uniform_colour(&[]), None);
+    }
 
     #[test]
     fn fr5_a_frame_never_waits_for_the_buffer_the_desktop_is_showing() {

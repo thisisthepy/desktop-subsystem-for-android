@@ -35,7 +35,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::frame_buffers::{
-    content_region, swapchain_buffers, swapchain_change, visual_scale, SwapchainChange,
+    content_region, sample_points, swapchain_buffers, swapchain_change, uniform_colour,
+    visual_scale, SwapchainChange, SAMPLE_GRID,
 };
 use dsa_host_core::compositor::resize_latency::ResizeLatency;
 use dsa_host_core::compositor::resize_sync::{self, frame_action, FrameAction, ResizeSync, Step};
@@ -47,9 +48,10 @@ use windows::Win32::Graphics::Direct3D::{
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11Device1, ID3D11DeviceContext, ID3D11Query,
     ID3D11Texture2D, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BOX,
-    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
-    D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION,
-    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
+    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAPPED_SUBRESOURCE,
+    D3D11_MAP_READ, D3D11_QUERY_DESC, D3D11_QUERY_EVENT, D3D11_RESOURCE_MISC_SHARED,
+    D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
+    D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING,
 };
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual,
@@ -65,7 +67,7 @@ use windows::Win32::Graphics::Dxgi::{
 };
 use windows_numerics::Matrix3x2;
 
-use super::log::{note, trace_stage, trace_summary, CompositorLogger};
+use super::log::{note, trace_detailed, trace_stage, trace_summary, CompositorLogger};
 use dsa_host_core::resize_trace::millis;
 
 /// How long a present waits for the GPU to finish reading the shared texture.
@@ -305,6 +307,8 @@ struct State {
     /// The size the window is about to take, while it waits for its frame.
     hold: Option<Hold>,
     query: Option<ID3D11Query>,
+    /// Where the resize trace reads a frame's sample pixels; made when the trace first looks.
+    samples: Option<ID3D11Texture2D>,
     closed: bool,
     /// How long the window waits for a frame of its size after each resize.
     latency: ResizeLatency,
@@ -385,6 +389,7 @@ impl WindowPresenter {
                 committed: None,
                 hold: None,
                 query: None,
+                samples: None,
                 closed: false,
                 latency: ResizeLatency::new(),
                 sync: ResizeSync::new(),
@@ -609,6 +614,7 @@ impl WindowPresenter {
         let stage = action == FrameAction::Stage;
         let shown =
             self.present_locked(&mut state, &texture.texture, texture.size, region, stage)?;
+        self.trace_frame_colour(&mut state, &texture.texture, region);
         state.sync.frame_arrived(region, Instant::now());
         if let Some(hold) = state.hold.as_mut() {
             hold.staged = stage;
@@ -627,6 +633,100 @@ impl WindowPresenter {
         *self.shown.lock().unwrap_or_else(|e| e.into_inner()) = region;
         self.arrived.notify_all();
         Ok(())
+    }
+
+    /// When the resize trace is on, says so if the frame in `texture` is all one colour. A
+    /// frame nothing was drawn into reads this way here, before the swapchain has any part in
+    /// it, so a black window with no such line was blackened after this point. One line per
+    /// size at most.
+    fn trace_frame_colour(&self, state: &mut State, texture: &ID3D11Texture2D, region: (u32, u32)) {
+        if !trace_detailed() {
+            return;
+        }
+        // SAFETY: plain COM calls on objects this presenter owns, and the immediate context
+        // under its lock.
+        match unsafe { self.frame_colour(state, texture, region) } {
+            Ok(Some([red, green, blue, alpha])) => trace_stage(
+                self.logger.as_deref(),
+                self.task_id,
+                "app.frame_one_colour",
+                region,
+                &format!("colour=#{red:02x}{green:02x}{blue:02x}{alpha:02x}"),
+            ),
+            Ok(None) => {}
+            Err(why) => note(self.logger.as_deref(), &why),
+        }
+    }
+
+    /// The colour all the sample pixels of the frame in `texture` have, if they have one. Waits
+    /// for the GPU to copy a few pixels, which is why only the trace does this.
+    unsafe fn frame_colour(
+        &self,
+        state: &mut State,
+        texture: &ID3D11Texture2D,
+        region: (u32, u32),
+    ) -> Result<Option<[u8; 4]>, String> {
+        if state.samples.is_none() {
+            let desc = D3D11_TEXTURE2D_DESC {
+                Width: SAMPLE_GRID,
+                Height: SAMPLE_GRID,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Usage: D3D11_USAGE_STAGING,
+                BindFlags: 0,
+                CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+                MiscFlags: 0,
+            };
+            self.gpu
+                .device
+                .CreateTexture2D(&desc, None, Some(&mut state.samples))
+                .map_err(|e| failed("creating the texture a frame is sampled into", e))?;
+        }
+        let Some(samples) = &state.samples else {
+            return Ok(None);
+        };
+        let context = self.gpu.context.lock().unwrap_or_else(|e| e.into_inner());
+        for (index, (x, y)) in sample_points(region).into_iter().enumerate() {
+            let index = index as u32;
+            let pixel = D3D11_BOX {
+                left: x,
+                top: y,
+                front: 0,
+                right: x + 1,
+                bottom: y + 1,
+                back: 1,
+            };
+            context.CopySubresourceRegion(
+                samples,
+                0,
+                index % SAMPLE_GRID,
+                index / SAMPLE_GRID,
+                0,
+                texture,
+                0,
+                Some(&pixel as *const _),
+            );
+        }
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        context
+            .Map(samples, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+            .map_err(|e| failed("reading the pixels sampled from a frame", e))?;
+        let mut pixels = Vec::with_capacity((SAMPLE_GRID * SAMPLE_GRID) as usize);
+        for row in 0..SAMPLE_GRID as usize {
+            let start = (mapped.pData as *const u8).add(row * mapped.RowPitch as usize);
+            for column in 0..SAMPLE_GRID as usize {
+                let mut pixel = [0u8; 4];
+                std::ptr::copy_nonoverlapping(start.add(column * 4), pixel.as_mut_ptr(), 4);
+                pixels.push(pixel);
+            }
+        }
+        context.Unmap(samples, 0);
+        Ok(uniform_colour(&pixels))
     }
 
     /// A frame of `region` pixels reached the screen, `started` being when its showing began.
