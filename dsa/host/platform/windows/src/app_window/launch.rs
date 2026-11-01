@@ -222,6 +222,22 @@ pub fn tell_user(title: &str, text: &str) {
     };
 }
 
+/// Tells the user that something they asked for went well, in a message box titled `title`.
+pub fn tell_user_done(title: &str, text: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
+    let title = wide(title);
+    let text = wide(text);
+    // SAFETY: NUL-terminated strings that outlive the call.
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            title.as_ptr(),
+            MB_OK | MB_ICONINFORMATION,
+        )
+    };
+}
+
 /// The class of the window shown while the app is being opened.
 const STARTING_CLASS: &str = "DsaStartingApp";
 

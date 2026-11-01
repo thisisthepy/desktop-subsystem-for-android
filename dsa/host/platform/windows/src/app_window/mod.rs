@@ -12,6 +12,7 @@
 //! when the window manager closes the connection, which it does when the app's last window
 //! closes.
 
+pub mod apk_install;
 pub mod ime;
 pub mod keys;
 pub mod launch;

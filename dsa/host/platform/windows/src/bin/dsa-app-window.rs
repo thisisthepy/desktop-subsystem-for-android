@@ -42,6 +42,76 @@ fn main() -> std::process::ExitCode {
     dsa_host_windows::compositor::log::input_trace_to(logger.clone());
     let args: Vec<String> = std::env::args().skip(1).collect();
     let program = std::env::current_exe().unwrap_or_default();
+    // Opened on an .apk file in Explorer: the APK is installed in Android, and the user is told
+    // how that went.
+    if let Some(path) = dsa_host_windows::app_window::apk_install::install_request(&args) {
+        use dsa_host_windows::app_window::apk_install;
+        use dsa_host_windows::app_window::launch::tell_user_done;
+        const TITLE: &str = "Desktop Subsystem for Android";
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        let window_manager_pipe = pipe_name(current_session());
+        let api_pipe = dsa_host_windows::host_config::DEFAULT_PIPE_NAME;
+        let mut starting = None;
+        let installed = apk_install::open(&path).and_then(|mut apk| {
+            prepare_app(
+                || {
+                    ensure_window_manager(
+                        || pipe_exists(&window_manager_pipe),
+                        || match window_manager_path(Some(program.as_path())) {
+                            Some(window_manager) => run_program(&window_manager, ""),
+                            None => Err("the DSA Window Manager is not installed".into()),
+                        },
+                        START_WINDOW_MANAGER,
+                        POLL,
+                    )
+                },
+                || {
+                    ensure_android(
+                        &mut NamedPipeConnector {
+                            name: api_pipe.into(),
+                        },
+                        || starting = Some(StartingWindow::show(TITLE)),
+                    )
+                },
+            )?;
+            let outcome = apk_install::install(
+                &mut NamedPipeConnector {
+                    name: api_pipe.into(),
+                },
+                &mut apk,
+            );
+            drop(starting.take());
+            outcome
+        });
+        drop(starting);
+        return match installed {
+            Ok(outcome) => {
+                let (text, good) = apk_install::result_text(&name, &outcome);
+                note(
+                    logger.as_deref(),
+                    &format!("{}: {} ({})", path.display(), outcome, outcome.status),
+                );
+                if good {
+                    tell_user_done(TITLE, &text);
+                    std::process::ExitCode::SUCCESS
+                } else {
+                    tell_user(TITLE, &text);
+                    std::process::ExitCode::FAILURE
+                }
+            }
+            Err(why) => {
+                note(
+                    logger.as_deref(),
+                    &format!("{}: not installed: {why}", path.display()),
+                );
+                tell_user(TITLE, &apk_install::failure_text(&name, &why));
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     let Some(package) = package_of(&program, &args) else {
         note(
             logger.as_deref(),
