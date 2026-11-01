@@ -403,5 +403,49 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.FileProgress getFileProgress();
 
+  /**
+   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+   * @return Whether the notification field is set.
+   */
+  boolean hasNotification();
+  /**
+   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+   * @return The notification.
+   */
+  io.github.thisisthepy.dsa.control.v1.GuestNotification getNotification();
+
+  /**
+   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+   * @return Whether the notificationRemoved field is set.
+   */
+  boolean hasNotificationRemoved();
+  /**
+   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+   * @return The notificationRemoved.
+   */
+  io.github.thisisthepy.dsa.control.v1.NotificationRemoved getNotificationRemoved();
+
+  /**
+   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+   * @return Whether the notificationClicked field is set.
+   */
+  boolean hasNotificationClicked();
+  /**
+   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+   * @return The notificationClicked.
+   */
+  io.github.thisisthepy.dsa.control.v1.NotificationClicked getNotificationClicked();
+
+  /**
+   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+   * @return Whether the notificationDismissed field is set.
+   */
+  boolean hasNotificationDismissed();
+  /**
+   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+   * @return The notificationDismissed.
+   */
+  io.github.thisisthepy.dsa.control.v1.NotificationDismissed getNotificationDismissed();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

@@ -168,6 +168,56 @@ pub struct ClipboardText {
     #[prost(string, tag = "1")]
     pub text: ::prost::alloc::string::String,
 }
+/// Turns the connection into a watch of the notifications of the caller's Android: after the
+/// answer (Done), the service sends a Notification each time an app posts one or changes one,
+/// and a NotificationRemoved when one is gone, including every one that was shown when the
+/// Android stops. The client sends nothing more on it. The watch lasts across restarts of the
+/// Android.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WatchNotifications {}
+/// A notification of the caller's Android, on a connection that watches them
+/// (WatchNotifications). One with the key of an earlier one replaces it.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Notification {
+    #[prost(string, tag = "1")]
+    pub key: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub package_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub app_label: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub title: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub text: ::prost::alloc::string::String,
+    /// A PNG image; empty for none.
+    #[prost(bytes = "vec", tag = "6")]
+    pub icon_png: ::prost::alloc::vec::Vec<u8>,
+    /// As Android numbers it: 1 minimum, 2 low, 3 default, 4 high.
+    #[prost(int32, tag = "7")]
+    pub importance: i32,
+    #[prost(bool, tag = "8")]
+    pub high_priority: bool,
+    /// Whether the user may dismiss it.
+    #[prost(bool, tag = "9")]
+    pub clearable: bool,
+    #[prost(int64, tag = "10")]
+    pub when_millis: i64,
+}
+/// The notification with this key is gone, on a connection that watches them.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NotificationRemoved {
+    #[prost(string, tag = "1")]
+    pub key: ::prost::alloc::string::String,
+}
+/// Passes what the user did with a notification of the caller's Android to it. Answered with
+/// Done.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ActOnNotification {
+    #[prost(string, tag = "1")]
+    pub key: ::prost::alloc::string::String,
+    #[prost(enumeration = "NotificationAction", tag = "2")]
+    pub action: i32,
+}
 /// Pointer input in a task's window, sent on a connection that streams input.
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct PointerEvent {
@@ -575,7 +625,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -625,6 +675,10 @@ pub mod request {
         OpenFile(super::OpenFile),
         #[prost(message, tag = "22")]
         WatchClipboard(super::WatchClipboard),
+        #[prost(message, tag = "23")]
+        WatchNotifications(super::WatchNotifications),
+        #[prost(message, tag = "24")]
+        ActOnNotification(super::ActOnNotification),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -663,7 +717,7 @@ pub mod response {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11, 14, 15"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -697,6 +751,10 @@ pub mod envelope {
         FileChunk(super::FileChunk),
         #[prost(message, tag = "11")]
         ClipboardText(super::ClipboardText),
+        #[prost(message, tag = "14")]
+        Notification(super::Notification),
+        #[prost(message, tag = "15")]
+        NotificationRemoved(super::NotificationRemoved),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -869,6 +927,39 @@ impl FileAction {
             "FILE_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
             "FILE_ACTION_VIEW" => Some(Self::View),
             "FILE_ACTION_SEND" => Some(Self::Send),
+            _ => None,
+        }
+    }
+}
+/// What the user did with a notification on the host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum NotificationAction {
+    Unspecified = 0,
+    /// Clicked it: the app opens it, and its task shows as a window. Android leaves Doze first.
+    Open = 1,
+    /// Dismissed it: it is removed in Android too, unless the app made it one the user cannot
+    /// dismiss.
+    Dismiss = 2,
+}
+impl NotificationAction {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "NOTIFICATION_ACTION_UNSPECIFIED",
+            Self::Open => "NOTIFICATION_ACTION_OPEN",
+            Self::Dismiss => "NOTIFICATION_ACTION_DISMISS",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "NOTIFICATION_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
+            "NOTIFICATION_ACTION_OPEN" => Some(Self::Open),
+            "NOTIFICATION_ACTION_DISMISS" => Some(Self::Dismiss),
             _ => None,
         }
     }

@@ -359,6 +359,67 @@ pub struct ClipboardSharing {
     #[prost(bool, tag = "1")]
     pub on: bool,
 }
+/// Guest to host, from the agent: a notification an app posted, or a new version of one it
+/// posted before under the same key, which replaces it. Only notifications a person would see
+/// come: not the ongoing notice of a foreground service, and not a group's summary, whose
+/// members come one by one. The icon is a PNG image of at most 96 pixels on a side and 64 KiB;
+/// a larger one is left out.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GuestNotification {
+    /// Android's key of the notification: unique in the guest while it is posted.
+    #[prost(string, tag = "1")]
+    pub key: ::prost::alloc::string::String,
+    /// The package that posted it.
+    #[prost(string, tag = "2")]
+    pub package_name: ::prost::alloc::string::String,
+    /// The posting app's name, as the guest shows it.
+    #[prost(string, tag = "3")]
+    pub app_label: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub title: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub text: ::prost::alloc::string::String,
+    /// The notification's large icon, else the app's icon, as a PNG image; empty for none.
+    #[prost(bytes = "vec", tag = "6")]
+    pub icon_png: ::prost::alloc::vec::Vec<u8>,
+    /// The importance of its channel, as Android numbers it (NotificationManager.IMPORTANCE_*):
+    /// 1 minimum, 2 low, 3 default, 4 high.
+    #[prost(int32, tag = "7")]
+    pub importance: i32,
+    /// Whether the app asked for it to interrupt: a high importance channel or a high
+    /// priority. Such a notification reaches the host while the guest is in Doze too.
+    #[prost(bool, tag = "8")]
+    pub high_priority: bool,
+    /// Whether the user may dismiss it. A notification that is not stays until the app removes
+    /// it, and the host does not ask the guest to remove it.
+    #[prost(bool, tag = "9")]
+    pub clearable: bool,
+    /// When it was posted, in milliseconds since the Unix epoch, as the app gave it.
+    #[prost(int64, tag = "10")]
+    pub when_millis: i64,
+}
+/// Guest to host, from the agent: the notification with this key is gone from the guest,
+/// because the app removed it, the user opened it, or the host asked.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NotificationRemoved {
+    #[prost(string, tag = "1")]
+    pub key: ::prost::alloc::string::String,
+}
+/// Host to guest: the user clicked the notification with this key on the host. The agent runs
+/// the notification's content intent, as clicking it in the guest would. A key the guest does
+/// not have is answered with NotificationRemoved.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NotificationClicked {
+    #[prost(string, tag = "1")]
+    pub key: ::prost::alloc::string::String,
+}
+/// Host to guest: the user dismissed the notification with this key on the host. The agent
+/// cancels it in the guest. A key the guest does not have is answered with NotificationRemoved.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NotificationDismissed {
+    #[prost(string, tag = "1")]
+    pub key: ::prost::alloc::string::String,
+}
 /// Host to guest: asks the agent for a GuestMemory report now, instead of at its next
 /// periodic one.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -528,7 +589,7 @@ pub struct ClockAnswer {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 42, 50, 51, 52, 53, 54"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 42, 50, 51, 52, 53, 54, 70, 71, 72, 73"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -608,6 +669,14 @@ pub mod envelope {
         FileChunk(super::FileChunk),
         #[prost(message, tag = "54")]
         FileProgress(super::FileProgress),
+        #[prost(message, tag = "70")]
+        Notification(super::GuestNotification),
+        #[prost(message, tag = "71")]
+        NotificationRemoved(super::NotificationRemoved),
+        #[prost(message, tag = "72")]
+        NotificationClicked(super::NotificationClicked),
+        #[prost(message, tag = "73")]
+        NotificationDismissed(super::NotificationDismissed),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
