@@ -151,6 +151,9 @@
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
+        </service>
+
+        <!--
           Reads the nodes of the tasks a host accessibility client (a screen reader) watches,
           so the host can show them in each task window's accessibility tree. The agent
           enables it only while the host watches a task and disables it after; it shows

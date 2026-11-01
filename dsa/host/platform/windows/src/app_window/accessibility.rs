@@ -22,6 +22,9 @@
 //!
 //! [`PRESENCE_GRACE`]: dsa_host_core::accessibility::PRESENCE_GRACE
 
+// UI Automation's constants keep their Windows names, which are matched on below.
+#![allow(non_upper_case_globals)]
+
 use std::collections::HashSet;
 use std::mem::ManuallyDrop;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,7 +42,7 @@ use dsa_transport::Connector;
 use windows::core::{
     implement, Error, IUnknown, IUnknownImpl, Interface, BOOL, BSTR, HRESULT, PCWSTR,
 };
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, VARIANT_BOOL, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, VARIANT_BOOL, WPARAM};
 use windows::Win32::System::Com::SAFEARRAY;
 use windows::Win32::System::Ole::{SafeArrayCreateVector, SafeArrayPutElement};
 use windows::Win32::System::Variant::{VARIANT, VT_BOOL, VT_BSTR, VT_EMPTY, VT_I4};
