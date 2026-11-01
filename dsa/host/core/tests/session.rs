@@ -1745,7 +1745,11 @@ fn fr10_time_stalled_during_doze_does_not_count_towards_the_freeze() {
     launcher.0.lock().unwrap().missing = Some("the window manager has gone".into());
     assert!(session.wait_for(SessionState::Stalled, WAIT));
     thread::sleep(freeze_after + Duration::from_millis(200));
-    assert_eq!(launcher.0.lock().unwrap().freezes, 0, "a stalled guest stays");
+    assert_eq!(
+        launcher.0.lock().unwrap().freezes,
+        0,
+        "a stalled guest stays"
+    );
     launcher.0.lock().unwrap().missing = None;
 
     assert!(session.wait_for(SessionState::Dozing, WAIT));
