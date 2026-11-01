@@ -18,6 +18,9 @@
 //! user copies on the host, and receives the text the caller's Android copies, on the same
 //! connection, unanswered in both directions.
 //!
+//! A client that installs an APK ([`HostApiClient::install_apk`]) streams its content in pieces
+//! after the first answer, and the service streams it on to the caller's Android as it comes,
+//! then answers again with how the install ended.
 //! A client that watches links ([`HostApiClient::watch_links`]) receives each web link the
 //! caller's Android opens, for the host's browser. A client that sends a file
 //! ([`HostApiClient::open_file`]) sends its content in pieces after the first answer, and the
@@ -28,6 +31,7 @@
 //! The caller's Android reads the task's tree only while such a connection is open.
 
 use std::collections::HashMap;
+use std::io::{self, Read};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex};
@@ -46,6 +50,7 @@ use dsa_transport::{Connection, Connector, TransportError};
 use crate::accessibility::{
     AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, TreeUpdate,
 };
+use crate::apk::{self, InstallOutcome};
 use crate::files::{self, FileAction, FileTransfer};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{InputEvent, PointerEvent};
@@ -144,6 +149,19 @@ pub trait UserAndroid: Send + Sync {
             "this Android does not take files".into(),
         ))
     }
+    /// Installs the APK called `name`, of `size` bytes read from `content`, in this Android,
+    /// and returns how the install ended. One install runs at a time; a second waits.
+    fn install_apk(
+        &self,
+        name: &str,
+        size: u64,
+        content: &mut dyn Read,
+    ) -> Result<InstallOutcome, InstallError> {
+        let _ = (name, size, content);
+        Err(InstallError::Refused(
+            "this Android does not install APKs".into(),
+        ))
+    }
     /// Watches a task's accessibility tree; Android reads it while any watch of the task
     /// lasts. `None` when this Android does not export its accessibility tree.
     fn watch_accessibility(&self, task_id: i32) -> Option<AccessibilityWatch> {
@@ -162,6 +180,15 @@ pub trait UserAndroid: Send + Sync {
             "this Android does not export its accessibility tree".into(),
         ))
     }
+}
+
+/// Why an APK did not reach Android.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InstallError {
+    /// The Android is not running.
+    NotRunning(String),
+    /// The APK was not taken, or did not arrive whole; the detail says why.
+    Refused(String),
 }
 
 impl UserAndroid for Session {
@@ -234,6 +261,20 @@ impl UserAndroid for Session {
     }
     fn open_file(&self, file: &FileTransfer) -> Result<(), TaskRequestError> {
         Session::open_file(self, file).map_err(request_error)
+    }
+    fn install_apk(
+        &self,
+        name: &str,
+        size: u64,
+        content: &mut dyn Read,
+    ) -> Result<InstallOutcome, InstallError> {
+        Session::install_apk(self, name, size, content).map_err(|error| match error {
+            SessionError::NotActive(state) => InstallError::NotRunning(format!(
+                "Android is {state}; start it and install the APK again"
+            )),
+            SessionError::InstallRefused(why) => InstallError::Refused(why),
+            other => InstallError::Refused(format!("the APK did not reach Android: {other}")),
+        })
     }
     fn watch_accessibility(&self, task_id: i32) -> Option<AccessibilityWatch> {
         Some(Session::watch_accessibility(self, task_id))
@@ -562,6 +603,14 @@ const WATCH_POLL: Duration = Duration::from_millis(100);
 /// for text from Android again.
 const CLIPBOARD_POLL: Duration = Duration::from_millis(50);
 
+/// How long the service waits for the next piece of an APK a client sends. A client reads the
+/// file as it sends it, so a gap this long means it is stuck or gone.
+const APK_CHUNK_WAIT: Duration = Duration::from_secs(30);
+
+/// How long a client waits for the service to say how an install ended: one install waits for
+/// another, and the guest may take minutes to verify and compile a large app.
+const INSTALL_ANSWER_WAIT: Duration = Duration::from_secs(30 * 60);
+
 /// How long a connection that carries links waits for its client before it looks for links
 /// again.
 const LINK_POLL: Duration = Duration::from_millis(100);
@@ -756,6 +805,9 @@ impl HostApiService {
             }
             if let Some(request::Body::WatchClipboard(_)) = request.body {
                 return self.watch_clipboard(connection, &peer, request.id);
+            }
+            if let Some(request::Body::InstallApk(install)) = &request.body {
+                return self.install_apk(connection, &peer, request.id, install.clone());
             }
             if let Some(request::Body::WatchLinks(_)) = request.body {
                 return self.watch_links(connection, &peer, request.id);
@@ -1315,6 +1367,76 @@ impl HostApiService {
         }
     }
 
+    /// Answers an InstallApk request: refuses an APK that is too large or not named as one,
+    /// else streams the ApkChunk frames that follow to the caller's Android and answers again
+    /// with how the install ended. The connection ends with the install.
+    fn install_apk(
+        &self,
+        mut connection: Box<dyn Connection>,
+        peer: &Peer,
+        id: u64,
+        install: types::InstallApk,
+    ) {
+        let answer = |connection: &mut dyn Connection, body: response::Body| {
+            let _ = send(
+                connection,
+                Body::Response(Response {
+                    id,
+                    body: Some(body),
+                }),
+            );
+        };
+        let checked = apk::check_name(&install.name).and_then(|()| apk::check_size(install.size));
+        let android = match (checked, self.androids.android(&peer.user)) {
+            (Err(why), _) => {
+                eprintln!("install: refused an APK from {}: {why}", peer.user);
+                answer(&mut *connection, error(ErrorCode::InstallRefused, why));
+                connection.close();
+                return;
+            }
+            (_, Err(why)) => {
+                answer(&mut *connection, error(ErrorCode::Unavailable, why));
+                connection.close();
+                return;
+            }
+            (Ok(()), Ok(android)) => android,
+        };
+        let state = android.state();
+        if !matches!(
+            state,
+            SessionState::Active | SessionState::Dozing | SessionState::Frozen
+        ) {
+            answer(
+                &mut *connection,
+                error(
+                    ErrorCode::NotRunning,
+                    format!("Android is {state}; start it and install the APK again"),
+                ),
+            );
+            connection.close();
+            return;
+        }
+        answer(&mut *connection, response::Body::Done(types::Done {}));
+        eprintln!(
+            "install: {} asked to install {} ({} bytes)",
+            peer.user, install.name, install.size
+        );
+        let mut content = ApkChunks {
+            connection: &mut *connection,
+            user: &peer.user,
+            left: install.size,
+            piece: Vec::new(),
+            at: 0,
+        };
+        let body = match android.install_apk(&install.name, install.size, &mut content) {
+            Ok(outcome) => response::Body::InstallResult(outcome.to_wire()),
+            Err(InstallError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(InstallError::Refused(why)) => error(ErrorCode::InstallRefused, why),
+        };
+        answer(&mut *connection, body);
+        connection.close();
+    }
+
     fn answer(&self, peer: &Peer, request: Request) -> Response {
         let body = match request.body {
             None => error(
@@ -1423,6 +1545,7 @@ impl HostApiService {
                         | request::Body::GetMemory(_)
                         | request::Body::StreamInput(_)
                         | request::Body::WatchClipboard(_)
+                        | request::Body::InstallApk(_)
                         | request::Body::WatchLinks(_)
                         | request::Body::WatchAccessibility(_)
                         | request::Body::OpenFile(_) => unreachable!("answered above"),
@@ -2044,6 +2167,69 @@ impl HostApiClient {
         }
     }
 
+    /// Installs the APK called `name`, of `size` bytes read from `content`, in the caller's
+    /// Android, and returns how the install ended: a refusal by Android is an outcome, not an
+    /// error. An error means the APK did not get there. The connection ends with the install,
+    /// so the client is used up.
+    pub fn install_apk(
+        mut self,
+        name: &str,
+        size: u64,
+        content: &mut dyn Read,
+    ) -> Result<InstallOutcome, ClientError> {
+        let id = self.next_id;
+        match self.exchange(
+            request::Body::InstallApk(types::InstallApk {
+                name: name.to_string(),
+                size,
+            }),
+            self.timeout,
+        )? {
+            response::Body::Done(_) => {}
+            _ => {
+                return Err(ClientError::Malformed(
+                    "expected the answer that the APK is taken".into(),
+                ))
+            }
+        }
+        let mut left = size;
+        let mut piece = vec![0u8; apk::LOCAL_CHUNK_BYTES];
+        let mut failed = None;
+        while left > 0 {
+            let length = left.min(piece.len() as u64) as usize;
+            if let Err(error) = content.read_exact(&mut piece[..length]) {
+                failed = Some(error);
+                break;
+            }
+            // A service that has answered already (Android refused the APK before the end)
+            // closes the connection; its answer is still there to read.
+            if send(
+                &mut *self.connection,
+                Body::ApkChunk(types::ApkChunk {
+                    data: piece[..length].to_vec(),
+                }),
+            )
+            .is_err()
+            {
+                break;
+            }
+            left -= length as u64;
+        }
+        if let Some(error) = failed {
+            self.connection.close();
+            return Err(ClientError::Service {
+                code: ErrorCode::InstallRefused,
+                detail: format!("the APK could not be read: {error}"),
+            });
+        }
+        match self.answer(id, INSTALL_ANSWER_WAIT)? {
+            response::Body::InstallResult(result) => Ok(InstallOutcome::from_wire(result)),
+            _ => Err(ClientError::Malformed(
+                "expected how the install ended".into(),
+            )),
+        }
+    }
+
     /// Receives the web links the caller's Android opens, for the host's browser. The
     /// connection carries nothing else from here on, so the client is used up.
     pub fn watch_links(mut self) -> Result<LinkStream, ClientError> {
@@ -2188,6 +2374,71 @@ impl HostApiClient {
             Some(body) => Ok(body),
             None => Err(ClientError::Malformed("an empty response".into())),
         }
+    }
+}
+
+/// The content of an APK a client sends, read from its ApkChunk frames as the install needs it.
+/// Anything else the client sends, a frame that cannot be read, more bytes than announced, or a
+/// gap longer than [`APK_CHUNK_WAIT`] ends the content with an error, and the install with it.
+struct ApkChunks<'a> {
+    connection: &'a mut dyn Connection,
+    user: &'a str,
+    /// The bytes announced that have not arrived yet.
+    left: u64,
+    piece: Vec<u8>,
+    /// How much of `piece` has been read.
+    at: usize,
+}
+
+impl Read for ApkChunks<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        while self.at == self.piece.len() {
+            if self.left == 0 {
+                return Ok(0);
+            }
+            let frame = self
+                .connection
+                .recv(Some(APK_CHUNK_WAIT))
+                .map_err(|error| {
+                    eprintln!(
+                        "install: the APK from {} did not arrive whole ({error})",
+                        self.user
+                    );
+                    io::Error::other(error.to_string())
+                })?;
+            match decode(&frame) {
+                Ok(Envelope {
+                    body: Some(Body::ApkChunk(chunk)),
+                }) if chunk.data.len() as u64 <= self.left => {
+                    self.left -= chunk.data.len() as u64;
+                    self.piece = chunk.data;
+                    self.at = 0;
+                }
+                Ok(Envelope {
+                    body: Some(Body::ApkChunk(_)),
+                }) => {
+                    eprintln!(
+                        "install: a client of {} sent more of its APK than it announced",
+                        self.user
+                    );
+                    return Err(io::Error::other("more bytes arrived than were announced"));
+                }
+                Ok(_) | Err(_) => {
+                    eprintln!(
+                        "install: a client of {} sent something other than a piece of its APK; \
+                         dropping the install",
+                        self.user
+                    );
+                    return Err(io::Error::other(
+                        "something other than a piece of the APK arrived",
+                    ));
+                }
+            }
+        }
+        let length = buf.len().min(self.piece.len() - self.at);
+        buf[..length].copy_from_slice(&self.piece[self.at..self.at + length]);
+        self.at += length;
+        Ok(length)
     }
 }
 

@@ -397,4 +397,49 @@
   <data name="CancelButton" xml:space="preserve">
     <value>취소</value>
   </data>
+  <data name="Install_BusyTitle" xml:space="preserve">
+    <value>설치하는 중</value>
+  </data>
+  <data name="Install_Busy" xml:space="preserve">
+    <value>{0}을(를) Android에 설치하는 중입니다…</value>
+  </data>
+  <data name="Install_DoneTitle" xml:space="preserve">
+    <value>설치했습니다</value>
+  </data>
+  <data name="Install_FailedTitle" xml:space="preserve">
+    <value>설치하지 못했습니다</value>
+  </data>
+  <data name="Install_Installed" xml:space="preserve">
+    <value>{0}을(를) 설치했습니다({1}). 시작 메뉴에서 열 수 있습니다.</value>
+  </data>
+  <data name="Install_Refused" xml:space="preserve">
+    <value>{0}을(를) 설치하지 못했습니다: {1} ({2})</value>
+  </data>
+  <data name="Install_NotSent" xml:space="preserve">
+    <value>{0}이(가) Android에 전달되지 않았습니다. {1}</value>
+  </data>
+  <data name="Install_NotApk" xml:space="preserve">
+    <value>APK 파일만 설치할 수 있습니다: {0}</value>
+  </data>
+  <data name="Install_Reason_incompatible" xml:space="preserve">
+    <value>이 Android에서 실행되지 않는 앱입니다. 다른 프로세서 종류, 더 새로운 Android 버전 또는 이 기기에 없는 기능이 필요합니다.</value>
+  </data>
+  <data name="Install_Reason_conflicting-signature" xml:space="preserve">
+    <value>다른 키로 서명된 같은 앱이 이미 설치되어 있습니다. 먼저 Android에서 제거하세요.</value>
+  </data>
+  <data name="Install_Reason_invalid-apk" xml:space="preserve">
+    <value>Android가 읽을 수 있는 서명된 APK가 아닙니다.</value>
+  </data>
+  <data name="Install_Reason_insufficient-storage" xml:space="preserve">
+    <value>Android에 앱을 설치할 공간이 없습니다.</value>
+  </data>
+  <data name="Install_Reason_downgrade" xml:space="preserve">
+    <value>더 새로운 버전의 앱이 설치되어 있습니다. 먼저 Android에서 제거하세요.</value>
+  </data>
+  <data name="Install_Reason_blocked" xml:space="preserve">
+    <value>이 Android의 정책이 앱을 허용하지 않습니다.</value>
+  </data>
+  <data name="Install_Reason_other" xml:space="preserve">
+    <value>Android가 앱을 설치하지 않았습니다.</value>
+  </data>
 </root>

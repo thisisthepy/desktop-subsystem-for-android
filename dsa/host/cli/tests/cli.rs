@@ -818,6 +818,16 @@ fn nfr1_dsa_memory_says_what_it_knows_of_the_host_and_android() {
     assert!(text.contains("Android: no report yet"), "{text}");
 }
 
+/// A file in a folder of this test run, holding `content`.
+fn apk_file(name: &str, content: &[u8]) -> std::path::PathBuf {
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("apks-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    std::fs::write(&path, content).unwrap();
+    path
+}
+
 fn scratch_file(name: &str, content: &[u8]) -> std::path::PathBuf {
     let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
         .join(format!("cli-files-{}", std::process::id()));
@@ -825,6 +835,147 @@ fn scratch_file(name: &str, content: &[u8]) -> std::path::PathBuf {
     let path = dir.join(name);
     std::fs::write(&path, content).unwrap();
     path
+}
+
+/// Runs dsa with `before`, then the path, then `after`, so a path with spaces stays whole.
+fn dsa_with_path(endpoint: &str, before: &str, path: &std::path::Path, after: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_dsa"))
+        .args(args(before))
+        .arg(path)
+        .args(args(after))
+        .args([endpoint_flag(), endpoint])
+        .output()
+        .expect("running dsa")
+}
+
+#[test]
+fn fr11_dsa_install_is_parsed() {
+    let install = parse(&args("install notes.apk --json")).unwrap();
+    assert_eq!(install.command, Cmd::Install);
+    assert_eq!(
+        install.file.as_deref(),
+        Some(std::path::Path::new("notes.apk"))
+    );
+    assert!(install.json);
+    assert!(parse(&args("install"))
+        .unwrap_err()
+        .contains("needs the APK file"));
+    assert!(
+        parse(&args("install a.apk b.apk")).is_err(),
+        "one APK at a time"
+    );
+}
+
+#[test]
+fn fr11_dsa_install_starts_android_and_installs_the_apk() {
+    use dsa_host_core::host_api_conformance::INSTALLED_PACKAGE;
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let content: Vec<u8> = (0..3 * 1024 * 1024 + 5).map(|i| (i % 249) as u8).collect();
+    let path = apk_file("My Notes.apk", &content);
+
+    let output = dsa_with_path(&endpoint, "install", &path, "");
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        format!("Installed {INSTALLED_PACKAGE} from My Notes.apk")
+    );
+    let android = androids.of(&user).unwrap();
+    assert_eq!(
+        android.state(),
+        SessionState::Active,
+        "Android was started first"
+    );
+    let installs = android.installs.lock().unwrap();
+    assert_eq!(installs.len(), 1);
+    assert_eq!(installs[0].0, "My Notes.apk");
+    assert!(installs[0].1 == content, "the APK arrived changed");
+}
+
+#[test]
+fn fr11_dsa_install_json_reports_the_package() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let path = apk_file("json.apk", b"PK\x03\x04 an apk");
+    let json = json_of(&dsa_with_path(&endpoint, "install", &path, "--json"));
+    assert_eq!(json["installed"], true);
+    assert_eq!(json["status"], "installed");
+    assert_eq!(json["package"], "com.example.installed");
+}
+
+#[test]
+fn fr11_dsa_install_says_why_android_refused_the_apk_and_fails() {
+    use dsa_host_core::host_api_conformance::BAD_APK;
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let path = apk_file("broken.apk", BAD_APK);
+    let output = dsa_with_path(&endpoint, "install", &path, "");
+    assert_eq!(output.status.code(), Some(1));
+    let error = stderr(&output);
+    assert!(
+        error.starts_with("dsa: not installed (invalid-apk): broken.apk"),
+        "{error}"
+    );
+    assert!(error.contains("INSTALL_PARSE_FAILED_NOT_APK"), "{error}");
+}
+
+#[test]
+fn fr11_dsa_install_refuses_a_file_that_is_no_apk_before_starting_android() {
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let path = apk_file("notes.zip", b"PK");
+    let output = dsa_with_path(&endpoint, "install", &path, "");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("not an APK file"),
+        "{}",
+        stderr(&output)
+    );
+    let missing = dsa(&endpoint, "install no-such-file.apk");
+    assert_eq!(missing.status.code(), Some(1));
+    assert!(
+        stderr(&missing).contains("cannot read"),
+        "{}",
+        stderr(&missing)
+    );
+    // Android was not started for either.
+    assert!(androids
+        .of(&user)
+        .is_none_or(|android| android.state() == SessionState::Stopped));
+}
+
+#[test]
+fn fr11_two_dsa_installs_at_once_both_succeed_one_after_the_other() {
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    assert!(dsa(&endpoint, "start").status.success());
+    *androids.of(&user).unwrap().install_time.lock().unwrap() = Duration::from_millis(300);
+    let one = apk_file("one.apk", b"one");
+    let two = apk_file("two.apk", b"two");
+    let first = {
+        let endpoint = endpoint.clone();
+        std::thread::spawn(move || dsa_with_path(&endpoint, "install", &one, ""))
+    };
+    let second = dsa_with_path(&endpoint, "install", &two, "");
+    let first = first.join().unwrap();
+    assert!(first.status.success(), "{}", stderr(&first));
+    assert!(second.status.success(), "{}", stderr(&second));
+    let steps = androids
+        .of(&user)
+        .unwrap()
+        .install_steps
+        .lock()
+        .unwrap()
+        .clone();
+    assert_eq!(steps.len(), 4, "{steps:?}");
+    assert_eq!(
+        steps[0][1..],
+        steps[1][1..],
+        "the installs overlapped: {steps:?}"
+    );
 }
 
 #[test]

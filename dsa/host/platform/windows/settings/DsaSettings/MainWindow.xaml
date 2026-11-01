@@ -13,10 +13,14 @@
     WindowStartupLocation="CenterScreen"
     ExtendsContentIntoTitleBar="True"
     WindowBackdropType="Mica"
-    WindowCornerPreference="Round">
+    WindowCornerPreference="Round"
+    AllowDrop="True"
+    DragOver="OnDragOver"
+    Drop="OnDrop">
     <!-- Mica on Windows 11; Windows 10 shows the theme's solid background instead. -->
     <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
@@ -27,9 +31,15 @@
             </ui:TitleBar.Icon>
         </ui:TitleBar>
 
+        <!-- APK files dropped anywhere on the window are installed in Android; this bar says how
+             it went. -->
+        <ui:InfoBar x:Name="InstallBar" Grid.Row="1" Margin="12,0,12,4" IsClosable="True"
+                    Title="{Binding Title, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}"
+                    IsOpen="{Binding IsOpen, Mode=TwoWay}" />
+
         <ui:NavigationView
             x:Name="Navigation"
-            Grid.Row="1"
+            Grid.Row="2"
             PaneDisplayMode="Left"
             OpenPaneLength="260"
             IsBackButtonVisible="Collapsed"

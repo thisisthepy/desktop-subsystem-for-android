@@ -38,6 +38,11 @@ internal sealed class KeyText : ITextSource
         "Memory_ProcessDetail" => "pid {0}, {1} private",
         "Memory_ZramDetail" => "{0} stored",
         "Memory_GuestProcessDetail" => "pid {0}",
+        "Install_Installed" => "installed {0} as {1}",
+        "Install_Refused" => "refused {0}: {1} [{2}]",
+        "Install_NotSent" => "not sent {0}: {1}",
+        "Install_NotApk" => "not an APK: {0}",
+        "Install_Busy" => "installing {0}",
         _ => key,
     };
 }
@@ -292,5 +297,85 @@ public class ViewModelTests
         Assert.Equal("0.5 MB", Format.Size(512, CultureInfo.InvariantCulture));
         Assert.Equal("1.50 GB", Format.Size(1572864, CultureInfo.InvariantCulture));
         Assert.Equal("1,50 GB", Format.Size(1572864, new CultureInfo("de-DE")));
+    }
+
+    [Fact]
+    public async Task Fr11_dropping_an_apk_installs_it_and_shows_the_package()
+    {
+        var cli = new FakeCli()
+            .Answer(@"install C:\Downloads\notes.apk --json",
+                "{\"installed\":true,\"status\":\"installed\",\"package\":\"com.example.notes\",\"message\":\"\"}");
+        var vm = new InstallViewModel(new DsaService(cli), new KeyText());
+        Assert.True(vm.Accepts(new[] { @"C:\Downloads\notes.apk" }));
+        await vm.DropAsync(new[] { @"C:\Downloads\notes.apk" });
+        Assert.Equal(new[] { @"install C:\Downloads\notes.apk --json" }, cli.Calls);
+        Assert.True(vm.IsOpen);
+        Assert.False(vm.IsBusy);
+        Assert.Equal(InstallSeverity.Success, vm.Severity);
+        Assert.Equal("Install_DoneTitle", vm.Title);
+        Assert.Equal("installed notes.apk as com.example.notes", vm.Message);
+    }
+
+    [Fact]
+    public async Task Fr11_a_refused_apk_shows_its_reason_in_the_users_language()
+    {
+        var cli = new FakeCli()
+            .Fail(@"install C:\Downloads\notes.apk --json",
+                "dsa: not installed (conflicting-signature): notes.apk: The app is installed already. Android said: INSTALL_FAILED_UPDATE_INCOMPATIBLE");
+        var vm = new InstallViewModel(new DsaService(cli), new KeyText());
+        await vm.DropAsync(new[] { @"C:\Downloads\notes.apk" });
+        Assert.Equal(InstallSeverity.Error, vm.Severity);
+        Assert.Equal("Install_FailedTitle", vm.Title);
+        Assert.StartsWith("refused notes.apk: Install_Reason_conflicting-signature [", vm.Message);
+        Assert.Contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE", vm.Message);
+    }
+
+    [Fact]
+    public async Task Fr11_files_that_are_not_apks_are_not_sent()
+    {
+        var cli = new FakeCli();
+        var vm = new InstallViewModel(new DsaService(cli), new KeyText());
+        Assert.False(vm.Accepts(new[] { @"C:\notes.txt" }));
+        Assert.False(vm.Accepts(null));
+        Assert.True(vm.Accepts(new[] { @"C:\notes.txt", @"C:\app.APK" }));
+        await vm.DropAsync(new[] { @"C:\notes.txt" });
+        Assert.Empty(cli.Calls);
+        Assert.Equal(InstallSeverity.Error, vm.Severity);
+        Assert.Equal("not an APK: notes.txt", vm.Message);
+    }
+
+    [Fact]
+    public async Task Fr11_several_apks_are_installed_one_after_the_other()
+    {
+        const string Installed = "{\"installed\":true,\"status\":\"installed\",\"package\":\"a.b\",\"message\":\"\"}";
+        var cli = new FakeCli()
+            .Answer(@"install C:\one.apk --json", Installed)
+            .Fail(@"install C:\two.apk --json", "dsa: not installed (invalid-apk): two.apk: The file is not a signed APK")
+            .Answer(@"install C:\three.apk --json", Installed);
+        var vm = new InstallViewModel(new DsaService(cli), new KeyText());
+        await vm.DropAsync(new[] { @"C:\one.apk", @"C:\two.apk", @"C:\notes.txt", @"C:\three.apk" });
+        Assert.Equal(new[]
+        {
+            @"install C:\one.apk --json",
+            @"install C:\two.apk --json",
+            @"install C:\three.apk --json",
+        }, cli.Calls);
+        Assert.Equal(InstallSeverity.Error, vm.Severity);
+        var lines = vm.Message.Split('\n');
+        Assert.Equal("installed one.apk as a.b", lines[0]);
+        Assert.StartsWith("refused two.apk: Install_Reason_invalid-apk", lines[1]);
+        Assert.Equal("installed three.apk as a.b", lines[2]);
+        Assert.Equal("not an APK: notes.txt", lines[3]);
+    }
+
+    [Fact]
+    public async Task Fr11_an_apk_that_does_not_reach_android_says_why()
+    {
+        var cli = new FakeCli()
+            .Fail(@"install C:\notes.apk --json", "dsa: cannot reach the DSA service (no pipe)");
+        var vm = new InstallViewModel(new DsaService(cli), new KeyText());
+        await vm.DropAsync(new[] { @"C:\notes.apk" });
+        Assert.Equal(InstallSeverity.Error, vm.Severity);
+        Assert.Equal("not sent notes.apk: Problem_ServiceUnreachable (cannot reach the DSA service (no pipe))", vm.Message);
     }
 }

@@ -349,6 +349,61 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.DeviceIdle getDeviceIdle();
 
   /**
+   * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
+   * @return Whether the installApk field is set.
+   */
+  boolean hasInstallApk();
+  /**
+   * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
+   * @return The installApk.
+   */
+  io.github.thisisthepy.dsa.control.v1.InstallApk getInstallApk();
+
+  /**
+   * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
+   * @return Whether the apkChunk field is set.
+   */
+  boolean hasApkChunk();
+  /**
+   * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
+   * @return The apkChunk.
+   */
+  io.github.thisisthepy.dsa.control.v1.ApkChunk getApkChunk();
+
+  /**
+   * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
+   * @return Whether the cancelInstall field is set.
+   */
+  boolean hasCancelInstall();
+  /**
+   * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
+   * @return The cancelInstall.
+   */
+  io.github.thisisthepy.dsa.control.v1.CancelInstall getCancelInstall();
+
+  /**
+   * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
+   * @return Whether the installProgress field is set.
+   */
+  boolean hasInstallProgress();
+  /**
+   * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
+   * @return The installProgress.
+   */
+  io.github.thisisthepy.dsa.control.v1.InstallProgress getInstallProgress();
+
+  /**
+   * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
+   * @return Whether the installResult field is set.
+   */
+  boolean hasInstallResult();
+  /**
+   * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
+   * @return The installResult.
+   */
+  io.github.thisisthepy.dsa.control.v1.InstallResult getInstallResult();
+
+  /**
    * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
    * @return Whether the openLink field is set.
    */

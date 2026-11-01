@@ -7,6 +7,7 @@
 //! dsa freeze
 //! dsa update [--wait]
 //! dsa launch <package>
+//! dsa install <file.apk>
 //! dsa open <file>
 //! dsa share <file>
 //! dsa tasks
@@ -20,6 +21,15 @@
 //!
 //! `dsa launch` starts an app in a window of its own, named by its package (such as
 //! `com.android.settings`). `dsa tasks` lists the app tasks Android shows as windows.
+//!
+//! `dsa install` installs an APK from this computer in Android, starting Android first when it
+//! is not running, and says how it went: the app's package once it is installed, or the reason
+//! Android gave for refusing it, with exit code 1. The installed app then appears in the Start
+//! menu like any other. APKs up to 2 GiB can be installed, one at a time; a second install waits
+//! for the first. With `--json` it prints `installed`, `status` (`installed`, or the reason:
+//! `incompatible`, `conflicting-signature`, `invalid-apk`, `insufficient-storage`, `downgrade`,
+//! `blocked` or `other`), `package` and `message`. A refusal's line on standard error starts
+//! with `not installed (<reason>):`.
 //!
 //! `dsa open` sends a file from this computer to Android, which asks which app opens it; that
 //! app shows in a window of its own. `dsa share` does the same for sharing the file with an
@@ -61,6 +71,7 @@ use std::fmt::Write as _;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_host_core::apk::{ApkFile, InstallOutcome};
 use dsa_host_core::files::{FileAction, FileTransfer};
 use dsa_host_core::host_api::{ClientError, HostApiClient, SettingsReport, Status, TaskList};
 use dsa_host_core::memory::MemorySnapshot;
@@ -69,7 +80,7 @@ use dsa_transport::Connector;
 use serde_json::{json, Value};
 
 pub const USAGE: &str = "usage: dsa <status | start | stop | freeze | update | launch <package> | \
-     open <file> | share <file> | \
+     install <file.apk> | open <file> | share <file> | \
      tasks | settings [set <name> <value>] | memory | gpus> [--wait] [--timeout <seconds>] \
      [--json] [--pipe <name> | --socket <path>]";
 
@@ -84,6 +95,8 @@ pub enum Command {
     Update,
     /// Start an app in a window of its own; the package is in [`Invocation::package`].
     Launch,
+    /// Install an APK; the file is in [`Invocation::file`].
+    Install,
     /// Open a file in an app in Android; the file is in [`Invocation::file`].
     Open,
     /// Share a file with an app in Android; the file is in [`Invocation::file`].
@@ -185,7 +198,7 @@ pub struct Invocation {
     pub endpoint: Option<String>,
     /// The app to launch, for `dsa launch`.
     pub package: Option<String>,
-    /// The file to open or share, for `dsa open` and `dsa share`.
+    /// The file to install, open or share, for `dsa install`, `dsa open` and `dsa share`.
     pub file: Option<std::path::PathBuf>,
     /// The setting to change, for `dsa settings set`.
     pub change: Option<Change>,
@@ -215,8 +228,8 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "status" | "start" | "stop" | "freeze" | "update" | "launch" | "open" | "share"
-            | "tasks" | "settings" | "memory" | "gpus"
+            "status" | "start" | "stop" | "freeze" | "update" | "launch" | "install" | "open"
+            | "share" | "tasks" | "settings" | "memory" | "gpus"
                 if command.is_none() =>
             {
                 command = Some(match arg.as_str() {
@@ -225,6 +238,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                     "freeze" => Command::Freeze,
                     "update" => Command::Update,
                     "launch" => Command::Launch,
+                    "install" => Command::Install,
                     "open" => Command::Open,
                     "share" => Command::Share,
                     "tasks" => Command::Tasks,
@@ -256,6 +270,12 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                 }
                 package = Some(name.to_string());
             }
+            name if command == Some(Command::Install)
+                && file.is_none()
+                && !name.starts_with("--") =>
+            {
+                file = Some(std::path::PathBuf::from(name));
+            }
             name if matches!(command, Some(Command::Open | Command::Share))
                 && file.is_none()
                 && !name.starts_with('-') =>
@@ -278,6 +298,11 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         }
     }
     let command = command.ok_or(USAGE)?;
+    if command == Command::Install && file.is_none() {
+        return Err(format!(
+            "dsa install needs the APK file to install\n{USAGE}"
+        ));
+    }
     if matches!(command, Command::Open | Command::Share) && file.is_none() {
         return Err(format!(
             "dsa {} needs the file to send to Android\n{USAGE}",
@@ -297,7 +322,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     Ok(Invocation {
         command,
         wait,
-        timeout: timeout.unwrap_or(if command == Command::Start {
+        timeout: timeout.unwrap_or(if matches!(command, Command::Start | Command::Install) {
             START_TIMEOUT
         } else {
             DEFAULT_TIMEOUT
@@ -640,6 +665,64 @@ fn update(
     }
 }
 
+/// How an install ended, as one JSON object.
+pub fn install_json(outcome: &InstallOutcome) -> Value {
+    json!({
+        "installed": outcome.installed(),
+        "status": outcome.status.code(),
+        "package": outcome.package_name,
+        "message": outcome.message,
+    })
+}
+
+/// The line `dsa install` prints when Android refused the APK. It starts with the reason's
+/// stable code, which the settings app reads to say the reason in the user's language.
+pub fn describe_refusal(name: &str, outcome: &InstallOutcome) -> String {
+    format!(
+        "not installed ({}): {name}: {outcome}",
+        outcome.status.code()
+    )
+}
+
+/// `dsa install`: opens the APK, makes sure Android runs (and, on Windows, the window manager
+/// that shows the app once it is opened), then streams the APK to the service.
+fn install(
+    invocation: &Invocation,
+    mut client: HostApiClient,
+    connector: &mut dyn Connector,
+) -> Result<String, String> {
+    let path = invocation
+        .file
+        .as_deref()
+        .unwrap_or(std::path::Path::new(""));
+    // A file that cannot be installed is refused before Android is started for it.
+    let mut apk = ApkFile::open(path)?;
+    #[cfg(windows)]
+    if invocation.endpoint.is_none() {
+        ensure_window_manager()?;
+    }
+    client
+        .ensure_running(invocation.timeout, Duration::from_millis(250), |_| {})
+        .map_err(|e| format!("Android did not start: {e}"))?;
+    drop(client);
+    let name = apk.name.clone();
+    let size = apk.size;
+    let outcome = connect(connector, None, false, Duration::from_secs(10))?
+        .install_apk(&name, size, apk.reader())
+        .map_err(|e| format!("{name} was not installed: {e}"))?;
+    if !outcome.installed() {
+        return Err(describe_refusal(&name, &outcome));
+    }
+    Ok(if invocation.json {
+        install_json(&outcome).to_string()
+    } else {
+        format!(
+            "Installed {} from {name}",
+            outcome.package_name.as_deref().unwrap_or("the app")
+        )
+    })
+}
+
 /// How long `dsa open` and `dsa share` wait for Android to start when it is not running:
 /// as long as `dsa start --wait`.
 const OPEN_START_TIMEOUT: Duration = START_TIMEOUT;
@@ -747,6 +830,7 @@ pub fn run_with_starter(
             client.launch_app(package).map_err(|e| e.to_string())?;
             return Ok(format!("Launching {package}"));
         }
+        Command::Install => return install(invocation, client, connector),
         Command::Open | Command::Share => {
             return open_file(invocation, client, connector);
         }

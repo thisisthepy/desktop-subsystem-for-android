@@ -397,4 +397,49 @@
   <data name="CancelButton" xml:space="preserve">
     <value>Cancel</value>
   </data>
+  <data name="Install_BusyTitle" xml:space="preserve">
+    <value>Installing</value>
+  </data>
+  <data name="Install_Busy" xml:space="preserve">
+    <value>Installing {0} in Android…</value>
+  </data>
+  <data name="Install_DoneTitle" xml:space="preserve">
+    <value>Installed</value>
+  </data>
+  <data name="Install_FailedTitle" xml:space="preserve">
+    <value>Not installed</value>
+  </data>
+  <data name="Install_Installed" xml:space="preserve">
+    <value>{0} is installed ({1}). Open it from the Start menu.</value>
+  </data>
+  <data name="Install_Refused" xml:space="preserve">
+    <value>{0} was not installed: {1} ({2})</value>
+  </data>
+  <data name="Install_NotSent" xml:space="preserve">
+    <value>{0} did not reach Android. {1}</value>
+  </data>
+  <data name="Install_NotApk" xml:space="preserve">
+    <value>Only APK files can be installed: {0}</value>
+  </data>
+  <data name="Install_Reason_incompatible" xml:space="preserve">
+    <value>the app does not run on this Android: it needs another processor type, a newer Android version or a feature this device does not have.</value>
+  </data>
+  <data name="Install_Reason_conflicting-signature" xml:space="preserve">
+    <value>the app is installed already, signed with another key. Uninstall it in Android first.</value>
+  </data>
+  <data name="Install_Reason_invalid-apk" xml:space="preserve">
+    <value>the file is not a signed APK that Android can read.</value>
+  </data>
+  <data name="Install_Reason_insufficient-storage" xml:space="preserve">
+    <value>Android has no room for the app.</value>
+  </data>
+  <data name="Install_Reason_downgrade" xml:space="preserve">
+    <value>a newer version of the app is installed. Uninstall it in Android first.</value>
+  </data>
+  <data name="Install_Reason_blocked" xml:space="preserve">
+    <value>a policy of this Android does not allow the app.</value>
+  </data>
+  <data name="Install_Reason_other" xml:space="preserve">
+    <value>Android did not install the app.</value>
+  </data>
 </root>

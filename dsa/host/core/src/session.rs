@@ -56,9 +56,13 @@
 //! the guest copies goes to every [`Session::watch_clipboard`] watcher. Text that came from one
 //! side is never sent back to it, and text longer than
 //! [`MAX_CLIPBOARD_BYTES`](crate::clipboard::MAX_CLIPBOARD_BYTES) does not cross.
+//!
+//! APKs from the host go to the guest with [`Session::install_apk`], streamed in chunks paced
+//! by the agent's progress reports, one install at a time; a second waits for the first.
 
 use std::collections::HashMap;
 use std::fmt;
+use std::io::Read;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex};
@@ -72,6 +76,7 @@ use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 use crate::accessibility::{
     AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, TreeUpdate,
 };
+use crate::apk::{self, InstallOutcome};
 use crate::clipboard;
 use crate::clock_trace::ClockTrace;
 use crate::files::{self, FileAction, FileTransfer};
@@ -420,6 +425,8 @@ pub enum SessionError {
     Gone,
     /// The guest could not be frozen; the detail says why.
     FreezeFailed(String),
+    /// An APK was not taken, or did not reach the guest whole; the detail says why.
+    InstallRefused(String),
     /// A file was not sent, or the guest did not take it; the detail says why.
     FileRefused(String),
 }
@@ -431,6 +438,7 @@ impl fmt::Display for SessionError {
             SessionError::Transport(error) => write!(f, "control channel: {error}"),
             SessionError::Gone => write!(f, "the session has shut down"),
             SessionError::FreezeFailed(why) => write!(f, "the guest was not frozen: {why}"),
+            SessionError::InstallRefused(why) => f.write_str(why),
             SessionError::FileRefused(why) => f.write_str(why),
         }
     }
@@ -484,8 +492,20 @@ struct Shared {
     clock_trace: Mutex<Option<ClockTrace>>,
     /// Who hears of the text the guest copies.
     clipboard_watchers: Mutex<Vec<Sender<String>>>,
+    /// The install under way, by its transfer ID, with who waits for the agent's word on it.
+    installs: Mutex<HashMap<u32, Sender<InstallEvent>>>,
+    /// The transfer ID of the last install.
+    last_install: AtomicU32,
+    /// Held for the length of an install, so a second one waits for the first.
+    install_turn: Mutex<()>,
     /// Who watches each task's accessibility tree.
     accessibility: Mutex<AccessibilityHub>,
+}
+
+/// What the agent says about an install under way.
+enum InstallEvent {
+    Progress(u64),
+    Done(InstallOutcome),
 }
 
 /// The watchers of each task's accessibility tree. The guest reads a task's tree while the
@@ -586,6 +606,20 @@ impl Shared {
         Some(sender.send(frame).map_err(SessionError::Transport))
     }
 
+    /// Hands the agent's word on an install to whoever sends that APK. Word on an install
+    /// that is not under way is dropped and logged.
+    fn install_event(&self, transfer_id: u32, event: InstallEvent) {
+        let installs = self.installs.lock().unwrap_or_else(|e| e.into_inner());
+        match installs.get(&transfer_id) {
+            Some(waiting) => {
+                let _ = waiting.send(event);
+            }
+            None => eprintln!(
+                "install: dropped the agent's word on install {transfer_id}, which is not under way"
+            ),
+        }
+    }
+
     /// Hands a web link the guest opened to every link watcher still listening. False when
     /// nobody was listening.
     fn publish_link(&self, url: &str) -> bool {
@@ -679,6 +713,9 @@ impl Session {
             last_transfer: AtomicU32::new(0),
             clock_trace: Mutex::new(None),
             clipboard_watchers: Mutex::new(Vec::new()),
+            installs: Mutex::new(HashMap::new()),
+            last_install: AtomicU32::new(0),
+            install_turn: Mutex::new(()),
             accessibility: Mutex::new(AccessibilityHub::default()),
         });
         let freeze_delay = config.freeze_after.unwrap_or(DEFAULT_FREEZE_AFTER);
@@ -851,6 +888,161 @@ impl Session {
         self.send(dsa_protocol::encode(&control::Envelope {
             body: Some(Body::RequestGuestMemory(control::RequestGuestMemory {})),
         }))
+    }
+
+    /// Installs the APK called `name`, of `size` bytes read from `content`, in the guest.
+    /// Returns how the install ended, as the agent said, or an error when the APK did not get
+    /// there: the guest is not running, `content` ended early or failed, or the agent stopped
+    /// answering. Needs a running guest; a frozen one is thawed by the first frame.
+    ///
+    /// The APK goes in chunks of [`apk::CHUNK_BYTES`], never more than
+    /// [`apk::CHUNKS_IN_FLIGHT`] ahead of what the agent says it has written. One install runs
+    /// at a time: a second call waits until the first has ended.
+    pub fn install_apk(
+        &self,
+        name: &str,
+        size: u64,
+        content: &mut dyn Read,
+    ) -> Result<InstallOutcome, SessionError> {
+        apk::check_name(name)
+            .and_then(|()| apk::check_size(size))
+            .map_err(SessionError::InstallRefused)?;
+        let _turn = self
+            .shared
+            .install_turn
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let state = self.state();
+        if !matches!(
+            state,
+            SessionState::Active | SessionState::Dozing | SessionState::Frozen
+        ) {
+            return Err(SessionError::NotActive(state));
+        }
+        let transfer_id = self
+            .shared
+            .last_install
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_add(1);
+        let (tx, events) = mpsc::channel();
+        self.shared
+            .installs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(transfer_id, tx);
+        eprintln!("install: sending {name} ({size} bytes) to Android as install {transfer_id}");
+        let result = self.send_apk(transfer_id, name, size, content, &events);
+        self.shared
+            .installs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&transfer_id);
+        match &result {
+            Ok(outcome) => eprintln!("install: {name}: {} ({})", outcome, outcome.status),
+            Err(why) => eprintln!("install: {name} did not reach Android: {why}"),
+        }
+        result
+    }
+
+    fn send_apk(
+        &self,
+        transfer_id: u32,
+        name: &str,
+        size: u64,
+        content: &mut dyn Read,
+        events: &Receiver<InstallEvent>,
+    ) -> Result<InstallOutcome, SessionError> {
+        self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::InstallApk(control::InstallApk {
+                transfer_id,
+                name: name.to_string(),
+                size,
+            })),
+        }))?;
+        let window = apk::CHUNK_BYTES as u64 * apk::CHUNKS_IN_FLIGHT;
+        let mut sent = 0u64;
+        let mut written = 0u64;
+        let mut waited = Duration::ZERO;
+        loop {
+            while sent < size && sent < written + window {
+                let length = (size - sent).min(apk::CHUNK_BYTES as u64) as usize;
+                let mut data = vec![0u8; length];
+                if let Err(error) = content.read_exact(&mut data) {
+                    self.cancel_install(transfer_id, events);
+                    return Err(SessionError::InstallRefused(format!(
+                        "the APK did not arrive whole: {error}"
+                    )));
+                }
+                if let Err(error) = self.send(dsa_protocol::encode(&control::Envelope {
+                    body: Some(Body::ApkChunk(control::ApkChunk {
+                        transfer_id,
+                        offset: sent,
+                        data,
+                    })),
+                })) {
+                    self.cancel_install(transfer_id, events);
+                    return Err(error);
+                }
+                sent += length as u64;
+            }
+            match events.recv_timeout(INSTALL_POLL) {
+                Ok(InstallEvent::Done(outcome)) => return Ok(outcome),
+                Ok(InstallEvent::Progress(received)) => {
+                    if received > size {
+                        self.cancel_install(transfer_id, events);
+                        return Err(SessionError::InstallRefused(format!(
+                            "Android says it has {received} bytes of {name}, which has {size}"
+                        )));
+                    }
+                    written = written.max(received);
+                    waited = Duration::ZERO;
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    let state = self.state();
+                    if !matches!(
+                        state,
+                        SessionState::Active | SessionState::Dozing | SessionState::Frozen
+                    ) {
+                        return Err(SessionError::NotActive(state));
+                    }
+                    waited += INSTALL_POLL;
+                    // Once the whole APK is there the guest verifies and installs it, which
+                    // takes far longer than writing a chunk.
+                    let limit = if written >= size {
+                        INSTALL_TIMEOUT
+                    } else {
+                        CHUNK_TIMEOUT
+                    };
+                    if waited >= limit {
+                        self.cancel_install(transfer_id, events);
+                        return Err(SessionError::InstallRefused(format!(
+                            "Android has not answered about {name} for {} s; it may be busy, \
+                             try again",
+                            limit.as_secs()
+                        )));
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) => return Err(SessionError::Gone),
+            }
+        }
+    }
+
+    /// Tells the agent an install will not be finished, and waits a moment for it to say it
+    /// has dropped it, so the next install does not start beside it.
+    fn cancel_install(&self, transfer_id: u32, events: &Receiver<InstallEvent>) {
+        let cancel = dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::CancelInstall(control::CancelInstall { transfer_id })),
+        });
+        if self.send(cancel).is_err() {
+            return;
+        }
+        let deadline = Instant::now() + CANCEL_WAIT;
+        while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+            match events.recv_timeout(left) {
+                Ok(InstallEvent::Done(_)) | Err(_) => return,
+                Ok(InstallEvent::Progress(_)) => {}
+            }
+        }
     }
 
     /// Sends a frame to the agent. Needs an active session.
@@ -1213,6 +1405,20 @@ fn send_quietly(shared: &Shared, commands: &Sender<Command>, body: Body) {
 
 /// How often an active session checks for requests while it waits on the channel.
 const POLL: Duration = Duration::from_millis(20);
+
+/// How often an install looks at the session while it waits for the agent.
+const INSTALL_POLL: Duration = Duration::from_millis(500);
+
+/// How long an install waits for the agent to write a chunk. Writing 128 KiB takes
+/// milliseconds; this long means the agent is stuck or gone.
+const CHUNK_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long an install waits for the guest to install a whole APK: verifying and compiling a
+/// large app takes minutes on a slow disk.
+const INSTALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+/// How long a cancelled install waits for the agent to say it dropped it.
+const CANCEL_WAIT: Duration = Duration::from_secs(5);
 
 /// How often a file transfer looks at the session while it waits for the agent.
 const PROGRESS_POLL: Duration = Duration::from_millis(500);
@@ -2244,6 +2450,14 @@ impl Worker {
             Some(Body::OpenLink(link)) => self.guest_link(link.url),
             Some(Body::FileProgress(progress)) => self.shared.file_progress(progress),
             Some(Body::ClipboardText(clip)) => self.guest_clipboard(clip.text),
+            Some(Body::InstallProgress(progress)) => self.shared.install_event(
+                progress.transfer_id,
+                InstallEvent::Progress(progress.received),
+            ),
+            Some(Body::InstallResult(result)) => self.shared.install_event(
+                result.transfer_id,
+                InstallEvent::Done(InstallOutcome::from_control(&result)),
+            ),
             Some(Body::GuestBoot(boot)) => self.guest_boot(boot),
             Some(Body::ClockAnswer(answer)) => self.clock_answered(answer),
             Some(Body::AgentConnected(_)) => {
@@ -2281,6 +2495,9 @@ impl Worker {
             | Some(Body::OpenFile(_))
             | Some(Body::FileChunk(_))
             | Some(Body::ClipboardSharing(_))
+            | Some(Body::InstallApk(_))
+            | Some(Body::ApkChunk(_))
+            | Some(Body::CancelInstall(_))
             | Some(Body::RequestGuestMemory(_))
             | Some(Body::AccessibilityWatch(_))
             | Some(Body::AccessibilityAction(_))

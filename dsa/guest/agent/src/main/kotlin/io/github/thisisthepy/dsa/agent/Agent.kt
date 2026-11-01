@@ -8,6 +8,8 @@ import io.github.thisisthepy.dsa.agent.channel.ChannelLocator
 import io.github.thisisthepy.dsa.agent.clipboard.ClipboardSync
 import io.github.thisisthepy.dsa.agent.clipboard.GuestClipboard
 import io.github.thisisthepy.dsa.agent.input.EditorConnection
+import io.github.thisisthepy.dsa.agent.install.ApkInstaller
+import io.github.thisisthepy.dsa.agent.install.PackageInstallerPort
 import io.github.thisisthepy.dsa.agent.input.InputInjector
 import io.github.thisisthepy.dsa.agent.input.InputMethodSetup
 import io.github.thisisthepy.dsa.agent.input.KeyInput
@@ -67,7 +69,8 @@ import io.github.thisisthepy.dsa.control.v1.PointerAction
  * text, and text copied in the guest goes to the host, while the user shares the clipboard
  * ([ClipboardSync]). Web links apps open go to the host's browser unless the host says they
  * stay in the guest ([Links]), and files the host sends are stored and offered to the apps
- * that can open them ([FileReceiver]). While a host accessibility client watches a task, the
+ * that can open them ([FileReceiver]). APKs the host sends are installed through the guest's
+ * package installer ([ApkInstaller]), and the host is told how each install went. While a host accessibility client watches a task, the
  * agent's accessibility service is on and the task's accessibility tree goes to the host
  * ([AccessibilityExport]); otherwise the service is off.
  */
@@ -97,6 +100,7 @@ class Agent(
     fileStore: TransferStore? = null,
     fileOpener: FileOpener = FileOpener.NONE,
     clipboard: GuestClipboard = GuestClipboard.NONE,
+    packageInstaller: PackageInstallerPort = PackageInstallerPort.NONE,
     accessibility: AccessibilitySource = AccessibilitySource.NONE,
     clock: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
@@ -147,6 +151,13 @@ class Agent(
         MemoryReporter(it, scheduler, log, isConnected = { channel.connected }, send = { frame -> channel.send(frame) })
     }
     private val clipboardSync = ClipboardSync(clipboard, { frame -> channel.send(frame) }, log, isConnected = { channel.connected })
+    private val apkInstaller = ApkInstaller(
+        packageInstaller,
+        { frame -> channel.send(frame) },
+        log,
+        post = { work -> scheduler.post(work) },
+        onInstalled = { requestAppsRefresh() },
+    )
     private val freeform = FreeformSetup(windowing, scheduler, log)
     private val arranger = TaskArranger(actions, windowing::displaySize, log)
     private val installed = InstalledAppReporter(ownPackage) { frame -> channel.send(frame) }
@@ -242,6 +253,7 @@ class Agent(
         reporter.resend()
         lifecycle.connected()
         clipboardSync.connected()
+        apkInstaller.connected()
         installed.resend()
         memoryReporter?.connected()
         links.connected()
@@ -303,6 +315,7 @@ class Agent(
         }
         if (lifecycle.handle(envelope)) return true
         if (clipboardSync.handle(envelope)) return true
+        if (apkInstaller.handle(envelope)) return true
         when (envelope.bodyCase) {
             Envelope.BodyCase.KEY_EVENT -> try {
                 keys.handle(envelope.keyEvent)

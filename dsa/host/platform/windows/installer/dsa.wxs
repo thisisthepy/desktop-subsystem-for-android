@@ -154,6 +154,29 @@
             <Component Id="AppWindowExe" Guid="*">
                 <File Id="AppWindowExe" Source="$(SourceDir)\dsa-app-window.exe" KeyPath="yes" />
             </Component>
+            <!-- Opening an .apk file in Explorer installs it in the user's Android: the installed
+                 window host takes the file, starts Android when it is not running, and says how
+                 the install went. The association is the machine's, like the rest of the
+                 installation, so uninstalling removes it for every user at once. A user who
+                 picked another app for .apk files keeps it; DSA is then under Open with. -->
+            <Component Id="ApkFileAssociation" Guid="5e3b8a2c-7d41-4f96-b0c8-2a9e6f1d4c73">
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkFile"
+                               Type="string" Value="APK app package" KeyPath="yes" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkFile\DefaultIcon"
+                               Type="string" Value="&quot;[INSTALLFOLDER]dsa-app-window.exe&quot;,0" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkFile\shell"
+                               Type="string" Value="open" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkFile\shell\open"
+                               Name="MUIVerb" Type="string" Value="Install in Android" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkFile\shell\open\command"
+                               Type="string" Value="&quot;[INSTALLFOLDER]dsa-app-window.exe&quot; --install-apk &quot;%1&quot;" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\.apk"
+                               Type="string" Value="Dsa.ApkFile" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\.apk"
+                               Name="Content Type" Type="string" Value="application/vnd.android.package-archive" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\.apk\OpenWithProgids"
+                               Name="Dsa.ApkFile" Type="string" Value="" />
+            </Component>
             <!-- Two entries in the context menu of every file (on Windows 11, under Show more
                  options): the installed window host sends the file to the user's Android, which
                  asks which app opens it or takes it. They are the machine's, like the rest of
