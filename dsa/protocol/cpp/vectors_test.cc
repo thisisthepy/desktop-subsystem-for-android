@@ -220,6 +220,8 @@ std::map<std::string, v1::Envelope> Cases() {
     power->set_power_saver(true);
   }
   cases["device_idle"].mutable_device_idle()->set_idle(true);
+  cases["clipboard_text"].mutable_clipboard_text()->set_text("hello \xec\x95\x88\xeb\x85\x95");
+  cases["clipboard_sharing_off"].mutable_clipboard_sharing()->set_on(false);
   cases["agent_connected"].mutable_agent_connected();
   {
     v1::GuestBoot* boot = cases["guest_boot"].mutable_guest_boot();

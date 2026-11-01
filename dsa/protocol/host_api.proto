@@ -165,6 +165,19 @@ message SetWindowsShown {
 // notifications, alarms and widgets stop with them. Returns at once with the status.
 message FreezeSession {}
 
+// Turns the connection into the caller's clipboard: after the answer (Done), the client sends
+// a ClipboardText each time the user's host clipboard gets new text, and the service sends a
+// ClipboardText each time the caller's Android copies text, which the client puts on the host
+// clipboard. Neither is answered. The service passes on nothing while the user has turned
+// clipboard sharing off. The connection lasts across restarts of the Android: the service keeps
+// the host's latest text and gives it to the Android when it is next ready.
+message WatchClipboard {}
+
+// Text on a clipboard, on a connection that carries the clipboard (WatchClipboard).
+message ClipboardText {
+  string text = 1;
+}
+
 // What a pointer did.
 enum PointerAction {
   POINTER_ACTION_UNSPECIFIED = 0;
@@ -459,8 +472,8 @@ message SetSettings {
   Settings settings = 1;
 }
 
-// The settings of the caller's DSA. `render_gpu` and `freeze` are the caller's own; the
-// update settings are the machine's, shared by every user of it.
+// The settings of the caller's DSA. `render_gpu`, `freeze` and `clipboard` are the caller's
+// own; the update settings are the machine's, shared by every user of it.
 message Settings {
   // The GPU the caller's window manager renders on: "display" (the GPU that drives the
   // primary monitor, the default), "integrated", "discrete", or part of a GPU's name. The
@@ -482,6 +495,9 @@ message Settings {
   // The folder the service writes its log to. Empty when it keeps none. A client cannot
   // change it.
   string log_dir = 8;
+  // Whether text copied on the host can be pasted in the caller's Android, and the reverse.
+  // On unless the user turns it off.
+  bool clipboard = 9;
 }
 
 // What went wrong with a request.
@@ -531,6 +547,7 @@ message Request {
     SetSettings set_settings = 17;
     SetWindowsShown set_windows_shown = 20;
     FreezeSession freeze_session = 21;
+    WatchClipboard watch_clipboard = 22;
   }
 }
 
@@ -562,5 +579,6 @@ message Envelope {
     KeyEvent key_event = 8;
     ImeComposition ime_composition = 9;
     ImeCommit ime_commit = 10;
+    ClipboardText clipboard_text = 11;
   }
 }

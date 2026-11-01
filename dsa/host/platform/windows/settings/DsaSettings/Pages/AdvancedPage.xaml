@@ -11,6 +11,17 @@
             <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
                         IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
 
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Clipboard24}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="{l:Text ClipboardCard.Header}" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{l:Text ClipboardCard.Description}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <ui:ToggleSwitch x:Name="ClipboardSwitch" IsChecked="{Binding Clipboard, Mode=OneWay}"
+                                 IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnClipboardToggled" />
+            </ui:CardControl>
+
             <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Snooze24}">
                 <ui:CardControl.Header>
                     <StackPanel>

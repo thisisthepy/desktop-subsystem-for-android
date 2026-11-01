@@ -13,6 +13,7 @@
 //! - [`input`]: pointer input in a task's window, as the guest task receives it.
 //! - [`keys`]: key input in a task's window.
 //! - [`power`]: the host computer's power, which each guest's battery state follows.
+//! - [`clipboard`]: the text clipboard the host and the guest share.
 //! - [`ime`]: text input through the host's input method in a task's window.
 //! - [`settings`]: the settings a user changes from the settings app, kept by the service.
 //! - [`memory`]: how much memory a user's Android takes, in the guest and on the host.
@@ -21,6 +22,7 @@
 //!   which window each task and each frame goes to.
 
 pub mod bootconfig;
+pub mod clipboard;
 pub mod clock_trace;
 pub mod compositor;
 pub mod guest_display;

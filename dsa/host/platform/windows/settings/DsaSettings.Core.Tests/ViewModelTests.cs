@@ -144,6 +144,40 @@ public class ViewModelTests
     }
 
     [Fact]
+    public async Task Fr13_the_clipboard_switch_is_on_by_default_and_changed_through_the_service()
+    {
+        var withClipboard = Settings.Replace("\"freeze\":false", "\"freeze\":false,\"clipboard\":true");
+        var cli = new FakeCli()
+            .Answer("settings --json", withClipboard)
+            .Fail("gpus --json", "dsa: no GPU list")
+            .Answer("settings set clipboard off --json", withClipboard.Replace("\"clipboard\":true", "\"clipboard\":false"))
+            .Answer("settings set clipboard on --json", withClipboard);
+        var vm = new SettingsViewModel(new DsaService(cli), new KeyText());
+        await vm.LoadAsync();
+        Assert.True(vm.Clipboard);
+        Assert.True(vm.CanChange);
+
+        await vm.SetClipboardAsync(false);
+        Assert.False(vm.Clipboard);
+        Assert.False(vm.Freeze, "one change keeps the others");
+        await vm.SetClipboardAsync(true);
+        Assert.True(vm.Clipboard);
+        Assert.Contains("settings set clipboard off --json", cli.Calls);
+        Assert.Contains("settings set clipboard on --json", cli.Calls);
+    }
+
+    [Fact]
+    public async Task Fr13_a_service_that_does_not_report_the_clipboard_switch_shares_it()
+    {
+        var cli = new FakeCli()
+            .Answer("settings --json", Settings)
+            .Fail("gpus --json", "dsa: no GPU list");
+        var vm = new SettingsViewModel(new DsaService(cli), new KeyText());
+        await vm.LoadAsync();
+        Assert.True(vm.Clipboard);
+    }
+
+    [Fact]
     public async Task Fr17_a_refused_setting_keeps_the_last_reported_value()
     {
         var cli = new FakeCli()

@@ -53,6 +53,11 @@ pub struct FakeAndroid {
     pub shown: Mutex<Vec<bool>>,
     /// Each word on whether it may be frozen when idle, in order.
     pub freeze_when_idle: Mutex<Vec<bool>>,
+    /// Each word on whether the clipboard is shared, in order.
+    pub clipboard_shared: Mutex<Vec<bool>>,
+    /// The text copied on the host it was given, in order.
+    pub host_clipboard: Mutex<Vec<String>>,
+    clipboard_watchers: Mutex<Vec<Sender<String>>>,
 }
 
 impl FakeAndroid {
@@ -66,7 +71,18 @@ impl FakeAndroid {
             text: Mutex::new(Vec::new()),
             shown: Mutex::new(Vec::new()),
             freeze_when_idle: Mutex::new(Vec::new()),
+            clipboard_shared: Mutex::new(Vec::new()),
+            host_clipboard: Mutex::new(Vec::new()),
+            clipboard_watchers: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Copies `text` as an app in this Android would, and tells the clipboard watchers.
+    pub fn copy_in_android(&self, text: &str) {
+        self.clipboard_watchers
+            .lock()
+            .unwrap()
+            .retain(|watcher| watcher.send(text.to_string()).is_ok());
     }
 
     /// Ends every watch of its tasks, as a service that goes away does.
@@ -118,6 +134,17 @@ impl UserAndroid for FakeAndroid {
     }
     fn freeze_when_idle(&self, on: bool) {
         self.freeze_when_idle.lock().unwrap().push(on);
+    }
+    fn share_clipboard(&self, on: bool) {
+        self.clipboard_shared.lock().unwrap().push(on);
+    }
+    fn host_clipboard(&self, text: String) {
+        self.host_clipboard.lock().unwrap().push(text);
+    }
+    fn watch_clipboard(&self) -> Option<mpsc::Receiver<String>> {
+        let (tx, rx) = mpsc::channel();
+        self.clipboard_watchers.lock().unwrap().push(tx);
+        Some(rx)
     }
     fn freeze(&self) -> Result<(), TaskRequestError> {
         let mut state = self.state.lock().unwrap();
@@ -397,6 +424,24 @@ macro_rules! host_api_conformance {
         #[test]
         fn nfr5_a_client_that_streams_input_and_sends_a_request_is_disconnected() {
             $crate::host_api_conformance::input_stream_that_sends_a_request_is_disconnected(
+                &mut || $make,
+            );
+        }
+        #[test]
+        fn fr13_text_copied_on_the_host_reaches_the_callers_android() {
+            $crate::host_api_conformance::host_clipboard_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr13_text_copied_in_the_callers_android_reaches_the_client() {
+            $crate::host_api_conformance::guest_clipboard_reaches_the_client(&mut || $make);
+        }
+        #[test]
+        fn fr13_turning_clipboard_sharing_off_and_on_reaches_the_callers_android() {
+            $crate::host_api_conformance::clipboard_setting_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn nfr5_a_clipboard_client_that_sends_a_request_is_disconnected() {
+            $crate::host_api_conformance::clipboard_client_that_sends_a_request_is_disconnected(
                 &mut || $make,
             );
         }
@@ -1112,6 +1157,118 @@ pub fn input_stream_that_sends_a_request_is_disconnected(make: MakeLocal<'_>) {
     assert!(
         connection.recv(Some(WAIT)).is_err(),
         "the service closes a client that sends a request on a stream of input"
+    );
+    assert_eq!(
+        connect(&mut *connector).status().unwrap().state,
+        SessionState::Stopped
+    );
+}
+
+/// Waits until `android` has been given `count` texts copied on the host.
+fn host_texts(android: &FakeAndroid, count: usize) -> Vec<String> {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let texts = android.host_clipboard.lock().unwrap().clone();
+        if texts.len() >= count || Instant::now() >= deadline {
+            return texts;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+pub fn host_clipboard_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut clipboard = connect(&mut *connector)
+        .watch_clipboard()
+        .expect("carrying the clipboard");
+    clipboard.send("copied on the host").unwrap();
+    clipboard.send("\u{d55c}\u{ae00}").unwrap();
+    let android = androids.of(&user).expect("the caller's Android");
+    assert_eq!(
+        host_texts(&android, 2),
+        vec![
+            "copied on the host".to_string(),
+            "\u{d55c}\u{ae00}".to_string()
+        ]
+    );
+}
+
+pub fn guest_clipboard_reaches_the_client(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut clipboard = connect(&mut *connector)
+        .watch_clipboard()
+        .expect("carrying the clipboard");
+    let android = androids.of(&user).expect("the caller's Android");
+    assert_eq!(clipboard.next(Duration::from_millis(50)).unwrap(), None);
+    android.copy_in_android("copied in Android");
+    assert_eq!(
+        clipboard.next(WAIT).unwrap().as_deref(),
+        Some("copied in Android")
+    );
+}
+
+pub fn clipboard_setting_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let service =
+        HostApiService::new(androids.clone(), "test service").with_settings(store.clone(), facts());
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    assert!(
+        client.settings().unwrap().settings.clipboard,
+        "on by default"
+    );
+    let off = client
+        .set_settings(&Settings {
+            clipboard: false,
+            ..Settings::default()
+        })
+        .expect("turning clipboard sharing off");
+    assert!(!off.settings.clipboard);
+    assert!(!store.get(&user).unwrap().clipboard);
+    client.set_settings(&Settings::default()).unwrap();
+    assert_eq!(
+        *androids.of(&user).unwrap().clipboard_shared.lock().unwrap(),
+        vec![false, true]
+    );
+}
+
+pub fn clipboard_client_that_sends_a_request_is_disconnected(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let mut connection = connector.connect(WAIT).unwrap();
+    client_connect(&mut *connection, &local_hello(Role::Client, "client"), WAIT).unwrap();
+    let watch = dsa_protocol::host_api::types::Request {
+        id: 1,
+        body: Some(
+            dsa_protocol::host_api::types::request::Body::WatchClipboard(
+                dsa_protocol::host_api::types::WatchClipboard {},
+            ),
+        ),
+    };
+    dsa_protocol::host_api::send(
+        &mut *connection,
+        dsa_protocol::host_api::types::envelope::Body::Request(watch.clone()),
+    )
+    .unwrap();
+    connection
+        .recv(Some(WAIT))
+        .expect("the answer to the watch");
+    // A frame that cannot be read is dropped, and the connection goes on.
+    connection.send(&[0xff, 0xff, 0xff]).unwrap();
+    dsa_protocol::host_api::send(
+        &mut *connection,
+        dsa_protocol::host_api::types::envelope::Body::Request(watch),
+    )
+    .unwrap();
+    assert!(
+        connection.recv(Some(WAIT)).is_err(),
+        "the service closes a clipboard client that sends a request"
     );
     assert_eq!(
         connect(&mut *connector).status().unwrap().state,

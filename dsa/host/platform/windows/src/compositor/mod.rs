@@ -11,9 +11,12 @@
 //! ([`frames`], [`present`]). When the user closes a window, the guest is asked to end its
 //! task. The mouse, touch and pen input in a window goes from the window host to the service
 //! itself, without passing through the window manager. While no task window is open, it gives
-//! back the memory it is not using ([`trim`]).
+//! back the memory it is not using ([`trim`]). It also carries the text clipboard between
+//! the user and their Android ([`clipboard`]), since the service cannot reach the user's
+//! clipboard.
 
 pub mod adapter;
+pub mod clipboard;
 pub mod display_gpu;
 pub mod frames;
 pub mod hosts;
@@ -103,6 +106,8 @@ pub struct Compositor {
     windows: Arc<Mutex<Vec<i32>>>,
     /// Where the apps' Start menu shortcuts go, when they are kept.
     start_menu: Option<StartMenuSetup>,
+    /// Whether the user's clipboard is shared with their Android.
+    share_clipboard: bool,
 }
 
 /// The installed apps an event from the watch of the tasks carries, if it carries them.
@@ -177,6 +182,7 @@ impl Compositor {
             launcher: None,
             windows: Arc::new(Mutex::new(Vec::new())),
             start_menu: crate::start_menu::StartMenuSetup::default_for_user(),
+            share_clipboard: true,
         }
     }
 
@@ -202,6 +208,7 @@ impl Compositor {
             launcher: None,
             windows: Arc::new(Mutex::new(Vec::new())),
             start_menu: None,
+            share_clipboard: false,
         }
     }
 
@@ -272,6 +279,7 @@ impl Compositor {
         // 0. The app window hosts, the watch of the guest's tasks, and the requests to end
         // them.
         let task_windows = self.start_task_windows(&stop);
+        let clipboard_thread = self.start_clipboard(&stop);
 
         // 1. Monitor thread that tracks the VM ID and state via the local API.
         let monitor_stop = Arc::clone(&stop);
@@ -452,10 +460,50 @@ impl Compositor {
         let _ = monitor_thread.join();
         let _ = cmd_thread.join();
         let _ = proc_thread.join();
+        if let Some(thread) = clipboard_thread {
+            let _ = thread.join();
+        }
 
         if let Some(logger) = &self.logger {
             logger.log("dsa-wm stopped cleanly");
         }
+    }
+
+    /// Starts carrying the text clipboard between the user and their Android, on a thread of
+    /// its own that ends with `stop`. A clipboard that cannot be followed is logged; the rest
+    /// of the window manager goes on.
+    fn start_clipboard(&self, stop: &Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
+        if !self.share_clipboard {
+            return None;
+        }
+        let connector = (self.local_api_connector)();
+        let stop = Arc::clone(stop);
+        let logger = self.logger.clone();
+        let failed = self.logger.clone();
+        thread::Builder::new()
+            .name("dsa-wm-clipboard".into())
+            .spawn(move || {
+                let (window, changes) = match clipboard::ClipboardWindow::open() {
+                    Ok(opened) => opened,
+                    Err(why) => {
+                        note(
+                            logger.as_deref(),
+                            &format!("the clipboard is not shared with Android: {why}"),
+                        );
+                        return;
+                    }
+                };
+                let mut host = window.clipboard();
+                clipboard::sync(connector, &mut host, changes, stop, logger);
+                drop(window);
+            })
+            .map_err(|e| {
+                note(
+                    failed.as_deref(),
+                    &format!("could not start the clipboard's thread: {e}"),
+                )
+            })
+            .ok()
     }
 
     /// Starts the task windows: the manager, the listener for the app window hosts, the watch

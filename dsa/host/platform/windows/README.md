@@ -126,6 +126,11 @@ signed out, or only reached the computer over the network), a stopped Android wa
 starting its VM, so it cannot crash-loop, and `dsa status` says why; a running Android is stopped
 after two minutes. `"keep_window_manager": false` turns this off.
 
+- It carries the text clipboard between the user and their Android, since the service runs
+  in session 0 and cannot reach it. A message-only window hears each change to the user's
+  clipboard and passes new text to the service, and the text Android copies goes on the
+  user's clipboard. Text it set itself is not passed back. `dsa settings set clipboard off`,
+  or the switch in the settings app, stops the sharing in both directions.
 - It owns no window. Each Android app task shows in a window of the app's own window
   program (below). The window manager watches the user's tasks through the service's
   local API, starts each app's window program, and tells it to open a window for each

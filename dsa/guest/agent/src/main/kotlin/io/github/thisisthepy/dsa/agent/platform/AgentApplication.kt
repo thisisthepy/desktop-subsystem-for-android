@@ -64,6 +64,7 @@ class AgentApplication : Application() {
             inputTrace = InputTrace(log, enabled = traced),
             frameTrace = frameTrace,
             touchSounds = AndroidTouchSounds(this),
+            clipboard = AndroidClipboard(this, log),
         )
         HostInputMethod.onCursor = { rect -> agent.cursorMoved(rect.left, rect.top, rect.right, rect.bottom) }
         agent.start()

@@ -1919,3 +1919,147 @@ fn fr10_stopping_a_frozen_guest_thaws_it_first_and_stops_it() {
     assert_eq!(guest.thaws, 1);
     assert_eq!(guest.processes, 0);
 }
+
+fn clipboard_text(text: &str) -> Body {
+    Body::ClipboardText(dsa_protocol::control::ClipboardText { text: text.into() })
+}
+
+fn clipboard_sharing(on: bool) -> Body {
+    Body::ClipboardSharing(dsa_protocol::control::ClipboardSharing { on })
+}
+
+/// Asserts that the guest is sent nothing for a while.
+fn nothing_for_the_guest(agent: &mut Box<dyn Connection>) {
+    match agent.recv(Some(Duration::from_millis(300))) {
+        Err(TransportError::Timeout) => {}
+        Ok(frame) => panic!(
+            "the guest was sent {:?}",
+            dsa_protocol::decode(&frame).map(|envelope| envelope.body)
+        ),
+        Err(error) => panic!("the channel broke: {error}"),
+    }
+}
+
+/// Asserts that no watcher hears of anything for a while.
+fn nothing_for_the_host(watch: &Receiver<String>) {
+    if let Ok(text) = watch.recv_timeout(Duration::from_millis(300)) {
+        panic!("the host was given {text:?}");
+    }
+}
+
+#[test]
+fn fr13_text_copied_on_the_host_becomes_the_guests_clip() {
+    let (session, mut agent, _launcher) = active_session();
+    session.host_clipboard("copied on the host".into());
+    assert_eq!(next_body(&mut agent), clipboard_text("copied on the host"));
+}
+
+#[test]
+fn fr13_text_copied_in_the_guest_reaches_the_host() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_clipboard();
+    send_body(&mut agent, clipboard_text("\u{c548}\u{b155} from Android"));
+    assert_eq!(
+        watch.recv_timeout(WAIT).expect("the guest's text"),
+        "\u{c548}\u{b155} from Android"
+    );
+}
+
+#[test]
+fn fr13_the_hosts_text_goes_to_the_guest_once_when_android_is_ready() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.host_clipboard("before the start".into());
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(next_body(&mut agent), clipboard_text("before the start"));
+    nothing_for_the_guest(&mut agent);
+}
+
+#[test]
+fn fr13_a_clip_is_never_sent_back_to_the_side_it_came_from() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_clipboard();
+
+    // From the guest: the host puts it on its clipboard, whose listener hears it again.
+    send_body(&mut agent, clipboard_text("from the guest"));
+    assert_eq!(watch.recv_timeout(WAIT).unwrap(), "from the guest");
+    session.host_clipboard("from the guest".into());
+    nothing_for_the_guest(&mut agent);
+
+    // From the host: the guest sets its primary clip, whose listener hears it again.
+    session.host_clipboard("from the host".into());
+    assert_eq!(next_body(&mut agent), clipboard_text("from the host"));
+    send_body(&mut agent, clipboard_text("from the host"));
+    nothing_for_the_host(&watch);
+
+    // The same text copied again after something else does cross.
+    send_body(&mut agent, clipboard_text("from the guest"));
+    assert_eq!(watch.recv_timeout(WAIT).unwrap(), "from the guest");
+}
+
+#[test]
+fn fr13_with_sharing_off_nothing_crosses_and_turning_it_on_resumes() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_clipboard();
+
+    session.share_clipboard(false);
+    assert_eq!(next_body(&mut agent), clipboard_sharing(false));
+    session.host_clipboard("secret on the host".into());
+    nothing_for_the_guest(&mut agent);
+    send_body(&mut agent, clipboard_text("secret in the guest"));
+    nothing_for_the_host(&watch);
+
+    session.share_clipboard(true);
+    assert_eq!(next_body(&mut agent), clipboard_sharing(true));
+    // What was copied while sharing was off stays where it was.
+    nothing_for_the_guest(&mut agent);
+    session.host_clipboard("shared again".into());
+    assert_eq!(next_body(&mut agent), clipboard_text("shared again"));
+    send_body(&mut agent, clipboard_text("from the guest again"));
+    assert_eq!(watch.recv_timeout(WAIT).unwrap(), "from the guest again");
+}
+
+#[test]
+fn fr13_an_agent_that_connects_while_sharing_is_off_is_told() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.share_clipboard(false);
+    session.host_clipboard("not shared".into());
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(next_body(&mut agent), clipboard_sharing(false));
+    nothing_for_the_guest(&mut agent);
+}
+
+#[test]
+fn fr13_text_longer_than_the_limit_does_not_cross_either_way() {
+    use dsa_host_core::clipboard::MAX_CLIPBOARD_BYTES;
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_clipboard();
+    let long = "x".repeat(MAX_CLIPBOARD_BYTES + 1);
+
+    session.host_clipboard(long.clone());
+    nothing_for_the_guest(&mut agent);
+    send_body(&mut agent, clipboard_text(&long));
+    nothing_for_the_host(&watch);
+
+    // Text at the limit crosses whole, and the session is still there.
+    let most = "y".repeat(MAX_CLIPBOARD_BYTES);
+    session.host_clipboard(most.clone());
+    assert_eq!(next_body(&mut agent), clipboard_text(&most));
+    assert_eq!(session.state(), SessionState::Active);
+}
+
+#[test]
+fn nfr5_a_clipboard_sharing_message_from_the_guest_is_dropped() {
+    let (session, mut agent, _launcher) = active_session();
+    send_body(&mut agent, clipboard_sharing(false));
+    thread::sleep(Duration::from_millis(100));
+    assert_eq!(session.state(), SessionState::Active);
+    // Sharing is still on.
+    session.host_clipboard("still shared".into());
+    assert_eq!(next_body(&mut agent), clipboard_text("still shared"));
+}
