@@ -506,14 +506,12 @@ where
         .with_resize_trace_detail(resize_trace_file)
         .with_settings(Arc::clone(&store), facts)
         .with_host_memory(Arc::clone(&host_memory))
-        .with_widget_placements(Arc::new(
-            dsa_host_core::widgets::FileWidgetPlacements::new(
-                config
-                    .settings_dir
-                    .clone()
-                    .unwrap_or_else(default_settings_dir),
-            ),
-        ));
+        .with_widget_placements(Arc::new(dsa_host_core::widgets::FileWidgetPlacements::new(
+            config
+                .settings_dir
+                .clone()
+                .unwrap_or_else(default_settings_dir),
+        )));
     {
         let androids = androids.clone();
         let (worker_build, stop) = (build.to_string(), Arc::clone(&stop));
