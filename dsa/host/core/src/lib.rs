@@ -5,6 +5,8 @@
 //! through the traits defined here and in `dsa-transport`.
 //!
 //! - [`session`]: one guest's life from start to stop.
+//! - [`accessibility`]: the accessibility tree of a task window, for host accessibility
+//!   clients such as screen readers.
 //! - [`bootconfig`]: the kernel bootconfig that carries each boot's secret to the guest.
 //! - [`handshake`]: the control channel's handshake as a session uses it.
 //! - [`host_api`]: the local API service, which acts on each caller's own Android, and its
@@ -23,6 +25,7 @@
 //! - [`compositor`]: platform-neutral graphics stream bookkeeping, renderer interfaces, and
 //!   which window each task and each frame goes to.
 
+pub mod accessibility;
 pub mod bootconfig;
 pub mod clipboard;
 pub mod clock_trace;

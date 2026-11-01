@@ -17,6 +17,10 @@ use dsa_protocol::host_api::{client_connect, local_hello, HandshakeError};
 use dsa_transport::local::LocalListener;
 use dsa_transport::Connector;
 
+use crate::accessibility::{
+    AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, Node, NodeAction,
+    TreeUpdate,
+};
 use crate::files::{FileAction, FileTransfer, MAX_FILE_BYTES};
 use crate::host_api::{
     running_of, stop_every, ClientError, HostApiClient, HostApiService, ProgramUpdate,
@@ -64,9 +68,23 @@ pub struct FakeAndroid {
     /// The text copied on the host it was given, in order.
     pub host_clipboard: Mutex<Vec<String>>,
     clipboard_watchers: Mutex<Vec<Sender<String>>>,
+    /// Each start (`true`) and end (`false`) of a watch of a task's accessibility tree, in
+    /// order.
+    pub accessibility_watches: Arc<Mutex<Vec<(i32, bool)>>>,
+    accessibility_watchers: Mutex<Vec<(i32, Sender<GuestAccessibility>)>>,
+    /// The accessibility actions it was asked for, in order.
+    pub accessibility_actions: Mutex<Vec<(i32, ActionRequest)>>,
 }
 
 impl FakeAndroid {
+    /// Sends what an agent says about a task's accessibility to the task's watchers.
+    pub fn publish_accessibility(&self, task_id: i32, message: GuestAccessibility) {
+        self.accessibility_watchers
+            .lock()
+            .unwrap()
+            .retain(|(task, watcher)| *task != task_id || watcher.send(message.clone()).is_ok());
+    }
+
     pub fn new() -> FakeAndroid {
         FakeAndroid {
             state: Mutex::new(SessionState::Stopped),
@@ -83,6 +101,9 @@ impl FakeAndroid {
             clipboard_shared: Mutex::new(Vec::new()),
             host_clipboard: Mutex::new(Vec::new()),
             clipboard_watchers: Mutex::new(Vec::new()),
+            accessibility_watches: Arc::new(Mutex::new(Vec::new())),
+            accessibility_watchers: Mutex::new(Vec::new()),
+            accessibility_actions: Mutex::new(Vec::new()),
         }
     }
 
@@ -168,6 +189,38 @@ impl UserAndroid for FakeAndroid {
             )));
         }
         self.files.lock().unwrap().push(file.clone());
+        Ok(())
+    }
+    fn watch_accessibility(&self, task_id: i32) -> Option<AccessibilityWatch> {
+        let (tx, rx) = mpsc::channel();
+        self.accessibility_watchers
+            .lock()
+            .unwrap()
+            .push((task_id, tx));
+        self.accessibility_watches
+            .lock()
+            .unwrap()
+            .push((task_id, true));
+        let watches = Arc::clone(&self.accessibility_watches);
+        Some(AccessibilityWatch::new(rx, move || {
+            watches.lock().unwrap().push((task_id, false));
+        }))
+    }
+    fn accessibility_action(
+        &self,
+        task_id: i32,
+        action: &ActionRequest,
+    ) -> Result<(), TaskRequestError> {
+        if self.state() != SessionState::Active {
+            return Err(TaskRequestError::NotRunning(format!(
+                "Android is {}, not running",
+                self.state()
+            )));
+        }
+        self.accessibility_actions
+            .lock()
+            .unwrap()
+            .push((task_id, action.clone()));
         Ok(())
     }
     fn share_clipboard(&self, on: bool) {
@@ -491,6 +544,20 @@ macro_rules! host_api_conformance {
         #[test]
         fn nfr5_a_link_client_that_sends_a_frame_is_disconnected() {
             $crate::host_api_conformance::link_client_that_sends_is_disconnected(&mut || $make);
+        }
+        #[test]
+        fn fr18_a_watched_tree_and_action_results_reach_the_client() {
+            $crate::host_api_conformance::accessibility_reaches_the_client(&mut || $make);
+        }
+        #[test]
+        fn fr18_actions_reach_the_callers_android_and_closing_ends_the_watch() {
+            $crate::host_api_conformance::accessibility_actions_reach_the_caller(&mut || $make);
+        }
+        #[test]
+        fn nfr5_an_accessibility_client_that_sends_something_else_is_disconnected() {
+            $crate::host_api_conformance::accessibility_client_that_sends_a_request_is_disconnected(
+                &mut || $make,
+            );
         }
         #[test]
         fn fr9_a_host_file_reaches_the_callers_android_whole() {
@@ -1333,6 +1400,157 @@ pub fn clipboard_client_that_sends_a_request_is_disconnected(make: MakeLocal<'_>
         connection.recv(Some(WAIT)).is_err(),
         "the service closes a clipboard client that sends a request"
     );
+    assert_eq!(
+        connect(&mut *connector).status().unwrap().state,
+        SessionState::Stopped
+    );
+}
+
+fn small_tree(epoch: u32) -> TreeUpdate {
+    TreeUpdate {
+        task_id: 7,
+        epoch,
+        full: true,
+        roots: vec![1],
+        nodes: vec![
+            Node {
+                id: 1,
+                children: vec![2],
+                class_name: "android.widget.FrameLayout".into(),
+                ..Node::default()
+            },
+            Node {
+                id: 2,
+                class_name: "android.widget.Button".into(),
+                text: "OK".into(),
+                actions: vec![NodeAction::Click],
+                ..Node::default()
+            },
+        ],
+        removed: vec![],
+        focused: Some(2),
+    }
+}
+
+/// Waits until `watches` holds `expected`, which the service records from its own thread.
+fn wait_for_watches(android: &FakeAndroid, expected: &[(i32, bool)]) {
+    let deadline = Instant::now() + WAIT;
+    while *android.accessibility_watches.lock().unwrap() != expected {
+        assert!(
+            Instant::now() < deadline,
+            "the watches were {:?}",
+            android.accessibility_watches.lock().unwrap()
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+pub fn accessibility_reaches_the_client(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut stream = connect(&mut *connector)
+        .watch_accessibility(7)
+        .expect("watching the tree");
+    let android = androids.of(&user).expect("the caller's Android");
+    wait_for_watches(&android, &[(7, true)]);
+    assert_eq!(stream.next(Duration::from_millis(50)).unwrap(), None);
+    // Another task's tree does not reach this watch.
+    android.publish_accessibility(8, GuestAccessibility::Tree(small_tree(1)));
+    android.publish_accessibility(7, GuestAccessibility::Tree(small_tree(1)));
+    assert_eq!(
+        stream.next(WAIT).unwrap(),
+        Some(GuestAccessibility::Tree(small_tree(1)))
+    );
+    let result = ActionResult {
+        request_id: 3,
+        outcome: Err("the node is gone".into()),
+    };
+    android.publish_accessibility(7, GuestAccessibility::ActionResult(result.clone()));
+    assert_eq!(
+        stream.next(WAIT).unwrap(),
+        Some(GuestAccessibility::ActionResult(result))
+    );
+}
+
+pub fn accessibility_actions_reach_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut client = connect(&mut *connector);
+    client.start().unwrap();
+    let mut stream = client.watch_accessibility(7).expect("watching the tree");
+    let android = androids.of(&user).expect("the caller's Android");
+    let action = ActionRequest {
+        epoch: 1,
+        node_id: 2,
+        action: NodeAction::Click,
+        text: String::new(),
+        request_id: 4,
+    };
+    stream.perform(&action).unwrap();
+    let deadline = Instant::now() + WAIT;
+    while android.accessibility_actions.lock().unwrap().is_empty() {
+        assert!(Instant::now() < deadline, "the action never arrived");
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        *android.accessibility_actions.lock().unwrap(),
+        vec![(7, action)]
+    );
+    // An action for an Android that is not running is answered with why.
+    android.stop();
+    let refused = ActionRequest {
+        request_id: 5,
+        ..ActionRequest {
+            epoch: 1,
+            node_id: 2,
+            action: NodeAction::Click,
+            text: String::new(),
+            request_id: 0,
+        }
+    };
+    stream.perform(&refused).unwrap();
+    match stream.next(WAIT).unwrap() {
+        Some(GuestAccessibility::ActionResult(result)) => {
+            assert_eq!(result.request_id, 5);
+            assert!(result.outcome.is_err());
+        }
+        other => panic!("expected the refusal, got {other:?}"),
+    }
+    // Closing the connection ends the watch, so Android stops reading the tree.
+    drop(stream);
+    wait_for_watches(&android, &[(7, true), (7, false)]);
+}
+
+pub fn accessibility_client_that_sends_a_request_is_disconnected(make: MakeLocal<'_>) {
+    use dsa_protocol::host_api::types as wire;
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut connection = connector.connect(WAIT).unwrap();
+    client_connect(&mut *connection, &local_hello(Role::Client, "client"), WAIT).unwrap();
+    let watch = wire::Request {
+        id: 1,
+        body: Some(wire::request::Body::WatchAccessibility(
+            wire::WatchAccessibility { task_id: 7 },
+        )),
+    };
+    dsa_protocol::host_api::send(
+        &mut *connection,
+        wire::envelope::Body::Request(watch.clone()),
+    )
+    .unwrap();
+    connection
+        .recv(Some(WAIT))
+        .expect("the answer to the watch");
+    dsa_protocol::host_api::send(&mut *connection, wire::envelope::Body::Request(watch)).unwrap();
+    assert!(
+        connection.recv(Some(WAIT)).is_err(),
+        "the service closes an accessibility client that sends a request"
+    );
+    let android = androids.of(&user).expect("the caller's Android");
+    wait_for_watches(&android, &[(7, true), (7, false)]);
     assert_eq!(
         connect(&mut *connector).status().unwrap().state,
         SessionState::Stopped
