@@ -12,6 +12,10 @@
 //! transport and over vsock. The binder service (`binder`, Android only) is the thin layer
 //! that lets those users in; [`aidl`] holds the values it shares with their generated code.
 //! [`reclaim`] decides when the guest drops its caches so the host gets the memory back.
+//!
+//! The daemon answers the host's clock probes itself ([`clock_answer`]), from the thread that
+//! reads the connection, so the answer carries the guest's clock as close to the probe's
+//! arrival as the daemon can read it.
 
 pub mod aidl;
 #[cfg(target_os = "android")]
@@ -21,13 +25,65 @@ pub mod router;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_protocol::auth::BootSecret;
-use dsa_protocol::control::{Hello, RejectReason};
+use dsa_protocol::control::envelope::Body;
+use dsa_protocol::control::{ClockAnswer, Envelope, Hello, RejectReason};
 use dsa_protocol::handshake::{guest_connect, HandshakeError};
-use dsa_transport::{Connection, Connector, TransportError};
+use dsa_transport::{Connection, Connector, FrameSender, TransportError};
+
+/// The guest's `CLOCK_MONOTONIC`, the clock the guest's trace lines carry as `mono`.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub fn guest_monotonic() -> Duration {
+    use std::ffi::{c_int, c_long};
+    #[repr(C)]
+    struct Timespec {
+        tv_sec: c_long,
+        tv_nsec: c_long,
+    }
+    extern "C" {
+        fn clock_gettime(clock: c_int, time: *mut Timespec) -> c_int;
+    }
+    const CLOCK_MONOTONIC: c_int = 1;
+    let mut time = Timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: the call writes one timespec, which lives on this stack frame.
+    if unsafe { clock_gettime(CLOCK_MONOTONIC, &mut time) } != 0 {
+        return Duration::ZERO;
+    }
+    Duration::new(time.tv_sec.max(0) as u64, time.tv_nsec.clamp(0, 999_999_999) as u32)
+}
+
+/// Off Linux there is no guest clock to pair; the time since the daemon first looked stands
+/// in for it.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+pub fn guest_monotonic() -> Duration {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    START.get_or_init(Instant::now).elapsed()
+}
+
+/// The daemon's answer when `frame` is the host's clock probe: the probe's send time and
+/// `guest_now`, the guest's clock when the probe was read. `None` for any other frame, which
+/// goes on to the guest's clients as before.
+pub fn clock_answer(frame: &[u8], guest_now: Duration) -> Option<Vec<u8>> {
+    let Ok(Envelope {
+        body: Some(Body::ClockProbe(probe)),
+    }) = dsa_protocol::decode(frame)
+    else {
+        return None;
+    };
+    Some(dsa_protocol::encode(&Envelope {
+        body: Some(Body::ClockAnswer(ClockAnswer {
+            host_sent_ns: probe.host_sent_ns,
+            guest_mono_ns: guest_now.as_nanos() as u64,
+        })),
+    }))
+}
 
 /// How the daemon paces its attempts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,14 +207,17 @@ pub fn pump(
     from_guest: &Receiver<Vec<u8>>,
     stop: &AtomicBool,
 ) -> TransportError {
-    let Some(mut sender) = connection.try_clone_sender() else {
+    let Some(sender) = connection.try_clone_sender() else {
         return pump_in_turns(connection, to_guest, from_guest, stop);
     };
+    // Shared with the reader, which answers clock probes on it; the lock keeps the two
+    // threads' frames whole.
+    let sender = Mutex::new(sender);
     let ended = AtomicBool::new(false);
     let send_failed = AtomicBool::new(false);
     thread::scope(|scope| {
         let reader = scope.spawn(|| {
-            let why = read_until_lost(connection, to_guest, stop, &send_failed);
+            let why = read_until_lost(connection, to_guest, stop, &send_failed, &sender);
             ended.store(true, Ordering::Relaxed);
             why
         });
@@ -166,7 +225,11 @@ pub fn pump(
         while !ended.load(Ordering::Relaxed) {
             match from_guest.recv_timeout(POLL) {
                 Ok(frame) => {
-                    if let Err(error) = sender.send(&frame) {
+                    let sent = sender
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .send(&frame);
+                    if let Err(error) = sent {
                         send_error = Some(error);
                         send_failed.store(true, Ordering::Relaxed);
                         break;
@@ -187,6 +250,7 @@ fn read_until_lost(
     to_guest: &Sender<Vec<u8>>,
     stop: &AtomicBool,
     send_failed: &AtomicBool,
+    sender: &Mutex<Box<dyn FrameSender>>,
 ) -> TransportError {
     loop {
         if stop.load(Ordering::Relaxed) || send_failed.load(Ordering::Relaxed) {
@@ -195,6 +259,14 @@ fn read_until_lost(
         }
         match connection.recv(Some(POLL)) {
             Ok(frame) => {
+                if let Some(answer) = clock_answer(&frame, guest_monotonic()) {
+                    // A failed send shows up on the sending thread's next frame.
+                    let _ = sender
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .send(&answer);
+                    continue;
+                }
                 // A guest side that has gone away just stops receiving.
                 let _ = to_guest.send(frame);
             }
@@ -230,6 +302,12 @@ fn pump_in_turns(
         }
         match connection.recv(Some(POLL)) {
             Ok(frame) => {
+                if let Some(answer) = clock_answer(&frame, guest_monotonic()) {
+                    if let Err(error) = connection.send(&answer) {
+                        return error;
+                    }
+                    continue;
+                }
                 // A guest side that has gone away just stops receiving.
                 let _ = to_guest.send(frame);
             }

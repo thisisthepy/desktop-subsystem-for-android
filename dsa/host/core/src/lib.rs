@@ -21,6 +21,7 @@
 //!   which window each task and each frame goes to.
 
 pub mod bootconfig;
+pub mod clock_trace;
 pub mod compositor;
 pub mod guest_display;
 pub mod handshake;

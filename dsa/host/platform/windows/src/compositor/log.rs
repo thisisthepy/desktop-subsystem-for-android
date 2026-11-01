@@ -4,7 +4,7 @@ use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use dsa_host_core::input_trace as input_trace_line;
 use dsa_host_core::resize_trace::{self, ResizeTrace};
@@ -123,6 +123,39 @@ pub fn input_trace_on() -> bool {
     })
 }
 
+/// The host's monotonic clock: the performance counter, which every process on the computer
+/// shares, as time since its origin.
+pub fn host_clock() -> Duration {
+    use windows_sys::Win32::System::Performance::{
+        QueryPerformanceCounter, QueryPerformanceFrequency,
+    };
+    let (mut now, mut frequency) = (0i64, 0i64);
+    // SAFETY: both write one local integer.
+    unsafe {
+        QueryPerformanceCounter(&mut now);
+        QueryPerformanceFrequency(&mut frequency);
+    }
+    qpc_to_duration(now, frequency)
+}
+
+/// A performance counter reading `ticks` at `frequency` ticks a second, as a duration.
+pub fn qpc_to_duration(ticks: i64, frequency: i64) -> Duration {
+    if ticks <= 0 || frequency <= 0 {
+        return Duration::ZERO;
+    }
+    let (ticks, frequency) = (ticks as u128, frequency as u128);
+    Duration::from_nanos((ticks * 1_000_000_000 / frequency) as u64)
+}
+
+/// [`host_clock`] for the platform-neutral clock pairing.
+pub struct PerformanceCounterClock;
+
+impl dsa_host_core::clock_trace::HostClock for PerformanceCounterClock {
+    fn now(&self) -> Duration {
+        host_clock()
+    }
+}
+
 /// Writes one input trace line, when the trace is on.
 pub fn input_trace(stage: &str, task_id: i32, detail: &str) {
     if !input_trace_on() {
@@ -135,6 +168,7 @@ pub fn input_trace(stage: &str, task_id: i32, detail: &str) {
         detail,
         START.get_or_init(Instant::now).elapsed(),
         resize_trace::wall_now(),
+        host_clock(),
     );
     note(INPUT_TRACE_LOG.get().map(|logger| &**logger), &line);
 }
@@ -221,4 +255,19 @@ pub fn trace_forget(task_id: i32) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .forget(task_id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fr5_the_host_clock_turns_performance_counter_ticks_into_time() {
+        assert_eq!(qpc_to_duration(10_000_000, 10_000_000), Duration::from_secs(1));
+        assert_eq!(
+            qpc_to_duration(1_234_567, 10_000_000),
+            Duration::from_nanos(123_456_700)
+        );
+        assert_eq!(qpc_to_duration(5, 0), Duration::ZERO);
+    }
 }
