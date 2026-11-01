@@ -23,7 +23,8 @@
 //! copied into the back buffer but not presented. When the window takes the size, the frame
 //! is presented and the visual scaled in one go ([`WindowPresenter::view_resized`]), so
 //! neither a slid picture nor an empty strip reaches the screen: until that moment the old
-//! window shows the old frame.
+//! window shows the old frame. The back buffer holds the only copy of that frame, so a frame of
+//! another size arriving meanwhile is left out.
 //!
 //! Each presenter measures how long its window waited for a frame of its new size
 //! (`ResizeLatency`) and logs a summary every 20 resizes and when the window closes, and a
@@ -37,7 +38,7 @@ use dsa_host_core::compositor::frame_buffers::{
     content_region, swapchain_buffers, swapchain_change, visual_scale, SwapchainChange,
 };
 use dsa_host_core::compositor::resize_latency::ResizeLatency;
-use dsa_host_core::compositor::resize_sync::{self, ResizeSync, Step};
+use dsa_host_core::compositor::resize_sync::{self, frame_action, FrameAction, ResizeSync, Step};
 use windows::core::{Interface, BOOL, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HMODULE, HWND, LUID};
 use windows::Win32::Graphics::Direct3D::{
@@ -592,7 +593,20 @@ impl WindowPresenter {
         }
         let region = content_region(content, texture.size);
         let started = Instant::now();
-        let stage = state.hold.as_ref().is_some_and(|hold| hold.view == region);
+        let hold = state.hold.as_ref().map(|hold| (hold.view, hold.staged));
+        let action = frame_action(hold, region);
+        if action == FrameAction::Drop {
+            state.sync.frame_arrived(region, Instant::now());
+            trace_stage(
+                self.logger.as_deref(),
+                self.task_id,
+                "app.frame_left_out",
+                region,
+                &format!("held={:?}", hold.map(|(view, _)| view)),
+            );
+            return Ok(());
+        }
+        let stage = action == FrameAction::Stage;
         let shown =
             self.present_locked(&mut state, &texture.texture, texture.size, region, stage)?;
         state.sync.frame_arrived(region, Instant::now());
