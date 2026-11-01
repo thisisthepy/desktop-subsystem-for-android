@@ -45,21 +45,6 @@ struct TableStruct_control_2eproto {
 namespace dsa {
 namespace control {
 namespace v1 {
-class AccessibilityAction;
-struct AccessibilityActionDefaultTypeInternal;
-extern AccessibilityActionDefaultTypeInternal _AccessibilityAction_default_instance_;
-class AccessibilityActionResult;
-struct AccessibilityActionResultDefaultTypeInternal;
-extern AccessibilityActionResultDefaultTypeInternal _AccessibilityActionResult_default_instance_;
-class AccessibilityNode;
-struct AccessibilityNodeDefaultTypeInternal;
-extern AccessibilityNodeDefaultTypeInternal _AccessibilityNode_default_instance_;
-class AccessibilityTree;
-struct AccessibilityTreeDefaultTypeInternal;
-extern AccessibilityTreeDefaultTypeInternal _AccessibilityTree_default_instance_;
-class AccessibilityWatch;
-struct AccessibilityWatchDefaultTypeInternal;
-extern AccessibilityWatchDefaultTypeInternal _AccessibilityWatch_default_instance_;
 class AgentConnected;
 struct AgentConnectedDefaultTypeInternal;
 extern AgentConnectedDefaultTypeInternal _AgentConnected_default_instance_;
@@ -111,6 +96,9 @@ extern GuestBootDefaultTypeInternal _GuestBoot_default_instance_;
 class GuestMemory;
 struct GuestMemoryDefaultTypeInternal;
 extern GuestMemoryDefaultTypeInternal _GuestMemory_default_instance_;
+class GuestNotification;
+struct GuestNotificationDefaultTypeInternal;
+extern GuestNotificationDefaultTypeInternal _GuestNotification_default_instance_;
 class Hello;
 struct HelloDefaultTypeInternal;
 extern HelloDefaultTypeInternal _Hello_default_instance_;
@@ -153,9 +141,15 @@ extern LaunchAppDefaultTypeInternal _LaunchApp_default_instance_;
 class LinkHandling;
 struct LinkHandlingDefaultTypeInternal;
 extern LinkHandlingDefaultTypeInternal _LinkHandling_default_instance_;
-class NodeRange;
-struct NodeRangeDefaultTypeInternal;
-extern NodeRangeDefaultTypeInternal _NodeRange_default_instance_;
+class NotificationClicked;
+struct NotificationClickedDefaultTypeInternal;
+extern NotificationClickedDefaultTypeInternal _NotificationClicked_default_instance_;
+class NotificationDismissed;
+struct NotificationDismissedDefaultTypeInternal;
+extern NotificationDismissedDefaultTypeInternal _NotificationDismissed_default_instance_;
+class NotificationRemoved;
+struct NotificationRemovedDefaultTypeInternal;
+extern NotificationRemovedDefaultTypeInternal _NotificationRemoved_default_instance_;
 class OpenFile;
 struct OpenFileDefaultTypeInternal;
 extern OpenFileDefaultTypeInternal _OpenFile_default_instance_;
@@ -199,11 +193,6 @@ extern TaskUpdatedDefaultTypeInternal _TaskUpdated_default_instance_;
 }  // namespace control
 }  // namespace dsa
 PROTOBUF_NAMESPACE_OPEN
-template<> ::dsa::control::v1::AccessibilityAction* Arena::CreateMaybeMessage<::dsa::control::v1::AccessibilityAction>(Arena*);
-template<> ::dsa::control::v1::AccessibilityActionResult* Arena::CreateMaybeMessage<::dsa::control::v1::AccessibilityActionResult>(Arena*);
-template<> ::dsa::control::v1::AccessibilityNode* Arena::CreateMaybeMessage<::dsa::control::v1::AccessibilityNode>(Arena*);
-template<> ::dsa::control::v1::AccessibilityTree* Arena::CreateMaybeMessage<::dsa::control::v1::AccessibilityTree>(Arena*);
-template<> ::dsa::control::v1::AccessibilityWatch* Arena::CreateMaybeMessage<::dsa::control::v1::AccessibilityWatch>(Arena*);
 template<> ::dsa::control::v1::AgentConnected* Arena::CreateMaybeMessage<::dsa::control::v1::AgentConnected>(Arena*);
 template<> ::dsa::control::v1::ApkChunk* Arena::CreateMaybeMessage<::dsa::control::v1::ApkChunk>(Arena*);
 template<> ::dsa::control::v1::AppInfo* Arena::CreateMaybeMessage<::dsa::control::v1::AppInfo>(Arena*);
@@ -221,6 +210,7 @@ template<> ::dsa::control::v1::FileChunk* Arena::CreateMaybeMessage<::dsa::contr
 template<> ::dsa::control::v1::FileProgress* Arena::CreateMaybeMessage<::dsa::control::v1::FileProgress>(Arena*);
 template<> ::dsa::control::v1::GuestBoot* Arena::CreateMaybeMessage<::dsa::control::v1::GuestBoot>(Arena*);
 template<> ::dsa::control::v1::GuestMemory* Arena::CreateMaybeMessage<::dsa::control::v1::GuestMemory>(Arena*);
+template<> ::dsa::control::v1::GuestNotification* Arena::CreateMaybeMessage<::dsa::control::v1::GuestNotification>(Arena*);
 template<> ::dsa::control::v1::Hello* Arena::CreateMaybeMessage<::dsa::control::v1::Hello>(Arena*);
 template<> ::dsa::control::v1::HelloAccepted* Arena::CreateMaybeMessage<::dsa::control::v1::HelloAccepted>(Arena*);
 template<> ::dsa::control::v1::HelloRejected* Arena::CreateMaybeMessage<::dsa::control::v1::HelloRejected>(Arena*);
@@ -235,7 +225,9 @@ template<> ::dsa::control::v1::InstalledApps* Arena::CreateMaybeMessage<::dsa::c
 template<> ::dsa::control::v1::KeyEvent* Arena::CreateMaybeMessage<::dsa::control::v1::KeyEvent>(Arena*);
 template<> ::dsa::control::v1::LaunchApp* Arena::CreateMaybeMessage<::dsa::control::v1::LaunchApp>(Arena*);
 template<> ::dsa::control::v1::LinkHandling* Arena::CreateMaybeMessage<::dsa::control::v1::LinkHandling>(Arena*);
-template<> ::dsa::control::v1::NodeRange* Arena::CreateMaybeMessage<::dsa::control::v1::NodeRange>(Arena*);
+template<> ::dsa::control::v1::NotificationClicked* Arena::CreateMaybeMessage<::dsa::control::v1::NotificationClicked>(Arena*);
+template<> ::dsa::control::v1::NotificationDismissed* Arena::CreateMaybeMessage<::dsa::control::v1::NotificationDismissed>(Arena*);
+template<> ::dsa::control::v1::NotificationRemoved* Arena::CreateMaybeMessage<::dsa::control::v1::NotificationRemoved>(Arena*);
 template<> ::dsa::control::v1::OpenFile* Arena::CreateMaybeMessage<::dsa::control::v1::OpenFile>(Arena*);
 template<> ::dsa::control::v1::OpenLink* Arena::CreateMaybeMessage<::dsa::control::v1::OpenLink>(Arena*);
 template<> ::dsa::control::v1::PointerEvent* Arena::CreateMaybeMessage<::dsa::control::v1::PointerEvent>(Arena*);
@@ -445,34 +437,6 @@ inline const std::string& FileAction_Name(T enum_t_value) {
 }
 bool FileAction_Parse(
     ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, FileAction* value);
-enum NodeAction : int {
-  NODE_ACTION_UNSPECIFIED = 0,
-  NODE_ACTION_CLICK = 1,
-  NODE_ACTION_LONG_CLICK = 2,
-  NODE_ACTION_SET_TEXT = 3,
-  NODE_ACTION_SCROLL_FORWARD = 4,
-  NODE_ACTION_SCROLL_BACKWARD = 5,
-  NODE_ACTION_FOCUS = 6,
-  NODE_ACTION_ACCESSIBILITY_FOCUS = 7,
-  NODE_ACTION_SELECT = 8,
-  NodeAction_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
-  NodeAction_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
-};
-bool NodeAction_IsValid(int value);
-constexpr NodeAction NodeAction_MIN = NODE_ACTION_UNSPECIFIED;
-constexpr NodeAction NodeAction_MAX = NODE_ACTION_SELECT;
-constexpr int NodeAction_ARRAYSIZE = NodeAction_MAX + 1;
-
-const std::string& NodeAction_Name(NodeAction value);
-template<typename T>
-inline const std::string& NodeAction_Name(T enum_t_value) {
-  static_assert(::std::is_same<T, NodeAction>::value ||
-    ::std::is_integral<T>::value,
-    "Incorrect type passed to function NodeAction_Name.");
-  return NodeAction_Name(static_cast<NodeAction>(enum_t_value));
-}
-bool NodeAction_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, NodeAction* value);
 // ===================================================================
 
 class Hello final :
@@ -4530,6 +4494,670 @@ class ClipboardSharing final :
 };
 // -------------------------------------------------------------------
 
+class GuestNotification final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.GuestNotification) */ {
+ public:
+  inline GuestNotification() : GuestNotification(nullptr) {}
+  ~GuestNotification() override;
+  explicit PROTOBUF_CONSTEXPR GuestNotification(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  GuestNotification(const GuestNotification& from);
+  GuestNotification(GuestNotification&& from) noexcept
+    : GuestNotification() {
+    *this = ::std::move(from);
+  }
+
+  inline GuestNotification& operator=(const GuestNotification& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline GuestNotification& operator=(GuestNotification&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const GuestNotification& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const GuestNotification* internal_default_instance() {
+    return reinterpret_cast<const GuestNotification*>(
+               &_GuestNotification_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    26;
+
+  friend void swap(GuestNotification& a, GuestNotification& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(GuestNotification* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(GuestNotification* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  GuestNotification* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<GuestNotification>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const GuestNotification& from);
+  void MergeFrom(const GuestNotification& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(GuestNotification* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.GuestNotification";
+  }
+  protected:
+  explicit GuestNotification(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kKeyFieldNumber = 1,
+    kPackageNameFieldNumber = 2,
+    kAppLabelFieldNumber = 3,
+    kTitleFieldNumber = 4,
+    kTextFieldNumber = 5,
+    kIconPngFieldNumber = 6,
+    kImportanceFieldNumber = 7,
+    kHighPriorityFieldNumber = 8,
+    kClearableFieldNumber = 9,
+    kWhenMillisFieldNumber = 10,
+  };
+  // string key = 1;
+  void clear_key();
+  const std::string& key() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_key(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_key();
+  PROTOBUF_NODISCARD std::string* release_key();
+  void set_allocated_key(std::string* key);
+  private:
+  const std::string& _internal_key() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_key(const std::string& value);
+  std::string* _internal_mutable_key();
+  public:
+
+  // string package_name = 2;
+  void clear_package_name();
+  const std::string& package_name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_package_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_package_name();
+  PROTOBUF_NODISCARD std::string* release_package_name();
+  void set_allocated_package_name(std::string* package_name);
+  private:
+  const std::string& _internal_package_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_package_name(const std::string& value);
+  std::string* _internal_mutable_package_name();
+  public:
+
+  // string app_label = 3;
+  void clear_app_label();
+  const std::string& app_label() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_app_label(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_app_label();
+  PROTOBUF_NODISCARD std::string* release_app_label();
+  void set_allocated_app_label(std::string* app_label);
+  private:
+  const std::string& _internal_app_label() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_app_label(const std::string& value);
+  std::string* _internal_mutable_app_label();
+  public:
+
+  // string title = 4;
+  void clear_title();
+  const std::string& title() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_title(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_title();
+  PROTOBUF_NODISCARD std::string* release_title();
+  void set_allocated_title(std::string* title);
+  private:
+  const std::string& _internal_title() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_title(const std::string& value);
+  std::string* _internal_mutable_title();
+  public:
+
+  // string text = 5;
+  void clear_text();
+  const std::string& text() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_text(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_text();
+  PROTOBUF_NODISCARD std::string* release_text();
+  void set_allocated_text(std::string* text);
+  private:
+  const std::string& _internal_text() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_text(const std::string& value);
+  std::string* _internal_mutable_text();
+  public:
+
+  // bytes icon_png = 6;
+  void clear_icon_png();
+  const std::string& icon_png() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_icon_png(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_icon_png();
+  PROTOBUF_NODISCARD std::string* release_icon_png();
+  void set_allocated_icon_png(std::string* icon_png);
+  private:
+  const std::string& _internal_icon_png() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_icon_png(const std::string& value);
+  std::string* _internal_mutable_icon_png();
+  public:
+
+  // int32 importance = 7;
+  void clear_importance();
+  int32_t importance() const;
+  void set_importance(int32_t value);
+  private:
+  int32_t _internal_importance() const;
+  void _internal_set_importance(int32_t value);
+  public:
+
+  // bool high_priority = 8;
+  void clear_high_priority();
+  bool high_priority() const;
+  void set_high_priority(bool value);
+  private:
+  bool _internal_high_priority() const;
+  void _internal_set_high_priority(bool value);
+  public:
+
+  // bool clearable = 9;
+  void clear_clearable();
+  bool clearable() const;
+  void set_clearable(bool value);
+  private:
+  bool _internal_clearable() const;
+  void _internal_set_clearable(bool value);
+  public:
+
+  // int64 when_millis = 10;
+  void clear_when_millis();
+  int64_t when_millis() const;
+  void set_when_millis(int64_t value);
+  private:
+  int64_t _internal_when_millis() const;
+  void _internal_set_when_millis(int64_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.GuestNotification)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr key_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr package_name_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr app_label_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr title_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr text_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr icon_png_;
+    int32_t importance_;
+    bool high_priority_;
+    bool clearable_;
+    int64_t when_millis_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class NotificationRemoved final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.NotificationRemoved) */ {
+ public:
+  inline NotificationRemoved() : NotificationRemoved(nullptr) {}
+  ~NotificationRemoved() override;
+  explicit PROTOBUF_CONSTEXPR NotificationRemoved(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  NotificationRemoved(const NotificationRemoved& from);
+  NotificationRemoved(NotificationRemoved&& from) noexcept
+    : NotificationRemoved() {
+    *this = ::std::move(from);
+  }
+
+  inline NotificationRemoved& operator=(const NotificationRemoved& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline NotificationRemoved& operator=(NotificationRemoved&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const NotificationRemoved& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const NotificationRemoved* internal_default_instance() {
+    return reinterpret_cast<const NotificationRemoved*>(
+               &_NotificationRemoved_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    27;
+
+  friend void swap(NotificationRemoved& a, NotificationRemoved& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(NotificationRemoved* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(NotificationRemoved* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  NotificationRemoved* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<NotificationRemoved>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const NotificationRemoved& from);
+  void MergeFrom(const NotificationRemoved& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(NotificationRemoved* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.NotificationRemoved";
+  }
+  protected:
+  explicit NotificationRemoved(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kKeyFieldNumber = 1,
+  };
+  // string key = 1;
+  void clear_key();
+  const std::string& key() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_key(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_key();
+  PROTOBUF_NODISCARD std::string* release_key();
+  void set_allocated_key(std::string* key);
+  private:
+  const std::string& _internal_key() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_key(const std::string& value);
+  std::string* _internal_mutable_key();
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.NotificationRemoved)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr key_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class NotificationClicked final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.NotificationClicked) */ {
+ public:
+  inline NotificationClicked() : NotificationClicked(nullptr) {}
+  ~NotificationClicked() override;
+  explicit PROTOBUF_CONSTEXPR NotificationClicked(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  NotificationClicked(const NotificationClicked& from);
+  NotificationClicked(NotificationClicked&& from) noexcept
+    : NotificationClicked() {
+    *this = ::std::move(from);
+  }
+
+  inline NotificationClicked& operator=(const NotificationClicked& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline NotificationClicked& operator=(NotificationClicked&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const NotificationClicked& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const NotificationClicked* internal_default_instance() {
+    return reinterpret_cast<const NotificationClicked*>(
+               &_NotificationClicked_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    28;
+
+  friend void swap(NotificationClicked& a, NotificationClicked& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(NotificationClicked* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(NotificationClicked* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  NotificationClicked* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<NotificationClicked>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const NotificationClicked& from);
+  void MergeFrom(const NotificationClicked& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(NotificationClicked* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.NotificationClicked";
+  }
+  protected:
+  explicit NotificationClicked(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kKeyFieldNumber = 1,
+  };
+  // string key = 1;
+  void clear_key();
+  const std::string& key() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_key(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_key();
+  PROTOBUF_NODISCARD std::string* release_key();
+  void set_allocated_key(std::string* key);
+  private:
+  const std::string& _internal_key() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_key(const std::string& value);
+  std::string* _internal_mutable_key();
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.NotificationClicked)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr key_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class NotificationDismissed final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.NotificationDismissed) */ {
+ public:
+  inline NotificationDismissed() : NotificationDismissed(nullptr) {}
+  ~NotificationDismissed() override;
+  explicit PROTOBUF_CONSTEXPR NotificationDismissed(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  NotificationDismissed(const NotificationDismissed& from);
+  NotificationDismissed(NotificationDismissed&& from) noexcept
+    : NotificationDismissed() {
+    *this = ::std::move(from);
+  }
+
+  inline NotificationDismissed& operator=(const NotificationDismissed& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline NotificationDismissed& operator=(NotificationDismissed&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const NotificationDismissed& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const NotificationDismissed* internal_default_instance() {
+    return reinterpret_cast<const NotificationDismissed*>(
+               &_NotificationDismissed_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    29;
+
+  friend void swap(NotificationDismissed& a, NotificationDismissed& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(NotificationDismissed* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(NotificationDismissed* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  NotificationDismissed* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<NotificationDismissed>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const NotificationDismissed& from);
+  void MergeFrom(const NotificationDismissed& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(NotificationDismissed* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.NotificationDismissed";
+  }
+  protected:
+  explicit NotificationDismissed(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kKeyFieldNumber = 1,
+  };
+  // string key = 1;
+  void clear_key();
+  const std::string& key() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_key(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_key();
+  PROTOBUF_NODISCARD std::string* release_key();
+  void set_allocated_key(std::string* key);
+  private:
+  const std::string& _internal_key() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_key(const std::string& value);
+  std::string* _internal_mutable_key();
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.NotificationDismissed)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr key_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class RequestGuestMemory final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.RequestGuestMemory) */ {
  public:
@@ -4569,7 +5197,7 @@ class RequestGuestMemory final :
                &_RequestGuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    26;
+    30;
 
   friend void swap(RequestGuestMemory& a, RequestGuestMemory& b) {
     a.Swap(&b);
@@ -4686,7 +5314,7 @@ class ProcessMemory final :
                &_ProcessMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    27;
+    31;
 
   friend void swap(ProcessMemory& a, ProcessMemory& b) {
     a.Swap(&b);
@@ -4854,7 +5482,7 @@ class GuestMemory final :
                &_GuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    28;
+    32;
 
   friend void swap(GuestMemory& a, GuestMemory& b) {
     a.Swap(&b);
@@ -5136,7 +5764,7 @@ class AgentConnected final :
                &_AgentConnected_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    29;
+    33;
 
   friend void swap(AgentConnected& a, AgentConnected& b) {
     a.Swap(&b);
@@ -5253,7 +5881,7 @@ class GuestBoot final :
                &_GuestBoot_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    30;
+    34;
 
   friend void swap(GuestBoot& a, GuestBoot& b) {
     a.Swap(&b);
@@ -5394,7 +6022,7 @@ class InstallApk final :
                &_InstallApk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    31;
+    35;
 
   friend void swap(InstallApk& a, InstallApk& b) {
     a.Swap(&b);
@@ -5551,7 +6179,7 @@ class ApkChunk final :
                &_ApkChunk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    32;
+    36;
 
   friend void swap(ApkChunk& a, ApkChunk& b) {
     a.Swap(&b);
@@ -5708,7 +6336,7 @@ class OpenLink final :
                &_OpenLink_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    33;
+    37;
 
   friend void swap(OpenLink& a, OpenLink& b) {
     a.Swap(&b);
@@ -5843,7 +6471,7 @@ class LinkHandling final :
                &_LinkHandling_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    34;
+    38;
 
   friend void swap(LinkHandling& a, LinkHandling& b) {
     a.Swap(&b);
@@ -5973,7 +6601,7 @@ class OpenFile final :
                &_OpenFile_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    35;
+    39;
 
   friend void swap(OpenFile& a, OpenFile& b) {
     a.Swap(&b);
@@ -6141,7 +6769,7 @@ class FileChunk final :
                &_FileChunk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    36;
+    40;
 
   friend void swap(FileChunk& a, FileChunk& b) {
     a.Swap(&b);
@@ -6298,7 +6926,7 @@ class CancelInstall final :
                &_CancelInstall_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    37;
+    41;
 
   friend void swap(CancelInstall& a, CancelInstall& b) {
     a.Swap(&b);
@@ -6428,7 +7056,7 @@ class InstallProgress final :
                &_InstallProgress_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    38;
+    42;
 
   friend void swap(InstallProgress& a, InstallProgress& b) {
     a.Swap(&b);
@@ -6569,7 +7197,7 @@ class InstallResult final :
                &_InstallResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    39;
+    43;
 
   friend void swap(InstallResult& a, InstallResult& b) {
     a.Swap(&b);
@@ -6742,7 +7370,7 @@ class FileProgress final :
                &_FileProgress_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    40;
+    44;
 
   friend void swap(FileProgress& a, FileProgress& b) {
     a.Swap(&b);
@@ -6899,7 +7527,7 @@ class ClockProbe final :
                &_ClockProbe_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    41;
+    45;
 
   friend void swap(ClockProbe& a, ClockProbe& b) {
     a.Swap(&b);
@@ -7029,7 +7657,7 @@ class ClockAnswer final :
                &_ClockAnswer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    42;
+    46;
 
   friend void swap(ClockAnswer& a, ClockAnswer& b) {
     a.Swap(&b);
@@ -7131,1333 +7759,6 @@ class ClockAnswer final :
 };
 // -------------------------------------------------------------------
 
-class AccessibilityWatch final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AccessibilityWatch) */ {
- public:
-  inline AccessibilityWatch() : AccessibilityWatch(nullptr) {}
-  ~AccessibilityWatch() override;
-  explicit PROTOBUF_CONSTEXPR AccessibilityWatch(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  AccessibilityWatch(const AccessibilityWatch& from);
-  AccessibilityWatch(AccessibilityWatch&& from) noexcept
-    : AccessibilityWatch() {
-    *this = ::std::move(from);
-  }
-
-  inline AccessibilityWatch& operator=(const AccessibilityWatch& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline AccessibilityWatch& operator=(AccessibilityWatch&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const AccessibilityWatch& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const AccessibilityWatch* internal_default_instance() {
-    return reinterpret_cast<const AccessibilityWatch*>(
-               &_AccessibilityWatch_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    43;
-
-  friend void swap(AccessibilityWatch& a, AccessibilityWatch& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(AccessibilityWatch* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(AccessibilityWatch* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  AccessibilityWatch* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<AccessibilityWatch>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const AccessibilityWatch& from);
-  void MergeFrom(const AccessibilityWatch& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(AccessibilityWatch* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.AccessibilityWatch";
-  }
-  protected:
-  explicit AccessibilityWatch(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kTaskIdFieldNumber = 1,
-    kOnFieldNumber = 2,
-  };
-  // int32 task_id = 1;
-  void clear_task_id();
-  int32_t task_id() const;
-  void set_task_id(int32_t value);
-  private:
-  int32_t _internal_task_id() const;
-  void _internal_set_task_id(int32_t value);
-  public:
-
-  // bool on = 2;
-  void clear_on();
-  bool on() const;
-  void set_on(bool value);
-  private:
-  bool _internal_on() const;
-  void _internal_set_on(bool value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.AccessibilityWatch)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    int32_t task_id_;
-    bool on_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class NodeRange final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.NodeRange) */ {
- public:
-  inline NodeRange() : NodeRange(nullptr) {}
-  ~NodeRange() override;
-  explicit PROTOBUF_CONSTEXPR NodeRange(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  NodeRange(const NodeRange& from);
-  NodeRange(NodeRange&& from) noexcept
-    : NodeRange() {
-    *this = ::std::move(from);
-  }
-
-  inline NodeRange& operator=(const NodeRange& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline NodeRange& operator=(NodeRange&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const NodeRange& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const NodeRange* internal_default_instance() {
-    return reinterpret_cast<const NodeRange*>(
-               &_NodeRange_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    44;
-
-  friend void swap(NodeRange& a, NodeRange& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(NodeRange* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(NodeRange* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  NodeRange* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<NodeRange>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const NodeRange& from);
-  void MergeFrom(const NodeRange& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(NodeRange* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.NodeRange";
-  }
-  protected:
-  explicit NodeRange(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kMinFieldNumber = 1,
-    kMaxFieldNumber = 2,
-    kCurrentFieldNumber = 3,
-  };
-  // float min = 1;
-  void clear_min();
-  float min() const;
-  void set_min(float value);
-  private:
-  float _internal_min() const;
-  void _internal_set_min(float value);
-  public:
-
-  // float max = 2;
-  void clear_max();
-  float max() const;
-  void set_max(float value);
-  private:
-  float _internal_max() const;
-  void _internal_set_max(float value);
-  public:
-
-  // float current = 3;
-  void clear_current();
-  float current() const;
-  void set_current(float value);
-  private:
-  float _internal_current() const;
-  void _internal_set_current(float value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.NodeRange)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    float min_;
-    float max_;
-    float current_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class AccessibilityNode final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AccessibilityNode) */ {
- public:
-  inline AccessibilityNode() : AccessibilityNode(nullptr) {}
-  ~AccessibilityNode() override;
-  explicit PROTOBUF_CONSTEXPR AccessibilityNode(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  AccessibilityNode(const AccessibilityNode& from);
-  AccessibilityNode(AccessibilityNode&& from) noexcept
-    : AccessibilityNode() {
-    *this = ::std::move(from);
-  }
-
-  inline AccessibilityNode& operator=(const AccessibilityNode& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline AccessibilityNode& operator=(AccessibilityNode&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const AccessibilityNode& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const AccessibilityNode* internal_default_instance() {
-    return reinterpret_cast<const AccessibilityNode*>(
-               &_AccessibilityNode_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    45;
-
-  friend void swap(AccessibilityNode& a, AccessibilityNode& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(AccessibilityNode* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(AccessibilityNode* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  AccessibilityNode* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<AccessibilityNode>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const AccessibilityNode& from);
-  void MergeFrom(const AccessibilityNode& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(AccessibilityNode* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.AccessibilityNode";
-  }
-  protected:
-  explicit AccessibilityNode(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kChildIdsFieldNumber = 2,
-    kActionsFieldNumber = 22,
-    kClassNameFieldNumber = 3,
-    kTextFieldNumber = 4,
-    kContentDescriptionFieldNumber = 5,
-    kHintFieldNumber = 6,
-    kViewIdFieldNumber = 7,
-    kStateDescriptionFieldNumber = 23,
-    kBoundsFieldNumber = 8,
-    kRangeFieldNumber = 21,
-    kIdFieldNumber = 1,
-    kCheckableFieldNumber = 9,
-    kCheckedFieldNumber = 10,
-    kSelectedFieldNumber = 11,
-    kEnabledFieldNumber = 12,
-    kFocusableFieldNumber = 13,
-    kFocusedFieldNumber = 14,
-    kScrollableFieldNumber = 15,
-    kClickableFieldNumber = 16,
-    kLongClickableFieldNumber = 17,
-    kEditableFieldNumber = 18,
-    kPasswordFieldNumber = 19,
-    kHeadingFieldNumber = 20,
-  };
-  // repeated uint32 child_ids = 2;
-  int child_ids_size() const;
-  private:
-  int _internal_child_ids_size() const;
-  public:
-  void clear_child_ids();
-  private:
-  uint32_t _internal_child_ids(int index) const;
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
-      _internal_child_ids() const;
-  void _internal_add_child_ids(uint32_t value);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
-      _internal_mutable_child_ids();
-  public:
-  uint32_t child_ids(int index) const;
-  void set_child_ids(int index, uint32_t value);
-  void add_child_ids(uint32_t value);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
-      child_ids() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
-      mutable_child_ids();
-
-  // repeated .dsa.control.v1.NodeAction actions = 22;
-  int actions_size() const;
-  private:
-  int _internal_actions_size() const;
-  public:
-  void clear_actions();
-  private:
-  ::dsa::control::v1::NodeAction _internal_actions(int index) const;
-  void _internal_add_actions(::dsa::control::v1::NodeAction value);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField<int>* _internal_mutable_actions();
-  public:
-  ::dsa::control::v1::NodeAction actions(int index) const;
-  void set_actions(int index, ::dsa::control::v1::NodeAction value);
-  void add_actions(::dsa::control::v1::NodeAction value);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedField<int>& actions() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField<int>* mutable_actions();
-
-  // string class_name = 3;
-  void clear_class_name();
-  const std::string& class_name() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_class_name(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_class_name();
-  PROTOBUF_NODISCARD std::string* release_class_name();
-  void set_allocated_class_name(std::string* class_name);
-  private:
-  const std::string& _internal_class_name() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_class_name(const std::string& value);
-  std::string* _internal_mutable_class_name();
-  public:
-
-  // string text = 4;
-  void clear_text();
-  const std::string& text() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_text(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_text();
-  PROTOBUF_NODISCARD std::string* release_text();
-  void set_allocated_text(std::string* text);
-  private:
-  const std::string& _internal_text() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_text(const std::string& value);
-  std::string* _internal_mutable_text();
-  public:
-
-  // string content_description = 5;
-  void clear_content_description();
-  const std::string& content_description() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_content_description(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_content_description();
-  PROTOBUF_NODISCARD std::string* release_content_description();
-  void set_allocated_content_description(std::string* content_description);
-  private:
-  const std::string& _internal_content_description() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_content_description(const std::string& value);
-  std::string* _internal_mutable_content_description();
-  public:
-
-  // string hint = 6;
-  void clear_hint();
-  const std::string& hint() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_hint(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_hint();
-  PROTOBUF_NODISCARD std::string* release_hint();
-  void set_allocated_hint(std::string* hint);
-  private:
-  const std::string& _internal_hint() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_hint(const std::string& value);
-  std::string* _internal_mutable_hint();
-  public:
-
-  // string view_id = 7;
-  void clear_view_id();
-  const std::string& view_id() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_view_id(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_view_id();
-  PROTOBUF_NODISCARD std::string* release_view_id();
-  void set_allocated_view_id(std::string* view_id);
-  private:
-  const std::string& _internal_view_id() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_view_id(const std::string& value);
-  std::string* _internal_mutable_view_id();
-  public:
-
-  // string state_description = 23;
-  void clear_state_description();
-  const std::string& state_description() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_state_description(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_state_description();
-  PROTOBUF_NODISCARD std::string* release_state_description();
-  void set_allocated_state_description(std::string* state_description);
-  private:
-  const std::string& _internal_state_description() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_state_description(const std::string& value);
-  std::string* _internal_mutable_state_description();
-  public:
-
-  // .dsa.control.v1.Rect bounds = 8;
-  bool has_bounds() const;
-  private:
-  bool _internal_has_bounds() const;
-  public:
-  void clear_bounds();
-  const ::dsa::control::v1::Rect& bounds() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::Rect* release_bounds();
-  ::dsa::control::v1::Rect* mutable_bounds();
-  void set_allocated_bounds(::dsa::control::v1::Rect* bounds);
-  private:
-  const ::dsa::control::v1::Rect& _internal_bounds() const;
-  ::dsa::control::v1::Rect* _internal_mutable_bounds();
-  public:
-  void unsafe_arena_set_allocated_bounds(
-      ::dsa::control::v1::Rect* bounds);
-  ::dsa::control::v1::Rect* unsafe_arena_release_bounds();
-
-  // .dsa.control.v1.NodeRange range = 21;
-  bool has_range() const;
-  private:
-  bool _internal_has_range() const;
-  public:
-  void clear_range();
-  const ::dsa::control::v1::NodeRange& range() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::NodeRange* release_range();
-  ::dsa::control::v1::NodeRange* mutable_range();
-  void set_allocated_range(::dsa::control::v1::NodeRange* range);
-  private:
-  const ::dsa::control::v1::NodeRange& _internal_range() const;
-  ::dsa::control::v1::NodeRange* _internal_mutable_range();
-  public:
-  void unsafe_arena_set_allocated_range(
-      ::dsa::control::v1::NodeRange* range);
-  ::dsa::control::v1::NodeRange* unsafe_arena_release_range();
-
-  // uint32 id = 1;
-  void clear_id();
-  uint32_t id() const;
-  void set_id(uint32_t value);
-  private:
-  uint32_t _internal_id() const;
-  void _internal_set_id(uint32_t value);
-  public:
-
-  // bool checkable = 9;
-  void clear_checkable();
-  bool checkable() const;
-  void set_checkable(bool value);
-  private:
-  bool _internal_checkable() const;
-  void _internal_set_checkable(bool value);
-  public:
-
-  // bool checked = 10;
-  void clear_checked();
-  bool checked() const;
-  void set_checked(bool value);
-  private:
-  bool _internal_checked() const;
-  void _internal_set_checked(bool value);
-  public:
-
-  // bool selected = 11;
-  void clear_selected();
-  bool selected() const;
-  void set_selected(bool value);
-  private:
-  bool _internal_selected() const;
-  void _internal_set_selected(bool value);
-  public:
-
-  // bool enabled = 12;
-  void clear_enabled();
-  bool enabled() const;
-  void set_enabled(bool value);
-  private:
-  bool _internal_enabled() const;
-  void _internal_set_enabled(bool value);
-  public:
-
-  // bool focusable = 13;
-  void clear_focusable();
-  bool focusable() const;
-  void set_focusable(bool value);
-  private:
-  bool _internal_focusable() const;
-  void _internal_set_focusable(bool value);
-  public:
-
-  // bool focused = 14;
-  void clear_focused();
-  bool focused() const;
-  void set_focused(bool value);
-  private:
-  bool _internal_focused() const;
-  void _internal_set_focused(bool value);
-  public:
-
-  // bool scrollable = 15;
-  void clear_scrollable();
-  bool scrollable() const;
-  void set_scrollable(bool value);
-  private:
-  bool _internal_scrollable() const;
-  void _internal_set_scrollable(bool value);
-  public:
-
-  // bool clickable = 16;
-  void clear_clickable();
-  bool clickable() const;
-  void set_clickable(bool value);
-  private:
-  bool _internal_clickable() const;
-  void _internal_set_clickable(bool value);
-  public:
-
-  // bool long_clickable = 17;
-  void clear_long_clickable();
-  bool long_clickable() const;
-  void set_long_clickable(bool value);
-  private:
-  bool _internal_long_clickable() const;
-  void _internal_set_long_clickable(bool value);
-  public:
-
-  // bool editable = 18;
-  void clear_editable();
-  bool editable() const;
-  void set_editable(bool value);
-  private:
-  bool _internal_editable() const;
-  void _internal_set_editable(bool value);
-  public:
-
-  // bool password = 19;
-  void clear_password();
-  bool password() const;
-  void set_password(bool value);
-  private:
-  bool _internal_password() const;
-  void _internal_set_password(bool value);
-  public:
-
-  // bool heading = 20;
-  void clear_heading();
-  bool heading() const;
-  void set_heading(bool value);
-  private:
-  bool _internal_heading() const;
-  void _internal_set_heading(bool value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.AccessibilityNode)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t > child_ids_;
-    mutable std::atomic<int> _child_ids_cached_byte_size_;
-    ::PROTOBUF_NAMESPACE_ID::RepeatedField<int> actions_;
-    mutable std::atomic<int> _actions_cached_byte_size_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr class_name_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr text_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr content_description_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr hint_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr view_id_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr state_description_;
-    ::dsa::control::v1::Rect* bounds_;
-    ::dsa::control::v1::NodeRange* range_;
-    uint32_t id_;
-    bool checkable_;
-    bool checked_;
-    bool selected_;
-    bool enabled_;
-    bool focusable_;
-    bool focused_;
-    bool scrollable_;
-    bool clickable_;
-    bool long_clickable_;
-    bool editable_;
-    bool password_;
-    bool heading_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class AccessibilityTree final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AccessibilityTree) */ {
- public:
-  inline AccessibilityTree() : AccessibilityTree(nullptr) {}
-  ~AccessibilityTree() override;
-  explicit PROTOBUF_CONSTEXPR AccessibilityTree(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  AccessibilityTree(const AccessibilityTree& from);
-  AccessibilityTree(AccessibilityTree&& from) noexcept
-    : AccessibilityTree() {
-    *this = ::std::move(from);
-  }
-
-  inline AccessibilityTree& operator=(const AccessibilityTree& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline AccessibilityTree& operator=(AccessibilityTree&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const AccessibilityTree& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const AccessibilityTree* internal_default_instance() {
-    return reinterpret_cast<const AccessibilityTree*>(
-               &_AccessibilityTree_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    46;
-
-  friend void swap(AccessibilityTree& a, AccessibilityTree& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(AccessibilityTree* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(AccessibilityTree* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  AccessibilityTree* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<AccessibilityTree>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const AccessibilityTree& from);
-  void MergeFrom(const AccessibilityTree& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(AccessibilityTree* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.AccessibilityTree";
-  }
-  protected:
-  explicit AccessibilityTree(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kRootIdsFieldNumber = 4,
-    kNodesFieldNumber = 5,
-    kRemovedIdsFieldNumber = 6,
-    kTaskIdFieldNumber = 1,
-    kEpochFieldNumber = 2,
-    kFullFieldNumber = 3,
-    kFocusedIdFieldNumber = 7,
-  };
-  // repeated uint32 root_ids = 4;
-  int root_ids_size() const;
-  private:
-  int _internal_root_ids_size() const;
-  public:
-  void clear_root_ids();
-  private:
-  uint32_t _internal_root_ids(int index) const;
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
-      _internal_root_ids() const;
-  void _internal_add_root_ids(uint32_t value);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
-      _internal_mutable_root_ids();
-  public:
-  uint32_t root_ids(int index) const;
-  void set_root_ids(int index, uint32_t value);
-  void add_root_ids(uint32_t value);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
-      root_ids() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
-      mutable_root_ids();
-
-  // repeated .dsa.control.v1.AccessibilityNode nodes = 5;
-  int nodes_size() const;
-  private:
-  int _internal_nodes_size() const;
-  public:
-  void clear_nodes();
-  ::dsa::control::v1::AccessibilityNode* mutable_nodes(int index);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::AccessibilityNode >*
-      mutable_nodes();
-  private:
-  const ::dsa::control::v1::AccessibilityNode& _internal_nodes(int index) const;
-  ::dsa::control::v1::AccessibilityNode* _internal_add_nodes();
-  public:
-  const ::dsa::control::v1::AccessibilityNode& nodes(int index) const;
-  ::dsa::control::v1::AccessibilityNode* add_nodes();
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::AccessibilityNode >&
-      nodes() const;
-
-  // repeated uint32 removed_ids = 6;
-  int removed_ids_size() const;
-  private:
-  int _internal_removed_ids_size() const;
-  public:
-  void clear_removed_ids();
-  private:
-  uint32_t _internal_removed_ids(int index) const;
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
-      _internal_removed_ids() const;
-  void _internal_add_removed_ids(uint32_t value);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
-      _internal_mutable_removed_ids();
-  public:
-  uint32_t removed_ids(int index) const;
-  void set_removed_ids(int index, uint32_t value);
-  void add_removed_ids(uint32_t value);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
-      removed_ids() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
-      mutable_removed_ids();
-
-  // int32 task_id = 1;
-  void clear_task_id();
-  int32_t task_id() const;
-  void set_task_id(int32_t value);
-  private:
-  int32_t _internal_task_id() const;
-  void _internal_set_task_id(int32_t value);
-  public:
-
-  // uint32 epoch = 2;
-  void clear_epoch();
-  uint32_t epoch() const;
-  void set_epoch(uint32_t value);
-  private:
-  uint32_t _internal_epoch() const;
-  void _internal_set_epoch(uint32_t value);
-  public:
-
-  // bool full = 3;
-  void clear_full();
-  bool full() const;
-  void set_full(bool value);
-  private:
-  bool _internal_full() const;
-  void _internal_set_full(bool value);
-  public:
-
-  // uint32 focused_id = 7;
-  void clear_focused_id();
-  uint32_t focused_id() const;
-  void set_focused_id(uint32_t value);
-  private:
-  uint32_t _internal_focused_id() const;
-  void _internal_set_focused_id(uint32_t value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.AccessibilityTree)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t > root_ids_;
-    mutable std::atomic<int> _root_ids_cached_byte_size_;
-    ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::AccessibilityNode > nodes_;
-    ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t > removed_ids_;
-    mutable std::atomic<int> _removed_ids_cached_byte_size_;
-    int32_t task_id_;
-    uint32_t epoch_;
-    bool full_;
-    uint32_t focused_id_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class AccessibilityAction final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AccessibilityAction) */ {
- public:
-  inline AccessibilityAction() : AccessibilityAction(nullptr) {}
-  ~AccessibilityAction() override;
-  explicit PROTOBUF_CONSTEXPR AccessibilityAction(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  AccessibilityAction(const AccessibilityAction& from);
-  AccessibilityAction(AccessibilityAction&& from) noexcept
-    : AccessibilityAction() {
-    *this = ::std::move(from);
-  }
-
-  inline AccessibilityAction& operator=(const AccessibilityAction& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline AccessibilityAction& operator=(AccessibilityAction&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const AccessibilityAction& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const AccessibilityAction* internal_default_instance() {
-    return reinterpret_cast<const AccessibilityAction*>(
-               &_AccessibilityAction_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    47;
-
-  friend void swap(AccessibilityAction& a, AccessibilityAction& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(AccessibilityAction* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(AccessibilityAction* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  AccessibilityAction* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<AccessibilityAction>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const AccessibilityAction& from);
-  void MergeFrom(const AccessibilityAction& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(AccessibilityAction* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.AccessibilityAction";
-  }
-  protected:
-  explicit AccessibilityAction(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kTextFieldNumber = 5,
-    kTaskIdFieldNumber = 1,
-    kEpochFieldNumber = 2,
-    kNodeIdFieldNumber = 3,
-    kActionFieldNumber = 4,
-    kRequestIdFieldNumber = 6,
-  };
-  // string text = 5;
-  void clear_text();
-  const std::string& text() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_text(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_text();
-  PROTOBUF_NODISCARD std::string* release_text();
-  void set_allocated_text(std::string* text);
-  private:
-  const std::string& _internal_text() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_text(const std::string& value);
-  std::string* _internal_mutable_text();
-  public:
-
-  // int32 task_id = 1;
-  void clear_task_id();
-  int32_t task_id() const;
-  void set_task_id(int32_t value);
-  private:
-  int32_t _internal_task_id() const;
-  void _internal_set_task_id(int32_t value);
-  public:
-
-  // uint32 epoch = 2;
-  void clear_epoch();
-  uint32_t epoch() const;
-  void set_epoch(uint32_t value);
-  private:
-  uint32_t _internal_epoch() const;
-  void _internal_set_epoch(uint32_t value);
-  public:
-
-  // uint32 node_id = 3;
-  void clear_node_id();
-  uint32_t node_id() const;
-  void set_node_id(uint32_t value);
-  private:
-  uint32_t _internal_node_id() const;
-  void _internal_set_node_id(uint32_t value);
-  public:
-
-  // .dsa.control.v1.NodeAction action = 4;
-  void clear_action();
-  ::dsa::control::v1::NodeAction action() const;
-  void set_action(::dsa::control::v1::NodeAction value);
-  private:
-  ::dsa::control::v1::NodeAction _internal_action() const;
-  void _internal_set_action(::dsa::control::v1::NodeAction value);
-  public:
-
-  // uint32 request_id = 6;
-  void clear_request_id();
-  uint32_t request_id() const;
-  void set_request_id(uint32_t value);
-  private:
-  uint32_t _internal_request_id() const;
-  void _internal_set_request_id(uint32_t value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.AccessibilityAction)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr text_;
-    int32_t task_id_;
-    uint32_t epoch_;
-    uint32_t node_id_;
-    int action_;
-    uint32_t request_id_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class AccessibilityActionResult final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AccessibilityActionResult) */ {
- public:
-  inline AccessibilityActionResult() : AccessibilityActionResult(nullptr) {}
-  ~AccessibilityActionResult() override;
-  explicit PROTOBUF_CONSTEXPR AccessibilityActionResult(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  AccessibilityActionResult(const AccessibilityActionResult& from);
-  AccessibilityActionResult(AccessibilityActionResult&& from) noexcept
-    : AccessibilityActionResult() {
-    *this = ::std::move(from);
-  }
-
-  inline AccessibilityActionResult& operator=(const AccessibilityActionResult& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline AccessibilityActionResult& operator=(AccessibilityActionResult&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const AccessibilityActionResult& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const AccessibilityActionResult* internal_default_instance() {
-    return reinterpret_cast<const AccessibilityActionResult*>(
-               &_AccessibilityActionResult_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    48;
-
-  friend void swap(AccessibilityActionResult& a, AccessibilityActionResult& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(AccessibilityActionResult* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(AccessibilityActionResult* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  AccessibilityActionResult* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<AccessibilityActionResult>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const AccessibilityActionResult& from);
-  void MergeFrom(const AccessibilityActionResult& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(AccessibilityActionResult* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.AccessibilityActionResult";
-  }
-  protected:
-  explicit AccessibilityActionResult(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kErrorFieldNumber = 4,
-    kTaskIdFieldNumber = 1,
-    kRequestIdFieldNumber = 2,
-    kDoneFieldNumber = 3,
-  };
-  // string error = 4;
-  void clear_error();
-  const std::string& error() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_error(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_error();
-  PROTOBUF_NODISCARD std::string* release_error();
-  void set_allocated_error(std::string* error);
-  private:
-  const std::string& _internal_error() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_error(const std::string& value);
-  std::string* _internal_mutable_error();
-  public:
-
-  // int32 task_id = 1;
-  void clear_task_id();
-  int32_t task_id() const;
-  void set_task_id(int32_t value);
-  private:
-  int32_t _internal_task_id() const;
-  void _internal_set_task_id(int32_t value);
-  public:
-
-  // uint32 request_id = 2;
-  void clear_request_id();
-  uint32_t request_id() const;
-  void set_request_id(uint32_t value);
-  private:
-  uint32_t _internal_request_id() const;
-  void _internal_set_request_id(uint32_t value);
-  public:
-
-  // bool done = 3;
-  void clear_done();
-  bool done() const;
-  void set_done(bool value);
-  private:
-  bool _internal_done() const;
-  void _internal_set_done(bool value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.AccessibilityActionResult)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr error_;
-    int32_t task_id_;
-    uint32_t request_id_;
-    bool done_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
 class Envelope final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.Envelope) */ {
  public:
@@ -8534,10 +7835,10 @@ class Envelope final :
     kOpenFile = 52,
     kFileChunk = 53,
     kFileProgress = 54,
-    kAccessibilityWatch = 80,
-    kAccessibilityTree = 81,
-    kAccessibilityAction = 82,
-    kAccessibilityActionResult = 83,
+    kNotification = 70,
+    kNotificationRemoved = 71,
+    kNotificationClicked = 72,
+    kNotificationDismissed = 73,
     BODY_NOT_SET = 0,
   };
 
@@ -8546,7 +7847,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    49;
+    47;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -8651,10 +7952,10 @@ class Envelope final :
     kOpenFileFieldNumber = 52,
     kFileChunkFieldNumber = 53,
     kFileProgressFieldNumber = 54,
-    kAccessibilityWatchFieldNumber = 80,
-    kAccessibilityTreeFieldNumber = 81,
-    kAccessibilityActionFieldNumber = 82,
-    kAccessibilityActionResultFieldNumber = 83,
+    kNotificationFieldNumber = 70,
+    kNotificationRemovedFieldNumber = 71,
+    kNotificationClickedFieldNumber = 72,
+    kNotificationDismissedFieldNumber = 73,
   };
   // .dsa.control.v1.Hello hello = 1;
   bool has_hello() const;
@@ -9394,77 +8695,77 @@ class Envelope final :
       ::dsa::control::v1::FileProgress* file_progress);
   ::dsa::control::v1::FileProgress* unsafe_arena_release_file_progress();
 
-  // .dsa.control.v1.AccessibilityWatch accessibility_watch = 80;
-  bool has_accessibility_watch() const;
+  // .dsa.control.v1.GuestNotification notification = 70;
+  bool has_notification() const;
   private:
-  bool _internal_has_accessibility_watch() const;
+  bool _internal_has_notification() const;
   public:
-  void clear_accessibility_watch();
-  const ::dsa::control::v1::AccessibilityWatch& accessibility_watch() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::AccessibilityWatch* release_accessibility_watch();
-  ::dsa::control::v1::AccessibilityWatch* mutable_accessibility_watch();
-  void set_allocated_accessibility_watch(::dsa::control::v1::AccessibilityWatch* accessibility_watch);
+  void clear_notification();
+  const ::dsa::control::v1::GuestNotification& notification() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::GuestNotification* release_notification();
+  ::dsa::control::v1::GuestNotification* mutable_notification();
+  void set_allocated_notification(::dsa::control::v1::GuestNotification* notification);
   private:
-  const ::dsa::control::v1::AccessibilityWatch& _internal_accessibility_watch() const;
-  ::dsa::control::v1::AccessibilityWatch* _internal_mutable_accessibility_watch();
+  const ::dsa::control::v1::GuestNotification& _internal_notification() const;
+  ::dsa::control::v1::GuestNotification* _internal_mutable_notification();
   public:
-  void unsafe_arena_set_allocated_accessibility_watch(
-      ::dsa::control::v1::AccessibilityWatch* accessibility_watch);
-  ::dsa::control::v1::AccessibilityWatch* unsafe_arena_release_accessibility_watch();
+  void unsafe_arena_set_allocated_notification(
+      ::dsa::control::v1::GuestNotification* notification);
+  ::dsa::control::v1::GuestNotification* unsafe_arena_release_notification();
 
-  // .dsa.control.v1.AccessibilityTree accessibility_tree = 81;
-  bool has_accessibility_tree() const;
+  // .dsa.control.v1.NotificationRemoved notification_removed = 71;
+  bool has_notification_removed() const;
   private:
-  bool _internal_has_accessibility_tree() const;
+  bool _internal_has_notification_removed() const;
   public:
-  void clear_accessibility_tree();
-  const ::dsa::control::v1::AccessibilityTree& accessibility_tree() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::AccessibilityTree* release_accessibility_tree();
-  ::dsa::control::v1::AccessibilityTree* mutable_accessibility_tree();
-  void set_allocated_accessibility_tree(::dsa::control::v1::AccessibilityTree* accessibility_tree);
+  void clear_notification_removed();
+  const ::dsa::control::v1::NotificationRemoved& notification_removed() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::NotificationRemoved* release_notification_removed();
+  ::dsa::control::v1::NotificationRemoved* mutable_notification_removed();
+  void set_allocated_notification_removed(::dsa::control::v1::NotificationRemoved* notification_removed);
   private:
-  const ::dsa::control::v1::AccessibilityTree& _internal_accessibility_tree() const;
-  ::dsa::control::v1::AccessibilityTree* _internal_mutable_accessibility_tree();
+  const ::dsa::control::v1::NotificationRemoved& _internal_notification_removed() const;
+  ::dsa::control::v1::NotificationRemoved* _internal_mutable_notification_removed();
   public:
-  void unsafe_arena_set_allocated_accessibility_tree(
-      ::dsa::control::v1::AccessibilityTree* accessibility_tree);
-  ::dsa::control::v1::AccessibilityTree* unsafe_arena_release_accessibility_tree();
+  void unsafe_arena_set_allocated_notification_removed(
+      ::dsa::control::v1::NotificationRemoved* notification_removed);
+  ::dsa::control::v1::NotificationRemoved* unsafe_arena_release_notification_removed();
 
-  // .dsa.control.v1.AccessibilityAction accessibility_action = 82;
-  bool has_accessibility_action() const;
+  // .dsa.control.v1.NotificationClicked notification_clicked = 72;
+  bool has_notification_clicked() const;
   private:
-  bool _internal_has_accessibility_action() const;
+  bool _internal_has_notification_clicked() const;
   public:
-  void clear_accessibility_action();
-  const ::dsa::control::v1::AccessibilityAction& accessibility_action() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::AccessibilityAction* release_accessibility_action();
-  ::dsa::control::v1::AccessibilityAction* mutable_accessibility_action();
-  void set_allocated_accessibility_action(::dsa::control::v1::AccessibilityAction* accessibility_action);
+  void clear_notification_clicked();
+  const ::dsa::control::v1::NotificationClicked& notification_clicked() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::NotificationClicked* release_notification_clicked();
+  ::dsa::control::v1::NotificationClicked* mutable_notification_clicked();
+  void set_allocated_notification_clicked(::dsa::control::v1::NotificationClicked* notification_clicked);
   private:
-  const ::dsa::control::v1::AccessibilityAction& _internal_accessibility_action() const;
-  ::dsa::control::v1::AccessibilityAction* _internal_mutable_accessibility_action();
+  const ::dsa::control::v1::NotificationClicked& _internal_notification_clicked() const;
+  ::dsa::control::v1::NotificationClicked* _internal_mutable_notification_clicked();
   public:
-  void unsafe_arena_set_allocated_accessibility_action(
-      ::dsa::control::v1::AccessibilityAction* accessibility_action);
-  ::dsa::control::v1::AccessibilityAction* unsafe_arena_release_accessibility_action();
+  void unsafe_arena_set_allocated_notification_clicked(
+      ::dsa::control::v1::NotificationClicked* notification_clicked);
+  ::dsa::control::v1::NotificationClicked* unsafe_arena_release_notification_clicked();
 
-  // .dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;
-  bool has_accessibility_action_result() const;
+  // .dsa.control.v1.NotificationDismissed notification_dismissed = 73;
+  bool has_notification_dismissed() const;
   private:
-  bool _internal_has_accessibility_action_result() const;
+  bool _internal_has_notification_dismissed() const;
   public:
-  void clear_accessibility_action_result();
-  const ::dsa::control::v1::AccessibilityActionResult& accessibility_action_result() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::AccessibilityActionResult* release_accessibility_action_result();
-  ::dsa::control::v1::AccessibilityActionResult* mutable_accessibility_action_result();
-  void set_allocated_accessibility_action_result(::dsa::control::v1::AccessibilityActionResult* accessibility_action_result);
+  void clear_notification_dismissed();
+  const ::dsa::control::v1::NotificationDismissed& notification_dismissed() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::NotificationDismissed* release_notification_dismissed();
+  ::dsa::control::v1::NotificationDismissed* mutable_notification_dismissed();
+  void set_allocated_notification_dismissed(::dsa::control::v1::NotificationDismissed* notification_dismissed);
   private:
-  const ::dsa::control::v1::AccessibilityActionResult& _internal_accessibility_action_result() const;
-  ::dsa::control::v1::AccessibilityActionResult* _internal_mutable_accessibility_action_result();
+  const ::dsa::control::v1::NotificationDismissed& _internal_notification_dismissed() const;
+  ::dsa::control::v1::NotificationDismissed* _internal_mutable_notification_dismissed();
   public:
-  void unsafe_arena_set_allocated_accessibility_action_result(
-      ::dsa::control::v1::AccessibilityActionResult* accessibility_action_result);
-  ::dsa::control::v1::AccessibilityActionResult* unsafe_arena_release_accessibility_action_result();
+  void unsafe_arena_set_allocated_notification_dismissed(
+      ::dsa::control::v1::NotificationDismissed* notification_dismissed);
+  ::dsa::control::v1::NotificationDismissed* unsafe_arena_release_notification_dismissed();
 
   void clear_body();
   BodyCase body_case() const;
@@ -9512,10 +8813,10 @@ class Envelope final :
   void set_has_open_file();
   void set_has_file_chunk();
   void set_has_file_progress();
-  void set_has_accessibility_watch();
-  void set_has_accessibility_tree();
-  void set_has_accessibility_action();
-  void set_has_accessibility_action_result();
+  void set_has_notification();
+  void set_has_notification_removed();
+  void set_has_notification_clicked();
+  void set_has_notification_dismissed();
 
   inline bool has_body() const;
   inline void clear_has_body();
@@ -9568,10 +8869,10 @@ class Envelope final :
       ::dsa::control::v1::OpenFile* open_file_;
       ::dsa::control::v1::FileChunk* file_chunk_;
       ::dsa::control::v1::FileProgress* file_progress_;
-      ::dsa::control::v1::AccessibilityWatch* accessibility_watch_;
-      ::dsa::control::v1::AccessibilityTree* accessibility_tree_;
-      ::dsa::control::v1::AccessibilityAction* accessibility_action_;
-      ::dsa::control::v1::AccessibilityActionResult* accessibility_action_result_;
+      ::dsa::control::v1::GuestNotification* notification_;
+      ::dsa::control::v1::NotificationRemoved* notification_removed_;
+      ::dsa::control::v1::NotificationClicked* notification_clicked_;
+      ::dsa::control::v1::NotificationDismissed* notification_dismissed_;
     } body_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -12038,6 +11339,552 @@ inline void ClipboardSharing::set_on(bool value) {
 
 // -------------------------------------------------------------------
 
+// GuestNotification
+
+// string key = 1;
+inline void GuestNotification::clear_key() {
+  _impl_.key_.ClearToEmpty();
+}
+inline const std::string& GuestNotification::key() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.key)
+  return _internal_key();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void GuestNotification::set_key(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.key_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.key)
+}
+inline std::string* GuestNotification::mutable_key() {
+  std::string* _s = _internal_mutable_key();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.GuestNotification.key)
+  return _s;
+}
+inline const std::string& GuestNotification::_internal_key() const {
+  return _impl_.key_.Get();
+}
+inline void GuestNotification::_internal_set_key(const std::string& value) {
+  
+  _impl_.key_.Set(value, GetArenaForAllocation());
+}
+inline std::string* GuestNotification::_internal_mutable_key() {
+  
+  return _impl_.key_.Mutable(GetArenaForAllocation());
+}
+inline std::string* GuestNotification::release_key() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.GuestNotification.key)
+  return _impl_.key_.Release();
+}
+inline void GuestNotification::set_allocated_key(std::string* key) {
+  if (key != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.key_.SetAllocated(key, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.key_.IsDefault()) {
+    _impl_.key_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.GuestNotification.key)
+}
+
+// string package_name = 2;
+inline void GuestNotification::clear_package_name() {
+  _impl_.package_name_.ClearToEmpty();
+}
+inline const std::string& GuestNotification::package_name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.package_name)
+  return _internal_package_name();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void GuestNotification::set_package_name(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.package_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.package_name)
+}
+inline std::string* GuestNotification::mutable_package_name() {
+  std::string* _s = _internal_mutable_package_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.GuestNotification.package_name)
+  return _s;
+}
+inline const std::string& GuestNotification::_internal_package_name() const {
+  return _impl_.package_name_.Get();
+}
+inline void GuestNotification::_internal_set_package_name(const std::string& value) {
+  
+  _impl_.package_name_.Set(value, GetArenaForAllocation());
+}
+inline std::string* GuestNotification::_internal_mutable_package_name() {
+  
+  return _impl_.package_name_.Mutable(GetArenaForAllocation());
+}
+inline std::string* GuestNotification::release_package_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.GuestNotification.package_name)
+  return _impl_.package_name_.Release();
+}
+inline void GuestNotification::set_allocated_package_name(std::string* package_name) {
+  if (package_name != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.package_name_.SetAllocated(package_name, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.package_name_.IsDefault()) {
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.GuestNotification.package_name)
+}
+
+// string app_label = 3;
+inline void GuestNotification::clear_app_label() {
+  _impl_.app_label_.ClearToEmpty();
+}
+inline const std::string& GuestNotification::app_label() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.app_label)
+  return _internal_app_label();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void GuestNotification::set_app_label(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.app_label_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.app_label)
+}
+inline std::string* GuestNotification::mutable_app_label() {
+  std::string* _s = _internal_mutable_app_label();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.GuestNotification.app_label)
+  return _s;
+}
+inline const std::string& GuestNotification::_internal_app_label() const {
+  return _impl_.app_label_.Get();
+}
+inline void GuestNotification::_internal_set_app_label(const std::string& value) {
+  
+  _impl_.app_label_.Set(value, GetArenaForAllocation());
+}
+inline std::string* GuestNotification::_internal_mutable_app_label() {
+  
+  return _impl_.app_label_.Mutable(GetArenaForAllocation());
+}
+inline std::string* GuestNotification::release_app_label() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.GuestNotification.app_label)
+  return _impl_.app_label_.Release();
+}
+inline void GuestNotification::set_allocated_app_label(std::string* app_label) {
+  if (app_label != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.app_label_.SetAllocated(app_label, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.app_label_.IsDefault()) {
+    _impl_.app_label_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.GuestNotification.app_label)
+}
+
+// string title = 4;
+inline void GuestNotification::clear_title() {
+  _impl_.title_.ClearToEmpty();
+}
+inline const std::string& GuestNotification::title() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.title)
+  return _internal_title();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void GuestNotification::set_title(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.title_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.title)
+}
+inline std::string* GuestNotification::mutable_title() {
+  std::string* _s = _internal_mutable_title();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.GuestNotification.title)
+  return _s;
+}
+inline const std::string& GuestNotification::_internal_title() const {
+  return _impl_.title_.Get();
+}
+inline void GuestNotification::_internal_set_title(const std::string& value) {
+  
+  _impl_.title_.Set(value, GetArenaForAllocation());
+}
+inline std::string* GuestNotification::_internal_mutable_title() {
+  
+  return _impl_.title_.Mutable(GetArenaForAllocation());
+}
+inline std::string* GuestNotification::release_title() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.GuestNotification.title)
+  return _impl_.title_.Release();
+}
+inline void GuestNotification::set_allocated_title(std::string* title) {
+  if (title != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.title_.SetAllocated(title, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.title_.IsDefault()) {
+    _impl_.title_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.GuestNotification.title)
+}
+
+// string text = 5;
+inline void GuestNotification::clear_text() {
+  _impl_.text_.ClearToEmpty();
+}
+inline const std::string& GuestNotification::text() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.text)
+  return _internal_text();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void GuestNotification::set_text(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.text_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.text)
+}
+inline std::string* GuestNotification::mutable_text() {
+  std::string* _s = _internal_mutable_text();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.GuestNotification.text)
+  return _s;
+}
+inline const std::string& GuestNotification::_internal_text() const {
+  return _impl_.text_.Get();
+}
+inline void GuestNotification::_internal_set_text(const std::string& value) {
+  
+  _impl_.text_.Set(value, GetArenaForAllocation());
+}
+inline std::string* GuestNotification::_internal_mutable_text() {
+  
+  return _impl_.text_.Mutable(GetArenaForAllocation());
+}
+inline std::string* GuestNotification::release_text() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.GuestNotification.text)
+  return _impl_.text_.Release();
+}
+inline void GuestNotification::set_allocated_text(std::string* text) {
+  if (text != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.text_.SetAllocated(text, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.text_.IsDefault()) {
+    _impl_.text_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.GuestNotification.text)
+}
+
+// bytes icon_png = 6;
+inline void GuestNotification::clear_icon_png() {
+  _impl_.icon_png_.ClearToEmpty();
+}
+inline const std::string& GuestNotification::icon_png() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.icon_png)
+  return _internal_icon_png();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void GuestNotification::set_icon_png(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.icon_png_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.icon_png)
+}
+inline std::string* GuestNotification::mutable_icon_png() {
+  std::string* _s = _internal_mutable_icon_png();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.GuestNotification.icon_png)
+  return _s;
+}
+inline const std::string& GuestNotification::_internal_icon_png() const {
+  return _impl_.icon_png_.Get();
+}
+inline void GuestNotification::_internal_set_icon_png(const std::string& value) {
+  
+  _impl_.icon_png_.Set(value, GetArenaForAllocation());
+}
+inline std::string* GuestNotification::_internal_mutable_icon_png() {
+  
+  return _impl_.icon_png_.Mutable(GetArenaForAllocation());
+}
+inline std::string* GuestNotification::release_icon_png() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.GuestNotification.icon_png)
+  return _impl_.icon_png_.Release();
+}
+inline void GuestNotification::set_allocated_icon_png(std::string* icon_png) {
+  if (icon_png != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.icon_png_.SetAllocated(icon_png, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.icon_png_.IsDefault()) {
+    _impl_.icon_png_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.GuestNotification.icon_png)
+}
+
+// int32 importance = 7;
+inline void GuestNotification::clear_importance() {
+  _impl_.importance_ = 0;
+}
+inline int32_t GuestNotification::_internal_importance() const {
+  return _impl_.importance_;
+}
+inline int32_t GuestNotification::importance() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.importance)
+  return _internal_importance();
+}
+inline void GuestNotification::_internal_set_importance(int32_t value) {
+  
+  _impl_.importance_ = value;
+}
+inline void GuestNotification::set_importance(int32_t value) {
+  _internal_set_importance(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.importance)
+}
+
+// bool high_priority = 8;
+inline void GuestNotification::clear_high_priority() {
+  _impl_.high_priority_ = false;
+}
+inline bool GuestNotification::_internal_high_priority() const {
+  return _impl_.high_priority_;
+}
+inline bool GuestNotification::high_priority() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.high_priority)
+  return _internal_high_priority();
+}
+inline void GuestNotification::_internal_set_high_priority(bool value) {
+  
+  _impl_.high_priority_ = value;
+}
+inline void GuestNotification::set_high_priority(bool value) {
+  _internal_set_high_priority(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.high_priority)
+}
+
+// bool clearable = 9;
+inline void GuestNotification::clear_clearable() {
+  _impl_.clearable_ = false;
+}
+inline bool GuestNotification::_internal_clearable() const {
+  return _impl_.clearable_;
+}
+inline bool GuestNotification::clearable() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.clearable)
+  return _internal_clearable();
+}
+inline void GuestNotification::_internal_set_clearable(bool value) {
+  
+  _impl_.clearable_ = value;
+}
+inline void GuestNotification::set_clearable(bool value) {
+  _internal_set_clearable(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.clearable)
+}
+
+// int64 when_millis = 10;
+inline void GuestNotification::clear_when_millis() {
+  _impl_.when_millis_ = int64_t{0};
+}
+inline int64_t GuestNotification::_internal_when_millis() const {
+  return _impl_.when_millis_;
+}
+inline int64_t GuestNotification::when_millis() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.when_millis)
+  return _internal_when_millis();
+}
+inline void GuestNotification::_internal_set_when_millis(int64_t value) {
+  
+  _impl_.when_millis_ = value;
+}
+inline void GuestNotification::set_when_millis(int64_t value) {
+  _internal_set_when_millis(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.when_millis)
+}
+
+// -------------------------------------------------------------------
+
+// NotificationRemoved
+
+// string key = 1;
+inline void NotificationRemoved::clear_key() {
+  _impl_.key_.ClearToEmpty();
+}
+inline const std::string& NotificationRemoved::key() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.NotificationRemoved.key)
+  return _internal_key();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void NotificationRemoved::set_key(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.key_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.NotificationRemoved.key)
+}
+inline std::string* NotificationRemoved::mutable_key() {
+  std::string* _s = _internal_mutable_key();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.NotificationRemoved.key)
+  return _s;
+}
+inline const std::string& NotificationRemoved::_internal_key() const {
+  return _impl_.key_.Get();
+}
+inline void NotificationRemoved::_internal_set_key(const std::string& value) {
+  
+  _impl_.key_.Set(value, GetArenaForAllocation());
+}
+inline std::string* NotificationRemoved::_internal_mutable_key() {
+  
+  return _impl_.key_.Mutable(GetArenaForAllocation());
+}
+inline std::string* NotificationRemoved::release_key() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.NotificationRemoved.key)
+  return _impl_.key_.Release();
+}
+inline void NotificationRemoved::set_allocated_key(std::string* key) {
+  if (key != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.key_.SetAllocated(key, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.key_.IsDefault()) {
+    _impl_.key_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.NotificationRemoved.key)
+}
+
+// -------------------------------------------------------------------
+
+// NotificationClicked
+
+// string key = 1;
+inline void NotificationClicked::clear_key() {
+  _impl_.key_.ClearToEmpty();
+}
+inline const std::string& NotificationClicked::key() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.NotificationClicked.key)
+  return _internal_key();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void NotificationClicked::set_key(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.key_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.NotificationClicked.key)
+}
+inline std::string* NotificationClicked::mutable_key() {
+  std::string* _s = _internal_mutable_key();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.NotificationClicked.key)
+  return _s;
+}
+inline const std::string& NotificationClicked::_internal_key() const {
+  return _impl_.key_.Get();
+}
+inline void NotificationClicked::_internal_set_key(const std::string& value) {
+  
+  _impl_.key_.Set(value, GetArenaForAllocation());
+}
+inline std::string* NotificationClicked::_internal_mutable_key() {
+  
+  return _impl_.key_.Mutable(GetArenaForAllocation());
+}
+inline std::string* NotificationClicked::release_key() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.NotificationClicked.key)
+  return _impl_.key_.Release();
+}
+inline void NotificationClicked::set_allocated_key(std::string* key) {
+  if (key != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.key_.SetAllocated(key, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.key_.IsDefault()) {
+    _impl_.key_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.NotificationClicked.key)
+}
+
+// -------------------------------------------------------------------
+
+// NotificationDismissed
+
+// string key = 1;
+inline void NotificationDismissed::clear_key() {
+  _impl_.key_.ClearToEmpty();
+}
+inline const std::string& NotificationDismissed::key() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.NotificationDismissed.key)
+  return _internal_key();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void NotificationDismissed::set_key(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.key_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.NotificationDismissed.key)
+}
+inline std::string* NotificationDismissed::mutable_key() {
+  std::string* _s = _internal_mutable_key();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.NotificationDismissed.key)
+  return _s;
+}
+inline const std::string& NotificationDismissed::_internal_key() const {
+  return _impl_.key_.Get();
+}
+inline void NotificationDismissed::_internal_set_key(const std::string& value) {
+  
+  _impl_.key_.Set(value, GetArenaForAllocation());
+}
+inline std::string* NotificationDismissed::_internal_mutable_key() {
+  
+  return _impl_.key_.Mutable(GetArenaForAllocation());
+}
+inline std::string* NotificationDismissed::release_key() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.NotificationDismissed.key)
+  return _impl_.key_.Release();
+}
+inline void NotificationDismissed::set_allocated_key(std::string* key) {
+  if (key != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.key_.SetAllocated(key, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.key_.IsDefault()) {
+    _impl_.key_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.NotificationDismissed.key)
+}
+
+// -------------------------------------------------------------------
+
 // RequestGuestMemory
 
 // -------------------------------------------------------------------
@@ -13352,1434 +13199,6 @@ inline void ClockAnswer::_internal_set_guest_mono_ns(uint64_t value) {
 inline void ClockAnswer::set_guest_mono_ns(uint64_t value) {
   _internal_set_guest_mono_ns(value);
   // @@protoc_insertion_point(field_set:dsa.control.v1.ClockAnswer.guest_mono_ns)
-}
-
-// -------------------------------------------------------------------
-
-// AccessibilityWatch
-
-// int32 task_id = 1;
-inline void AccessibilityWatch::clear_task_id() {
-  _impl_.task_id_ = 0;
-}
-inline int32_t AccessibilityWatch::_internal_task_id() const {
-  return _impl_.task_id_;
-}
-inline int32_t AccessibilityWatch::task_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityWatch.task_id)
-  return _internal_task_id();
-}
-inline void AccessibilityWatch::_internal_set_task_id(int32_t value) {
-  
-  _impl_.task_id_ = value;
-}
-inline void AccessibilityWatch::set_task_id(int32_t value) {
-  _internal_set_task_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityWatch.task_id)
-}
-
-// bool on = 2;
-inline void AccessibilityWatch::clear_on() {
-  _impl_.on_ = false;
-}
-inline bool AccessibilityWatch::_internal_on() const {
-  return _impl_.on_;
-}
-inline bool AccessibilityWatch::on() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityWatch.on)
-  return _internal_on();
-}
-inline void AccessibilityWatch::_internal_set_on(bool value) {
-  
-  _impl_.on_ = value;
-}
-inline void AccessibilityWatch::set_on(bool value) {
-  _internal_set_on(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityWatch.on)
-}
-
-// -------------------------------------------------------------------
-
-// NodeRange
-
-// float min = 1;
-inline void NodeRange::clear_min() {
-  _impl_.min_ = 0;
-}
-inline float NodeRange::_internal_min() const {
-  return _impl_.min_;
-}
-inline float NodeRange::min() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.NodeRange.min)
-  return _internal_min();
-}
-inline void NodeRange::_internal_set_min(float value) {
-  
-  _impl_.min_ = value;
-}
-inline void NodeRange::set_min(float value) {
-  _internal_set_min(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.NodeRange.min)
-}
-
-// float max = 2;
-inline void NodeRange::clear_max() {
-  _impl_.max_ = 0;
-}
-inline float NodeRange::_internal_max() const {
-  return _impl_.max_;
-}
-inline float NodeRange::max() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.NodeRange.max)
-  return _internal_max();
-}
-inline void NodeRange::_internal_set_max(float value) {
-  
-  _impl_.max_ = value;
-}
-inline void NodeRange::set_max(float value) {
-  _internal_set_max(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.NodeRange.max)
-}
-
-// float current = 3;
-inline void NodeRange::clear_current() {
-  _impl_.current_ = 0;
-}
-inline float NodeRange::_internal_current() const {
-  return _impl_.current_;
-}
-inline float NodeRange::current() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.NodeRange.current)
-  return _internal_current();
-}
-inline void NodeRange::_internal_set_current(float value) {
-  
-  _impl_.current_ = value;
-}
-inline void NodeRange::set_current(float value) {
-  _internal_set_current(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.NodeRange.current)
-}
-
-// -------------------------------------------------------------------
-
-// AccessibilityNode
-
-// uint32 id = 1;
-inline void AccessibilityNode::clear_id() {
-  _impl_.id_ = 0u;
-}
-inline uint32_t AccessibilityNode::_internal_id() const {
-  return _impl_.id_;
-}
-inline uint32_t AccessibilityNode::id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.id)
-  return _internal_id();
-}
-inline void AccessibilityNode::_internal_set_id(uint32_t value) {
-  
-  _impl_.id_ = value;
-}
-inline void AccessibilityNode::set_id(uint32_t value) {
-  _internal_set_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.id)
-}
-
-// repeated uint32 child_ids = 2;
-inline int AccessibilityNode::_internal_child_ids_size() const {
-  return _impl_.child_ids_.size();
-}
-inline int AccessibilityNode::child_ids_size() const {
-  return _internal_child_ids_size();
-}
-inline void AccessibilityNode::clear_child_ids() {
-  _impl_.child_ids_.Clear();
-}
-inline uint32_t AccessibilityNode::_internal_child_ids(int index) const {
-  return _impl_.child_ids_.Get(index);
-}
-inline uint32_t AccessibilityNode::child_ids(int index) const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.child_ids)
-  return _internal_child_ids(index);
-}
-inline void AccessibilityNode::set_child_ids(int index, uint32_t value) {
-  _impl_.child_ids_.Set(index, value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.child_ids)
-}
-inline void AccessibilityNode::_internal_add_child_ids(uint32_t value) {
-  _impl_.child_ids_.Add(value);
-}
-inline void AccessibilityNode::add_child_ids(uint32_t value) {
-  _internal_add_child_ids(value);
-  // @@protoc_insertion_point(field_add:dsa.control.v1.AccessibilityNode.child_ids)
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
-AccessibilityNode::_internal_child_ids() const {
-  return _impl_.child_ids_;
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
-AccessibilityNode::child_ids() const {
-  // @@protoc_insertion_point(field_list:dsa.control.v1.AccessibilityNode.child_ids)
-  return _internal_child_ids();
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
-AccessibilityNode::_internal_mutable_child_ids() {
-  return &_impl_.child_ids_;
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
-AccessibilityNode::mutable_child_ids() {
-  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.AccessibilityNode.child_ids)
-  return _internal_mutable_child_ids();
-}
-
-// string class_name = 3;
-inline void AccessibilityNode::clear_class_name() {
-  _impl_.class_name_.ClearToEmpty();
-}
-inline const std::string& AccessibilityNode::class_name() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.class_name)
-  return _internal_class_name();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void AccessibilityNode::set_class_name(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.class_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.class_name)
-}
-inline std::string* AccessibilityNode::mutable_class_name() {
-  std::string* _s = _internal_mutable_class_name();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.class_name)
-  return _s;
-}
-inline const std::string& AccessibilityNode::_internal_class_name() const {
-  return _impl_.class_name_.Get();
-}
-inline void AccessibilityNode::_internal_set_class_name(const std::string& value) {
-  
-  _impl_.class_name_.Set(value, GetArenaForAllocation());
-}
-inline std::string* AccessibilityNode::_internal_mutable_class_name() {
-  
-  return _impl_.class_name_.Mutable(GetArenaForAllocation());
-}
-inline std::string* AccessibilityNode::release_class_name() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.class_name)
-  return _impl_.class_name_.Release();
-}
-inline void AccessibilityNode::set_allocated_class_name(std::string* class_name) {
-  if (class_name != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.class_name_.SetAllocated(class_name, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.class_name_.IsDefault()) {
-    _impl_.class_name_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.class_name)
-}
-
-// string text = 4;
-inline void AccessibilityNode::clear_text() {
-  _impl_.text_.ClearToEmpty();
-}
-inline const std::string& AccessibilityNode::text() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.text)
-  return _internal_text();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void AccessibilityNode::set_text(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.text_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.text)
-}
-inline std::string* AccessibilityNode::mutable_text() {
-  std::string* _s = _internal_mutable_text();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.text)
-  return _s;
-}
-inline const std::string& AccessibilityNode::_internal_text() const {
-  return _impl_.text_.Get();
-}
-inline void AccessibilityNode::_internal_set_text(const std::string& value) {
-  
-  _impl_.text_.Set(value, GetArenaForAllocation());
-}
-inline std::string* AccessibilityNode::_internal_mutable_text() {
-  
-  return _impl_.text_.Mutable(GetArenaForAllocation());
-}
-inline std::string* AccessibilityNode::release_text() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.text)
-  return _impl_.text_.Release();
-}
-inline void AccessibilityNode::set_allocated_text(std::string* text) {
-  if (text != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.text_.SetAllocated(text, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.text_.IsDefault()) {
-    _impl_.text_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.text)
-}
-
-// string content_description = 5;
-inline void AccessibilityNode::clear_content_description() {
-  _impl_.content_description_.ClearToEmpty();
-}
-inline const std::string& AccessibilityNode::content_description() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.content_description)
-  return _internal_content_description();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void AccessibilityNode::set_content_description(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.content_description_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.content_description)
-}
-inline std::string* AccessibilityNode::mutable_content_description() {
-  std::string* _s = _internal_mutable_content_description();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.content_description)
-  return _s;
-}
-inline const std::string& AccessibilityNode::_internal_content_description() const {
-  return _impl_.content_description_.Get();
-}
-inline void AccessibilityNode::_internal_set_content_description(const std::string& value) {
-  
-  _impl_.content_description_.Set(value, GetArenaForAllocation());
-}
-inline std::string* AccessibilityNode::_internal_mutable_content_description() {
-  
-  return _impl_.content_description_.Mutable(GetArenaForAllocation());
-}
-inline std::string* AccessibilityNode::release_content_description() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.content_description)
-  return _impl_.content_description_.Release();
-}
-inline void AccessibilityNode::set_allocated_content_description(std::string* content_description) {
-  if (content_description != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.content_description_.SetAllocated(content_description, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.content_description_.IsDefault()) {
-    _impl_.content_description_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.content_description)
-}
-
-// string hint = 6;
-inline void AccessibilityNode::clear_hint() {
-  _impl_.hint_.ClearToEmpty();
-}
-inline const std::string& AccessibilityNode::hint() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.hint)
-  return _internal_hint();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void AccessibilityNode::set_hint(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.hint_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.hint)
-}
-inline std::string* AccessibilityNode::mutable_hint() {
-  std::string* _s = _internal_mutable_hint();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.hint)
-  return _s;
-}
-inline const std::string& AccessibilityNode::_internal_hint() const {
-  return _impl_.hint_.Get();
-}
-inline void AccessibilityNode::_internal_set_hint(const std::string& value) {
-  
-  _impl_.hint_.Set(value, GetArenaForAllocation());
-}
-inline std::string* AccessibilityNode::_internal_mutable_hint() {
-  
-  return _impl_.hint_.Mutable(GetArenaForAllocation());
-}
-inline std::string* AccessibilityNode::release_hint() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.hint)
-  return _impl_.hint_.Release();
-}
-inline void AccessibilityNode::set_allocated_hint(std::string* hint) {
-  if (hint != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.hint_.SetAllocated(hint, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.hint_.IsDefault()) {
-    _impl_.hint_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.hint)
-}
-
-// string view_id = 7;
-inline void AccessibilityNode::clear_view_id() {
-  _impl_.view_id_.ClearToEmpty();
-}
-inline const std::string& AccessibilityNode::view_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.view_id)
-  return _internal_view_id();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void AccessibilityNode::set_view_id(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.view_id_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.view_id)
-}
-inline std::string* AccessibilityNode::mutable_view_id() {
-  std::string* _s = _internal_mutable_view_id();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.view_id)
-  return _s;
-}
-inline const std::string& AccessibilityNode::_internal_view_id() const {
-  return _impl_.view_id_.Get();
-}
-inline void AccessibilityNode::_internal_set_view_id(const std::string& value) {
-  
-  _impl_.view_id_.Set(value, GetArenaForAllocation());
-}
-inline std::string* AccessibilityNode::_internal_mutable_view_id() {
-  
-  return _impl_.view_id_.Mutable(GetArenaForAllocation());
-}
-inline std::string* AccessibilityNode::release_view_id() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.view_id)
-  return _impl_.view_id_.Release();
-}
-inline void AccessibilityNode::set_allocated_view_id(std::string* view_id) {
-  if (view_id != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.view_id_.SetAllocated(view_id, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.view_id_.IsDefault()) {
-    _impl_.view_id_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.view_id)
-}
-
-// .dsa.control.v1.Rect bounds = 8;
-inline bool AccessibilityNode::_internal_has_bounds() const {
-  return this != internal_default_instance() && _impl_.bounds_ != nullptr;
-}
-inline bool AccessibilityNode::has_bounds() const {
-  return _internal_has_bounds();
-}
-inline void AccessibilityNode::clear_bounds() {
-  if (GetArenaForAllocation() == nullptr && _impl_.bounds_ != nullptr) {
-    delete _impl_.bounds_;
-  }
-  _impl_.bounds_ = nullptr;
-}
-inline const ::dsa::control::v1::Rect& AccessibilityNode::_internal_bounds() const {
-  const ::dsa::control::v1::Rect* p = _impl_.bounds_;
-  return p != nullptr ? *p : reinterpret_cast<const ::dsa::control::v1::Rect&>(
-      ::dsa::control::v1::_Rect_default_instance_);
-}
-inline const ::dsa::control::v1::Rect& AccessibilityNode::bounds() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.bounds)
-  return _internal_bounds();
-}
-inline void AccessibilityNode::unsafe_arena_set_allocated_bounds(
-    ::dsa::control::v1::Rect* bounds) {
-  if (GetArenaForAllocation() == nullptr) {
-    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.bounds_);
-  }
-  _impl_.bounds_ = bounds;
-  if (bounds) {
-    
-  } else {
-    
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.AccessibilityNode.bounds)
-}
-inline ::dsa::control::v1::Rect* AccessibilityNode::release_bounds() {
-  
-  ::dsa::control::v1::Rect* temp = _impl_.bounds_;
-  _impl_.bounds_ = nullptr;
-#ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
-  auto* old =  reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(temp);
-  temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-  if (GetArenaForAllocation() == nullptr) { delete old; }
-#else  // PROTOBUF_FORCE_COPY_IN_RELEASE
-  if (GetArenaForAllocation() != nullptr) {
-    temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-  }
-#endif  // !PROTOBUF_FORCE_COPY_IN_RELEASE
-  return temp;
-}
-inline ::dsa::control::v1::Rect* AccessibilityNode::unsafe_arena_release_bounds() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.bounds)
-  
-  ::dsa::control::v1::Rect* temp = _impl_.bounds_;
-  _impl_.bounds_ = nullptr;
-  return temp;
-}
-inline ::dsa::control::v1::Rect* AccessibilityNode::_internal_mutable_bounds() {
-  
-  if (_impl_.bounds_ == nullptr) {
-    auto* p = CreateMaybeMessage<::dsa::control::v1::Rect>(GetArenaForAllocation());
-    _impl_.bounds_ = p;
-  }
-  return _impl_.bounds_;
-}
-inline ::dsa::control::v1::Rect* AccessibilityNode::mutable_bounds() {
-  ::dsa::control::v1::Rect* _msg = _internal_mutable_bounds();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.bounds)
-  return _msg;
-}
-inline void AccessibilityNode::set_allocated_bounds(::dsa::control::v1::Rect* bounds) {
-  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
-  if (message_arena == nullptr) {
-    delete _impl_.bounds_;
-  }
-  if (bounds) {
-    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
-        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(bounds);
-    if (message_arena != submessage_arena) {
-      bounds = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, bounds, submessage_arena);
-    }
-    
-  } else {
-    
-  }
-  _impl_.bounds_ = bounds;
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.bounds)
-}
-
-// bool checkable = 9;
-inline void AccessibilityNode::clear_checkable() {
-  _impl_.checkable_ = false;
-}
-inline bool AccessibilityNode::_internal_checkable() const {
-  return _impl_.checkable_;
-}
-inline bool AccessibilityNode::checkable() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.checkable)
-  return _internal_checkable();
-}
-inline void AccessibilityNode::_internal_set_checkable(bool value) {
-  
-  _impl_.checkable_ = value;
-}
-inline void AccessibilityNode::set_checkable(bool value) {
-  _internal_set_checkable(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.checkable)
-}
-
-// bool checked = 10;
-inline void AccessibilityNode::clear_checked() {
-  _impl_.checked_ = false;
-}
-inline bool AccessibilityNode::_internal_checked() const {
-  return _impl_.checked_;
-}
-inline bool AccessibilityNode::checked() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.checked)
-  return _internal_checked();
-}
-inline void AccessibilityNode::_internal_set_checked(bool value) {
-  
-  _impl_.checked_ = value;
-}
-inline void AccessibilityNode::set_checked(bool value) {
-  _internal_set_checked(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.checked)
-}
-
-// bool selected = 11;
-inline void AccessibilityNode::clear_selected() {
-  _impl_.selected_ = false;
-}
-inline bool AccessibilityNode::_internal_selected() const {
-  return _impl_.selected_;
-}
-inline bool AccessibilityNode::selected() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.selected)
-  return _internal_selected();
-}
-inline void AccessibilityNode::_internal_set_selected(bool value) {
-  
-  _impl_.selected_ = value;
-}
-inline void AccessibilityNode::set_selected(bool value) {
-  _internal_set_selected(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.selected)
-}
-
-// bool enabled = 12;
-inline void AccessibilityNode::clear_enabled() {
-  _impl_.enabled_ = false;
-}
-inline bool AccessibilityNode::_internal_enabled() const {
-  return _impl_.enabled_;
-}
-inline bool AccessibilityNode::enabled() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.enabled)
-  return _internal_enabled();
-}
-inline void AccessibilityNode::_internal_set_enabled(bool value) {
-  
-  _impl_.enabled_ = value;
-}
-inline void AccessibilityNode::set_enabled(bool value) {
-  _internal_set_enabled(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.enabled)
-}
-
-// bool focusable = 13;
-inline void AccessibilityNode::clear_focusable() {
-  _impl_.focusable_ = false;
-}
-inline bool AccessibilityNode::_internal_focusable() const {
-  return _impl_.focusable_;
-}
-inline bool AccessibilityNode::focusable() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.focusable)
-  return _internal_focusable();
-}
-inline void AccessibilityNode::_internal_set_focusable(bool value) {
-  
-  _impl_.focusable_ = value;
-}
-inline void AccessibilityNode::set_focusable(bool value) {
-  _internal_set_focusable(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.focusable)
-}
-
-// bool focused = 14;
-inline void AccessibilityNode::clear_focused() {
-  _impl_.focused_ = false;
-}
-inline bool AccessibilityNode::_internal_focused() const {
-  return _impl_.focused_;
-}
-inline bool AccessibilityNode::focused() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.focused)
-  return _internal_focused();
-}
-inline void AccessibilityNode::_internal_set_focused(bool value) {
-  
-  _impl_.focused_ = value;
-}
-inline void AccessibilityNode::set_focused(bool value) {
-  _internal_set_focused(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.focused)
-}
-
-// bool scrollable = 15;
-inline void AccessibilityNode::clear_scrollable() {
-  _impl_.scrollable_ = false;
-}
-inline bool AccessibilityNode::_internal_scrollable() const {
-  return _impl_.scrollable_;
-}
-inline bool AccessibilityNode::scrollable() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.scrollable)
-  return _internal_scrollable();
-}
-inline void AccessibilityNode::_internal_set_scrollable(bool value) {
-  
-  _impl_.scrollable_ = value;
-}
-inline void AccessibilityNode::set_scrollable(bool value) {
-  _internal_set_scrollable(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.scrollable)
-}
-
-// bool clickable = 16;
-inline void AccessibilityNode::clear_clickable() {
-  _impl_.clickable_ = false;
-}
-inline bool AccessibilityNode::_internal_clickable() const {
-  return _impl_.clickable_;
-}
-inline bool AccessibilityNode::clickable() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.clickable)
-  return _internal_clickable();
-}
-inline void AccessibilityNode::_internal_set_clickable(bool value) {
-  
-  _impl_.clickable_ = value;
-}
-inline void AccessibilityNode::set_clickable(bool value) {
-  _internal_set_clickable(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.clickable)
-}
-
-// bool long_clickable = 17;
-inline void AccessibilityNode::clear_long_clickable() {
-  _impl_.long_clickable_ = false;
-}
-inline bool AccessibilityNode::_internal_long_clickable() const {
-  return _impl_.long_clickable_;
-}
-inline bool AccessibilityNode::long_clickable() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.long_clickable)
-  return _internal_long_clickable();
-}
-inline void AccessibilityNode::_internal_set_long_clickable(bool value) {
-  
-  _impl_.long_clickable_ = value;
-}
-inline void AccessibilityNode::set_long_clickable(bool value) {
-  _internal_set_long_clickable(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.long_clickable)
-}
-
-// bool editable = 18;
-inline void AccessibilityNode::clear_editable() {
-  _impl_.editable_ = false;
-}
-inline bool AccessibilityNode::_internal_editable() const {
-  return _impl_.editable_;
-}
-inline bool AccessibilityNode::editable() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.editable)
-  return _internal_editable();
-}
-inline void AccessibilityNode::_internal_set_editable(bool value) {
-  
-  _impl_.editable_ = value;
-}
-inline void AccessibilityNode::set_editable(bool value) {
-  _internal_set_editable(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.editable)
-}
-
-// bool password = 19;
-inline void AccessibilityNode::clear_password() {
-  _impl_.password_ = false;
-}
-inline bool AccessibilityNode::_internal_password() const {
-  return _impl_.password_;
-}
-inline bool AccessibilityNode::password() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.password)
-  return _internal_password();
-}
-inline void AccessibilityNode::_internal_set_password(bool value) {
-  
-  _impl_.password_ = value;
-}
-inline void AccessibilityNode::set_password(bool value) {
-  _internal_set_password(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.password)
-}
-
-// bool heading = 20;
-inline void AccessibilityNode::clear_heading() {
-  _impl_.heading_ = false;
-}
-inline bool AccessibilityNode::_internal_heading() const {
-  return _impl_.heading_;
-}
-inline bool AccessibilityNode::heading() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.heading)
-  return _internal_heading();
-}
-inline void AccessibilityNode::_internal_set_heading(bool value) {
-  
-  _impl_.heading_ = value;
-}
-inline void AccessibilityNode::set_heading(bool value) {
-  _internal_set_heading(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.heading)
-}
-
-// .dsa.control.v1.NodeRange range = 21;
-inline bool AccessibilityNode::_internal_has_range() const {
-  return this != internal_default_instance() && _impl_.range_ != nullptr;
-}
-inline bool AccessibilityNode::has_range() const {
-  return _internal_has_range();
-}
-inline void AccessibilityNode::clear_range() {
-  if (GetArenaForAllocation() == nullptr && _impl_.range_ != nullptr) {
-    delete _impl_.range_;
-  }
-  _impl_.range_ = nullptr;
-}
-inline const ::dsa::control::v1::NodeRange& AccessibilityNode::_internal_range() const {
-  const ::dsa::control::v1::NodeRange* p = _impl_.range_;
-  return p != nullptr ? *p : reinterpret_cast<const ::dsa::control::v1::NodeRange&>(
-      ::dsa::control::v1::_NodeRange_default_instance_);
-}
-inline const ::dsa::control::v1::NodeRange& AccessibilityNode::range() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.range)
-  return _internal_range();
-}
-inline void AccessibilityNode::unsafe_arena_set_allocated_range(
-    ::dsa::control::v1::NodeRange* range) {
-  if (GetArenaForAllocation() == nullptr) {
-    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.range_);
-  }
-  _impl_.range_ = range;
-  if (range) {
-    
-  } else {
-    
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.AccessibilityNode.range)
-}
-inline ::dsa::control::v1::NodeRange* AccessibilityNode::release_range() {
-  
-  ::dsa::control::v1::NodeRange* temp = _impl_.range_;
-  _impl_.range_ = nullptr;
-#ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
-  auto* old =  reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(temp);
-  temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-  if (GetArenaForAllocation() == nullptr) { delete old; }
-#else  // PROTOBUF_FORCE_COPY_IN_RELEASE
-  if (GetArenaForAllocation() != nullptr) {
-    temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-  }
-#endif  // !PROTOBUF_FORCE_COPY_IN_RELEASE
-  return temp;
-}
-inline ::dsa::control::v1::NodeRange* AccessibilityNode::unsafe_arena_release_range() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.range)
-  
-  ::dsa::control::v1::NodeRange* temp = _impl_.range_;
-  _impl_.range_ = nullptr;
-  return temp;
-}
-inline ::dsa::control::v1::NodeRange* AccessibilityNode::_internal_mutable_range() {
-  
-  if (_impl_.range_ == nullptr) {
-    auto* p = CreateMaybeMessage<::dsa::control::v1::NodeRange>(GetArenaForAllocation());
-    _impl_.range_ = p;
-  }
-  return _impl_.range_;
-}
-inline ::dsa::control::v1::NodeRange* AccessibilityNode::mutable_range() {
-  ::dsa::control::v1::NodeRange* _msg = _internal_mutable_range();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.range)
-  return _msg;
-}
-inline void AccessibilityNode::set_allocated_range(::dsa::control::v1::NodeRange* range) {
-  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
-  if (message_arena == nullptr) {
-    delete _impl_.range_;
-  }
-  if (range) {
-    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
-        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(range);
-    if (message_arena != submessage_arena) {
-      range = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, range, submessage_arena);
-    }
-    
-  } else {
-    
-  }
-  _impl_.range_ = range;
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.range)
-}
-
-// repeated .dsa.control.v1.NodeAction actions = 22;
-inline int AccessibilityNode::_internal_actions_size() const {
-  return _impl_.actions_.size();
-}
-inline int AccessibilityNode::actions_size() const {
-  return _internal_actions_size();
-}
-inline void AccessibilityNode::clear_actions() {
-  _impl_.actions_.Clear();
-}
-inline ::dsa::control::v1::NodeAction AccessibilityNode::_internal_actions(int index) const {
-  return static_cast< ::dsa::control::v1::NodeAction >(_impl_.actions_.Get(index));
-}
-inline ::dsa::control::v1::NodeAction AccessibilityNode::actions(int index) const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.actions)
-  return _internal_actions(index);
-}
-inline void AccessibilityNode::set_actions(int index, ::dsa::control::v1::NodeAction value) {
-  _impl_.actions_.Set(index, value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.actions)
-}
-inline void AccessibilityNode::_internal_add_actions(::dsa::control::v1::NodeAction value) {
-  _impl_.actions_.Add(value);
-}
-inline void AccessibilityNode::add_actions(::dsa::control::v1::NodeAction value) {
-  _internal_add_actions(value);
-  // @@protoc_insertion_point(field_add:dsa.control.v1.AccessibilityNode.actions)
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField<int>&
-AccessibilityNode::actions() const {
-  // @@protoc_insertion_point(field_list:dsa.control.v1.AccessibilityNode.actions)
-  return _impl_.actions_;
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField<int>*
-AccessibilityNode::_internal_mutable_actions() {
-  return &_impl_.actions_;
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField<int>*
-AccessibilityNode::mutable_actions() {
-  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.AccessibilityNode.actions)
-  return _internal_mutable_actions();
-}
-
-// string state_description = 23;
-inline void AccessibilityNode::clear_state_description() {
-  _impl_.state_description_.ClearToEmpty();
-}
-inline const std::string& AccessibilityNode::state_description() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.state_description)
-  return _internal_state_description();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void AccessibilityNode::set_state_description(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.state_description_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.state_description)
-}
-inline std::string* AccessibilityNode::mutable_state_description() {
-  std::string* _s = _internal_mutable_state_description();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.state_description)
-  return _s;
-}
-inline const std::string& AccessibilityNode::_internal_state_description() const {
-  return _impl_.state_description_.Get();
-}
-inline void AccessibilityNode::_internal_set_state_description(const std::string& value) {
-  
-  _impl_.state_description_.Set(value, GetArenaForAllocation());
-}
-inline std::string* AccessibilityNode::_internal_mutable_state_description() {
-  
-  return _impl_.state_description_.Mutable(GetArenaForAllocation());
-}
-inline std::string* AccessibilityNode::release_state_description() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.state_description)
-  return _impl_.state_description_.Release();
-}
-inline void AccessibilityNode::set_allocated_state_description(std::string* state_description) {
-  if (state_description != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.state_description_.SetAllocated(state_description, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.state_description_.IsDefault()) {
-    _impl_.state_description_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.state_description)
-}
-
-// -------------------------------------------------------------------
-
-// AccessibilityTree
-
-// int32 task_id = 1;
-inline void AccessibilityTree::clear_task_id() {
-  _impl_.task_id_ = 0;
-}
-inline int32_t AccessibilityTree::_internal_task_id() const {
-  return _impl_.task_id_;
-}
-inline int32_t AccessibilityTree::task_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityTree.task_id)
-  return _internal_task_id();
-}
-inline void AccessibilityTree::_internal_set_task_id(int32_t value) {
-  
-  _impl_.task_id_ = value;
-}
-inline void AccessibilityTree::set_task_id(int32_t value) {
-  _internal_set_task_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityTree.task_id)
-}
-
-// uint32 epoch = 2;
-inline void AccessibilityTree::clear_epoch() {
-  _impl_.epoch_ = 0u;
-}
-inline uint32_t AccessibilityTree::_internal_epoch() const {
-  return _impl_.epoch_;
-}
-inline uint32_t AccessibilityTree::epoch() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityTree.epoch)
-  return _internal_epoch();
-}
-inline void AccessibilityTree::_internal_set_epoch(uint32_t value) {
-  
-  _impl_.epoch_ = value;
-}
-inline void AccessibilityTree::set_epoch(uint32_t value) {
-  _internal_set_epoch(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityTree.epoch)
-}
-
-// bool full = 3;
-inline void AccessibilityTree::clear_full() {
-  _impl_.full_ = false;
-}
-inline bool AccessibilityTree::_internal_full() const {
-  return _impl_.full_;
-}
-inline bool AccessibilityTree::full() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityTree.full)
-  return _internal_full();
-}
-inline void AccessibilityTree::_internal_set_full(bool value) {
-  
-  _impl_.full_ = value;
-}
-inline void AccessibilityTree::set_full(bool value) {
-  _internal_set_full(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityTree.full)
-}
-
-// repeated uint32 root_ids = 4;
-inline int AccessibilityTree::_internal_root_ids_size() const {
-  return _impl_.root_ids_.size();
-}
-inline int AccessibilityTree::root_ids_size() const {
-  return _internal_root_ids_size();
-}
-inline void AccessibilityTree::clear_root_ids() {
-  _impl_.root_ids_.Clear();
-}
-inline uint32_t AccessibilityTree::_internal_root_ids(int index) const {
-  return _impl_.root_ids_.Get(index);
-}
-inline uint32_t AccessibilityTree::root_ids(int index) const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityTree.root_ids)
-  return _internal_root_ids(index);
-}
-inline void AccessibilityTree::set_root_ids(int index, uint32_t value) {
-  _impl_.root_ids_.Set(index, value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityTree.root_ids)
-}
-inline void AccessibilityTree::_internal_add_root_ids(uint32_t value) {
-  _impl_.root_ids_.Add(value);
-}
-inline void AccessibilityTree::add_root_ids(uint32_t value) {
-  _internal_add_root_ids(value);
-  // @@protoc_insertion_point(field_add:dsa.control.v1.AccessibilityTree.root_ids)
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
-AccessibilityTree::_internal_root_ids() const {
-  return _impl_.root_ids_;
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
-AccessibilityTree::root_ids() const {
-  // @@protoc_insertion_point(field_list:dsa.control.v1.AccessibilityTree.root_ids)
-  return _internal_root_ids();
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
-AccessibilityTree::_internal_mutable_root_ids() {
-  return &_impl_.root_ids_;
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
-AccessibilityTree::mutable_root_ids() {
-  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.AccessibilityTree.root_ids)
-  return _internal_mutable_root_ids();
-}
-
-// repeated .dsa.control.v1.AccessibilityNode nodes = 5;
-inline int AccessibilityTree::_internal_nodes_size() const {
-  return _impl_.nodes_.size();
-}
-inline int AccessibilityTree::nodes_size() const {
-  return _internal_nodes_size();
-}
-inline void AccessibilityTree::clear_nodes() {
-  _impl_.nodes_.Clear();
-}
-inline ::dsa::control::v1::AccessibilityNode* AccessibilityTree::mutable_nodes(int index) {
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityTree.nodes)
-  return _impl_.nodes_.Mutable(index);
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::AccessibilityNode >*
-AccessibilityTree::mutable_nodes() {
-  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.AccessibilityTree.nodes)
-  return &_impl_.nodes_;
-}
-inline const ::dsa::control::v1::AccessibilityNode& AccessibilityTree::_internal_nodes(int index) const {
-  return _impl_.nodes_.Get(index);
-}
-inline const ::dsa::control::v1::AccessibilityNode& AccessibilityTree::nodes(int index) const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityTree.nodes)
-  return _internal_nodes(index);
-}
-inline ::dsa::control::v1::AccessibilityNode* AccessibilityTree::_internal_add_nodes() {
-  return _impl_.nodes_.Add();
-}
-inline ::dsa::control::v1::AccessibilityNode* AccessibilityTree::add_nodes() {
-  ::dsa::control::v1::AccessibilityNode* _add = _internal_add_nodes();
-  // @@protoc_insertion_point(field_add:dsa.control.v1.AccessibilityTree.nodes)
-  return _add;
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::AccessibilityNode >&
-AccessibilityTree::nodes() const {
-  // @@protoc_insertion_point(field_list:dsa.control.v1.AccessibilityTree.nodes)
-  return _impl_.nodes_;
-}
-
-// repeated uint32 removed_ids = 6;
-inline int AccessibilityTree::_internal_removed_ids_size() const {
-  return _impl_.removed_ids_.size();
-}
-inline int AccessibilityTree::removed_ids_size() const {
-  return _internal_removed_ids_size();
-}
-inline void AccessibilityTree::clear_removed_ids() {
-  _impl_.removed_ids_.Clear();
-}
-inline uint32_t AccessibilityTree::_internal_removed_ids(int index) const {
-  return _impl_.removed_ids_.Get(index);
-}
-inline uint32_t AccessibilityTree::removed_ids(int index) const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityTree.removed_ids)
-  return _internal_removed_ids(index);
-}
-inline void AccessibilityTree::set_removed_ids(int index, uint32_t value) {
-  _impl_.removed_ids_.Set(index, value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityTree.removed_ids)
-}
-inline void AccessibilityTree::_internal_add_removed_ids(uint32_t value) {
-  _impl_.removed_ids_.Add(value);
-}
-inline void AccessibilityTree::add_removed_ids(uint32_t value) {
-  _internal_add_removed_ids(value);
-  // @@protoc_insertion_point(field_add:dsa.control.v1.AccessibilityTree.removed_ids)
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
-AccessibilityTree::_internal_removed_ids() const {
-  return _impl_.removed_ids_;
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
-AccessibilityTree::removed_ids() const {
-  // @@protoc_insertion_point(field_list:dsa.control.v1.AccessibilityTree.removed_ids)
-  return _internal_removed_ids();
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
-AccessibilityTree::_internal_mutable_removed_ids() {
-  return &_impl_.removed_ids_;
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
-AccessibilityTree::mutable_removed_ids() {
-  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.AccessibilityTree.removed_ids)
-  return _internal_mutable_removed_ids();
-}
-
-// uint32 focused_id = 7;
-inline void AccessibilityTree::clear_focused_id() {
-  _impl_.focused_id_ = 0u;
-}
-inline uint32_t AccessibilityTree::_internal_focused_id() const {
-  return _impl_.focused_id_;
-}
-inline uint32_t AccessibilityTree::focused_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityTree.focused_id)
-  return _internal_focused_id();
-}
-inline void AccessibilityTree::_internal_set_focused_id(uint32_t value) {
-  
-  _impl_.focused_id_ = value;
-}
-inline void AccessibilityTree::set_focused_id(uint32_t value) {
-  _internal_set_focused_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityTree.focused_id)
-}
-
-// -------------------------------------------------------------------
-
-// AccessibilityAction
-
-// int32 task_id = 1;
-inline void AccessibilityAction::clear_task_id() {
-  _impl_.task_id_ = 0;
-}
-inline int32_t AccessibilityAction::_internal_task_id() const {
-  return _impl_.task_id_;
-}
-inline int32_t AccessibilityAction::task_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityAction.task_id)
-  return _internal_task_id();
-}
-inline void AccessibilityAction::_internal_set_task_id(int32_t value) {
-  
-  _impl_.task_id_ = value;
-}
-inline void AccessibilityAction::set_task_id(int32_t value) {
-  _internal_set_task_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityAction.task_id)
-}
-
-// uint32 epoch = 2;
-inline void AccessibilityAction::clear_epoch() {
-  _impl_.epoch_ = 0u;
-}
-inline uint32_t AccessibilityAction::_internal_epoch() const {
-  return _impl_.epoch_;
-}
-inline uint32_t AccessibilityAction::epoch() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityAction.epoch)
-  return _internal_epoch();
-}
-inline void AccessibilityAction::_internal_set_epoch(uint32_t value) {
-  
-  _impl_.epoch_ = value;
-}
-inline void AccessibilityAction::set_epoch(uint32_t value) {
-  _internal_set_epoch(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityAction.epoch)
-}
-
-// uint32 node_id = 3;
-inline void AccessibilityAction::clear_node_id() {
-  _impl_.node_id_ = 0u;
-}
-inline uint32_t AccessibilityAction::_internal_node_id() const {
-  return _impl_.node_id_;
-}
-inline uint32_t AccessibilityAction::node_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityAction.node_id)
-  return _internal_node_id();
-}
-inline void AccessibilityAction::_internal_set_node_id(uint32_t value) {
-  
-  _impl_.node_id_ = value;
-}
-inline void AccessibilityAction::set_node_id(uint32_t value) {
-  _internal_set_node_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityAction.node_id)
-}
-
-// .dsa.control.v1.NodeAction action = 4;
-inline void AccessibilityAction::clear_action() {
-  _impl_.action_ = 0;
-}
-inline ::dsa::control::v1::NodeAction AccessibilityAction::_internal_action() const {
-  return static_cast< ::dsa::control::v1::NodeAction >(_impl_.action_);
-}
-inline ::dsa::control::v1::NodeAction AccessibilityAction::action() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityAction.action)
-  return _internal_action();
-}
-inline void AccessibilityAction::_internal_set_action(::dsa::control::v1::NodeAction value) {
-  
-  _impl_.action_ = value;
-}
-inline void AccessibilityAction::set_action(::dsa::control::v1::NodeAction value) {
-  _internal_set_action(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityAction.action)
-}
-
-// string text = 5;
-inline void AccessibilityAction::clear_text() {
-  _impl_.text_.ClearToEmpty();
-}
-inline const std::string& AccessibilityAction::text() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityAction.text)
-  return _internal_text();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void AccessibilityAction::set_text(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.text_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityAction.text)
-}
-inline std::string* AccessibilityAction::mutable_text() {
-  std::string* _s = _internal_mutable_text();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityAction.text)
-  return _s;
-}
-inline const std::string& AccessibilityAction::_internal_text() const {
-  return _impl_.text_.Get();
-}
-inline void AccessibilityAction::_internal_set_text(const std::string& value) {
-  
-  _impl_.text_.Set(value, GetArenaForAllocation());
-}
-inline std::string* AccessibilityAction::_internal_mutable_text() {
-  
-  return _impl_.text_.Mutable(GetArenaForAllocation());
-}
-inline std::string* AccessibilityAction::release_text() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityAction.text)
-  return _impl_.text_.Release();
-}
-inline void AccessibilityAction::set_allocated_text(std::string* text) {
-  if (text != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.text_.SetAllocated(text, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.text_.IsDefault()) {
-    _impl_.text_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityAction.text)
-}
-
-// uint32 request_id = 6;
-inline void AccessibilityAction::clear_request_id() {
-  _impl_.request_id_ = 0u;
-}
-inline uint32_t AccessibilityAction::_internal_request_id() const {
-  return _impl_.request_id_;
-}
-inline uint32_t AccessibilityAction::request_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityAction.request_id)
-  return _internal_request_id();
-}
-inline void AccessibilityAction::_internal_set_request_id(uint32_t value) {
-  
-  _impl_.request_id_ = value;
-}
-inline void AccessibilityAction::set_request_id(uint32_t value) {
-  _internal_set_request_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityAction.request_id)
-}
-
-// -------------------------------------------------------------------
-
-// AccessibilityActionResult
-
-// int32 task_id = 1;
-inline void AccessibilityActionResult::clear_task_id() {
-  _impl_.task_id_ = 0;
-}
-inline int32_t AccessibilityActionResult::_internal_task_id() const {
-  return _impl_.task_id_;
-}
-inline int32_t AccessibilityActionResult::task_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityActionResult.task_id)
-  return _internal_task_id();
-}
-inline void AccessibilityActionResult::_internal_set_task_id(int32_t value) {
-  
-  _impl_.task_id_ = value;
-}
-inline void AccessibilityActionResult::set_task_id(int32_t value) {
-  _internal_set_task_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityActionResult.task_id)
-}
-
-// uint32 request_id = 2;
-inline void AccessibilityActionResult::clear_request_id() {
-  _impl_.request_id_ = 0u;
-}
-inline uint32_t AccessibilityActionResult::_internal_request_id() const {
-  return _impl_.request_id_;
-}
-inline uint32_t AccessibilityActionResult::request_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityActionResult.request_id)
-  return _internal_request_id();
-}
-inline void AccessibilityActionResult::_internal_set_request_id(uint32_t value) {
-  
-  _impl_.request_id_ = value;
-}
-inline void AccessibilityActionResult::set_request_id(uint32_t value) {
-  _internal_set_request_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityActionResult.request_id)
-}
-
-// bool done = 3;
-inline void AccessibilityActionResult::clear_done() {
-  _impl_.done_ = false;
-}
-inline bool AccessibilityActionResult::_internal_done() const {
-  return _impl_.done_;
-}
-inline bool AccessibilityActionResult::done() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityActionResult.done)
-  return _internal_done();
-}
-inline void AccessibilityActionResult::_internal_set_done(bool value) {
-  
-  _impl_.done_ = value;
-}
-inline void AccessibilityActionResult::set_done(bool value) {
-  _internal_set_done(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityActionResult.done)
-}
-
-// string error = 4;
-inline void AccessibilityActionResult::clear_error() {
-  _impl_.error_.ClearToEmpty();
-}
-inline const std::string& AccessibilityActionResult::error() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityActionResult.error)
-  return _internal_error();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void AccessibilityActionResult::set_error(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.error_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityActionResult.error)
-}
-inline std::string* AccessibilityActionResult::mutable_error() {
-  std::string* _s = _internal_mutable_error();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityActionResult.error)
-  return _s;
-}
-inline const std::string& AccessibilityActionResult::_internal_error() const {
-  return _impl_.error_.Get();
-}
-inline void AccessibilityActionResult::_internal_set_error(const std::string& value) {
-  
-  _impl_.error_.Set(value, GetArenaForAllocation());
-}
-inline std::string* AccessibilityActionResult::_internal_mutable_error() {
-  
-  return _impl_.error_.Mutable(GetArenaForAllocation());
-}
-inline std::string* AccessibilityActionResult::release_error() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityActionResult.error)
-  return _impl_.error_.Release();
-}
-inline void AccessibilityActionResult::set_allocated_error(std::string* error) {
-  if (error != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.error_.SetAllocated(error, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.error_.IsDefault()) {
-    _impl_.error_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityActionResult.error)
 }
 
 // -------------------------------------------------------------------
@@ -17820,299 +16239,299 @@ inline ::dsa::control::v1::FileProgress* Envelope::mutable_file_progress() {
   return _msg;
 }
 
-// .dsa.control.v1.AccessibilityWatch accessibility_watch = 80;
-inline bool Envelope::_internal_has_accessibility_watch() const {
-  return body_case() == kAccessibilityWatch;
+// .dsa.control.v1.GuestNotification notification = 70;
+inline bool Envelope::_internal_has_notification() const {
+  return body_case() == kNotification;
 }
-inline bool Envelope::has_accessibility_watch() const {
-  return _internal_has_accessibility_watch();
+inline bool Envelope::has_notification() const {
+  return _internal_has_notification();
 }
-inline void Envelope::set_has_accessibility_watch() {
-  _impl_._oneof_case_[0] = kAccessibilityWatch;
+inline void Envelope::set_has_notification() {
+  _impl_._oneof_case_[0] = kNotification;
 }
-inline void Envelope::clear_accessibility_watch() {
-  if (_internal_has_accessibility_watch()) {
+inline void Envelope::clear_notification() {
+  if (_internal_has_notification()) {
     if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.accessibility_watch_;
+      delete _impl_.body_.notification_;
     }
     clear_has_body();
   }
 }
-inline ::dsa::control::v1::AccessibilityWatch* Envelope::release_accessibility_watch() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.accessibility_watch)
-  if (_internal_has_accessibility_watch()) {
+inline ::dsa::control::v1::GuestNotification* Envelope::release_notification() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.notification)
+  if (_internal_has_notification()) {
     clear_has_body();
-    ::dsa::control::v1::AccessibilityWatch* temp = _impl_.body_.accessibility_watch_;
+    ::dsa::control::v1::GuestNotification* temp = _impl_.body_.notification_;
     if (GetArenaForAllocation() != nullptr) {
       temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
     }
-    _impl_.body_.accessibility_watch_ = nullptr;
+    _impl_.body_.notification_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline const ::dsa::control::v1::AccessibilityWatch& Envelope::_internal_accessibility_watch() const {
-  return _internal_has_accessibility_watch()
-      ? *_impl_.body_.accessibility_watch_
-      : reinterpret_cast< ::dsa::control::v1::AccessibilityWatch&>(::dsa::control::v1::_AccessibilityWatch_default_instance_);
+inline const ::dsa::control::v1::GuestNotification& Envelope::_internal_notification() const {
+  return _internal_has_notification()
+      ? *_impl_.body_.notification_
+      : reinterpret_cast< ::dsa::control::v1::GuestNotification&>(::dsa::control::v1::_GuestNotification_default_instance_);
 }
-inline const ::dsa::control::v1::AccessibilityWatch& Envelope::accessibility_watch() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.accessibility_watch)
-  return _internal_accessibility_watch();
+inline const ::dsa::control::v1::GuestNotification& Envelope::notification() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.notification)
+  return _internal_notification();
 }
-inline ::dsa::control::v1::AccessibilityWatch* Envelope::unsafe_arena_release_accessibility_watch() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.accessibility_watch)
-  if (_internal_has_accessibility_watch()) {
+inline ::dsa::control::v1::GuestNotification* Envelope::unsafe_arena_release_notification() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.notification)
+  if (_internal_has_notification()) {
     clear_has_body();
-    ::dsa::control::v1::AccessibilityWatch* temp = _impl_.body_.accessibility_watch_;
-    _impl_.body_.accessibility_watch_ = nullptr;
+    ::dsa::control::v1::GuestNotification* temp = _impl_.body_.notification_;
+    _impl_.body_.notification_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline void Envelope::unsafe_arena_set_allocated_accessibility_watch(::dsa::control::v1::AccessibilityWatch* accessibility_watch) {
+inline void Envelope::unsafe_arena_set_allocated_notification(::dsa::control::v1::GuestNotification* notification) {
   clear_body();
-  if (accessibility_watch) {
-    set_has_accessibility_watch();
-    _impl_.body_.accessibility_watch_ = accessibility_watch;
+  if (notification) {
+    set_has_notification();
+    _impl_.body_.notification_ = notification;
   }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.accessibility_watch)
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.notification)
 }
-inline ::dsa::control::v1::AccessibilityWatch* Envelope::_internal_mutable_accessibility_watch() {
-  if (!_internal_has_accessibility_watch()) {
+inline ::dsa::control::v1::GuestNotification* Envelope::_internal_mutable_notification() {
+  if (!_internal_has_notification()) {
     clear_body();
-    set_has_accessibility_watch();
-    _impl_.body_.accessibility_watch_ = CreateMaybeMessage< ::dsa::control::v1::AccessibilityWatch >(GetArenaForAllocation());
+    set_has_notification();
+    _impl_.body_.notification_ = CreateMaybeMessage< ::dsa::control::v1::GuestNotification >(GetArenaForAllocation());
   }
-  return _impl_.body_.accessibility_watch_;
+  return _impl_.body_.notification_;
 }
-inline ::dsa::control::v1::AccessibilityWatch* Envelope::mutable_accessibility_watch() {
-  ::dsa::control::v1::AccessibilityWatch* _msg = _internal_mutable_accessibility_watch();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.accessibility_watch)
+inline ::dsa::control::v1::GuestNotification* Envelope::mutable_notification() {
+  ::dsa::control::v1::GuestNotification* _msg = _internal_mutable_notification();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.notification)
   return _msg;
 }
 
-// .dsa.control.v1.AccessibilityTree accessibility_tree = 81;
-inline bool Envelope::_internal_has_accessibility_tree() const {
-  return body_case() == kAccessibilityTree;
+// .dsa.control.v1.NotificationRemoved notification_removed = 71;
+inline bool Envelope::_internal_has_notification_removed() const {
+  return body_case() == kNotificationRemoved;
 }
-inline bool Envelope::has_accessibility_tree() const {
-  return _internal_has_accessibility_tree();
+inline bool Envelope::has_notification_removed() const {
+  return _internal_has_notification_removed();
 }
-inline void Envelope::set_has_accessibility_tree() {
-  _impl_._oneof_case_[0] = kAccessibilityTree;
+inline void Envelope::set_has_notification_removed() {
+  _impl_._oneof_case_[0] = kNotificationRemoved;
 }
-inline void Envelope::clear_accessibility_tree() {
-  if (_internal_has_accessibility_tree()) {
+inline void Envelope::clear_notification_removed() {
+  if (_internal_has_notification_removed()) {
     if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.accessibility_tree_;
+      delete _impl_.body_.notification_removed_;
     }
     clear_has_body();
   }
 }
-inline ::dsa::control::v1::AccessibilityTree* Envelope::release_accessibility_tree() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.accessibility_tree)
-  if (_internal_has_accessibility_tree()) {
+inline ::dsa::control::v1::NotificationRemoved* Envelope::release_notification_removed() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.notification_removed)
+  if (_internal_has_notification_removed()) {
     clear_has_body();
-    ::dsa::control::v1::AccessibilityTree* temp = _impl_.body_.accessibility_tree_;
+    ::dsa::control::v1::NotificationRemoved* temp = _impl_.body_.notification_removed_;
     if (GetArenaForAllocation() != nullptr) {
       temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
     }
-    _impl_.body_.accessibility_tree_ = nullptr;
+    _impl_.body_.notification_removed_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline const ::dsa::control::v1::AccessibilityTree& Envelope::_internal_accessibility_tree() const {
-  return _internal_has_accessibility_tree()
-      ? *_impl_.body_.accessibility_tree_
-      : reinterpret_cast< ::dsa::control::v1::AccessibilityTree&>(::dsa::control::v1::_AccessibilityTree_default_instance_);
+inline const ::dsa::control::v1::NotificationRemoved& Envelope::_internal_notification_removed() const {
+  return _internal_has_notification_removed()
+      ? *_impl_.body_.notification_removed_
+      : reinterpret_cast< ::dsa::control::v1::NotificationRemoved&>(::dsa::control::v1::_NotificationRemoved_default_instance_);
 }
-inline const ::dsa::control::v1::AccessibilityTree& Envelope::accessibility_tree() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.accessibility_tree)
-  return _internal_accessibility_tree();
+inline const ::dsa::control::v1::NotificationRemoved& Envelope::notification_removed() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.notification_removed)
+  return _internal_notification_removed();
 }
-inline ::dsa::control::v1::AccessibilityTree* Envelope::unsafe_arena_release_accessibility_tree() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.accessibility_tree)
-  if (_internal_has_accessibility_tree()) {
+inline ::dsa::control::v1::NotificationRemoved* Envelope::unsafe_arena_release_notification_removed() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.notification_removed)
+  if (_internal_has_notification_removed()) {
     clear_has_body();
-    ::dsa::control::v1::AccessibilityTree* temp = _impl_.body_.accessibility_tree_;
-    _impl_.body_.accessibility_tree_ = nullptr;
+    ::dsa::control::v1::NotificationRemoved* temp = _impl_.body_.notification_removed_;
+    _impl_.body_.notification_removed_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline void Envelope::unsafe_arena_set_allocated_accessibility_tree(::dsa::control::v1::AccessibilityTree* accessibility_tree) {
+inline void Envelope::unsafe_arena_set_allocated_notification_removed(::dsa::control::v1::NotificationRemoved* notification_removed) {
   clear_body();
-  if (accessibility_tree) {
-    set_has_accessibility_tree();
-    _impl_.body_.accessibility_tree_ = accessibility_tree;
+  if (notification_removed) {
+    set_has_notification_removed();
+    _impl_.body_.notification_removed_ = notification_removed;
   }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.accessibility_tree)
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.notification_removed)
 }
-inline ::dsa::control::v1::AccessibilityTree* Envelope::_internal_mutable_accessibility_tree() {
-  if (!_internal_has_accessibility_tree()) {
+inline ::dsa::control::v1::NotificationRemoved* Envelope::_internal_mutable_notification_removed() {
+  if (!_internal_has_notification_removed()) {
     clear_body();
-    set_has_accessibility_tree();
-    _impl_.body_.accessibility_tree_ = CreateMaybeMessage< ::dsa::control::v1::AccessibilityTree >(GetArenaForAllocation());
+    set_has_notification_removed();
+    _impl_.body_.notification_removed_ = CreateMaybeMessage< ::dsa::control::v1::NotificationRemoved >(GetArenaForAllocation());
   }
-  return _impl_.body_.accessibility_tree_;
+  return _impl_.body_.notification_removed_;
 }
-inline ::dsa::control::v1::AccessibilityTree* Envelope::mutable_accessibility_tree() {
-  ::dsa::control::v1::AccessibilityTree* _msg = _internal_mutable_accessibility_tree();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.accessibility_tree)
+inline ::dsa::control::v1::NotificationRemoved* Envelope::mutable_notification_removed() {
+  ::dsa::control::v1::NotificationRemoved* _msg = _internal_mutable_notification_removed();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.notification_removed)
   return _msg;
 }
 
-// .dsa.control.v1.AccessibilityAction accessibility_action = 82;
-inline bool Envelope::_internal_has_accessibility_action() const {
-  return body_case() == kAccessibilityAction;
+// .dsa.control.v1.NotificationClicked notification_clicked = 72;
+inline bool Envelope::_internal_has_notification_clicked() const {
+  return body_case() == kNotificationClicked;
 }
-inline bool Envelope::has_accessibility_action() const {
-  return _internal_has_accessibility_action();
+inline bool Envelope::has_notification_clicked() const {
+  return _internal_has_notification_clicked();
 }
-inline void Envelope::set_has_accessibility_action() {
-  _impl_._oneof_case_[0] = kAccessibilityAction;
+inline void Envelope::set_has_notification_clicked() {
+  _impl_._oneof_case_[0] = kNotificationClicked;
 }
-inline void Envelope::clear_accessibility_action() {
-  if (_internal_has_accessibility_action()) {
+inline void Envelope::clear_notification_clicked() {
+  if (_internal_has_notification_clicked()) {
     if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.accessibility_action_;
+      delete _impl_.body_.notification_clicked_;
     }
     clear_has_body();
   }
 }
-inline ::dsa::control::v1::AccessibilityAction* Envelope::release_accessibility_action() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.accessibility_action)
-  if (_internal_has_accessibility_action()) {
+inline ::dsa::control::v1::NotificationClicked* Envelope::release_notification_clicked() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.notification_clicked)
+  if (_internal_has_notification_clicked()) {
     clear_has_body();
-    ::dsa::control::v1::AccessibilityAction* temp = _impl_.body_.accessibility_action_;
+    ::dsa::control::v1::NotificationClicked* temp = _impl_.body_.notification_clicked_;
     if (GetArenaForAllocation() != nullptr) {
       temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
     }
-    _impl_.body_.accessibility_action_ = nullptr;
+    _impl_.body_.notification_clicked_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline const ::dsa::control::v1::AccessibilityAction& Envelope::_internal_accessibility_action() const {
-  return _internal_has_accessibility_action()
-      ? *_impl_.body_.accessibility_action_
-      : reinterpret_cast< ::dsa::control::v1::AccessibilityAction&>(::dsa::control::v1::_AccessibilityAction_default_instance_);
+inline const ::dsa::control::v1::NotificationClicked& Envelope::_internal_notification_clicked() const {
+  return _internal_has_notification_clicked()
+      ? *_impl_.body_.notification_clicked_
+      : reinterpret_cast< ::dsa::control::v1::NotificationClicked&>(::dsa::control::v1::_NotificationClicked_default_instance_);
 }
-inline const ::dsa::control::v1::AccessibilityAction& Envelope::accessibility_action() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.accessibility_action)
-  return _internal_accessibility_action();
+inline const ::dsa::control::v1::NotificationClicked& Envelope::notification_clicked() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.notification_clicked)
+  return _internal_notification_clicked();
 }
-inline ::dsa::control::v1::AccessibilityAction* Envelope::unsafe_arena_release_accessibility_action() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.accessibility_action)
-  if (_internal_has_accessibility_action()) {
+inline ::dsa::control::v1::NotificationClicked* Envelope::unsafe_arena_release_notification_clicked() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.notification_clicked)
+  if (_internal_has_notification_clicked()) {
     clear_has_body();
-    ::dsa::control::v1::AccessibilityAction* temp = _impl_.body_.accessibility_action_;
-    _impl_.body_.accessibility_action_ = nullptr;
+    ::dsa::control::v1::NotificationClicked* temp = _impl_.body_.notification_clicked_;
+    _impl_.body_.notification_clicked_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline void Envelope::unsafe_arena_set_allocated_accessibility_action(::dsa::control::v1::AccessibilityAction* accessibility_action) {
+inline void Envelope::unsafe_arena_set_allocated_notification_clicked(::dsa::control::v1::NotificationClicked* notification_clicked) {
   clear_body();
-  if (accessibility_action) {
-    set_has_accessibility_action();
-    _impl_.body_.accessibility_action_ = accessibility_action;
+  if (notification_clicked) {
+    set_has_notification_clicked();
+    _impl_.body_.notification_clicked_ = notification_clicked;
   }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.accessibility_action)
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.notification_clicked)
 }
-inline ::dsa::control::v1::AccessibilityAction* Envelope::_internal_mutable_accessibility_action() {
-  if (!_internal_has_accessibility_action()) {
+inline ::dsa::control::v1::NotificationClicked* Envelope::_internal_mutable_notification_clicked() {
+  if (!_internal_has_notification_clicked()) {
     clear_body();
-    set_has_accessibility_action();
-    _impl_.body_.accessibility_action_ = CreateMaybeMessage< ::dsa::control::v1::AccessibilityAction >(GetArenaForAllocation());
+    set_has_notification_clicked();
+    _impl_.body_.notification_clicked_ = CreateMaybeMessage< ::dsa::control::v1::NotificationClicked >(GetArenaForAllocation());
   }
-  return _impl_.body_.accessibility_action_;
+  return _impl_.body_.notification_clicked_;
 }
-inline ::dsa::control::v1::AccessibilityAction* Envelope::mutable_accessibility_action() {
-  ::dsa::control::v1::AccessibilityAction* _msg = _internal_mutable_accessibility_action();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.accessibility_action)
+inline ::dsa::control::v1::NotificationClicked* Envelope::mutable_notification_clicked() {
+  ::dsa::control::v1::NotificationClicked* _msg = _internal_mutable_notification_clicked();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.notification_clicked)
   return _msg;
 }
 
-// .dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;
-inline bool Envelope::_internal_has_accessibility_action_result() const {
-  return body_case() == kAccessibilityActionResult;
+// .dsa.control.v1.NotificationDismissed notification_dismissed = 73;
+inline bool Envelope::_internal_has_notification_dismissed() const {
+  return body_case() == kNotificationDismissed;
 }
-inline bool Envelope::has_accessibility_action_result() const {
-  return _internal_has_accessibility_action_result();
+inline bool Envelope::has_notification_dismissed() const {
+  return _internal_has_notification_dismissed();
 }
-inline void Envelope::set_has_accessibility_action_result() {
-  _impl_._oneof_case_[0] = kAccessibilityActionResult;
+inline void Envelope::set_has_notification_dismissed() {
+  _impl_._oneof_case_[0] = kNotificationDismissed;
 }
-inline void Envelope::clear_accessibility_action_result() {
-  if (_internal_has_accessibility_action_result()) {
+inline void Envelope::clear_notification_dismissed() {
+  if (_internal_has_notification_dismissed()) {
     if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.accessibility_action_result_;
+      delete _impl_.body_.notification_dismissed_;
     }
     clear_has_body();
   }
 }
-inline ::dsa::control::v1::AccessibilityActionResult* Envelope::release_accessibility_action_result() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.accessibility_action_result)
-  if (_internal_has_accessibility_action_result()) {
+inline ::dsa::control::v1::NotificationDismissed* Envelope::release_notification_dismissed() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.notification_dismissed)
+  if (_internal_has_notification_dismissed()) {
     clear_has_body();
-    ::dsa::control::v1::AccessibilityActionResult* temp = _impl_.body_.accessibility_action_result_;
+    ::dsa::control::v1::NotificationDismissed* temp = _impl_.body_.notification_dismissed_;
     if (GetArenaForAllocation() != nullptr) {
       temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
     }
-    _impl_.body_.accessibility_action_result_ = nullptr;
+    _impl_.body_.notification_dismissed_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline const ::dsa::control::v1::AccessibilityActionResult& Envelope::_internal_accessibility_action_result() const {
-  return _internal_has_accessibility_action_result()
-      ? *_impl_.body_.accessibility_action_result_
-      : reinterpret_cast< ::dsa::control::v1::AccessibilityActionResult&>(::dsa::control::v1::_AccessibilityActionResult_default_instance_);
+inline const ::dsa::control::v1::NotificationDismissed& Envelope::_internal_notification_dismissed() const {
+  return _internal_has_notification_dismissed()
+      ? *_impl_.body_.notification_dismissed_
+      : reinterpret_cast< ::dsa::control::v1::NotificationDismissed&>(::dsa::control::v1::_NotificationDismissed_default_instance_);
 }
-inline const ::dsa::control::v1::AccessibilityActionResult& Envelope::accessibility_action_result() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.accessibility_action_result)
-  return _internal_accessibility_action_result();
+inline const ::dsa::control::v1::NotificationDismissed& Envelope::notification_dismissed() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.notification_dismissed)
+  return _internal_notification_dismissed();
 }
-inline ::dsa::control::v1::AccessibilityActionResult* Envelope::unsafe_arena_release_accessibility_action_result() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.accessibility_action_result)
-  if (_internal_has_accessibility_action_result()) {
+inline ::dsa::control::v1::NotificationDismissed* Envelope::unsafe_arena_release_notification_dismissed() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.notification_dismissed)
+  if (_internal_has_notification_dismissed()) {
     clear_has_body();
-    ::dsa::control::v1::AccessibilityActionResult* temp = _impl_.body_.accessibility_action_result_;
-    _impl_.body_.accessibility_action_result_ = nullptr;
+    ::dsa::control::v1::NotificationDismissed* temp = _impl_.body_.notification_dismissed_;
+    _impl_.body_.notification_dismissed_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline void Envelope::unsafe_arena_set_allocated_accessibility_action_result(::dsa::control::v1::AccessibilityActionResult* accessibility_action_result) {
+inline void Envelope::unsafe_arena_set_allocated_notification_dismissed(::dsa::control::v1::NotificationDismissed* notification_dismissed) {
   clear_body();
-  if (accessibility_action_result) {
-    set_has_accessibility_action_result();
-    _impl_.body_.accessibility_action_result_ = accessibility_action_result;
+  if (notification_dismissed) {
+    set_has_notification_dismissed();
+    _impl_.body_.notification_dismissed_ = notification_dismissed;
   }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.accessibility_action_result)
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.notification_dismissed)
 }
-inline ::dsa::control::v1::AccessibilityActionResult* Envelope::_internal_mutable_accessibility_action_result() {
-  if (!_internal_has_accessibility_action_result()) {
+inline ::dsa::control::v1::NotificationDismissed* Envelope::_internal_mutable_notification_dismissed() {
+  if (!_internal_has_notification_dismissed()) {
     clear_body();
-    set_has_accessibility_action_result();
-    _impl_.body_.accessibility_action_result_ = CreateMaybeMessage< ::dsa::control::v1::AccessibilityActionResult >(GetArenaForAllocation());
+    set_has_notification_dismissed();
+    _impl_.body_.notification_dismissed_ = CreateMaybeMessage< ::dsa::control::v1::NotificationDismissed >(GetArenaForAllocation());
   }
-  return _impl_.body_.accessibility_action_result_;
+  return _impl_.body_.notification_dismissed_;
 }
-inline ::dsa::control::v1::AccessibilityActionResult* Envelope::mutable_accessibility_action_result() {
-  ::dsa::control::v1::AccessibilityActionResult* _msg = _internal_mutable_accessibility_action_result();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.accessibility_action_result)
+inline ::dsa::control::v1::NotificationDismissed* Envelope::mutable_notification_dismissed() {
+  ::dsa::control::v1::NotificationDismissed* _msg = _internal_mutable_notification_dismissed();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.notification_dismissed)
   return _msg;
 }
 
@@ -18128,10 +16547,6 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
-// -------------------------------------------------------------------
-
-// -------------------------------------------------------------------
-
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
@@ -18243,7 +16658,6 @@ template <> struct is_proto_enum< ::dsa::control::v1::PointerTool> : ::std::true
 template <> struct is_proto_enum< ::dsa::control::v1::KeyAction> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::InstallStatus> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::FileAction> : ::std::true_type {};
-template <> struct is_proto_enum< ::dsa::control::v1::NodeAction> : ::std::true_type {};
 
 PROTOBUF_NAMESPACE_CLOSE
 

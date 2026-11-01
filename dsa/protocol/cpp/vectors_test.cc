@@ -222,6 +222,23 @@ std::map<std::string, v1::Envelope> Cases() {
   cases["device_idle"].mutable_device_idle()->set_idle(true);
   cases["clipboard_text"].mutable_clipboard_text()->set_text("hello \xec\x95\x88\xeb\x85\x95");
   cases["clipboard_sharing_off"].mutable_clipboard_sharing()->set_on(false);
+  {
+    const std::string key = "0|com.example.chat|1|null|10100";
+    v1::GuestNotification* n = cases["notification"].mutable_notification();
+    n->set_key(key);
+    n->set_package_name("com.example.chat");
+    n->set_app_label("Chat");
+    n->set_title("Ann");
+    n->set_text("\xec\x95\x88\xeb\x85\x95");
+    n->set_icon_png(std::string("\x89PNG", 4));
+    n->set_importance(4);
+    n->set_high_priority(true);
+    n->set_clearable(true);
+    n->set_when_millis(1700000000000LL);
+    cases["notification_removed"].mutable_notification_removed()->set_key(key);
+    cases["notification_clicked"].mutable_notification_clicked()->set_key(key);
+    cases["notification_dismissed"].mutable_notification_dismissed()->set_key(key);
+  }
   cases["agent_connected"].mutable_agent_connected();
   {
     v1::InstallApk* install = cases["install_apk"].mutable_install_apk();

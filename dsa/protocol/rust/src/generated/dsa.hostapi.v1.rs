@@ -168,6 +168,56 @@ pub struct ClipboardText {
     #[prost(string, tag = "1")]
     pub text: ::prost::alloc::string::String,
 }
+/// Turns the connection into a watch of the notifications of the caller's Android: after the
+/// answer (Done), the service sends a Notification each time an app posts one or changes one,
+/// and a NotificationRemoved when one is gone, including every one that was shown when the
+/// Android stops. The client sends nothing more on it. The watch lasts across restarts of the
+/// Android.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WatchNotifications {}
+/// A notification of the caller's Android, on a connection that watches them
+/// (WatchNotifications). One with the key of an earlier one replaces it.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Notification {
+    #[prost(string, tag = "1")]
+    pub key: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub package_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub app_label: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub title: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub text: ::prost::alloc::string::String,
+    /// A PNG image; empty for none.
+    #[prost(bytes = "vec", tag = "6")]
+    pub icon_png: ::prost::alloc::vec::Vec<u8>,
+    /// As Android numbers it: 1 minimum, 2 low, 3 default, 4 high.
+    #[prost(int32, tag = "7")]
+    pub importance: i32,
+    #[prost(bool, tag = "8")]
+    pub high_priority: bool,
+    /// Whether the user may dismiss it.
+    #[prost(bool, tag = "9")]
+    pub clearable: bool,
+    #[prost(int64, tag = "10")]
+    pub when_millis: i64,
+}
+/// The notification with this key is gone, on a connection that watches them.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NotificationRemoved {
+    #[prost(string, tag = "1")]
+    pub key: ::prost::alloc::string::String,
+}
+/// Passes what the user did with a notification of the caller's Android to it. Answered with
+/// Done.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ActOnNotification {
+    #[prost(string, tag = "1")]
+    pub key: ::prost::alloc::string::String,
+    #[prost(enumeration = "NotificationAction", tag = "2")]
+    pub action: i32,
+}
 /// Installs an APK in the caller's Android. The service answers at once: Done when it takes an
 /// APK of this name and size, or an error. After Done the client sends the APK's `size` bytes
 /// in ApkChunk frames, which are not answered, and the service answers the same request id once
@@ -592,129 +642,6 @@ pub struct Settings {
     #[prost(bool, tag = "9")]
     pub clipboard: bool,
 }
-/// Turns the connection into the accessibility tree of one of the caller's task windows, for a
-/// host accessibility client (a screen reader, an inspection tool) that reads that window.
-/// After the answer (Done), the service sends an AccessibilityTree each time the task's tree
-/// arrives from Android or changes in it (a full tree first), and an AccessibilityActionResult
-/// for each AccessibilityAction the client sends. Android reads the task's accessibility nodes
-/// only while at least one such connection for the task is open: closing the last one stops
-/// it. The connection lasts across restarts of the Android, which sends a full tree again.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct WatchAccessibility {
-    #[prost(int32, tag = "1")]
-    pub task_id: i32,
-}
-/// The range a slider or a progress bar has, and where it stands in it.
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
-pub struct NodeRange {
-    #[prost(float, tag = "1")]
-    pub min: f32,
-    #[prost(float, tag = "2")]
-    pub max: f32,
-    #[prost(float, tag = "3")]
-    pub current: f32,
-}
-/// One accessibility node of a task, as Android describes it.
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct AccessibilityNode {
-    /// Unique among the nodes of one tree epoch, never 0.
-    #[prost(uint32, tag = "1")]
-    pub id: u32,
-    #[prost(uint32, repeated, tag = "2")]
-    pub child_ids: ::prost::alloc::vec::Vec<u32>,
-    /// The Android class the node says it is, from which its role is worked out.
-    #[prost(string, tag = "3")]
-    pub class_name: ::prost::alloc::string::String,
-    #[prost(string, tag = "4")]
-    pub text: ::prost::alloc::string::String,
-    #[prost(string, tag = "5")]
-    pub content_description: ::prost::alloc::string::String,
-    #[prost(string, tag = "6")]
-    pub hint: ::prost::alloc::string::String,
-    #[prost(string, tag = "7")]
-    pub view_id: ::prost::alloc::string::String,
-    /// In pixels of the task's window: (0, 0) is the window's top left.
-    #[prost(message, optional, tag = "8")]
-    pub bounds: ::core::option::Option<Rect>,
-    #[prost(bool, tag = "9")]
-    pub checkable: bool,
-    #[prost(bool, tag = "10")]
-    pub checked: bool,
-    #[prost(bool, tag = "11")]
-    pub selected: bool,
-    #[prost(bool, tag = "12")]
-    pub enabled: bool,
-    #[prost(bool, tag = "13")]
-    pub focusable: bool,
-    #[prost(bool, tag = "14")]
-    pub focused: bool,
-    #[prost(bool, tag = "15")]
-    pub scrollable: bool,
-    #[prost(bool, tag = "16")]
-    pub clickable: bool,
-    #[prost(bool, tag = "17")]
-    pub long_clickable: bool,
-    #[prost(bool, tag = "18")]
-    pub editable: bool,
-    #[prost(bool, tag = "19")]
-    pub password: bool,
-    #[prost(bool, tag = "20")]
-    pub heading: bool,
-    #[prost(message, optional, tag = "21")]
-    pub range: ::core::option::Option<NodeRange>,
-    #[prost(enumeration = "NodeAction", repeated, tag = "22")]
-    pub actions: ::prost::alloc::vec::Vec<i32>,
-    #[prost(string, tag = "23")]
-    pub state_description: ::prost::alloc::string::String,
-}
-/// A task's accessibility tree, or what changed in it, on a connection that watches it
-/// (WatchAccessibility). A full tree replaces what came before and starts a new epoch; a change
-/// names the epoch it applies to, carries each new or changed node whole, and the IDs of the
-/// nodes that are gone.
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct AccessibilityTree {
-    #[prost(int32, tag = "1")]
-    pub task_id: i32,
-    #[prost(uint32, tag = "2")]
-    pub epoch: u32,
-    #[prost(bool, tag = "3")]
-    pub full: bool,
-    #[prost(uint32, repeated, tag = "4")]
-    pub root_ids: ::prost::alloc::vec::Vec<u32>,
-    #[prost(message, repeated, tag = "5")]
-    pub nodes: ::prost::alloc::vec::Vec<AccessibilityNode>,
-    #[prost(uint32, repeated, tag = "6")]
-    pub removed_ids: ::prost::alloc::vec::Vec<u32>,
-    /// The node with the input focus, or 0 for none.
-    #[prost(uint32, tag = "7")]
-    pub focused_id: u32,
-}
-/// Client to service, on a connection that watches a task's tree: do something to one of its
-/// nodes. Not answered as a request: an AccessibilityActionResult with the same request_id
-/// follows.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AccessibilityAction {
-    #[prost(uint32, tag = "1")]
-    pub epoch: u32,
-    #[prost(uint32, tag = "2")]
-    pub node_id: u32,
-    #[prost(enumeration = "NodeAction", tag = "3")]
-    pub action: i32,
-    #[prost(string, tag = "4")]
-    pub text: ::prost::alloc::string::String,
-    #[prost(uint32, tag = "5")]
-    pub request_id: u32,
-}
-/// What came of an AccessibilityAction.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AccessibilityActionResult {
-    #[prost(uint32, tag = "1")]
-    pub request_id: u32,
-    #[prost(bool, tag = "2")]
-    pub done: bool,
-    #[prost(string, tag = "3")]
-    pub error: ::prost::alloc::string::String,
-}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Error {
     #[prost(enumeration = "ErrorCode", tag = "1")]
@@ -730,7 +657,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 27, 28"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -780,10 +707,12 @@ pub mod request {
         OpenFile(super::OpenFile),
         #[prost(message, tag = "22")]
         WatchClipboard(super::WatchClipboard),
+        #[prost(message, tag = "23")]
+        WatchNotifications(super::WatchNotifications),
+        #[prost(message, tag = "24")]
+        ActOnNotification(super::ActOnNotification),
         #[prost(message, tag = "27")]
         InstallApk(super::InstallApk),
-        #[prost(message, tag = "28")]
-        WatchAccessibility(super::WatchAccessibility),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -824,7 +753,7 @@ pub mod response {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11, 14, 15, 16, 17"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11, 15, 16, 14"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -858,14 +787,12 @@ pub mod envelope {
         FileChunk(super::FileChunk),
         #[prost(message, tag = "11")]
         ClipboardText(super::ClipboardText),
+        #[prost(message, tag = "15")]
+        Notification(super::Notification),
+        #[prost(message, tag = "16")]
+        NotificationRemoved(super::NotificationRemoved),
         #[prost(message, tag = "14")]
         ApkChunk(super::ApkChunk),
-        #[prost(message, tag = "15")]
-        AccessibilityTree(super::AccessibilityTree),
-        #[prost(message, tag = "16")]
-        AccessibilityAction(super::AccessibilityAction),
-        #[prost(message, tag = "17")]
-        AccessibilityActionResult(super::AccessibilityActionResult),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -1042,6 +969,39 @@ impl FileAction {
         }
     }
 }
+/// What the user did with a notification on the host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum NotificationAction {
+    Unspecified = 0,
+    /// Clicked it: the app opens it, and its task shows as a window. Android leaves Doze first.
+    Open = 1,
+    /// Dismissed it: it is removed in Android too, unless the app made it one the user cannot
+    /// dismiss.
+    Dismiss = 2,
+}
+impl NotificationAction {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "NOTIFICATION_ACTION_UNSPECIFIED",
+            Self::Open => "NOTIFICATION_ACTION_OPEN",
+            Self::Dismiss => "NOTIFICATION_ACTION_DISMISS",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "NOTIFICATION_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
+            "NOTIFICATION_ACTION_OPEN" => Some(Self::Open),
+            "NOTIFICATION_ACTION_DISMISS" => Some(Self::Dismiss),
+            _ => None,
+        }
+    }
+}
 /// Whether an APK was installed, and if not, why. The reasons are stable, so a client can say
 /// in the user's language what went wrong.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
@@ -1213,54 +1173,6 @@ impl KeyAction {
             "KEY_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
             "KEY_ACTION_DOWN" => Some(Self::Down),
             "KEY_ACTION_UP" => Some(Self::Up),
-            _ => None,
-        }
-    }
-}
-/// What can be done to an accessibility node.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum NodeAction {
-    Unspecified = 0,
-    Click = 1,
-    LongClick = 2,
-    SetText = 3,
-    ScrollForward = 4,
-    ScrollBackward = 5,
-    Focus = 6,
-    AccessibilityFocus = 7,
-    Select = 8,
-}
-impl NodeAction {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            Self::Unspecified => "NODE_ACTION_UNSPECIFIED",
-            Self::Click => "NODE_ACTION_CLICK",
-            Self::LongClick => "NODE_ACTION_LONG_CLICK",
-            Self::SetText => "NODE_ACTION_SET_TEXT",
-            Self::ScrollForward => "NODE_ACTION_SCROLL_FORWARD",
-            Self::ScrollBackward => "NODE_ACTION_SCROLL_BACKWARD",
-            Self::Focus => "NODE_ACTION_FOCUS",
-            Self::AccessibilityFocus => "NODE_ACTION_ACCESSIBILITY_FOCUS",
-            Self::Select => "NODE_ACTION_SELECT",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "NODE_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
-            "NODE_ACTION_CLICK" => Some(Self::Click),
-            "NODE_ACTION_LONG_CLICK" => Some(Self::LongClick),
-            "NODE_ACTION_SET_TEXT" => Some(Self::SetText),
-            "NODE_ACTION_SCROLL_FORWARD" => Some(Self::ScrollForward),
-            "NODE_ACTION_SCROLL_BACKWARD" => Some(Self::ScrollBackward),
-            "NODE_ACTION_FOCUS" => Some(Self::Focus),
-            "NODE_ACTION_ACCESSIBILITY_FOCUS" => Some(Self::AccessibilityFocus),
-            "NODE_ACTION_SELECT" => Some(Self::Select),
             _ => None,
         }
     }

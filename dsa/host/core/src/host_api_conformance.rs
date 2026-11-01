@@ -30,6 +30,7 @@ use crate::host_api::{
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use crate::keys::{keycode, meta, KeyAction, KeyEvent};
+use crate::notifications::{Notification, NotificationAction, NotificationEvent};
 use crate::session::SessionState;
 use crate::settings::{MemorySettings, Settings, SettingsStore};
 use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskTable, TaskWatch};
@@ -69,6 +70,9 @@ pub struct FakeAndroid {
     /// The text copied on the host it was given, in order.
     pub host_clipboard: Mutex<Vec<String>>,
     clipboard_watchers: Mutex<Vec<Sender<String>>>,
+    /// What the user did with its notifications on the host, in order.
+    pub notification_actions: Mutex<Vec<NotificationAction>>,
+    notification_watchers: Mutex<Vec<Sender<NotificationEvent>>>,
     /// The APKs it installed or refused, by name, with their whole content, in order.
     pub installs: Mutex<Vec<(String, Vec<u8>)>>,
     /// When each install began and ended, by name, in order: `+name` and `-name`.
@@ -116,6 +120,8 @@ impl FakeAndroid {
             clipboard_shared: Mutex::new(Vec::new()),
             host_clipboard: Mutex::new(Vec::new()),
             clipboard_watchers: Mutex::new(Vec::new()),
+            notification_actions: Mutex::new(Vec::new()),
+            notification_watchers: Mutex::new(Vec::new()),
             installs: Mutex::new(Vec::new()),
             install_steps: Mutex::new(Vec::new()),
             install_time: Mutex::new(Duration::ZERO),
@@ -124,6 +130,14 @@ impl FakeAndroid {
             accessibility_watchers: Mutex::new(Vec::new()),
             accessibility_actions: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Changes its notifications as an app in this Android would, and tells the watchers.
+    pub fn notify(&self, event: NotificationEvent) {
+        self.notification_watchers
+            .lock()
+            .unwrap()
+            .retain(|watcher| watcher.send(event.clone()).is_ok());
     }
 
     /// Opens `url` as an app in this Android would, and tells the link watchers.
@@ -252,6 +266,24 @@ impl UserAndroid for FakeAndroid {
         let (tx, rx) = mpsc::channel();
         self.clipboard_watchers.lock().unwrap().push(tx);
         Some(rx)
+    }
+    fn watch_notifications(&self) -> Option<mpsc::Receiver<NotificationEvent>> {
+        let (tx, rx) = mpsc::channel();
+        self.notification_watchers.lock().unwrap().push(tx);
+        Some(rx)
+    }
+    fn notification_action(&self, action: NotificationAction) -> Result<(), TaskRequestError> {
+        if !matches!(
+            self.state(),
+            SessionState::Active | SessionState::Dozing | SessionState::Frozen
+        ) {
+            return Err(TaskRequestError::NotRunning(format!(
+                "Android is {}, not running",
+                self.state()
+            )));
+        }
+        self.notification_actions.lock().unwrap().push(action);
+        Ok(())
     }
     fn install_apk(
         &self,
@@ -658,6 +690,30 @@ macro_rules! host_api_conformance {
         #[test]
         fn nfr5_a_file_client_that_sends_something_else_is_refused() {
             $crate::host_api_conformance::malformed_file_is_refused(&mut || $make);
+        }
+        #[test]
+        fn fr8_notifications_of_the_callers_android_reach_a_watcher() {
+            $crate::host_api_conformance::notifications_reach_a_watcher(&mut || $make);
+        }
+        #[test]
+        fn fr8_opening_and_dismissing_a_notification_reach_the_callers_android() {
+            $crate::host_api_conformance::notification_actions_reach_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr8_acting_on_a_notification_of_a_stopped_android_says_it_is_not_running() {
+            $crate::host_api_conformance::notification_action_needs_a_running_android(&mut || {
+                $make
+            });
+        }
+        #[test]
+        fn nfr5_a_malformed_action_on_a_notification_is_refused() {
+            $crate::host_api_conformance::malformed_notification_action_is_refused(&mut || $make);
+        }
+        #[test]
+        fn nfr5_a_notification_watcher_that_sends_something_is_disconnected() {
+            $crate::host_api_conformance::notification_watcher_that_sends_is_disconnected(
+                &mut || $make,
+            );
         }
         #[test]
         fn fr17_settings_are_read_and_changed_through_the_service() {
@@ -2075,6 +2131,184 @@ pub fn malformed_file_is_refused(make: MakeLocal<'_>) {
         connect(&mut *connector).status().unwrap().state,
         SessionState::Active,
         "the service goes on"
+    );
+}
+
+fn sample_notification(key: &str, title: &str) -> Notification {
+    Notification {
+        key: key.into(),
+        package_name: "com.example.chat".into(),
+        app_label: "Chat".into(),
+        title: title.into(),
+        text: "\u{c548}\u{b155}".into(),
+        icon_png: vec![0x89, b'P', b'N', b'G'],
+        importance: 4,
+        high_priority: true,
+        clearable: true,
+        when_millis: 1_700_000_000_000,
+    }
+}
+
+pub fn notifications_reach_a_watcher(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut watch = connect(&mut *connector)
+        .watch_notifications()
+        .expect("watching notifications");
+    let android = androids.of(&user).expect("the caller's Android");
+    assert_eq!(watch.next(Duration::from_millis(50)).unwrap(), None);
+    let posted = sample_notification("0|com.example.chat|1|null|10100", "Ann");
+    android.notify(NotificationEvent::Posted(posted.clone()));
+    assert_eq!(
+        watch.next(WAIT).unwrap(),
+        Some(NotificationEvent::Posted(posted.clone()))
+    );
+    let updated = sample_notification("0|com.example.chat|1|null|10100", "Ann (2)");
+    android.notify(NotificationEvent::Posted(updated.clone()));
+    assert_eq!(
+        watch.next(WAIT).unwrap(),
+        Some(NotificationEvent::Posted(updated))
+    );
+    android.notify(NotificationEvent::Removed {
+        key: posted.key.clone(),
+    });
+    assert_eq!(
+        watch.next(WAIT).unwrap(),
+        Some(NotificationEvent::Removed { key: posted.key })
+    );
+}
+
+pub fn notification_actions_reach_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut client = connect(&mut *connector);
+    client.start().unwrap();
+    let open = NotificationAction::Open {
+        key: "0|com.example.chat|1|null|10100".into(),
+    };
+    let dismiss = NotificationAction::Dismiss {
+        key: "0|com.example.chat|2|null|10100".into(),
+    };
+    client.act_on_notification(&open).expect("opened");
+    client.act_on_notification(&dismiss).expect("dismissed");
+    assert_eq!(
+        *androids
+            .of(&user)
+            .unwrap()
+            .notification_actions
+            .lock()
+            .unwrap(),
+        vec![open, dismiss]
+    );
+}
+
+pub fn notification_action_needs_a_running_android(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let mut client = connect(&mut *connector);
+    match client.act_on_notification(&NotificationAction::Open { key: "k".into() }) {
+        Err(ClientError::Service { code, .. }) => assert_eq!(code, ErrorCode::NotRunning),
+        other => panic!("expected the Android not to be running, got {other:?}"),
+    }
+}
+
+pub fn malformed_notification_action_is_refused(make: MakeLocal<'_>) {
+    use dsa_protocol::host_api::types::{
+        envelope::Body, request, response, ActOnNotification, Envelope, Request,
+    };
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let mut connection = connector.connect(WAIT).unwrap();
+    client_connect(&mut *connection, &local_hello(Role::Client, "client"), WAIT).unwrap();
+    let bad = [
+        ActOnNotification {
+            key: String::new(),
+            action: 1,
+        },
+        ActOnNotification {
+            key: "k".repeat(crate::notifications::MAX_KEY_BYTES + 1),
+            action: 1,
+        },
+        ActOnNotification {
+            key: "k".into(),
+            action: 0,
+        },
+        ActOnNotification {
+            key: "k".into(),
+            action: 77,
+        },
+    ];
+    for (id, act) in bad.into_iter().enumerate() {
+        let request = Request {
+            id: id as u64 + 1,
+            body: Some(request::Body::ActOnNotification(act)),
+        };
+        dsa_protocol::host_api::send(&mut *connection, Body::Request(request)).unwrap();
+        let frame = connection.recv(Some(WAIT)).expect("an answer");
+        match dsa_protocol::host_api::decode(&frame) {
+            Ok(Envelope {
+                body:
+                    Some(Body::Response(dsa_protocol::host_api::types::Response {
+                        body: Some(response::Body::Error(_)),
+                        ..
+                    })),
+            }) => {}
+            other => panic!("expected the action to be refused, got {other:?}"),
+        }
+    }
+    assert!(androids
+        .of(&user)
+        .unwrap()
+        .notification_actions
+        .lock()
+        .unwrap()
+        .is_empty());
+    // The service is still there.
+    assert_eq!(
+        connect(&mut *connector).status().unwrap().state,
+        SessionState::Active
+    );
+}
+
+pub fn notification_watcher_that_sends_is_disconnected(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let mut connection = connector.connect(WAIT).unwrap();
+    client_connect(&mut *connection, &local_hello(Role::Client, "client"), WAIT).unwrap();
+    let watch = dsa_protocol::host_api::types::Request {
+        id: 1,
+        body: Some(
+            dsa_protocol::host_api::types::request::Body::WatchNotifications(
+                dsa_protocol::host_api::types::WatchNotifications {},
+            ),
+        ),
+    };
+    dsa_protocol::host_api::send(
+        &mut *connection,
+        dsa_protocol::host_api::types::envelope::Body::Request(watch.clone()),
+    )
+    .unwrap();
+    connection
+        .recv(Some(WAIT))
+        .expect("the answer to the watch");
+    // A frame that cannot be read is dropped, and the connection goes on.
+    connection.send(&[0xff, 0xff, 0xff]).unwrap();
+    dsa_protocol::host_api::send(
+        &mut *connection,
+        dsa_protocol::host_api::types::envelope::Body::Request(watch),
+    )
+    .unwrap();
+    assert!(
+        connection.recv(Some(WAIT)).is_err(),
+        "the service closes a notification watcher that sends a request"
+    );
+    assert_eq!(
+        connect(&mut *connector).status().unwrap().state,
+        SessionState::Stopped
     );
 }
 

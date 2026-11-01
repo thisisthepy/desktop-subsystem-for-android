@@ -218,6 +218,53 @@ message ClipboardText {
   string text = 1;
 }
 
+// Turns the connection into a watch of the notifications of the caller's Android: after the
+// answer (Done), the service sends a Notification each time an app posts one or changes one,
+// and a NotificationRemoved when one is gone, including every one that was shown when the
+// Android stops. The client sends nothing more on it. The watch lasts across restarts of the
+// Android.
+message WatchNotifications {}
+
+// A notification of the caller's Android, on a connection that watches them
+// (WatchNotifications). One with the key of an earlier one replaces it.
+message Notification {
+  string key = 1;
+  string package_name = 2;
+  string app_label = 3;
+  string title = 4;
+  string text = 5;
+  // A PNG image; empty for none.
+  bytes icon_png = 6;
+  // As Android numbers it: 1 minimum, 2 low, 3 default, 4 high.
+  int32 importance = 7;
+  bool high_priority = 8;
+  // Whether the user may dismiss it.
+  bool clearable = 9;
+  int64 when_millis = 10;
+}
+
+// The notification with this key is gone, on a connection that watches them.
+message NotificationRemoved {
+  string key = 1;
+}
+
+// What the user did with a notification on the host.
+enum NotificationAction {
+  NOTIFICATION_ACTION_UNSPECIFIED = 0;
+  // Clicked it: the app opens it, and its task shows as a window. Android leaves Doze first.
+  NOTIFICATION_ACTION_OPEN = 1;
+  // Dismissed it: it is removed in Android too, unless the app made it one the user cannot
+  // dismiss.
+  NOTIFICATION_ACTION_DISMISS = 2;
+}
+
+// Passes what the user did with a notification of the caller's Android to it. Answered with
+// Done.
+message ActOnNotification {
+  string key = 1;
+  NotificationAction action = 2;
+}
+
 // Installs an APK in the caller's Android. The service answers at once: Done when it takes an
 // APK of this name and size, or an error. After Done the client sends the APK's `size` bytes
 // in ApkChunk frames, which are not answered, and the service answers the same request id once
@@ -738,6 +785,8 @@ message Request {
     WatchLinks watch_links = 25;
     OpenFile open_file = 26;
     WatchClipboard watch_clipboard = 22;
+    WatchNotifications watch_notifications = 23;
+    ActOnNotification act_on_notification = 24;
     InstallApk install_apk = 27;
     WatchAccessibility watch_accessibility = 28;
   }
@@ -775,9 +824,11 @@ message Envelope {
     OpenLink open_link = 12;
     FileChunk file_chunk = 13;
     ClipboardText clipboard_text = 11;
+    Notification notification = 15;
+    NotificationRemoved notification_removed = 16;
     ApkChunk apk_chunk = 14;
-    AccessibilityTree accessibility_tree = 15;
-    AccessibilityAction accessibility_action = 16;
-    AccessibilityActionResult accessibility_action_result = 17;
+    AccessibilityTree accessibility_tree = 17;
+    AccessibilityAction accessibility_action = 18;
+    AccessibilityActionResult accessibility_action_result = 19;
   }
 }

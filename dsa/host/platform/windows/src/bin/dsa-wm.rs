@@ -32,6 +32,27 @@ fn main() {
     let log_file = default_log_file();
     let logger = CompositorLogger::open(&log_file).ok().map(Arc::new);
 
+    // Windows runs `dsa-wm --notification <uri>` when the user clicks a notification's toast:
+    // the click goes to the service, and this process ends without starting another window
+    // manager.
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(at) = args
+        .iter()
+        .position(|arg| arg == dsa_host_windows::compositor::notifications::ARGUMENT)
+    {
+        let uri = args.get(at + 1).map(String::as_str).unwrap_or("");
+        let mut connector = NamedPipeConnector {
+            name: CompositorConfig::default().pipe_name,
+        };
+        if let Err(why) = dsa_host_windows::compositor::notifications::activate(uri, &mut connector)
+        {
+            if let Some(log) = &logger {
+                log.log(&format!("a clicked notification did not open: {why}"));
+            }
+        }
+        return;
+    }
+
     dsa_host_windows::compositor::log::input_trace_to(logger.clone());
 
     let config = CompositorConfig::default();

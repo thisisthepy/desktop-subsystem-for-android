@@ -26,6 +26,10 @@
 //! ([`HostApiClient::open_file`]) sends its content in pieces after the first answer, and the
 //! service answers again once Android has the file.
 //!
+//! A client that watches notifications ([`HostApiClient::watch_notifications`]) receives the
+//! notifications of the caller's Android as they are posted, changed and removed. What the user
+//! does with one on the host goes back with [`HostApiClient::act_on_notification`], on any
+//! connection.
 //! A client that watches a task's accessibility tree ([`HostApiClient::watch_accessibility`])
 //! receives the tree and its changes, and sends actions on its nodes, on the same connection.
 //! The caller's Android reads the task's tree only while such a connection is open.
@@ -58,6 +62,7 @@ use crate::keys::KeyEvent;
 use crate::memory::{
     snapshot_from_wire, snapshot_to_wire, GuestMemoryReport, HostMemory, MemorySnapshot,
 };
+use crate::notifications::{self, Notification, NotificationAction, NotificationEvent};
 use crate::resize_trace::{self, detail_requested, ResizeTrace, DETAIL_ENV};
 use crate::session::{Session, SessionError, SessionState};
 use crate::settings::{Settings, SettingsStore};
@@ -147,6 +152,17 @@ pub trait UserAndroid: Send + Sync {
         let _ = file;
         Err(TaskRequestError::Failed(
             "this Android does not take files".into(),
+        ))
+    }
+    /// The notifications of this Android from now on. `None` when it does not report them.
+    fn watch_notifications(&self) -> Option<Receiver<NotificationEvent>> {
+        None
+    }
+    /// Passes what the user did with a notification on the host to this Android.
+    fn notification_action(&self, action: NotificationAction) -> Result<(), TaskRequestError> {
+        let _ = action;
+        Err(TaskRequestError::Failed(
+            "this Android does not show its notifications on the host".into(),
         ))
     }
     /// Installs the APK called `name`, of `size` bytes read from `content`, in this Android,
@@ -261,6 +277,12 @@ impl UserAndroid for Session {
     }
     fn open_file(&self, file: &FileTransfer) -> Result<(), TaskRequestError> {
         Session::open_file(self, file).map_err(request_error)
+    }
+    fn watch_notifications(&self) -> Option<Receiver<NotificationEvent>> {
+        Some(Session::watch_notifications(self))
+    }
+    fn notification_action(&self, action: NotificationAction) -> Result<(), TaskRequestError> {
+        Session::notification_action(self, action).map_err(request_error)
     }
     fn install_apk(
         &self,
@@ -805,6 +827,9 @@ impl HostApiService {
             }
             if let Some(request::Body::WatchClipboard(_)) = request.body {
                 return self.watch_clipboard(connection, &peer, request.id);
+            }
+            if let Some(request::Body::WatchNotifications(_)) = request.body {
+                return self.watch_notifications(connection, &peer, request.id);
             }
             if let Some(request::Body::InstallApk(install)) = &request.body {
                 return self.install_apk(connection, &peer, request.id, install.clone());
@@ -1367,6 +1392,113 @@ impl HostApiService {
         }
     }
 
+    /// Answers a WatchNotifications request, then passes the notifications of the client's
+    /// Android to it until the client goes away. The client sends nothing more: anything it
+    /// sends closes the connection, except a frame that cannot be read, which is dropped.
+    fn watch_notifications(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
+        let watched = match self.androids.android(&peer.user) {
+            Err(why) => Err(error(ErrorCode::Unavailable, why)),
+            Ok(android) => android.watch_notifications().ok_or_else(|| {
+                error(
+                    ErrorCode::Unavailable,
+                    "this Android does not show its notifications on the host".into(),
+                )
+            }),
+        };
+        let watch = match watched {
+            Ok(watch) => watch,
+            Err(body) => {
+                let _ = send(
+                    &mut *connection,
+                    Body::Response(Response {
+                        id,
+                        body: Some(body),
+                    }),
+                );
+                return;
+            }
+        };
+        let answer = Response {
+            id,
+            body: Some(response::Body::Done(types::Done {})),
+        };
+        if send(&mut *connection, Body::Response(answer)).is_err() {
+            return;
+        }
+        loop {
+            loop {
+                match watch.try_recv() {
+                    Ok(event) => {
+                        if send(&mut *connection, notification_to_wire(event)).is_err() {
+                            return;
+                        }
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        connection.close();
+                        return;
+                    }
+                }
+            }
+            let frame = match connection.recv(Some(CLIPBOARD_POLL)) {
+                Ok(frame) => frame,
+                Err(TransportError::Timeout) => continue,
+                Err(_) => return,
+            };
+            match decode(&frame) {
+                Ok(_) => {
+                    eprintln!(
+                        "local API: a client of {} sent something on a connection that watches \
+                         notifications; closing its connection",
+                        peer.user
+                    );
+                    connection.close();
+                    return;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "local API: a client of {} sent an unreadable frame on a connection \
+                         that watches notifications ({error}); dropping it",
+                        peer.user
+                    );
+                }
+            }
+        }
+    }
+
+    /// Passes what the user did with a notification to the caller's Android.
+    fn act_on_notification(&self, peer: &Peer, act: types::ActOnNotification) -> response::Body {
+        if !notifications::valid_key(&act.key) {
+            return error(
+                ErrorCode::UnknownRequest,
+                format!(
+                    "a notification key is 1 to {} bytes, not {}",
+                    notifications::MAX_KEY_BYTES,
+                    act.key.len()
+                ),
+            );
+        }
+        let action = match types::NotificationAction::try_from(act.action) {
+            Ok(types::NotificationAction::Open) => NotificationAction::Open { key: act.key },
+            Ok(types::NotificationAction::Dismiss) => NotificationAction::Dismiss { key: act.key },
+            _ => {
+                return error(
+                    ErrorCode::UnknownRequest,
+                    "the action on a notification is to open it or to dismiss it".into(),
+                )
+            }
+        };
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        match android.notification_action(action) {
+            Ok(()) => response::Body::Done(types::Done {}),
+            Err(TaskRequestError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(TaskRequestError::Failed(why)) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
     /// Answers an InstallApk request: refuses an APK that is too large or not named as one,
     /// else streams the ApkChunk frames that follow to the caller's Android and answers again
     /// with how the install ended. The connection ends with the install.
@@ -1514,6 +1646,7 @@ impl HostApiService {
             Some(request::Body::SetWindowsShown(shown)) => {
                 self.request(peer, TaskRequest::WindowsShown { shown: shown.shown })
             }
+            Some(request::Body::ActOnNotification(act)) => self.act_on_notification(peer, act),
             Some(request::Body::FreezeSession(_)) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => match android.freeze() {
@@ -1547,8 +1680,10 @@ impl HostApiService {
                         | request::Body::WatchClipboard(_)
                         | request::Body::InstallApk(_)
                         | request::Body::WatchLinks(_)
-                        | request::Body::WatchAccessibility(_)
-                        | request::Body::OpenFile(_) => unreachable!("answered above"),
+                        | request::Body::OpenFile(_)
+                        | request::Body::WatchNotifications(_)
+                        | request::Body::ActOnNotification(_)
+                        | request::Body::WatchAccessibility(_) => unreachable!("answered above"),
                     }
                     status(android.as_ref())
                 }
@@ -2304,6 +2439,34 @@ impl HostApiClient {
         }
     }
 
+    /// Watches the notifications of the caller's Android. The connection carries nothing
+    /// else from here on, so the client is used up.
+    pub fn watch_notifications(mut self) -> Result<NotificationStream, ClientError> {
+        match self.exchange(
+            request::Body::WatchNotifications(types::WatchNotifications {}),
+            self.timeout,
+        )? {
+            response::Body::Done(_) => Ok(NotificationStream {
+                connection: self.connection,
+            }),
+            _ => Err(ClientError::Malformed(
+                "expected the answer that notifications are watched".into(),
+            )),
+        }
+    }
+
+    /// Passes what the user did with a notification on the host to the caller's Android.
+    pub fn act_on_notification(&mut self, action: &NotificationAction) -> Result<(), ClientError> {
+        let (key, kind) = match action {
+            NotificationAction::Open { key } => (key, types::NotificationAction::Open),
+            NotificationAction::Dismiss { key } => (key, types::NotificationAction::Dismiss),
+        };
+        self.done(request::Body::ActOnNotification(types::ActOnNotification {
+            key: key.clone(),
+            action: kind as i32,
+        }))
+    }
+
     fn done(&mut self, body: request::Body) -> Result<(), ClientError> {
         match self.exchange(body, self.timeout)? {
             response::Body::Done(_) => Ok(()),
@@ -2583,6 +2746,65 @@ impl LinkStream {
             }) => Ok(Some(link.url)),
             Ok(_) => Err(ClientError::Malformed("expected a link".into())),
             Err(error) => Err(ClientError::Malformed(error.to_string())),
+        }
+    }
+}
+
+/// A connection that watches the notifications of the caller's Android, from
+/// [`HostApiClient::watch_notifications`].
+pub struct NotificationStream {
+    connection: Box<dyn Connection>,
+}
+
+impl NotificationStream {
+    /// The next change to the notifications, waiting at most `timeout`. `Ok(None)` means none
+    /// came in time; an error means the connection has ended.
+    pub fn next(&mut self, timeout: Duration) -> Result<Option<NotificationEvent>, ClientError> {
+        let frame = match self.connection.recv(Some(timeout)) {
+            Ok(frame) => frame,
+            Err(TransportError::Timeout) => return Ok(None),
+            Err(error) => return Err(ClientError::Transport(error)),
+        };
+        match decode(&frame) {
+            Ok(Envelope {
+                body: Some(Body::Notification(n)),
+            }) => Ok(Some(NotificationEvent::Posted(Notification {
+                key: n.key,
+                package_name: n.package_name,
+                app_label: n.app_label,
+                title: n.title,
+                text: n.text,
+                icon_png: n.icon_png,
+                importance: n.importance,
+                high_priority: n.high_priority,
+                clearable: n.clearable,
+                when_millis: n.when_millis,
+            }))),
+            Ok(Envelope {
+                body: Some(Body::NotificationRemoved(removed)),
+            }) => Ok(Some(NotificationEvent::Removed { key: removed.key })),
+            Ok(_) => Err(ClientError::Malformed("expected a notification".into())),
+            Err(error) => Err(ClientError::Malformed(error.to_string())),
+        }
+    }
+}
+
+fn notification_to_wire(event: NotificationEvent) -> Body {
+    match event {
+        NotificationEvent::Posted(n) => Body::Notification(types::Notification {
+            key: n.key,
+            package_name: n.package_name,
+            app_label: n.app_label,
+            title: n.title,
+            text: n.text,
+            icon_png: n.icon_png,
+            importance: n.importance,
+            high_priority: n.high_priority,
+            clearable: n.clearable,
+            when_millis: n.when_millis,
+        }),
+        NotificationEvent::Removed { key } => {
+            Body::NotificationRemoved(types::NotificationRemoved { key })
         }
     }
 }

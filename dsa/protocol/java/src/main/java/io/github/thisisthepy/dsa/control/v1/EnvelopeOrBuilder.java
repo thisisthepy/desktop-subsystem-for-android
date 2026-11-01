@@ -459,48 +459,48 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.FileProgress getFileProgress();
 
   /**
-   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
-   * @return Whether the accessibilityWatch field is set.
+   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+   * @return Whether the notification field is set.
    */
-  boolean hasAccessibilityWatch();
+  boolean hasNotification();
   /**
-   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
-   * @return The accessibilityWatch.
+   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+   * @return The notification.
    */
-  io.github.thisisthepy.dsa.control.v1.AccessibilityWatch getAccessibilityWatch();
+  io.github.thisisthepy.dsa.control.v1.GuestNotification getNotification();
 
   /**
-   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
-   * @return Whether the accessibilityTree field is set.
+   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+   * @return Whether the notificationRemoved field is set.
    */
-  boolean hasAccessibilityTree();
+  boolean hasNotificationRemoved();
   /**
-   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
-   * @return The accessibilityTree.
+   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+   * @return The notificationRemoved.
    */
-  io.github.thisisthepy.dsa.control.v1.AccessibilityTree getAccessibilityTree();
+  io.github.thisisthepy.dsa.control.v1.NotificationRemoved getNotificationRemoved();
 
   /**
-   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
-   * @return Whether the accessibilityAction field is set.
+   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+   * @return Whether the notificationClicked field is set.
    */
-  boolean hasAccessibilityAction();
+  boolean hasNotificationClicked();
   /**
-   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
-   * @return The accessibilityAction.
+   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+   * @return The notificationClicked.
    */
-  io.github.thisisthepy.dsa.control.v1.AccessibilityAction getAccessibilityAction();
+  io.github.thisisthepy.dsa.control.v1.NotificationClicked getNotificationClicked();
 
   /**
-   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
-   * @return Whether the accessibilityActionResult field is set.
+   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+   * @return Whether the notificationDismissed field is set.
    */
-  boolean hasAccessibilityActionResult();
+  boolean hasNotificationDismissed();
   /**
-   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
-   * @return The accessibilityActionResult.
+   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+   * @return The notificationDismissed.
    */
-  io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult getAccessibilityActionResult();
+  io.github.thisisthepy.dsa.control.v1.NotificationDismissed getNotificationDismissed();
 
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

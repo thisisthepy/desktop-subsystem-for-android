@@ -5,10 +5,11 @@
   agent reports tasks and acts on the host's requests, and its activities are the guest's
   invisible home (platform/HomeActivity.kt), which Android requires and nobody sees, and the
   guest's browser while web links go to the host (platform/LinkActivity.kt), which shows
-  nothing. Its services are the guest's input method (platform/HostInputMethod.kt), which
-  shows nothing and types what the host's input method composes, and an accessibility
-  service (platform/HostAccessibilityService.kt), enabled only while a host accessibility
-  client watches a task.
+  nothing. Its first service is the guest's input method (platform/HostInputMethod.kt), which
+  shows nothing and types what the host's input method composes. Its other service is its
+  notification listener (platform/AndroidNotifications.kt), which hands the guest's
+  notifications to the host. An accessibility service (platform/HostAccessibilityService.kt)
+  is enabled only while a host accessibility client watches a task.
   Every permission here is also in privapp-permissions-dsa-agent.xml.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -53,6 +54,11 @@
       role back to a browser app when the user keeps links in the guest.
     -->
     <uses-permission android:name="android.permission.MANAGE_ROLE_HOLDERS" />
+    <!--
+      Allowing the agent's own notification listener at start, as Settings does when a person
+      allows one: the guest has no screen to ask on.
+    -->
+    <uses-permission android:name="android.permission.MANAGE_NOTIFICATION_LISTENERS" />
 
     <application
         android:name=".platform.AgentApplication"
@@ -134,6 +140,17 @@
         </service>
 
         <!--
+          The agent's notification listener. Only the notification manager may bind it, and it
+          runs in the agent's process, which is always running.
+        -->
+        <service
+            android:name=".platform.HostNotificationListener"
+            android:exported="true"
+            android:label="@string/notification_listener_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
           Reads the nodes of the tasks a host accessibility client (a screen reader) watches,
           so the host can show them in each task window's accessibility tree. The agent
           enables it only while the host watches a task and disables it after; it shows

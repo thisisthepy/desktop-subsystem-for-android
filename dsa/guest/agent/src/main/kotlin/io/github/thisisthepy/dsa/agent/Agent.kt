@@ -28,6 +28,8 @@ import io.github.thisisthepy.dsa.agent.power.DevicePower
 import io.github.thisisthepy.dsa.agent.power.Lifecycle
 import io.github.thisisthepy.dsa.agent.memory.MemoryReporter
 import io.github.thisisthepy.dsa.agent.memory.MemorySource
+import io.github.thisisthepy.dsa.agent.notifications.NotificationForwarder
+import io.github.thisisthepy.dsa.agent.notifications.NotificationSource
 import io.github.thisisthepy.dsa.agent.requests.HostRequests
 import io.github.thisisthepy.dsa.agent.requests.RequestResult
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
@@ -70,7 +72,9 @@ import io.github.thisisthepy.dsa.control.v1.PointerAction
  * ([ClipboardSync]). Web links apps open go to the host's browser unless the host says they
  * stay in the guest ([Links]), and files the host sends are stored and offered to the apps
  * that can open them ([FileReceiver]). APKs the host sends are installed through the guest's
- * package installer ([ApkInstaller]), and the host is told how each install went. While a host accessibility client watches a task, the
+ * package installer ([ApkInstaller]), and the host is told how each install went. The guest's
+ * notifications go to the host's notification centre, and a click or a dismissal there comes
+ * back to them ([NotificationForwarder]). While a host accessibility client watches a task, the
  * agent's accessibility service is on and the task's accessibility tree goes to the host
  * ([AccessibilityExport]); otherwise the service is off.
  */
@@ -100,6 +104,7 @@ class Agent(
     fileStore: TransferStore? = null,
     fileOpener: FileOpener = FileOpener.NONE,
     clipboard: GuestClipboard = GuestClipboard.NONE,
+    notifications: NotificationSource = NotificationSource.NONE,
     packageInstaller: PackageInstallerPort = PackageInstallerPort.NONE,
     accessibility: AccessibilitySource = AccessibilitySource.NONE,
     clock: () -> Long = { System.nanoTime() / 1_000_000 },
@@ -151,6 +156,13 @@ class Agent(
         MemoryReporter(it, scheduler, log, isConnected = { channel.connected }, send = { frame -> channel.send(frame) })
     }
     private val clipboardSync = ClipboardSync(clipboard, { frame -> channel.send(frame) }, log, isConnected = { channel.connected })
+    private val notificationForwarder = NotificationForwarder(
+        ownPackage,
+        notifications,
+        { frame -> channel.send(frame) },
+        log,
+        isConnected = { channel.connected },
+    )
     private val apkInstaller = ApkInstaller(
         packageInstaller,
         { frame -> channel.send(frame) },
@@ -192,6 +204,7 @@ class Agent(
             listen()
             lifecycle.start { work -> scheduler.post(work) }
             clipboardSync.start { work -> scheduler.post(work) }
+            notificationForwarder.start { work -> scheduler.post(work) }
             listenToApps()
             channel.start()
             requestRefresh()
@@ -253,6 +266,7 @@ class Agent(
         reporter.resend()
         lifecycle.connected()
         clipboardSync.connected()
+        notificationForwarder.connected()
         apkInstaller.connected()
         installed.resend()
         memoryReporter?.connected()
@@ -315,6 +329,7 @@ class Agent(
         }
         if (lifecycle.handle(envelope)) return true
         if (clipboardSync.handle(envelope)) return true
+        if (notificationForwarder.handle(envelope)) return true
         if (apkInstaller.handle(envelope)) return true
         when (envelope.bodyCase) {
             Envelope.BodyCase.KEY_EVENT -> try {
