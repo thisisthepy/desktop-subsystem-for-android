@@ -5,6 +5,6 @@
 namespace dsa::control::v1 {
 
 // SHA-256 of the normalised control.proto these sources were generated from.
-inline constexpr char kSchemaHashHex[] = "9ecee1958f8b845f55705acc82eb192715b76c0944dfd94c42e3e5b397432683";
+inline constexpr char kSchemaHashHex[] = "184b37b03aa5bb02bfac42d122a64c274e1bbc6df0d3a87c9f8d686fe316d8ad";
 
 }  // namespace dsa::control::v1

@@ -461,6 +461,33 @@ struct GuestBootDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GuestBootDefaultTypeInternal _GuestBoot_default_instance_;
+PROTOBUF_CONSTEXPR ClockProbe::ClockProbe(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.host_sent_ns_)*/uint64_t{0u}
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct ClockProbeDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ClockProbeDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ClockProbeDefaultTypeInternal() {}
+  union {
+    ClockProbe _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ClockProbeDefaultTypeInternal _ClockProbe_default_instance_;
+PROTOBUF_CONSTEXPR ClockAnswer::ClockAnswer(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.host_sent_ns_)*/uint64_t{0u}
+  , /*decltype(_impl_.guest_mono_ns_)*/uint64_t{0u}
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct ClockAnswerDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ClockAnswerDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ClockAnswerDefaultTypeInternal() {}
+  union {
+    ClockAnswer _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ClockAnswerDefaultTypeInternal _ClockAnswer_default_instance_;
 PROTOBUF_CONSTEXPR Envelope::Envelope(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.body_)*/{}
@@ -8304,6 +8331,399 @@ std::string GuestBoot::GetTypeName() const {
 
 // ===================================================================
 
+class ClockProbe::_Internal {
+ public:
+};
+
+ClockProbe::ClockProbe(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ClockProbe)
+}
+ClockProbe::ClockProbe(const ClockProbe& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ClockProbe* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.host_sent_ns_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _this->_impl_.host_sent_ns_ = from._impl_.host_sent_ns_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ClockProbe)
+}
+
+inline void ClockProbe::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.host_sent_ns_){uint64_t{0u}}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+ClockProbe::~ClockProbe() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ClockProbe)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ClockProbe::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void ClockProbe::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ClockProbe::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ClockProbe)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.host_sent_ns_ = uint64_t{0u};
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ClockProbe::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint64 host_sent_ns = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.host_sent_ns_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ClockProbe::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ClockProbe)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint64 host_sent_ns = 1;
+  if (this->_internal_host_sent_ns() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(1, this->_internal_host_sent_ns(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ClockProbe)
+  return target;
+}
+
+size_t ClockProbe::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ClockProbe)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // uint64 host_sent_ns = 1;
+  if (this->_internal_host_sent_ns() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_host_sent_ns());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ClockProbe::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ClockProbe*>(
+      &from));
+}
+
+void ClockProbe::MergeFrom(const ClockProbe& from) {
+  ClockProbe* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ClockProbe)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_host_sent_ns() != 0) {
+    _this->_internal_set_host_sent_ns(from._internal_host_sent_ns());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ClockProbe::CopyFrom(const ClockProbe& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ClockProbe)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ClockProbe::IsInitialized() const {
+  return true;
+}
+
+void ClockProbe::InternalSwap(ClockProbe* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_.host_sent_ns_, other->_impl_.host_sent_ns_);
+}
+
+std::string ClockProbe::GetTypeName() const {
+  return "dsa.control.v1.ClockProbe";
+}
+
+
+// ===================================================================
+
+class ClockAnswer::_Internal {
+ public:
+};
+
+ClockAnswer::ClockAnswer(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ClockAnswer)
+}
+ClockAnswer::ClockAnswer(const ClockAnswer& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ClockAnswer* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.host_sent_ns_){}
+    , decltype(_impl_.guest_mono_ns_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.host_sent_ns_, &from._impl_.host_sent_ns_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.guest_mono_ns_) -
+    reinterpret_cast<char*>(&_impl_.host_sent_ns_)) + sizeof(_impl_.guest_mono_ns_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ClockAnswer)
+}
+
+inline void ClockAnswer::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.host_sent_ns_){uint64_t{0u}}
+    , decltype(_impl_.guest_mono_ns_){uint64_t{0u}}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+ClockAnswer::~ClockAnswer() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ClockAnswer)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ClockAnswer::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void ClockAnswer::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ClockAnswer::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ClockAnswer)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&_impl_.host_sent_ns_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.guest_mono_ns_) -
+      reinterpret_cast<char*>(&_impl_.host_sent_ns_)) + sizeof(_impl_.guest_mono_ns_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ClockAnswer::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint64 host_sent_ns = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.host_sent_ns_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 guest_mono_ns = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.guest_mono_ns_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ClockAnswer::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ClockAnswer)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint64 host_sent_ns = 1;
+  if (this->_internal_host_sent_ns() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(1, this->_internal_host_sent_ns(), target);
+  }
+
+  // uint64 guest_mono_ns = 2;
+  if (this->_internal_guest_mono_ns() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_guest_mono_ns(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ClockAnswer)
+  return target;
+}
+
+size_t ClockAnswer::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ClockAnswer)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // uint64 host_sent_ns = 1;
+  if (this->_internal_host_sent_ns() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_host_sent_ns());
+  }
+
+  // uint64 guest_mono_ns = 2;
+  if (this->_internal_guest_mono_ns() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_guest_mono_ns());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ClockAnswer::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ClockAnswer*>(
+      &from));
+}
+
+void ClockAnswer::MergeFrom(const ClockAnswer& from) {
+  ClockAnswer* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ClockAnswer)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_host_sent_ns() != 0) {
+    _this->_internal_set_host_sent_ns(from._internal_host_sent_ns());
+  }
+  if (from._internal_guest_mono_ns() != 0) {
+    _this->_internal_set_guest_mono_ns(from._internal_guest_mono_ns());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ClockAnswer::CopyFrom(const ClockAnswer& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ClockAnswer)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ClockAnswer::IsInitialized() const {
+  return true;
+}
+
+void ClockAnswer::InternalSwap(ClockAnswer* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(ClockAnswer, _impl_.guest_mono_ns_)
+      + sizeof(ClockAnswer::_impl_.guest_mono_ns_)
+      - PROTOBUF_FIELD_OFFSET(ClockAnswer, _impl_.host_sent_ns_)>(
+          reinterpret_cast<char*>(&_impl_.host_sent_ns_),
+          reinterpret_cast<char*>(&other->_impl_.host_sent_ns_));
+}
+
+std::string ClockAnswer::GetTypeName() const {
+  return "dsa.control.v1.ClockAnswer";
+}
+
+
+// ===================================================================
+
 class Envelope::_Internal {
  public:
   static const ::dsa::control::v1::Hello& hello(const Envelope* msg);
@@ -8330,6 +8750,8 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::InstalledApps& installed_apps(const Envelope* msg);
   static const ::dsa::control::v1::AgentConnected& agent_connected(const Envelope* msg);
   static const ::dsa::control::v1::GuestBoot& guest_boot(const Envelope* msg);
+  static const ::dsa::control::v1::ClockProbe& clock_probe(const Envelope* msg);
+  static const ::dsa::control::v1::ClockAnswer& clock_answer(const Envelope* msg);
   static const ::dsa::control::v1::ScreenState& screen_state(const Envelope* msg);
   static const ::dsa::control::v1::PowerState& power_state(const Envelope* msg);
   static const ::dsa::control::v1::DeviceIdle& device_idle(const Envelope* msg);
@@ -8430,6 +8852,14 @@ Envelope::_Internal::agent_connected(const Envelope* msg) {
 const ::dsa::control::v1::GuestBoot&
 Envelope::_Internal::guest_boot(const Envelope* msg) {
   return *msg->_impl_.body_.guest_boot_;
+}
+const ::dsa::control::v1::ClockProbe&
+Envelope::_Internal::clock_probe(const Envelope* msg) {
+  return *msg->_impl_.body_.clock_probe_;
+}
+const ::dsa::control::v1::ClockAnswer&
+Envelope::_Internal::clock_answer(const Envelope* msg) {
+  return *msg->_impl_.body_.clock_answer_;
 }
 const ::dsa::control::v1::ScreenState&
 Envelope::_Internal::screen_state(const Envelope* msg) {
@@ -8803,6 +9233,36 @@ void Envelope::set_allocated_guest_boot(::dsa::control::v1::GuestBoot* guest_boo
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.guest_boot)
 }
+void Envelope::set_allocated_clock_probe(::dsa::control::v1::ClockProbe* clock_probe) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (clock_probe) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(clock_probe);
+    if (message_arena != submessage_arena) {
+      clock_probe = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, clock_probe, submessage_arena);
+    }
+    set_has_clock_probe();
+    _impl_.body_.clock_probe_ = clock_probe;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.clock_probe)
+}
+void Envelope::set_allocated_clock_answer(::dsa::control::v1::ClockAnswer* clock_answer) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (clock_answer) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(clock_answer);
+    if (message_arena != submessage_arena) {
+      clock_answer = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, clock_answer, submessage_arena);
+    }
+    set_has_clock_answer();
+    _impl_.body_.clock_answer_ = clock_answer;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.clock_answer)
+}
 void Envelope::set_allocated_screen_state(::dsa::control::v1::ScreenState* screen_state) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
   clear_body();
@@ -8983,6 +9443,16 @@ Envelope::Envelope(const Envelope& from)
     case kGuestBoot: {
       _this->_internal_mutable_guest_boot()->::dsa::control::v1::GuestBoot::MergeFrom(
           from._internal_guest_boot());
+      break;
+    }
+    case kClockProbe: {
+      _this->_internal_mutable_clock_probe()->::dsa::control::v1::ClockProbe::MergeFrom(
+          from._internal_clock_probe());
+      break;
+    }
+    case kClockAnswer: {
+      _this->_internal_mutable_clock_answer()->::dsa::control::v1::ClockAnswer::MergeFrom(
+          from._internal_clock_answer());
       break;
     }
     case kScreenState: {
@@ -9183,6 +9653,18 @@ void Envelope::clear_body() {
     case kGuestBoot: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.guest_boot_;
+      }
+      break;
+    }
+    case kClockProbe: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.clock_probe_;
+      }
+      break;
+    }
+    case kClockAnswer: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.clock_answer_;
       }
       break;
     }
@@ -9420,6 +9902,22 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.ClockProbe clock_probe = 26;
+      case 26:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 210)) {
+          ptr = ctx->ParseMessage(_internal_mutable_clock_probe(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.ClockAnswer clock_answer = 27;
+      case 27:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 218)) {
+          ptr = ctx->ParseMessage(_internal_mutable_clock_answer(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       // .dsa.control.v1.ScreenState screen_state = 40;
       case 40:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 66)) {
@@ -9641,6 +10139,20 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::guest_boot(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.ClockProbe clock_probe = 26;
+  if (_internal_has_clock_probe()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(26, _Internal::clock_probe(this),
+        _Internal::clock_probe(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.ClockAnswer clock_answer = 27;
+  if (_internal_has_clock_answer()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(27, _Internal::clock_answer(this),
+        _Internal::clock_answer(this).GetCachedSize(), target, stream);
+  }
+
   // .dsa.control.v1.ScreenState screen_state = 40;
   if (_internal_has_screen_state()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
@@ -9847,6 +10359,20 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.guest_boot_);
       break;
     }
+    // .dsa.control.v1.ClockProbe clock_probe = 26;
+    case kClockProbe: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.clock_probe_);
+      break;
+    }
+    // .dsa.control.v1.ClockAnswer clock_answer = 27;
+    case kClockAnswer: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.clock_answer_);
+      break;
+    }
     // .dsa.control.v1.ScreenState screen_state = 40;
     case kScreenState: {
       total_size += 2 +
@@ -10014,6 +10540,16 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_guest_boot());
       break;
     }
+    case kClockProbe: {
+      _this->_internal_mutable_clock_probe()->::dsa::control::v1::ClockProbe::MergeFrom(
+          from._internal_clock_probe());
+      break;
+    }
+    case kClockAnswer: {
+      _this->_internal_mutable_clock_answer()->::dsa::control::v1::ClockAnswer::MergeFrom(
+          from._internal_clock_answer());
+      break;
+    }
     case kScreenState: {
       _this->_internal_mutable_screen_state()->::dsa::control::v1::ScreenState::MergeFrom(
           from._internal_screen_state());
@@ -10179,6 +10715,14 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::AgentConnected >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::GuestBoot*
 Arena::CreateMaybeMessage< ::dsa::control::v1::GuestBoot >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::GuestBoot >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ClockProbe*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ClockProbe >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ClockProbe >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ClockAnswer*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ClockAnswer >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ClockAnswer >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::Envelope*
 Arena::CreateMaybeMessage< ::dsa::control::v1::Envelope >(Arena* arena) {
