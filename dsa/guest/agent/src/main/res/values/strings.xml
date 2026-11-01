@@ -2,4 +2,6 @@
 <resources>
     <string name="app_name">DSA agent</string>
     <string name="input_method_name">DSA host input</string>
+    <string name="accessibility_service_name">DSA host accessibility</string>
+    <string name="accessibility_service_description">Lets screen readers and other accessibility tools on the host read and use the apps in their windows.</string>
 </resources>

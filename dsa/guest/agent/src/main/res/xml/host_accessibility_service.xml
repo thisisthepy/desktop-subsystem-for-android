@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The agent's accessibility service, which reads the nodes of the tasks a host accessibility
+  client watches. It is enabled only while the host watches a task. It reads window content
+  and every interactive window, reports view IDs, and asks for nothing that changes input:
+  no gestures, no touch exploration, no key filtering, no accessibility button.
+  notificationTimeout batches the events of one change before they reach the service.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeWindowsChanged|typeViewScrolled|typeViewFocused|typeViewSelected|typeViewTextChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/accessibility_service_description"
+    android:isAccessibilityTool="true"
+    android:notificationTimeout="100" />

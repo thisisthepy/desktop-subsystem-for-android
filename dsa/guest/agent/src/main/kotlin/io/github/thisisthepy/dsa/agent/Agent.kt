@@ -1,6 +1,8 @@
 package io.github.thisisthepy.dsa.agent
 
 import com.google.protobuf.InvalidProtocolBufferException
+import io.github.thisisthepy.dsa.agent.accessibility.AccessibilityExport
+import io.github.thisisthepy.dsa.agent.accessibility.AccessibilitySource
 import io.github.thisisthepy.dsa.agent.channel.ChannelClient
 import io.github.thisisthepy.dsa.agent.channel.ChannelLocator
 import io.github.thisisthepy.dsa.agent.clipboard.ClipboardSync
@@ -65,7 +67,9 @@ import io.github.thisisthepy.dsa.control.v1.PointerAction
  * text, and text copied in the guest goes to the host, while the user shares the clipboard
  * ([ClipboardSync]). Web links apps open go to the host's browser unless the host says they
  * stay in the guest ([Links]), and files the host sends are stored and offered to the apps
- * that can open them ([FileReceiver]).
+ * that can open them ([FileReceiver]). While a host accessibility client watches a task, the
+ * agent's accessibility service is on and the task's accessibility tree goes to the host
+ * ([AccessibilityExport]); otherwise the service is off.
  */
 class Agent(
     private val ownPackage: String,
@@ -93,6 +97,8 @@ class Agent(
     fileStore: TransferStore? = null,
     fileOpener: FileOpener = FileOpener.NONE,
     clipboard: GuestClipboard = GuestClipboard.NONE,
+    accessibility: AccessibilitySource = AccessibilitySource.NONE,
+    clock: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     private val channel = ChannelClient(
         locator = locator,
@@ -146,6 +152,14 @@ class Agent(
     private val installed = InstalledAppReporter(ownPackage) { frame -> channel.send(frame) }
     private val links = Links(browserRole, guestBrowser, { frame -> channel.send(frame) }, log)
     private val files = FileReceiver(fileStore, fileOpener, { frame -> channel.send(frame) }, log)
+    private val accessibilityExport = AccessibilityExport(
+        accessibility,
+        scheduler,
+        { frame -> channel.send(frame) },
+        log,
+        reporter::reportedBounds,
+        clock,
+    )
     private var refreshPending = false
     private var appsPending = false
     private var checkPending = false
@@ -163,6 +177,7 @@ class Agent(
             } catch (e: Exception) {
                 log.warn("could not turn click sounds off; each click spends time on a sound nobody hears", e)
             }
+            accessibilityExport.start()
             listen()
             lifecycle.start { work -> scheduler.post(work) }
             clipboardSync.start { work -> scheduler.post(work) }
@@ -231,6 +246,7 @@ class Agent(
         memoryReporter?.connected()
         links.connected()
         files.connected()
+        accessibilityExport.connected()
         requestRefresh()
         requestAppsRefresh()
     }
@@ -316,9 +332,9 @@ class Agent(
             return false
         }
         return try {
-            links.handle(envelope) || files.handle(envelope)
+            links.handle(envelope) || files.handle(envelope) || accessibilityExport.handle(envelope)
         } catch (e: Exception) {
-            log.warn("acting on a link or file frame from the host failed", e)
+            log.warn("acting on a link, file or accessibility frame from the host failed", e)
             true
         }
     }
