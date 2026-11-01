@@ -42,6 +42,12 @@ pub type MakeLocal<'a> = &'a mut dyn FnMut() -> LocalPair;
 
 const WAIT: Duration = Duration::from_secs(10);
 
+/// The widgets placed in a [`FakeAndroid`], by ID, and who watches them.
+type FakeWidgets = (
+    std::collections::BTreeMap<i32, WidgetProvider>,
+    Vec<Sender<WidgetEvent>>,
+);
+
 /// An Android that only remembers what it was asked.
 pub struct FakeAndroid {
     state: Mutex<SessionState>,
@@ -82,10 +88,7 @@ pub struct FakeAndroid {
     /// The widgets its apps offer.
     pub widget_offer: Mutex<Vec<WidgetProvider>>,
     /// The widgets placed in it, by ID, and who watches them.
-    widgets: Mutex<(
-        std::collections::BTreeMap<i32, WidgetProvider>,
-        Vec<Sender<WidgetEvent>>,
-    )>,
+    widgets: Mutex<FakeWidgets>,
     /// The sizes its widgets were given, in order.
     pub widget_sizes: Mutex<Vec<(i32, WidgetSize)>>,
     /// The pointer input its widgets were given, in order.
@@ -2397,7 +2400,7 @@ pub fn widget_watcher_receives_changes(make: MakeLocal<'_>) {
         .add_widget("com.example.clock/.ClockWidget", WAIT)
         .unwrap();
     let mut watch = connect(&mut *connector).watch_widgets().unwrap();
-    assert_eq!(watch.current(), &[first.clone()]);
+    assert_eq!(watch.current(), std::slice::from_ref(&first));
     assert_eq!(watch.remembered(), 1);
     let android = androids.of(&user).unwrap();
     let frame = WidgetFrame {

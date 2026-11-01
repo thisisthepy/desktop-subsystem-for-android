@@ -230,7 +230,7 @@ class WidgetManagerTest {
         sent.clear()
         platform.changed()
         scheduler.runDue()
-        assertEquals(listOf(), sent.single().widgetList.widgetIdsList)
+        assertEquals(listOf<Int>(), sent.single().widgetList.widgetIdsList)
     }
 
     @Test

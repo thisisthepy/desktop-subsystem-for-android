@@ -307,7 +307,7 @@ pub fn clamp_size(provider: &WidgetProvider, width_dp: u32, height_dp: u32) -> (
     let side = |asked: u32, default: u32, min: u32, max: u32, resizable: bool| {
         let default = default_side(default, min);
         let asked = if resizable { asked } else { default };
-        let lower = min.max(MIN_SIDE_DP).min(MAX_SIDE);
+        let lower = min.clamp(MIN_SIDE_DP, MAX_SIDE);
         let upper = if max == 0 {
             MAX_SIDE
         } else {
