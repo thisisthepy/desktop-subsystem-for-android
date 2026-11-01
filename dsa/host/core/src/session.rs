@@ -585,6 +585,8 @@ impl Session {
             prerequisite_missing: None,
             next_prerequisite_check: Instant::now(),
             next_diagnosis: Instant::now(),
+            guest_is_idle: false,
+            stall_doze: None,
         };
         let worker = thread::Builder::new()
             .name("dsa-session".into())
@@ -880,6 +882,11 @@ struct Worker {
     prerequisite_missing: Option<(Instant, String)>,
     next_prerequisite_check: Instant,
     next_diagnosis: Instant,
+    /// The agent's last word on whether the device is idle. Unknown, so false, for a new agent.
+    guest_is_idle: bool,
+    /// Set when a stall interrupted Doze with the agent still there: how long the freeze timer
+    /// had counted, if it was still counting. Time spent stalled does not count.
+    stall_doze: Option<Option<Duration>>,
 }
 
 impl Worker {
@@ -1053,6 +1060,8 @@ impl Worker {
         }
         if !self.screen_on {
             self.screen_on = true;
+            self.guest_is_idle = false;
+            self.stall_doze = None;
             self.send_body(Body::ScreenState(control::ScreenState { on: true }));
         }
         self.dozing_since = None;
@@ -1132,6 +1141,7 @@ impl Worker {
     /// windows while it dozes; the session stays `Dozing` through them, and leaves it only
     /// when the screen comes on.
     fn guest_idle(&mut self, idle: bool) {
+        self.guest_is_idle = idle;
         if idle && !self.screen_on && self.state() == SessionState::Active {
             self.dozing_since = Some(Instant::now());
             self.shared.set(SessionState::Dozing, None);
@@ -1153,6 +1163,9 @@ impl Worker {
             return;
         }
         self.agent_connected = boot.agent_connected;
+        // A new agent takes the screen to be on, so what the last one said of Doze is over.
+        self.guest_is_idle = false;
+        self.stall_doze = None;
         if boot.agent_connected {
             self.agent_lost_at = None;
             eprintln!("lifecycle: the agent is connected");
@@ -1256,6 +1269,10 @@ impl Worker {
         if let Some(problem) = self.overdue(now) {
             self.report_problem(problem);
             if self.state() != SessionState::Stalled {
+                if self.state() == SessionState::Dozing && self.agent_connected {
+                    self.stall_doze =
+                        Some(self.dozing_since.map(|since| now.duration_since(since)));
+                }
                 self.dozing_since = None;
                 self.shared.set(SessionState::Stalled, None);
             }
@@ -1269,7 +1286,19 @@ impl Worker {
                 self.shared.set_problem(None);
                 // The doze delay counts from here when no window is shown.
                 self.hidden_since = now;
-                self.shared.set(SessionState::Active, None);
+                let doze = self.stall_doze.take();
+                if !self.screen_on && (doze.is_some() || self.guest_is_idle) {
+                    // The guest has dozed all along. A timer that had given up stays given up.
+                    self.dozing_since = match doze {
+                        Some(counted) => {
+                            counted.map(|counted| now.checked_sub(counted).unwrap_or(now))
+                        }
+                        None => Some(now),
+                    };
+                    self.shared.set(SessionState::Dozing, None);
+                } else {
+                    self.shared.set(SessionState::Active, None);
+                }
             }
             SessionState::Stalled => {
                 self.shared.set_problem(None);
@@ -1319,6 +1348,8 @@ impl Worker {
         self.agent_connected = false;
         self.agent_lost_at = None;
         self.prerequisite_missing = None;
+        self.guest_is_idle = false;
+        self.stall_doze = None;
         if !self.wait_for_prerequisite() {
             return;
         }

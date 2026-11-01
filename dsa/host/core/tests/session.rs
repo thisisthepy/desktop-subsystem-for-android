@@ -1703,6 +1703,71 @@ fn fr10_the_power_hub_tells_every_session_and_each_new_one() {
     assert_eq!(hub.latest(), Some(PowerState::MAINS_ONLY));
 }
 
+/// An active session in Doze whose prerequisite stalls it soon after going missing.
+fn dozing_session_that_can_stall(
+    freeze_after: Option<Duration>,
+) -> (Session, Box<dyn Connection>, FakeLauncher) {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = timed_session(
+        launcher.clone(),
+        SessionConfig {
+            doze_delay: DOZE_DELAY,
+            freeze_after,
+            prerequisite_grace: Duration::from_millis(50),
+            ..SessionConfig::default()
+        },
+    );
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    dozing(&session, &mut agent);
+    (session, agent, launcher)
+}
+
+#[test]
+fn fr10_a_stall_during_doze_returns_to_dozing() {
+    let (session, _agent, launcher) = dozing_session_that_can_stall(None);
+
+    launcher.0.lock().unwrap().missing = Some("the window manager has gone".into());
+    assert!(session.wait_for(SessionState::Stalled, WAIT));
+    launcher.0.lock().unwrap().missing = None;
+
+    // The agent says nothing new: it has been idle throughout.
+    assert!(session.wait_for(SessionState::Dozing, WAIT));
+    assert_eq!(session.problem(), None);
+}
+
+#[test]
+fn fr10_time_stalled_during_doze_does_not_count_towards_the_freeze() {
+    let freeze_after = Duration::from_secs(3);
+    let (session, _agent, launcher) = dozing_session_that_can_stall(Some(freeze_after));
+
+    launcher.0.lock().unwrap().missing = Some("the window manager has gone".into());
+    assert!(session.wait_for(SessionState::Stalled, WAIT));
+    thread::sleep(freeze_after + Duration::from_millis(200));
+    assert_eq!(launcher.0.lock().unwrap().freezes, 0, "a stalled guest stays");
+    launcher.0.lock().unwrap().missing = None;
+
+    assert!(session.wait_for(SessionState::Dozing, WAIT));
+    assert_eq!(session.state(), SessionState::Dozing, "not frozen at once");
+    assert_eq!(launcher.0.lock().unwrap().freezes, 0);
+    // The rest of the timer still runs.
+    assert!(session.wait_for(SessionState::Frozen, WAIT));
+}
+
+#[test]
+fn fr10_a_window_shown_during_a_stall_ends_the_doze_it_interrupted() {
+    let (session, mut agent, launcher) = dozing_session_that_can_stall(None);
+
+    launcher.0.lock().unwrap().missing = Some("the window manager has gone".into());
+    assert!(session.wait_for(SessionState::Stalled, WAIT));
+    session.windows_shown(true).unwrap();
+    assert_eq!(next_body(&mut agent), screen(true));
+    launcher.0.lock().unwrap().missing = None;
+
+    assert!(session.wait_for(SessionState::Active, WAIT));
+}
+
 #[test]
 fn fr10_a_dozing_guest_is_never_frozen_by_default() {
     let (session, mut agent, launcher) = lifecycle_session(None);
