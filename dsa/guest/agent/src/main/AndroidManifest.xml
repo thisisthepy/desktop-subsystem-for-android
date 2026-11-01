@@ -21,6 +21,8 @@
     <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
     <!-- Turning freeform windows on. -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <!-- Turning click sounds off: nothing carries the guest's sound to the host. -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <!-- Making the display a freeform display. -->
     <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" />
     <!-- Injecting the pointer input of each task's host window into the task. -->

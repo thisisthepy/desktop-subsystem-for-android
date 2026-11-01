@@ -824,6 +824,34 @@ class AgentTest {
     }
 
     @Test
+    fun fr5_at_boot_click_sounds_are_turned_off() {
+        var turnedOff = 0
+        locator.up = daemon
+        Agent(
+            AGENT, tasks, actions, locator, windowing, injector, scheduler, log,
+            touchSounds = { turnedOff++ },
+        ).start()
+        scheduler.runDue()
+
+        assertEquals(1, turnedOff)
+    }
+
+    @Test
+    fun fr5_a_click_sound_setting_that_cannot_be_written_stops_nothing_else() {
+        locator.up = daemon
+        Agent(
+            AGENT, tasks, actions, locator, windowing, injector, scheduler, log,
+            inputMethods = { hostInputMethodSelected++ },
+            touchSounds = { throw IllegalStateException("refused") },
+        ).start()
+        scheduler.runDue()
+
+        assertEquals(1, hostInputMethodSelected)
+        assertEquals(WINDOWING_MODE_FREEFORM, windowing.mode)
+        assertTrue(daemon.subscriber != null)
+    }
+
+    @Test
     fun fr6_at_boot_the_agents_input_method_becomes_the_guests() {
         started()
 

@@ -11,6 +11,7 @@ import io.github.thisisthepy.dsa.agent.input.PointerInput
 import io.github.thisisthepy.dsa.agent.input.PointerQueue
 import io.github.thisisthepy.dsa.agent.input.TextInput
 import io.github.thisisthepy.dsa.agent.input.TextKeys
+import io.github.thisisthepy.dsa.agent.input.TouchSounds
 import io.github.thisisthepy.dsa.agent.power.DevicePower
 import io.github.thisisthepy.dsa.agent.power.Lifecycle
 import io.github.thisisthepy.dsa.agent.memory.MemoryReporter
@@ -70,6 +71,7 @@ class Agent(
     memory: MemorySource? = null,
     private val inputScheduler: Scheduler = scheduler,
     private val inputTrace: InputTrace = InputTrace(log),
+    private val touchSounds: TouchSounds = TouchSounds.NONE,
 ) {
     private val channel = ChannelClient(
         locator = locator,
@@ -126,6 +128,11 @@ class Agent(
                 inputMethods.useHostInputMethod()
             } catch (e: Exception) {
                 log.warn("could not make the agent's input method the guest's; typed text may not reach editors", e)
+            }
+            try {
+                touchSounds.turnOff()
+            } catch (e: Exception) {
+                log.warn("could not turn click sounds off; each click spends time on a sound nobody hears", e)
             }
             listen()
             lifecycle.start { work -> scheduler.post(work) }

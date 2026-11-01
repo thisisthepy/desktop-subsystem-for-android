@@ -40,6 +40,7 @@ class AgentApplication : Application() {
             memory = AndroidMemorySource(this),
             inputScheduler = HandlerScheduler(input.looper),
             inputTrace = InputTrace(log, enabled = inputTraceRequested()),
+            touchSounds = AndroidTouchSounds(this),
         )
         HostInputMethod.onCursor = { rect -> agent.cursorMoved(rect.left, rect.top, rect.right, rect.bottom) }
         agent.start()
