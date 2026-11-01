@@ -820,7 +820,10 @@ fn fr9_dsa_open_and_dsa_share_are_parsed() {
     assert_eq!(parse(&args("share notes.txt")).unwrap().command, Cmd::Share);
     let missing = parse(&args("open")).unwrap_err();
     assert!(missing.contains("file"), "{missing}");
-    assert!(parse(&args("share a.txt b.txt")).is_err(), "one file at a time");
+    assert!(
+        parse(&args("share a.txt b.txt")).is_err(),
+        "one file at a time"
+    );
     assert_eq!(
         parse(&args("settings set links-in-android on"))
             .unwrap()
@@ -840,7 +843,11 @@ fn fr9_dsa_open_sends_the_file_to_the_users_android() {
     // Android is started first when it is not running.
     let output = dsa(&endpoint, &format!("open {}", path.display()));
     assert!(output.status.success(), "{}", stderr(&output));
-    assert!(stdout(&output).contains("report.pdf"), "{}", stdout(&output));
+    assert!(
+        stdout(&output).contains("report.pdf"),
+        "{}",
+        stdout(&output)
+    );
     let output = dsa(&endpoint, &format!("share {}", path.display()));
     assert!(output.status.success(), "{}", stderr(&output));
 

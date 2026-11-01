@@ -70,8 +70,8 @@ impl FileTransfer {
             .and_then(|name| name.to_str())
             .ok_or_else(|| format!("{} names no file", path.display()))?;
         check_name(name)?;
-        let metadata = std::fs::metadata(path)
-            .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let metadata =
+            std::fs::metadata(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         if !metadata.is_file() {
             return Err(format!("{} is not a file", path.display()));
         }

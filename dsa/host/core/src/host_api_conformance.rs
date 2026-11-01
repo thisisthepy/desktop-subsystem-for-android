@@ -17,11 +17,11 @@ use dsa_protocol::host_api::{client_connect, local_hello, HandshakeError};
 use dsa_transport::local::LocalListener;
 use dsa_transport::Connector;
 
+use crate::files::{FileAction, FileTransfer, MAX_FILE_BYTES};
 use crate::host_api::{
     running_of, stop_every, ClientError, HostApiClient, HostApiService, ProgramUpdate,
     ServiceFacts, UpdateProgram, UserAndroid, UserAndroids,
 };
-use crate::files::{FileAction, FileTransfer, MAX_FILE_BYTES};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use crate::keys::{keycode, meta, KeyAction, KeyEvent};
@@ -1240,7 +1240,9 @@ pub fn link_client_that_sends_is_disconnected(make: MakeLocal<'_>) {
         wire::envelope::Body::Request(watch.clone()),
     )
     .unwrap();
-    connection.recv(Some(WAIT)).expect("the answer to the watch");
+    connection
+        .recv(Some(WAIT))
+        .expect("the answer to the watch");
     dsa_protocol::host_api::send(&mut *connection, wire::envelope::Body::Request(watch)).unwrap();
     assert!(
         connection.recv(Some(WAIT)).is_err(),

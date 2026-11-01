@@ -1,4 +1,4 @@
-//! The session: the guest container's life from start to stop, as the host sees it.
+//! Th        let mut watchers = self.link_watchers.lock().unwrap_or_else(|e| e.into_inner()); session: the guest container's life from start to stop, as the host sees it.
 //!
 //! A [`Session`] owns a worker thread. The thread starts the guest through a
 //! [`GuestLauncher`], waits for the agent to connect on the control channel, checks the
@@ -555,10 +555,7 @@ impl Shared {
     /// Hands a web link the guest opened to every link watcher still listening. False when
     /// nobody was listening.
     fn publish_link(&self, url: &str) -> bool {
-        let mut watchers = self
-            .link_watchers
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut watchers = self.link_watchers.lock().unwrap_or_else(|e| e.into_inner());
         watchers.retain(|watcher| watcher.send(url.to_string()).is_ok());
         !watchers.is_empty()
     }

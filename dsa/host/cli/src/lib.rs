@@ -116,8 +116,7 @@ impl Change {
         };
         match name {
             "render-gpu" => Ok(Change::RenderGpu(value.to_string())),
-           "status" | "start" | "stop" | "freeze" | "update" | "launch" | "open" | "share"
-            | "tasks" | "settings"=> switch().map(Change::Freeze),
+            "freeze" => switch().map(Change::Freeze),
             "links-in-android" => switch().map(Change::LinksInAndroid),
             "program-updates" => switch().map(Change::ProgramUpdates),
             "image-updates" => switch().map(Change::ImageUpdates),
@@ -279,7 +278,11 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     if matches!(command, Command::Open | Command::Share) && file.is_none() {
         return Err(format!(
             "dsa {} needs the file to send to Android\n{USAGE}",
-            if command == Command::Open { "open" } else { "share" }
+            if command == Command::Open {
+                "open"
+            } else {
+                "share"
+            }
         ));
     }
     if command == Command::Launch && package.is_none() {
@@ -642,7 +645,10 @@ fn open_file(
     mut client: HostApiClient,
     connector: &mut dyn Connector,
 ) -> Result<String, String> {
-    let path = invocation.file.as_deref().unwrap_or(std::path::Path::new(""));
+    let path = invocation
+        .file
+        .as_deref()
+        .unwrap_or(std::path::Path::new(""));
     let action = if invocation.command == Command::Share {
         FileAction::Send
     } else {

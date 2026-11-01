@@ -1929,7 +1929,10 @@ fn fr9_a_web_link_opened_in_the_guest_reaches_a_link_watcher() {
     let (session, mut agent, _launcher) = active_session();
     let links = session.watch_links();
     // Only http and https links reach the host; the rest are dropped and logged.
-    send_body(&mut agent, open_link("file:///C:/Windows/System32/calc.exe"));
+    send_body(
+        &mut agent,
+        open_link("file:///C:/Windows/System32/calc.exe"),
+    );
     send_body(&mut agent, open_link("ms-settings:"));
     send_body(&mut agent, open_link("https://example.com/news?id=1"));
     assert_eq!(
