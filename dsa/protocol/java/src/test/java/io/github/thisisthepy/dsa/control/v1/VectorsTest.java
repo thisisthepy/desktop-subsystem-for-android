@@ -231,6 +231,30 @@ public final class VectorsTest {
         cases.put("clipboard_sharing_off", Envelope.newBuilder()
                 .setClipboardSharing(ClipboardSharing.newBuilder().setOn(false))
                 .build());
+        String chatKey = "0|com.example.chat|1|null|10100";
+        cases.put("notification", Envelope.newBuilder()
+                .setNotification(GuestNotification.newBuilder()
+                        .setKey(chatKey)
+                        .setPackageName("com.example.chat")
+                        .setAppLabel("Chat")
+                        .setTitle("Ann")
+                        .setText("\uc548\ub155")
+                        .setIconPng(com.google.protobuf.ByteString.copyFrom(
+                                new byte[] {(byte) 0x89, 'P', 'N', 'G'}))
+                        .setImportance(4)
+                        .setHighPriority(true)
+                        .setClearable(true)
+                        .setWhenMillis(1700000000000L))
+                .build());
+        cases.put("notification_removed", Envelope.newBuilder()
+                .setNotificationRemoved(NotificationRemoved.newBuilder().setKey(chatKey))
+                .build());
+        cases.put("notification_clicked", Envelope.newBuilder()
+                .setNotificationClicked(NotificationClicked.newBuilder().setKey(chatKey))
+                .build());
+        cases.put("notification_dismissed", Envelope.newBuilder()
+                .setNotificationDismissed(NotificationDismissed.newBuilder().setKey(chatKey))
+                .build());
         cases.put("agent_connected", Envelope.newBuilder()
                 .setAgentConnected(AgentConnected.getDefaultInstance())
                 .build());

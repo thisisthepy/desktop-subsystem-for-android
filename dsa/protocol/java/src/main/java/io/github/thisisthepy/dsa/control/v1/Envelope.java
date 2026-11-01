@@ -49,6 +49,10 @@ public  final class Envelope extends
     SCREEN_STATE(40),
     POWER_STATE(41),
     DEVICE_IDLE(42),
+    NOTIFICATION(70),
+    NOTIFICATION_REMOVED(71),
+    NOTIFICATION_CLICKED(72),
+    NOTIFICATION_DISMISSED(73),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -93,6 +97,10 @@ public  final class Envelope extends
         case 40: return SCREEN_STATE;
         case 41: return POWER_STATE;
         case 42: return DEVICE_IDLE;
+        case 70: return NOTIFICATION;
+        case 71: return NOTIFICATION_REMOVED;
+        case 72: return NOTIFICATION_CLICKED;
+        case 73: return NOTIFICATION_DISMISSED;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -1559,6 +1567,206 @@ public  final class Envelope extends
    */
   private void clearDeviceIdle() {
     if (bodyCase_ == 42) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int NOTIFICATION_FIELD_NUMBER = 70;
+  /**
+   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+   */
+  @java.lang.Override
+  public boolean hasNotification() {
+    return bodyCase_ == 70;
+  }
+  /**
+   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.GuestNotification getNotification() {
+    if (bodyCase_ == 70) {
+       return (io.github.thisisthepy.dsa.control.v1.GuestNotification) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.GuestNotification.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+   */
+  private void setNotification(io.github.thisisthepy.dsa.control.v1.GuestNotification value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 70;
+  }
+  /**
+   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+   */
+  private void mergeNotification(io.github.thisisthepy.dsa.control.v1.GuestNotification value) {
+    value.getClass();
+  if (bodyCase_ == 70 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.GuestNotification.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.GuestNotification.newBuilder((io.github.thisisthepy.dsa.control.v1.GuestNotification) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 70;
+  }
+  /**
+   * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+   */
+  private void clearNotification() {
+    if (bodyCase_ == 70) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int NOTIFICATION_REMOVED_FIELD_NUMBER = 71;
+  /**
+   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+   */
+  @java.lang.Override
+  public boolean hasNotificationRemoved() {
+    return bodyCase_ == 71;
+  }
+  /**
+   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.NotificationRemoved getNotificationRemoved() {
+    if (bodyCase_ == 71) {
+       return (io.github.thisisthepy.dsa.control.v1.NotificationRemoved) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.NotificationRemoved.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+   */
+  private void setNotificationRemoved(io.github.thisisthepy.dsa.control.v1.NotificationRemoved value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 71;
+  }
+  /**
+   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+   */
+  private void mergeNotificationRemoved(io.github.thisisthepy.dsa.control.v1.NotificationRemoved value) {
+    value.getClass();
+  if (bodyCase_ == 71 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.NotificationRemoved.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.NotificationRemoved.newBuilder((io.github.thisisthepy.dsa.control.v1.NotificationRemoved) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 71;
+  }
+  /**
+   * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+   */
+  private void clearNotificationRemoved() {
+    if (bodyCase_ == 71) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int NOTIFICATION_CLICKED_FIELD_NUMBER = 72;
+  /**
+   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+   */
+  @java.lang.Override
+  public boolean hasNotificationClicked() {
+    return bodyCase_ == 72;
+  }
+  /**
+   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.NotificationClicked getNotificationClicked() {
+    if (bodyCase_ == 72) {
+       return (io.github.thisisthepy.dsa.control.v1.NotificationClicked) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.NotificationClicked.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+   */
+  private void setNotificationClicked(io.github.thisisthepy.dsa.control.v1.NotificationClicked value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 72;
+  }
+  /**
+   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+   */
+  private void mergeNotificationClicked(io.github.thisisthepy.dsa.control.v1.NotificationClicked value) {
+    value.getClass();
+  if (bodyCase_ == 72 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.NotificationClicked.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.NotificationClicked.newBuilder((io.github.thisisthepy.dsa.control.v1.NotificationClicked) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 72;
+  }
+  /**
+   * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+   */
+  private void clearNotificationClicked() {
+    if (bodyCase_ == 72) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int NOTIFICATION_DISMISSED_FIELD_NUMBER = 73;
+  /**
+   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+   */
+  @java.lang.Override
+  public boolean hasNotificationDismissed() {
+    return bodyCase_ == 73;
+  }
+  /**
+   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.NotificationDismissed getNotificationDismissed() {
+    if (bodyCase_ == 73) {
+       return (io.github.thisisthepy.dsa.control.v1.NotificationDismissed) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.NotificationDismissed.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+   */
+  private void setNotificationDismissed(io.github.thisisthepy.dsa.control.v1.NotificationDismissed value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 73;
+  }
+  /**
+   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+   */
+  private void mergeNotificationDismissed(io.github.thisisthepy.dsa.control.v1.NotificationDismissed value) {
+    value.getClass();
+  if (bodyCase_ == 73 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.NotificationDismissed.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.NotificationDismissed.newBuilder((io.github.thisisthepy.dsa.control.v1.NotificationDismissed) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 73;
+  }
+  /**
+   * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+   */
+  private void clearNotificationDismissed() {
+    if (bodyCase_ == 73) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -3067,6 +3275,198 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+     */
+    @java.lang.Override
+    public boolean hasNotification() {
+      return instance.hasNotification();
+    }
+    /**
+     * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.GuestNotification getNotification() {
+      return instance.getNotification();
+    }
+    /**
+     * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+     */
+    public Builder setNotification(io.github.thisisthepy.dsa.control.v1.GuestNotification value) {
+      copyOnWrite();
+      instance.setNotification(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+     */
+    public Builder setNotification(
+        io.github.thisisthepy.dsa.control.v1.GuestNotification.Builder builderForValue) {
+      copyOnWrite();
+      instance.setNotification(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+     */
+    public Builder mergeNotification(io.github.thisisthepy.dsa.control.v1.GuestNotification value) {
+      copyOnWrite();
+      instance.mergeNotification(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GuestNotification notification = 70;</code>
+     */
+    public Builder clearNotification() {
+      copyOnWrite();
+      instance.clearNotification();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+     */
+    @java.lang.Override
+    public boolean hasNotificationRemoved() {
+      return instance.hasNotificationRemoved();
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.NotificationRemoved getNotificationRemoved() {
+      return instance.getNotificationRemoved();
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+     */
+    public Builder setNotificationRemoved(io.github.thisisthepy.dsa.control.v1.NotificationRemoved value) {
+      copyOnWrite();
+      instance.setNotificationRemoved(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+     */
+    public Builder setNotificationRemoved(
+        io.github.thisisthepy.dsa.control.v1.NotificationRemoved.Builder builderForValue) {
+      copyOnWrite();
+      instance.setNotificationRemoved(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+     */
+    public Builder mergeNotificationRemoved(io.github.thisisthepy.dsa.control.v1.NotificationRemoved value) {
+      copyOnWrite();
+      instance.mergeNotificationRemoved(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationRemoved notification_removed = 71;</code>
+     */
+    public Builder clearNotificationRemoved() {
+      copyOnWrite();
+      instance.clearNotificationRemoved();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+     */
+    @java.lang.Override
+    public boolean hasNotificationClicked() {
+      return instance.hasNotificationClicked();
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.NotificationClicked getNotificationClicked() {
+      return instance.getNotificationClicked();
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+     */
+    public Builder setNotificationClicked(io.github.thisisthepy.dsa.control.v1.NotificationClicked value) {
+      copyOnWrite();
+      instance.setNotificationClicked(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+     */
+    public Builder setNotificationClicked(
+        io.github.thisisthepy.dsa.control.v1.NotificationClicked.Builder builderForValue) {
+      copyOnWrite();
+      instance.setNotificationClicked(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+     */
+    public Builder mergeNotificationClicked(io.github.thisisthepy.dsa.control.v1.NotificationClicked value) {
+      copyOnWrite();
+      instance.mergeNotificationClicked(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationClicked notification_clicked = 72;</code>
+     */
+    public Builder clearNotificationClicked() {
+      copyOnWrite();
+      instance.clearNotificationClicked();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+     */
+    @java.lang.Override
+    public boolean hasNotificationDismissed() {
+      return instance.hasNotificationDismissed();
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.NotificationDismissed getNotificationDismissed() {
+      return instance.getNotificationDismissed();
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+     */
+    public Builder setNotificationDismissed(io.github.thisisthepy.dsa.control.v1.NotificationDismissed value) {
+      copyOnWrite();
+      instance.setNotificationDismissed(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+     */
+    public Builder setNotificationDismissed(
+        io.github.thisisthepy.dsa.control.v1.NotificationDismissed.Builder builderForValue) {
+      copyOnWrite();
+      instance.setNotificationDismissed(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+     */
+    public Builder mergeNotificationDismissed(io.github.thisisthepy.dsa.control.v1.NotificationDismissed value) {
+      copyOnWrite();
+      instance.mergeNotificationDismissed(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.NotificationDismissed notification_dismissed = 73;</code>
+     */
+    public Builder clearNotificationDismissed() {
+      copyOnWrite();
+      instance.clearNotificationDismissed();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -3114,13 +3514,18 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.ScreenState.class,
             io.github.thisisthepy.dsa.control.v1.PowerState.class,
             io.github.thisisthepy.dsa.control.v1.DeviceIdle.class,
+            io.github.thisisthepy.dsa.control.v1.GuestNotification.class,
+            io.github.thisisthepy.dsa.control.v1.NotificationRemoved.class,
+            io.github.thisisthepy.dsa.control.v1.NotificationClicked.class,
+            io.github.thisisthepy.dsa.control.v1.NotificationDismissed.class,
           };
           java.lang.String info =
-              "\u0000\u001d\u0001\u0000\u0001*\u001d\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000" +
-              "\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000" +
-              "\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012" +
-              "<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000" +
-              "\u0019<\u0000\u001a<\u0000\u001b<\u0000(<\u0000)<\u0000*<\u0000";
+              "\u0000!\u0001\u0000\u0001I!\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<\u0000" +
+              "\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<\u0000\u000b" +
+              "<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012<\u0000\u0013" +
+              "<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000\u0019<\u0000" +
+              "\u001a<\u0000\u001b<\u0000(<\u0000)<\u0000*<\u0000F<\u0000G<\u0000H<\u0000I<\u0000" +
+              "";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

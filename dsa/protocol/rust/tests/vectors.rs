@@ -10,13 +10,17 @@ use std::path::PathBuf;
 
 use dsa_protocol::control::{
     envelope::Body, AgentConnected, AppInfo, AuthChallenge, AuthProof, ClipboardSharing,
-    ClipboardText, CloseTask, DeviceIdle, Envelope, GuestBoot, GuestMemory, Hello, HelloAccepted,
-    HelloRejected, ImeCommit, ImeComposition, ImeCursor, KeyAction, KeyEvent, LaunchApp,
+    ClipboardText, CloseTask, DeviceIdle, Envelope, GuestBoot, GuestMemory, GuestNotification,
+    Hello, HelloAccepted, HelloRejected, ImeCommit, ImeComposition, ImeCursor, KeyAction,
+    KeyEvent, LaunchApp, NotificationClicked, NotificationDismissed, NotificationRemoved,
     PointerAction, PointerEvent, PointerTool, PowerState, ProcessMemory, Rect, RejectReason,
     RequestGuestMemory, ResizeTask, Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved,
     TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
+
+/// The key of the notification in the notification cases.
+const CHAT_KEY: &str = "0|com.example.chat|1|null|10100";
 
 fn vectors_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vectors/control.vectors")
@@ -324,6 +328,39 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
         (
             "clipboard_sharing_off",
             wrap(Body::ClipboardSharing(ClipboardSharing { on: false })),
+        ),
+        (
+            "notification",
+            wrap(Body::Notification(GuestNotification {
+                key: CHAT_KEY.into(),
+                package_name: "com.example.chat".into(),
+                app_label: "Chat".into(),
+                title: "Ann".into(),
+                text: "\u{c548}\u{b155}".into(),
+                icon_png: vec![0x89, b'P', b'N', b'G'],
+                importance: 4,
+                high_priority: true,
+                clearable: true,
+                when_millis: 1_700_000_000_000,
+            })),
+        ),
+        (
+            "notification_removed",
+            wrap(Body::NotificationRemoved(NotificationRemoved {
+                key: CHAT_KEY.into(),
+            })),
+        ),
+        (
+            "notification_clicked",
+            wrap(Body::NotificationClicked(NotificationClicked {
+                key: CHAT_KEY.into(),
+            })),
+        ),
+        (
+            "notification_dismissed",
+            wrap(Body::NotificationDismissed(NotificationDismissed {
+                key: CHAT_KEY.into(),
+            })),
         ),
         (
             "agent_connected",
