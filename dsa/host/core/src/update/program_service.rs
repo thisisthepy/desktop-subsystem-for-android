@@ -772,4 +772,13 @@ impl UserAndroid for WithProgramStatus {
     fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError> {
         self.android.ime(event)
     }
+    fn share_clipboard(&self, on: bool) {
+        self.android.share_clipboard(on)
+    }
+    fn host_clipboard(&self, text: String) {
+        self.android.host_clipboard(text)
+    }
+    fn watch_clipboard(&self) -> Option<std::sync::mpsc::Receiver<String>> {
+        self.android.watch_clipboard()
+    }
 }

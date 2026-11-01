@@ -11,14 +11,16 @@
 //! ([`frames`], [`present`]). When the user closes a window, the guest is asked to end its
 //! task. The mouse, touch and pen input in a window goes from the window host to the service
 //! itself, without passing through the window manager. While no task window is open, it gives
-//! back the memory it is not using ([`trim`]). It also opens the web links apps in Android open
-//! in the user's default browser ([`links`]), since the service cannot reach the user's session.
+//! back the memory it is not using ([`trim`]). It also carries the text clipboard between
+//! the user and their Android ([`clipboard`]), since the service cannot reach the user's
+//! clipboard, and opens the web links apps in Android open in the user's default browser
+//! ([`links`]).
 
 pub mod adapter;
+pub mod clipboard;
 pub mod display_gpu;
 pub mod frames;
 pub mod hosts;
-pub mod links;
 pub mod log;
 pub mod present;
 pub mod shutdown;
@@ -107,6 +109,8 @@ pub struct Compositor {
     start_menu: Option<StartMenuSetup>,
     /// What opens the web links the user's Android opens, when they are followed.
     link_opener: Option<Box<dyn links::LinkOpener>>,
+    /// Whether the user's clipboard is shared with their Android.
+    share_clipboard: bool,
 }
 
 /// The installed apps an event from the watch of the tasks carries, if it carries them.
@@ -182,6 +186,7 @@ impl Compositor {
             windows: Arc::new(Mutex::new(Vec::new())),
             start_menu: crate::start_menu::StartMenuSetup::default_for_user(),
             link_opener: Some(Box::new(links::ShellOpener)),
+            share_clipboard: true,
         }
     }
 
@@ -208,6 +213,7 @@ impl Compositor {
             windows: Arc::new(Mutex::new(Vec::new())),
             start_menu: None,
             link_opener: None,
+            share_clipboard: false,
         }
     }
 
@@ -306,6 +312,7 @@ impl Compositor {
         // them.
         let task_windows = self.start_task_windows(&stop);
         let links_thread = self.start_links(&stop);
+        let clipboard_thread = self.start_clipboard(&stop);
 
         // 1. Monitor thread that tracks the VM ID and state via the local API.
         let monitor_stop = Arc::clone(&stop);
@@ -489,10 +496,50 @@ impl Compositor {
         if let Some(thread) = links_thread {
             let _ = thread.join();
         }
+        if let Some(thread) = clipboard_thread {
+            let _ = thread.join();
+        }
 
         if let Some(logger) = &self.logger {
             logger.log("dsa-wm stopped cleanly");
         }
+    }
+
+    /// Starts carrying the text clipboard between the user and their Android, on a thread of
+    /// its own that ends with `stop`. A clipboard that cannot be followed is logged; the rest
+    /// of the window manager goes on.
+    fn start_clipboard(&self, stop: &Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
+        if !self.share_clipboard {
+            return None;
+        }
+        let connector = (self.local_api_connector)();
+        let stop = Arc::clone(stop);
+        let logger = self.logger.clone();
+        let failed = self.logger.clone();
+        thread::Builder::new()
+            .name("dsa-wm-clipboard".into())
+            .spawn(move || {
+                let (window, changes) = match clipboard::ClipboardWindow::open() {
+                    Ok(opened) => opened,
+                    Err(why) => {
+                        note(
+                            logger.as_deref(),
+                            &format!("the clipboard is not shared with Android: {why}"),
+                        );
+                        return;
+                    }
+                };
+                let mut host = window.clipboard();
+                clipboard::sync(connector, &mut host, changes, stop, logger);
+                drop(window);
+            })
+            .map_err(|e| {
+                note(
+                    failed.as_deref(),
+                    &format!("could not start the clipboard's thread: {e}"),
+                )
+            })
+            .ok()
     }
 
     /// Starts the task windows: the manager, the listener for the app window hosts, the watch

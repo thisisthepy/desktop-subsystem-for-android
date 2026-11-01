@@ -14,6 +14,10 @@
 //! connection from then on, and the service passes each to the caller's Android as it
 //! arrives, without answering, so a pointer that moves fast is never held back.
 //!
+//! A client that carries the clipboard ([`HostApiClient::watch_clipboard`]) sends the text the
+//! user copies on the host, and receives the text the caller's Android copies, on the same
+//! connection, unanswered in both directions.
+//!
 //! A client that watches links ([`HostApiClient::watch_links`]) receives each web link the
 //! caller's Android opens, for the host's browser. A client that sends a file
 //! ([`HostApiClient::open_file`]) sends its content in pieces after the first answer, and the
@@ -108,6 +112,14 @@ pub trait UserAndroid: Send + Sync {
             "this Android cannot be frozen".into(),
         ))
     }
+    /// Shares the user's clipboard with this Android (`on`) or stops, as the user's clipboard
+    /// setting says.
+    fn share_clipboard(&self, on: bool);
+    /// The user's host clipboard got `text`, for this Android to take while it is shared.
+    fn host_clipboard(&self, text: String);
+    /// The text this Android copies from now on, while the clipboard is shared. `None` when
+    /// this Android does not share its clipboard at all.
+    fn watch_clipboard(&self) -> Option<Receiver<String>>;
     /// Lets the web links apps in this Android open go to apps in it (`on`), or to the host,
     /// as the user's setting says.
     fn links_in_android(&self, on: bool) {
@@ -179,6 +191,15 @@ impl UserAndroid for Session {
     }
     fn request_guest_memory(&self) -> Result<(), TaskRequestError> {
         Session::request_guest_memory(self).map_err(request_error)
+    }
+    fn share_clipboard(&self, on: bool) {
+        Session::share_clipboard(self, on)
+    }
+    fn host_clipboard(&self, text: String) {
+        Session::host_clipboard(self, text)
+    }
+    fn watch_clipboard(&self) -> Option<Receiver<String>> {
+        Some(Session::watch_clipboard(self))
     }
     fn links_in_android(&self, on: bool) {
         Session::links_in_android(self, on)
@@ -502,6 +523,10 @@ fn tasks_from_wire(tasks: types::Tasks) -> TaskList {
 /// changes.
 const WATCH_POLL: Duration = Duration::from_millis(100);
 
+/// How long a connection that carries the clipboard waits for the client before it looks
+/// for text from Android again.
+const CLIPBOARD_POLL: Duration = Duration::from_millis(50);
+
 /// How long a connection that carries links waits for its client before it looks for links
 /// again.
 const LINK_POLL: Duration = Duration::from_millis(100);
@@ -688,6 +713,9 @@ impl HostApiService {
             }
             if let Some(request::Body::StreamInput(_)) = request.body {
                 return self.stream_input(connection, &peer, request.id);
+            }
+            if let Some(request::Body::WatchClipboard(_)) = request.body {
+                return self.watch_clipboard(connection, &peer, request.id);
             }
             if let Some(request::Body::WatchLinks(_)) = request.body {
                 return self.watch_links(connection, &peer, request.id);
@@ -1056,6 +1084,86 @@ impl HostApiService {
         }
     }
 
+    /// Answers a WatchClipboard request, then passes the text the client copies to its
+    /// Android, and the text its Android copies to the client, until the client goes away.
+    /// What the client sends that is not clipboard text closes the connection; a frame that
+    /// cannot be read is dropped.
+    fn watch_clipboard(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
+        let watched = match self.androids.android(&peer.user) {
+            Err(why) => Err(error(ErrorCode::Unavailable, why)),
+            Ok(android) => match android.watch_clipboard() {
+                Some(watch) => Ok((android, watch)),
+                None => Err(error(
+                    ErrorCode::Unavailable,
+                    "this Android does not share its clipboard".into(),
+                )),
+            },
+        };
+        let (android, watch) = match watched {
+            Ok(watched) => watched,
+            Err(body) => {
+                let _ = send(
+                    &mut *connection,
+                    Body::Response(Response {
+                        id,
+                        body: Some(body),
+                    }),
+                );
+                return;
+            }
+        };
+        let answer = Response {
+            id,
+            body: Some(response::Body::Done(types::Done {})),
+        };
+        if send(&mut *connection, Body::Response(answer)).is_err() {
+            return;
+        }
+        loop {
+            loop {
+                match watch.try_recv() {
+                    Ok(text) => {
+                        let frame = Body::ClipboardText(types::ClipboardText { text });
+                        if send(&mut *connection, frame).is_err() {
+                            return;
+                        }
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        connection.close();
+                        return;
+                    }
+                }
+            }
+            let frame = match connection.recv(Some(CLIPBOARD_POLL)) {
+                Ok(frame) => frame,
+                Err(TransportError::Timeout) => continue,
+                Err(_) => return,
+            };
+            match decode(&frame) {
+                Ok(Envelope {
+                    body: Some(Body::ClipboardText(clip)),
+                }) => android.host_clipboard(clip.text),
+                Ok(_) => {
+                    eprintln!(
+                        "local API: a client of {} sent something other than clipboard text on \
+                         a connection that carries the clipboard; closing its connection",
+                        peer.user
+                    );
+                    connection.close();
+                    return;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "local API: a client of {} sent an unreadable frame on a connection \
+                         that carries the clipboard ({error}); dropping it",
+                        peer.user
+                    );
+                }
+            }
+        }
+    }
+
     fn answer(&self, peer: &Peer, request: Request) -> Response {
         let body = match request.body {
             None => error(
@@ -1163,6 +1271,7 @@ impl HostApiService {
                         | request::Body::SetSettings(_)
                         | request::Body::GetMemory(_)
                         | request::Body::StreamInput(_)
+                        | request::Body::WatchClipboard(_)
                         | request::Body::WatchLinks(_)
                         | request::Body::OpenFile(_) => unreachable!("answered above"),
                     }
@@ -1303,6 +1412,7 @@ impl HostApiService {
         let wanted = Settings {
             render_gpu: wanted.render_gpu,
             freeze: wanted.freeze,
+            clipboard: wanted.clipboard,
             links_in_android: wanted.links_in_android,
             program_updates: wanted.program_updates,
             image_updates: wanted.image_updates,
@@ -1335,17 +1445,19 @@ impl HostApiService {
         }
         match store.set(&peer.user, &wanted) {
             Ok(settings) => {
-                // The caller's Android follows the freeze and link settings at once.
+                // The caller's Android follows the freeze, clipboard and link settings at once.
                 if let Ok(android) = self.androids.android(&peer.user) {
                     android.freeze_when_idle(settings.freeze);
+                    android.share_clipboard(settings.clipboard);
                     android.links_in_android(settings.links_in_android);
                 }
                 eprintln!(
-                    "local API: {} changed the settings: render GPU {}, freeze {}, links in \
-                     Android {}, program updates {}, image updates {}",
+                    "local API: {} changed the settings: render GPU {}, freeze {}, clipboard \
+                     {}, links in Android {}, program updates {}, image updates {}",
                     peer.user,
                     settings.render_gpu,
                     on_off(settings.freeze),
+                    on_off(settings.clipboard),
                     on_off(settings.links_in_android),
                     on_off(settings.program_updates),
                     on_off(settings.image_updates)
@@ -1372,6 +1484,7 @@ fn settings_to_wire(settings: &Settings, facts: &ServiceFacts) -> types::Setting
         links_in_android: settings.links_in_android,
         program_updates: settings.program_updates,
         image_updates: settings.image_updates,
+        clipboard: settings.clipboard,
         program_updates_available: facts.program_updates_available,
         image_updates_available: facts.image_updates_available,
         version: facts.version.clone(),
@@ -1383,8 +1496,9 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
     SettingsReport {
         settings: Settings {
             render_gpu: settings.render_gpu,
-            freeze: settings.freeze,
             links_in_android: settings.links_in_android,
+            freeze: settings.freeze,
+            clipboard: settings.clipboard,
             program_updates: settings.program_updates,
             image_updates: settings.image_updates,
         },
@@ -1762,6 +1876,22 @@ impl HostApiClient {
         }
     }
 
+    /// Carries the clipboard between the host and the caller's Android. The connection carries
+    /// nothing else from here on, so the client is used up.
+    pub fn watch_clipboard(mut self) -> Result<ClipboardStream, ClientError> {
+        match self.exchange(
+            request::Body::WatchClipboard(types::WatchClipboard {}),
+            self.timeout,
+        )? {
+            response::Body::Done(_) => Ok(ClipboardStream {
+                connection: self.connection,
+            }),
+            _ => Err(ClientError::Malformed(
+                "expected the answer that the clipboard is carried".into(),
+            )),
+        }
+    }
+
     /// Receives the web links the caller's Android opens, for the host's browser. The
     /// connection carries nothing else from here on, so the client is used up.
     pub fn watch_links(mut self) -> Result<LinkStream, ClientError> {
@@ -1927,6 +2057,43 @@ impl TaskStream {
                 Ok(_) => return Err(ClientError::Malformed("expected a task event".into())),
                 Err(error) => return Err(ClientError::Malformed(error.to_string())),
             }
+        }
+    }
+}
+
+/// A connection that carries the clipboard between the host and the caller's Android, from
+/// [`HostApiClient::watch_clipboard`].
+pub struct ClipboardStream {
+    connection: Box<dyn Connection>,
+}
+
+impl ClipboardStream {
+    /// Says that the host's clipboard got `text`. Nothing is awaited. An error means the
+    /// connection has ended, and a new one is needed.
+    pub fn send(&mut self, text: &str) -> Result<(), ClientError> {
+        send(
+            &mut *self.connection,
+            Body::ClipboardText(types::ClipboardText {
+                text: text.to_string(),
+            }),
+        )
+        .map_err(ClientError::Transport)
+    }
+
+    /// The next text the caller's Android copied, waiting at most `timeout`. `Ok(None)` means
+    /// none came in time; an error means the connection has ended.
+    pub fn next(&mut self, timeout: Duration) -> Result<Option<String>, ClientError> {
+        let frame = match self.connection.recv(Some(timeout)) {
+            Ok(frame) => frame,
+            Err(TransportError::Timeout) => return Ok(None),
+            Err(error) => return Err(ClientError::Transport(error)),
+        };
+        match decode(&frame) {
+            Ok(Envelope {
+                body: Some(Body::ClipboardText(clip)),
+            }) => Ok(Some(clip.text)),
+            Ok(_) => Err(ClientError::Malformed("expected clipboard text".into())),
+            Err(error) => Err(ClientError::Malformed(error.to_string())),
         }
     }
 }

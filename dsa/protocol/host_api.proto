@@ -205,6 +205,19 @@ message FileChunk {
   bytes data = 1;
 }
 
+// Turns the connection into the caller's clipboard: after the answer (Done), the client sends
+// a ClipboardText each time the user's host clipboard gets new text, and the service sends a
+// ClipboardText each time the caller's Android copies text, which the client puts on the host
+// clipboard. Neither is answered. The service passes on nothing while the user has turned
+// clipboard sharing off. The connection lasts across restarts of the Android: the service keeps
+// the host's latest text and gives it to the Android when it is next ready.
+message WatchClipboard {}
+
+// Text on a clipboard, on a connection that carries the clipboard (WatchClipboard).
+message ClipboardText {
+  string text = 1;
+}
+
 // What a pointer did.
 enum PointerAction {
   POINTER_ACTION_UNSPECIFIED = 0;
@@ -499,8 +512,8 @@ message SetSettings {
   Settings settings = 1;
 }
 
-// The settings of the caller's DSA. `render_gpu` and `freeze` are the caller's own; the
-// update settings are the machine's, shared by every user of it.
+// The settings of the caller's DSA. `render_gpu`, `freeze`, `clipboard` and `links_in_android` are
+// the caller's own; the update settings are the machine's, shared by every user of it.
 message Settings {
   // The GPU the caller's window manager renders on: "display" (the GPU that drives the
   // primary monitor, the default), "integrated", "discrete", or part of a GPU's name. The
@@ -525,6 +538,9 @@ message Settings {
   // Whether the web links apps in the caller's Android open go to apps in it, as on a phone.
   // Off by default: they open in the user's default browser on the host.
   bool links_in_android = 10;
+  // Whether text copied on the host can be pasted in the caller's Android, and the reverse.
+  // On unless the user turns it off.
+  bool clipboard = 9;
 }
 
 // What went wrong with a request.
@@ -579,6 +595,7 @@ message Request {
     FreezeSession freeze_session = 21;
     WatchLinks watch_links = 25;
     OpenFile open_file = 26;
+    WatchClipboard watch_clipboard = 22;
   }
 }
 
@@ -612,5 +629,6 @@ message Envelope {
     ImeCommit ime_commit = 10;
     OpenLink open_link = 12;
     FileChunk file_chunk = 13;
+    ClipboardText clipboard_text = 11;
   }
 }

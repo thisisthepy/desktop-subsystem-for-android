@@ -35,6 +35,7 @@ public sealed record SettingsInfo(
     bool ImageUpdatesAvailable,
     string Version,
     string? LogDir,
+    bool Clipboard = true,
     bool LinksInAndroid = false)
 {
     public RenderGpuKind RenderGpuKind => RenderGpu.ToLowerInvariant() switch

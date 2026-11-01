@@ -49,6 +49,13 @@ public sealed class DsaService
     private static bool Bool(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
 
+    /// <summary>The switch <paramref name="name"/>, or <paramref name="missing"/> when a service
+    /// from before it existed does not report it.</summary>
+    private static bool Bool(JsonElement element, string name, bool missing) =>
+        element.TryGetProperty(name, out var value)
+            ? value.ValueKind == JsonValueKind.True
+            : missing;
+
     private static ulong Number(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
             ? value.GetUInt64()
@@ -91,6 +98,7 @@ public sealed class DsaService
         Bool(json, "image_updates_available"),
         String(json, "version"),
         OptionalString(json, "log_dir"),
+        Bool(json, "clipboard", missing: true),
         Bool(json, "links_in_android"));
 
     public async Task<SettingsInfo> SettingsAsync() =>
@@ -104,6 +112,8 @@ public sealed class DsaService
     public Task<SettingsInfo> SetFreezeAsync(bool on) => SetAsync("freeze", on ? "on" : "off");
 
     public Task<SettingsInfo> SetLinksInAndroidAsync(bool on) => SetAsync("links-in-android", on ? "on" : "off");
+
+    public Task<SettingsInfo> SetClipboardAsync(bool on) => SetAsync("clipboard", on ? "on" : "off");
 
     public Task<SettingsInfo> SetProgramUpdatesAsync(bool on) => SetAsync("program-updates", on ? "on" : "off");
 

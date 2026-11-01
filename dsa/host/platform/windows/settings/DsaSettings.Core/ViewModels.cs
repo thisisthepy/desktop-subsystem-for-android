@@ -162,6 +162,8 @@ public sealed class SettingsViewModel : ObservableObject
     /// <summary>Whether web links apps in Android open go to Android apps instead of the
     /// default browser.</summary>
     public bool LinksInAndroid => _settings?.LinksInAndroid ?? false;
+    /// <summary>Whether text copied on Windows can be pasted in Android, and the reverse.</summary>
+    public bool Clipboard => _settings?.Clipboard ?? true;
     public bool ProgramUpdates => _settings?.ProgramUpdates ?? false;
     public bool ImageUpdates => _settings?.ImageUpdates ?? false;
     public bool ProgramUpdatesAvailable => _settings?.ProgramUpdatesAvailable ?? false;
@@ -289,6 +291,9 @@ public sealed class SettingsViewModel : ObservableObject
 
     public Task SetLinksInAndroidAsync(bool on) =>
         on == LinksInAndroid && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetLinksInAndroidAsync(on));
+
+    public Task SetClipboardAsync(bool on) =>
+        on == Clipboard && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetClipboardAsync(on));
 
     public Task SetProgramUpdatesAsync(bool on) =>
         on == ProgramUpdates && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetProgramUpdatesAsync(on));

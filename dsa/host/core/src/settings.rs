@@ -1,9 +1,10 @@
 //! The settings a user changes from the settings app, kept by the service.
 //!
-//! Three of them are the user's own: the GPU their window manager renders on, whether their
-//! Android may be frozen when idle, and whether web links open in apps in their Android
-//! instead of the host's browser. Two are the machine's, shared by every user: whether the
-//! service updates DSA itself and whether it downloads new Android images.
+//! Four of them are the user's own: the GPU their window manager renders on, whether their
+//! Android may be frozen when idle, whether their clipboard is shared with it, and whether web
+//! links open in apps in their Android instead of the host's browser. Two are the machine's,
+//! shared by every user: whether the service updates DSA itself and whether it downloads new
+//! Android images.
 //!
 //! Clients read and change them through the local API only. The service keeps them in its
 //! own folder, which users cannot write to, so the values a client sees are the values the
@@ -11,7 +12,7 @@
 //!
 //! ```text
 //! <dir>/machine.json          {"program_updates": true, "image_updates": true}
-//! <dir>/users/<user>.json     {"render_gpu": "display", "freeze": false,
+//! <dir>/users/<user>.json     {"render_gpu": "display", "freeze": false, "clipboard": true,
 //!                              "links_in_android": false}
 //! ```
 //!
@@ -37,6 +38,9 @@ pub struct Settings {
     /// Whether the web links apps in the user's Android open go to apps in it rather than to
     /// the host's default browser. Off by default.
     pub links_in_android: bool,
+    /// Whether text copied on the host can be pasted in the user's Android, and the reverse.
+    /// On by default.
+    pub clipboard: bool,
     /// Whether the service updates DSA itself.
     pub program_updates: bool,
     /// Whether the service downloads new Android images.
@@ -49,6 +53,7 @@ impl Default for Settings {
             render_gpu: "display".into(),
             freeze: false,
             links_in_android: false,
+            clipboard: true,
             program_updates: true,
             image_updates: true,
         }
@@ -90,6 +95,8 @@ pub struct UserSettings {
     pub freeze: bool,
     #[serde(default)]
     pub links_in_android: bool,
+    #[serde(default = "yes")]
+    pub clipboard: bool,
 }
 
 impl Default for UserSettings {
@@ -98,6 +105,7 @@ impl Default for UserSettings {
             render_gpu: display(),
             freeze: false,
             links_in_android: false,
+            clipboard: true,
         }
     }
 }
@@ -202,6 +210,7 @@ impl FileSettings {
                     .unwrap_or_else(display),
                 freeze: false,
                 links_in_android: false,
+                clipboard: true,
             }),
         }
     }
@@ -237,6 +246,7 @@ impl SettingsStore for FileSettings {
             render_gpu: mine.render_gpu,
             freeze: mine.freeze,
             links_in_android: mine.links_in_android,
+            clipboard: mine.clipboard,
             program_updates: machine.program_updates,
             image_updates: machine.image_updates,
         })
@@ -252,6 +262,7 @@ impl SettingsStore for FileSettings {
                 render_gpu: render_gpu.clone(),
                 freeze: settings.freeze,
                 links_in_android: settings.links_in_android,
+                clipboard: settings.clipboard,
             },
         )?;
         write_json(
@@ -297,6 +308,7 @@ impl SettingsStore for MemorySettings {
             render_gpu: mine.render_gpu,
             freeze: mine.freeze,
             links_in_android: mine.links_in_android,
+            clipboard: mine.clipboard,
             program_updates: machine.program_updates,
             image_updates: machine.image_updates,
         })
@@ -310,6 +322,7 @@ impl SettingsStore for MemorySettings {
                 render_gpu: render_gpu.clone(),
                 freeze: settings.freeze,
                 links_in_android: settings.links_in_android,
+                clipboard: settings.clipboard,
             },
         );
         *self.machine.lock().unwrap_or_else(|e| e.into_inner()) = MachineSettings {
@@ -363,6 +376,7 @@ mod tests {
                     render_gpu: " Discrete ".into(),
                     freeze: true,
                     links_in_android: true,
+                    clipboard: false,
                     program_updates: false,
                     image_updates: true,
                 },
@@ -374,11 +388,13 @@ mod tests {
         let mine = again.get("S-1-5-21-1-2-3-1001").unwrap();
         assert_eq!(mine.render_gpu, "discrete");
         assert!(mine.freeze);
+        assert!(!mine.clipboard);
         assert!(!mine.program_updates);
         // Another user has their own GPU and freeze, and shares the machine's updates.
         let theirs = again.get("S-1-5-21-1-2-3-1002").unwrap();
         assert_eq!(theirs.render_gpu, "display");
         assert!(!theirs.freeze);
+        assert!(theirs.clipboard);
         assert!(!theirs.program_updates);
         assert!(!again.machine().program_updates);
         let _ = std::fs::remove_dir_all(&dir);
@@ -430,6 +446,32 @@ mod tests {
         let again = FileSettings::new(&dir);
         assert!(again.get("uid:1000").unwrap().links_in_android);
         assert!(!again.get("uid:1001").unwrap().links_in_android);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr13_clipboard_sharing_is_on_by_default_and_kept_when_turned_off() {
+        let dir = scratch("clipboard");
+        let store = FileSettings::new(&dir);
+        assert!(store.get("uid:1000").unwrap().clipboard);
+        // A file saved before the setting existed keeps it on.
+        std::fs::create_dir_all(dir.join("users")).unwrap();
+        std::fs::write(
+            dir.join("users").join("uid_1001.json"),
+            r#"{"render_gpu": "display", "freeze": true}"#,
+        )
+        .unwrap();
+        assert!(store.get("uid:1001").unwrap().clipboard);
+        store
+            .set(
+                "uid:1000",
+                &Settings {
+                    clipboard: false,
+                    ..Settings::default()
+                },
+            )
+            .unwrap();
+        assert!(!FileSettings::new(&dir).get("uid:1000").unwrap().clipboard);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

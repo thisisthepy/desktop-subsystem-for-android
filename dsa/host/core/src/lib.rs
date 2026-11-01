@@ -15,6 +15,7 @@
 //! - [`power`]: the host computer's power, which each guest's battery state follows.
 //! - [`links`]: web links apps in the guest open, which the host opens in its browser.
 //! - [`files`]: host files the user opens or shares in an app in the guest.
+//! - [`clipboard`]: the text clipboard the host and the guest share.
 //! - [`ime`]: text input through the host's input method in a task's window.
 //! - [`settings`]: the settings a user changes from the settings app, kept by the service.
 //! - [`memory`]: how much memory a user's Android takes, in the guest and on the host.
@@ -23,6 +24,7 @@
 //!   which window each task and each frame goes to.
 
 pub mod bootconfig;
+pub mod clipboard;
 pub mod compositor;
 pub mod files;
 pub mod guest_display;

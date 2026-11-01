@@ -322,6 +322,12 @@
   <data name="LinksCard.Description" xml:space="preserve">
     <value>Off by default: a web link you tap in an Android app opens in your default browser in Windows. On, it opens in an Android app, as on a phone. A link an installed app has verified as its own opens in that app either way.</value>
   </data>
+  <data name="ClipboardCard.Header" xml:space="preserve">
+    <value>Share the clipboard with Android</value>
+  </data>
+  <data name="ClipboardCard.Description" xml:space="preserve">
+    <value>On by default: text you copy in Windows can be pasted in Android apps, and text copied in Android can be pasted in Windows. Images stay where they were copied.</value>
+  </data>
   <data name="FreezeCard.Header" xml:space="preserve">
     <value>Freeze Android when idle</value>
   </data>

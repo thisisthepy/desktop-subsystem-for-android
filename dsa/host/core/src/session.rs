@@ -1,4 +1,4 @@
-//! Th        let mut watchers = self.link_watchers.lock().unwrap_or_else(|e| e.into_inner()); session: the guest container's life from start to stop, as the host sees it.
+//! The session: the guest container's life from start to stop, as the host sees it.
 //!
 //! A [`Session`] owns a worker thread. The thread starts the guest through a
 //! [`GuestLauncher`], waits for the agent to connect on the control channel, checks the
@@ -45,6 +45,14 @@
 //! ([`Session::links_in_android`]). Only http and https links pass, and only a few in a row.
 //! Files from the host go to the guest with [`Session::open_file`], in chunks paced by the
 //! agent's progress reports.
+//!
+//! The session also keeps the host's and the guest's text clipboards in step while sharing is
+//! on ([`Session::share_clipboard`], on by default). Text the host copies
+//! ([`Session::host_clipboard`]) goes to the guest while it is `Active` or `Dozing`, and the
+//! host's latest text goes to it again each time it gets there, as when Android starts. Text
+//! the guest copies goes to every [`Session::watch_clipboard`] watcher. Text that came from one
+//! side is never sent back to it, and text longer than
+//! [`MAX_CLIPBOARD_BYTES`](crate::clipboard::MAX_CLIPBOARD_BYTES) does not cross.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -58,6 +66,7 @@ use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{self, envelope::Body};
 use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 
+use crate::clipboard;
 use crate::files::{self, FileAction, FileTransfer};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::PointerEvent;
@@ -437,6 +446,10 @@ enum Command {
     Freeze(Sender<Result<(), SessionError>>),
     /// Whether web links open in the guest rather than on the host.
     LinksInAndroid(bool),
+    /// The host's clipboard got new text.
+    HostClipboard(String),
+    /// Whether the clipboards are shared.
+    ShareClipboard(bool),
 }
 
 struct Shared {
@@ -460,6 +473,8 @@ struct Shared {
     transfers: Mutex<HashMap<u32, Sender<control::FileProgress>>>,
     /// The ID of the last file transfer.
     last_transfer: AtomicU32,
+    /// Who hears of the text the guest copies.
+    clipboard_watchers: Mutex<Vec<Sender<String>>>,
 }
 
 /// The guest's tasks and who is watching them, under one lock, so a new watcher's starting
@@ -574,6 +589,14 @@ impl Shared {
         }
     }
 
+    /// Hands text the guest copied to every clipboard watcher still listening.
+    fn publish_clipboard(&self, text: &str) {
+        self.clipboard_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|watcher| watcher.send(text.to_string()).is_ok());
+    }
+
     /// Removes every task, as when the guest has gone away.
     fn clear_tasks(&self) {
         let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
@@ -616,6 +639,7 @@ impl Session {
             link_watchers: Mutex::new(Vec::new()),
             transfers: Mutex::new(HashMap::new()),
             last_transfer: AtomicU32::new(0),
+            clipboard_watchers: Mutex::new(Vec::new()),
         });
         let freeze_delay = config.freeze_after.unwrap_or(DEFAULT_FREEZE_AFTER);
         let (commands, command_rx) = mpsc::channel();
@@ -649,6 +673,9 @@ impl Session {
             frozen_at: None,
             links_in_android: false,
             link_gate: LinkGate::default(),
+            clipboard_sharing: true,
+            host_clipboard: None,
+            clipboard_last: None,
         };
         let worker = thread::Builder::new()
             .name("dsa-session".into())
@@ -819,6 +846,31 @@ impl Session {
     /// agent connects.
     pub fn set_power(&self, state: PowerState) {
         let _ = self.commands.send(Command::Power(state));
+    }
+
+    /// Says that the host's clipboard got `text`. It goes to the guest while sharing is on and
+    /// the guest is `Active` or `Dozing`; otherwise the latest text waits for the guest to get
+    /// there. Taken in every state.
+    pub fn host_clipboard(&self, text: String) {
+        let _ = self.commands.send(Command::HostClipboard(text));
+    }
+
+    /// Shares the clipboards (`on`, the default) or stops sharing them, as the user's setting
+    /// says. While they are not shared, nothing crosses in either direction.
+    pub fn share_clipboard(&self, on: bool) {
+        let _ = self.commands.send(Command::ShareClipboard(on));
+    }
+
+    /// The text the guest copies from now on, while sharing is on. The watch lasts across
+    /// restarts of the guest.
+    pub fn watch_clipboard(&self) -> Receiver<String> {
+        let (tx, rx) = mpsc::channel();
+        self.shared
+            .clipboard_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(tx);
+        rx
     }
 
     /// Freezes the guest now, as when the user chooses it. It stays frozen until a task
@@ -1087,6 +1139,13 @@ struct Worker {
     links_in_android: bool,
     /// Keeps a flood of links from reaching the host.
     link_gate: LinkGate,
+    /// Whether the clipboards are shared, as the user last said.
+    clipboard_sharing: bool,
+    /// The host's latest clipboard text while sharing is on, for a guest that gets ready later.
+    host_clipboard: Option<String>,
+    /// The last text that crossed, either way, since the agent connected. Text equal to it is
+    /// not sent, so what one side was given never comes back to it.
+    clipboard_last: Option<String>,
 }
 
 impl Worker {
@@ -1115,6 +1174,8 @@ impl Worker {
                         Ok(Command::Power(state)) => self.set_power(state),
                         Ok(Command::FreezeAfter(after)) => self.config.freeze_after = after,
                         Ok(Command::LinksInAndroid(on)) => self.set_links_in_android(on),
+                        Ok(Command::HostClipboard(text)) => self.host_clipboard(text),
+                        Ok(Command::ShareClipboard(on)) => self.share_clipboard(on),
                         Ok(Command::Shutdown) | Err(_) => return,
                     }
                 }
@@ -1134,6 +1195,8 @@ impl Worker {
                         Ok(Command::Power(state)) => self.set_power(state),
                         Ok(Command::FreezeAfter(after)) => self.config.freeze_after = after,
                         Ok(Command::LinksInAndroid(on)) => self.set_links_in_android(on),
+                        Ok(Command::HostClipboard(text)) => self.host_clipboard(text),
+                        Ok(Command::ShareClipboard(on)) => self.share_clipboard(on),
                         Ok(Command::Shutdown) | Err(_) => return,
                     }
                 }
@@ -1200,6 +1263,83 @@ impl Worker {
                 let _ = reply.send(self.freeze_now());
                 true
             }
+            Command::HostClipboard(text) => {
+                self.host_clipboard(text);
+                true
+            }
+            Command::ShareClipboard(on) => {
+                self.share_clipboard(on);
+                true
+            }
+        }
+    }
+
+    /// Takes new text from the host's clipboard. It is sent at once if the guest can take it,
+    /// and kept for when it can.
+    fn host_clipboard(&mut self, text: String) {
+        if !self.clipboard_sharing {
+            return;
+        }
+        if !clipboard::fits(&text) {
+            eprintln!("{}", clipboard::too_long(&text, "host"));
+            return;
+        }
+        self.host_clipboard = Some(text);
+        self.offer_host_clipboard();
+    }
+
+    /// Sends the host's latest clipboard text to a guest that is ready for it and does not
+    /// have it yet.
+    fn offer_host_clipboard(&mut self) {
+        if !self.clipboard_sharing
+            || !self.agent_connected
+            || !matches!(self.state(), SessionState::Active | SessionState::Dozing)
+        {
+            return;
+        }
+        let Some(text) = &self.host_clipboard else {
+            return;
+        };
+        if self.clipboard_last.as_ref() == Some(text) {
+            return;
+        }
+        let text = text.clone();
+        self.clipboard_last = Some(text.clone());
+        self.send_body(Body::ClipboardText(control::ClipboardText { text }));
+    }
+
+    /// Takes text the guest copied, and hands it to the watchers unless it is what the guest
+    /// was just given.
+    fn guest_clipboard(&mut self, text: String) {
+        if !self.clipboard_sharing {
+            eprintln!("clipboard: dropped text copied in Android; sharing is off");
+            return;
+        }
+        if !clipboard::fits(&text) {
+            eprintln!("{}", clipboard::too_long(&text, "guest"));
+            return;
+        }
+        if self.clipboard_last.as_ref() == Some(&text) {
+            return;
+        }
+        self.clipboard_last = Some(text.clone());
+        // The host's clipboard is about to hold it, so it is not offered back.
+        self.host_clipboard = Some(text.clone());
+        self.shared.publish_clipboard(&text);
+    }
+
+    /// Turns clipboard sharing on or off, and tells a connected agent.
+    fn share_clipboard(&mut self, on: bool) {
+        if on == self.clipboard_sharing {
+            return;
+        }
+        self.clipboard_sharing = on;
+        // Nothing copied while sharing was off crosses later; the next copy does.
+        self.host_clipboard = None;
+        self.clipboard_last = None;
+        eprintln!("clipboard: sharing is {}", if on { "on" } else { "off" });
+        if self.running() && self.agent_connected {
+            self.send_body(Body::ClipboardSharing(control::ClipboardSharing { on }));
         }
     }
 
@@ -1447,6 +1587,13 @@ impl Worker {
             // A new agent takes links to go to the host.
             if self.links_in_android {
                 self.send_body(Body::LinkHandling(control::LinkHandling { in_guest: true }));
+            }
+            // A new agent takes the clipboards to be shared, and has none of the host's text.
+            self.clipboard_last = None;
+            if !self.clipboard_sharing {
+                self.send_body(Body::ClipboardSharing(control::ClipboardSharing {
+                    on: false,
+                }));
             }
         } else {
             self.agent_lost_at = Some(now);
@@ -1761,6 +1908,14 @@ impl Worker {
                 self.set_links_in_android(on);
                 true
             }
+            Command::HostClipboard(text) => {
+                self.host_clipboard(text);
+                true
+            }
+            Command::ShareClipboard(on) => {
+                self.share_clipboard(on);
+                true
+            }
             Command::Stop => {
                 self.stop(StopReason::Requested);
                 false
@@ -1794,6 +1949,7 @@ impl Worker {
                 return;
             }
             self.tick_lifecycle();
+            self.offer_host_clipboard();
             let Some(connection) = self.connection.as_mut() else {
                 self.stop(StopReason::ChannelLost("no connection".into()));
                 return;
@@ -1902,6 +2058,7 @@ impl Worker {
             Some(Body::DeviceIdle(idle)) => self.guest_idle(idle.idle),
             Some(Body::OpenLink(link)) => self.guest_link(link.url),
             Some(Body::FileProgress(progress)) => self.shared.file_progress(progress),
+            Some(Body::ClipboardText(clip)) => self.guest_clipboard(clip.text),
             Some(Body::GuestBoot(boot)) => self.guest_boot(boot),
             Some(Body::AgentConnected(_)) => {
                 eprintln!("control channel: dropping a message that stops at the guest's daemon");
@@ -1919,6 +2076,7 @@ impl Worker {
             | Some(Body::LinkHandling(_))
             | Some(Body::OpenFile(_))
             | Some(Body::FileChunk(_))
+            | Some(Body::ClipboardSharing(_))
             | Some(Body::RequestGuestMemory(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
             }

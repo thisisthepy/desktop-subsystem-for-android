@@ -3,6 +3,8 @@ package io.github.thisisthepy.dsa.agent
 import com.google.protobuf.InvalidProtocolBufferException
 import io.github.thisisthepy.dsa.agent.channel.ChannelClient
 import io.github.thisisthepy.dsa.agent.channel.ChannelLocator
+import io.github.thisisthepy.dsa.agent.clipboard.ClipboardSync
+import io.github.thisisthepy.dsa.agent.clipboard.GuestClipboard
 import io.github.thisisthepy.dsa.agent.input.EditorConnection
 import io.github.thisisthepy.dsa.agent.input.InputInjector
 import io.github.thisisthepy.dsa.agent.input.InputMethodSetup
@@ -59,9 +61,11 @@ import io.github.thisisthepy.dsa.control.v1.PointerAction
  * so the host's start menu can show them. With a [MemorySource], it also reports the guest's
  * memory every few minutes and whenever the host asks. When the host says no task window is
  * shown the agent turns the screen off and puts the device into Doze, and the host's battery
- * becomes the guest's ([Lifecycle]). Web links apps open go to the host's browser unless
- * the host says they stay in the guest ([Links]), and files the host sends are stored and
- * offered to the apps that can open them ([FileReceiver]).
+ * becomes the guest's ([Lifecycle]). Text copied on the host becomes the guest's clipboard
+ * text, and text copied in the guest goes to the host, while the user shares the clipboard
+ * ([ClipboardSync]). Web links apps open go to the host's browser unless the host says they
+ * stay in the guest ([Links]), and files the host sends are stored and offered to the apps
+ * that can open them ([FileReceiver]).
  */
 class Agent(
     private val ownPackage: String,
@@ -88,6 +92,7 @@ class Agent(
     guestBrowser: GuestBrowser = GuestBrowser.NONE,
     fileStore: TransferStore? = null,
     fileOpener: FileOpener = FileOpener.NONE,
+    clipboard: GuestClipboard = GuestClipboard.NONE,
 ) {
     private val channel = ChannelClient(
         locator = locator,
@@ -135,6 +140,7 @@ class Agent(
     private val memoryReporter = memory?.let {
         MemoryReporter(it, scheduler, log, isConnected = { channel.connected }, send = { frame -> channel.send(frame) })
     }
+    private val clipboardSync = ClipboardSync(clipboard, { frame -> channel.send(frame) }, log, isConnected = { channel.connected })
     private val freeform = FreeformSetup(windowing, scheduler, log)
     private val arranger = TaskArranger(actions, windowing::displaySize, log)
     private val installed = InstalledAppReporter(ownPackage) { frame -> channel.send(frame) }
@@ -159,6 +165,7 @@ class Agent(
             }
             listen()
             lifecycle.start { work -> scheduler.post(work) }
+            clipboardSync.start { work -> scheduler.post(work) }
             listenToApps()
             channel.start()
             requestRefresh()
@@ -219,6 +226,7 @@ class Agent(
         channel.send(Envelope.newBuilder().setAgentConnected(AgentConnected.getDefaultInstance()).build().toByteArray())
         reporter.resend()
         lifecycle.connected()
+        clipboardSync.connected()
         installed.resend()
         memoryReporter?.connected()
         links.connected()
@@ -278,6 +286,7 @@ class Agent(
             return false
         }
         if (lifecycle.handle(envelope)) return true
+        if (clipboardSync.handle(envelope)) return true
         when (envelope.bodyCase) {
             Envelope.BodyCase.KEY_EVENT -> try {
                 keys.handle(envelope.keyEvent)

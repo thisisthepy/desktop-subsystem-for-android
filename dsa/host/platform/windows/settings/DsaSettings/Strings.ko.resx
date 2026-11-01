@@ -322,6 +322,12 @@
   <data name="LinksCard.Description" xml:space="preserve">
     <value>기본값은 꺼짐입니다. 꺼져 있으면 안드로이드 앱에서 누른 웹 링크가 Windows의 기본 브라우저에서 열립니다. 켜면 휴대폰에서처럼 안드로이드 앱에서 열립니다. 설치된 앱이 자기 것으로 확인한 링크는 어느 쪽이든 그 앱에서 열립니다.</value>
   </data>
+  <data name="ClipboardCard.Header" xml:space="preserve">
+    <value>안드로이드와 클립보드 공유</value>
+  </data>
+  <data name="ClipboardCard.Description" xml:space="preserve">
+    <value>기본값은 켜짐입니다. Windows에서 복사한 텍스트를 안드로이드 앱에 붙여넣을 수 있고, 안드로이드에서 복사한 텍스트를 Windows에 붙여넣을 수 있습니다. 이미지는 복사한 곳에만 남습니다.</value>
+  </data>
   <data name="FreezeCard.Header" xml:space="preserve">
     <value>유휴 상태에서 안드로이드 일시 정지</value>
   </data>
