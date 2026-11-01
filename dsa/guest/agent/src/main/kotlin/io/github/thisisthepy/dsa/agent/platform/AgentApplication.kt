@@ -41,6 +41,7 @@ class AgentApplication : Application() {
             inputScheduler = HandlerScheduler(input.looper),
             inputTrace = InputTrace(log, enabled = inputTraceRequested()),
             touchSounds = AndroidTouchSounds(this),
+            clipboard = AndroidClipboard(this, log),
         )
         HostInputMethod.onCursor = { rect -> agent.cursorMoved(rect.left, rect.top, rect.right, rect.bottom) }
         agent.start()
