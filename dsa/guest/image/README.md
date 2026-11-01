@@ -57,7 +57,8 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
   (Cuttlefish's virtio consoles, radios) do not exist on Hyper-V, they abort in a loop, and
   system_server waits for the oemlock HAL forever. Bluetooth comes back as a host HAL.
 - `unavailable-features.xml` withdraws the Bluetooth features, so system_server does not
-  start a Bluetooth stack that has no controller to talk to.
+  start a Bluetooth stack that has no controller to talk to, and the UWB feature, so nothing
+  waits for its removed HAL.
 - `sepolicy/memory.cil` lets the audio HAL and the software codecs share memory through
   memfds. Refused, each falls back to an ashmem device the kernel does not have, and audio
   policy never starts.

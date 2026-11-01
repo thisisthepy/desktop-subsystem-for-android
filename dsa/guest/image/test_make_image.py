@@ -1229,6 +1229,13 @@ class GuestMemoryTests(unittest.TestCase):
                               ("mediaswcodec", "system_server_tmpfs")]:
             self.assertIn(f"(allow {domain} {memfd} (file (read write getattr map)))", policy)
 
+    def test_fr5_uwb_is_not_advertised_without_its_hal(self):
+        # Declared, system_server's threads wait for the HAL for as long as the guest runs,
+        # and servicemanager tries to start it about twice a second.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            xml = archive.read("VENDOR/etc/permissions/dsa-unavailable-features.xml").decode()
+        self.assertIn('<unavailable-feature name="android.hardware.uwb" />', xml)
+
     def test_nfr2_only_the_control_daemon_asks_init_to_reclaim(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
             contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
