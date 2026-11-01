@@ -60,7 +60,10 @@ SHELL_APPS = ["Launcher3QuickStep", "SystemUI", "LatinIME"]
 # calendar, media, downloads, settings, telephony's database), PackageInstaller,
 # PermissionController, DocumentsUI, the print spooler, the sound picker, Settings, Provision
 # (it marks the device set up), Telecom and TeleService (system_server binds them at boot),
-# CarrierConfig, the browser (http links need an app), the camera and the clock.
+# CarrierConfig, the browser, the camera and the clock. The browser stays although web links
+# go to the host's browser by default (the agent holds the browser role then): an app may
+# start it by name, the user can choose to keep links in Android, which gives the role back
+# to it, and a link that cannot reach the host opens in it.
 UNNEEDED_APPS = [
     # Telephony without a modem (the radio HAL is removed): calls, SMS, the SIM toolkit, MMS,
     # emergency information, IMS entitlement and the carrier's captive portal app.

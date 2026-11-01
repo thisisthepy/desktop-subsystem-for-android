@@ -52,13 +52,25 @@ class AgentApplication : Application() {
             inputTrace = InputTrace(log, enabled = traced),
             frameTrace = frameTrace,
             touchSounds = AndroidTouchSounds(this),
+            browserRole = AndroidBrowserRole(this, log),
+            guestBrowser = AndroidGuestBrowser(this, log),
+            fileStore = io.github.thisisthepy.dsa.agent.files.TransferStore(hostFilesDir(this)),
+            fileOpener = AndroidFileOpener(this),
         )
+        AgentApplication.agent = agent
         HostInputMethod.onCursor = { rect -> agent.cursorMoved(rect.left, rect.top, rect.right, rect.bottom) }
         agent.start()
         // Starting windows draw on a thread of their own, so a slow app theme never holds up
         // the agent's work or the home activity on the main thread.
         val splash = HandlerThread("dsa-splash").apply { start() }
         AndroidStartingWindows(this, splash.looper, log).start()
+    }
+
+    companion object {
+        /** The running agent, for the link activity, which runs in the same process. */
+        @Volatile
+        var agent: Agent? = null
+            private set
     }
 
     /** SystemProperties is not in the SDK and is called by reflection; off when it fails. */
