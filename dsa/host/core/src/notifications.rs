@@ -276,8 +276,12 @@ mod tests {
         for i in 0..(BURST as usize + MAX_WAITING + 5) {
             limit.offer(note(&format!("k{i}"), "x"), start);
         }
-        let due = limit.due(start + REFILL * 1000);
+        let mut due = Vec::new();
+        for step in 1..=200u32 {
+            due.extend(limit.due(start + REFILL * step));
+        }
         assert_eq!(due.len(), MAX_WAITING);
+        assert_eq!(due[0].key, format!("k{BURST}"));
     }
 
     #[test]
