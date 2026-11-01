@@ -89,6 +89,32 @@ class HostGraphicsBuildTests(unittest.TestCase):
         # Nothing retired outlives the device.
         self.assertIn("+    freeRetiredLocked(/*wait=*/true);", text)
 
+    def test_fr4_an_image_release_is_answered_once_the_gpu_has_finished(self):
+        # The guest has no fences from the host, so the answer to a release is all that says the
+        # image is ready. Upstream answers once the release is queued, the guest then composes
+        # the buffer before the app's drawing has run, and a buffer new to a resize shows black.
+        script = FETCH_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('"0010-*.patch"', script)
+        patch = (HERE.parent / "patches" /
+                 "0010-answer-an-image-release-once-the-gpu-has-finished.patch")
+        lines = patch.read_text(encoding="utf-8").splitlines()
+        added = "\n".join(line for line in lines if line.startswith("+"))
+
+        # The entry point the guest's waiting call reaches waits, and only after a release that
+        # was queued; the guest's other, fenced entry point calls the implementation directly.
+        self.assertIn("mImpl->waitForImageRelease(image);", added)
+        self.assertIn("if (result == VK_SUCCESS) {", added)
+        self.assertNotIn("AsyncGOOGLE", patch.read_text(encoding="utf-8"))
+
+        # The wait is on what the release's own fence completes, and outside the decoder's lock:
+        # the lock's scope closes before it, so another app's commands are not held up.
+        wait = added[added.index("void waitForImageRelease"):]
+        self.assertIn("latestRelease()", wait)
+        self.assertLess(wait.index("std::lock_guard<std::mutex> lock(mMutex);"),
+                        wait.index("release->wait();"))
+        between = wait[wait.index("latestRelease()"):wait.index("release->wait();")]
+        self.assertIn("+        }", between)
+
     def test_fr3_each_display_is_copied_into_its_window_on_the_gpu(self):
         header = (HERE / "dsa_gfx_backend.h").read_text(encoding="utf-8")
         self.assertIn("dsa_gfx_set_display_callbacks2", header)
