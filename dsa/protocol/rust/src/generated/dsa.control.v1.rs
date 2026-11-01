@@ -420,12 +420,75 @@ pub struct GuestBoot {
     #[prost(bool, tag = "2")]
     pub agent_connected: bool,
 }
+/// Guest to host, from the agent: an app in the guest opened a web link, which the host opens
+/// in the user's default browser. Only http and https links are sent; the host checks the link
+/// again and drops anything else, so an app in the guest can never make the host run a
+/// program. The agent sends none while links open in the guest (LinkHandling).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OpenLink {
+    #[prost(string, tag = "1")]
+    pub url: ::prost::alloc::string::String,
+}
+/// Host to guest: where the web links that apps in the guest open go. The agent takes them to
+/// go to the host when it connects; the host says so when they do not, and on every change
+/// after that. While they go to the host, the agent is the guest's browser. A link that an
+/// installed app has verified as its own (an Android App Link) still opens in that app, which
+/// the guest decides by itself.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LinkHandling {
+    /// True when links open in an app in the guest, as on a phone.
+    #[prost(bool, tag = "1")]
+    pub in_guest: bool,
+}
+/// Host to guest: a file from the host, whose content follows in FileChunk messages of the
+/// same `transfer_id`, in order. Once the agent has all `size` bytes, it asks the user which
+/// app opens (or takes) the file, and that app shows as a task window. The host sends at most
+/// a few chunks ahead of the agent's FileProgress, so the guest is never handed more than it
+/// has taken.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct OpenFile {
+    /// Unique among the transfers of one connection.
+    #[prost(uint32, tag = "1")]
+    pub transfer_id: u32,
+    /// The file's name, without any folder. Its extension gives its type.
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    /// The file's length in bytes.
+    #[prost(uint64, tag = "3")]
+    pub size: u64,
+    #[prost(enumeration = "FileAction", tag = "4")]
+    pub action: i32,
+}
+/// Host to guest: part of the content of a file an OpenFile announced.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct FileChunk {
+    #[prost(uint32, tag = "1")]
+    pub transfer_id: u32,
+    /// Where `data` starts in the file.
+    #[prost(uint64, tag = "2")]
+    pub offset: u64,
+    #[prost(bytes = "vec", tag = "3")]
+    pub data: ::prost::alloc::vec::Vec<u8>,
+}
+/// Guest to host, from the agent: how far a transfer has got. Sent after each chunk the agent
+/// has stored. When `received` is the file's whole size, the agent has asked the user which
+/// app takes it. A non-empty `error` ends the transfer: it says, in words a person can act on,
+/// why the agent could not take the file.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct FileProgress {
+    #[prost(uint32, tag = "1")]
+    pub transfer_id: u32,
+    #[prost(uint64, tag = "2")]
+    pub received: u64,
+    #[prost(string, tag = "3")]
+    pub error: ::prost::alloc::string::String,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 40, 41, 42"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 40, 41, 42, 50, 51, 52, 53, 54"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -487,6 +550,16 @@ pub mod envelope {
         PowerState(super::PowerState),
         #[prost(message, tag = "42")]
         DeviceIdle(super::DeviceIdle),
+        #[prost(message, tag = "50")]
+        OpenLink(super::OpenLink),
+        #[prost(message, tag = "51")]
+        LinkHandling(super::LinkHandling),
+        #[prost(message, tag = "52")]
+        OpenFile(super::OpenFile),
+        #[prost(message, tag = "53")]
+        FileChunk(super::FileChunk),
+        #[prost(message, tag = "54")]
+        FileProgress(super::FileProgress),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -708,6 +781,38 @@ impl KeyAction {
             "KEY_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
             "KEY_ACTION_DOWN" => Some(Self::Down),
             "KEY_ACTION_UP" => Some(Self::Up),
+            _ => None,
+        }
+    }
+}
+/// What the user wants done with a file the host sends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum FileAction {
+    Unspecified = 0,
+    /// Open it in an app the user picks.
+    View = 1,
+    /// Share it with an app the user picks.
+    Send = 2,
+}
+impl FileAction {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "FILE_ACTION_UNSPECIFIED",
+            Self::View => "FILE_ACTION_VIEW",
+            Self::Send => "FILE_ACTION_SEND",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "FILE_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
+            "FILE_ACTION_VIEW" => Some(Self::View),
+            "FILE_ACTION_SEND" => Some(Self::Send),
             _ => None,
         }
     }

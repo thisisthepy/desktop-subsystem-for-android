@@ -304,5 +304,60 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.DeviceIdle getDeviceIdle();
 
+  /**
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+   * @return Whether the openLink field is set.
+   */
+  boolean hasOpenLink();
+  /**
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+   * @return The openLink.
+   */
+  io.github.thisisthepy.dsa.control.v1.OpenLink getOpenLink();
+
+  /**
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+   * @return Whether the linkHandling field is set.
+   */
+  boolean hasLinkHandling();
+  /**
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+   * @return The linkHandling.
+   */
+  io.github.thisisthepy.dsa.control.v1.LinkHandling getLinkHandling();
+
+  /**
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+   * @return Whether the openFile field is set.
+   */
+  boolean hasOpenFile();
+  /**
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+   * @return The openFile.
+   */
+  io.github.thisisthepy.dsa.control.v1.OpenFile getOpenFile();
+
+  /**
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+   * @return Whether the fileChunk field is set.
+   */
+  boolean hasFileChunk();
+  /**
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+   * @return The fileChunk.
+   */
+  io.github.thisisthepy.dsa.control.v1.FileChunk getFileChunk();
+
+  /**
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   * @return Whether the fileProgress field is set.
+   */
+  boolean hasFileProgress();
+  /**
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   * @return The fileProgress.
+   */
+  io.github.thisisthepy.dsa.control.v1.FileProgress getFileProgress();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }
