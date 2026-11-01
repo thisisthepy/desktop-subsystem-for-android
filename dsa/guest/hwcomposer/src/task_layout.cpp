@@ -174,6 +174,8 @@ uint64_t drawnGeometry(const Rect& bounds, const std::vector<LayerFill>& layers)
     return hash;
 }
 
+bool leavesLastFrame(bool layerMissing, bool hasFrame) { return layerMissing && hasFrame; }
+
 ResizeGate::Decision ResizeGate::decide(int32_t task, int64_t postedWidth, int64_t postedHeight,
                                         const Rect& bounds, bool drawn, int64_t nowMs,
                                         uint64_t geometry) {

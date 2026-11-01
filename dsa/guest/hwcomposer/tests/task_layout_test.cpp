@@ -558,4 +558,11 @@ TEST(fr4_a_resized_task_is_composed_into_the_top_left_of_its_buffers) {
     EXPECT_EQ(layer.displayFrame.bottom, 500);
 }
 
+TEST(fr4_a_frame_missing_a_layer_does_not_replace_a_tasks_last_frame) {
+    EXPECT_TRUE(leavesLastFrame(/*layerMissing=*/true, /*hasFrame=*/true));
+    // A first frame goes as it is, and a whole frame always goes.
+    EXPECT_TRUE(!leavesLastFrame(/*layerMissing=*/true, /*hasFrame=*/false));
+    EXPECT_TRUE(!leavesLastFrame(/*layerMissing=*/false, /*hasFrame=*/true));
+}
+
 int main() { return ::dsa::test::runAll(); }

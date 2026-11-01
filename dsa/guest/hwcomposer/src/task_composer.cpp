@@ -177,6 +177,7 @@ void TaskComposer::releaseOutputLocked(Output& output) {
     output.buffers = BufferSize{};
     mHost.destroyDisplay(output.display);
     output.onHost = false;
+    output.posted = false;
 }
 
 void TaskComposer::syncGenerationLocked() {
@@ -190,6 +191,7 @@ void TaskComposer::syncGenerationLocked() {
     mResizeGate.clear();
     for (auto& [_, output] : mOutputs) {
         output.onHost = false;
+        output.posted = false;
         output.announced = false;
         output.targets[0] = output.targets[1] = 0;
         output.buffers = BufferSize{};
@@ -337,6 +339,7 @@ void TaskComposer::compose(Frame& frame) {
             std::vector<ComposeInput> inputs;
             Rect clientArea;
             int clientSlot = -1;
+            bool layerMissing = false;
             for (int64_t id : task.layers) {
                 FrameLayer& layer = *byId[id];
                 if (layer.client) {
@@ -364,6 +367,7 @@ void TaskComposer::compose(Frame& frame) {
                     }
                     in.colorBuffer = sharedHandleLocked(layer.buffer);
                     if (in.colorBuffer == 0) {
+                        layerMissing = true;
                         continue;
                     }
                 }
@@ -390,9 +394,13 @@ void TaskComposer::compose(Frame& frame) {
                                    static_cast<float>(clientArea.right),
                                    static_cast<float>(clientArea.bottom)};
                 slice.blendMode = kBlendPremultiplied;
+                layerMissing = layerMissing || slice.colorBuffer == 0;
                 if (slice.colorBuffer == 0 || clientArea.empty()) {
                     inputs.erase(inputs.begin() + clientSlot);
                 }
+            }
+            if (leavesLastFrame(layerMissing, output.posted)) {
+                continue;
             }
 
             // Composed for display 0, which names no task window: given the task's display,
@@ -405,6 +413,7 @@ void TaskComposer::compose(Frame& frame) {
             if (mHost.compose(request)) {
                 const double postStart = traceMonoMs();
                 mHost.post(output.display, target);
+                output.posted = true;
                 if (inputTraceRequested()) {
                     logInputTrace(task.task, postStart - composeStart, traceMonoMs() - postStart,
                                   traceWallMs());

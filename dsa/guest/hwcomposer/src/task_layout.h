@@ -123,6 +123,11 @@ bool drawnAtSize(const Rect& bounds, const std::vector<LayerFill>& layers);
 // when the app draws a new picture into the same layout.
 uint64_t drawnGeometry(const Rect& bounds, const std::vector<LayerFill>& layers);
 
+// Whether a frame goes unsent because one of its layers could not be reached on the host. Composed
+// without that layer it would show black where the layer is, so a task with an earlier frame keeps
+// that one; a first frame has nothing better to show.
+bool leavesLastFrame(bool layerMissing, bool hasFrame);
+
 // Whether a task's frame goes to the host, after the task's size changed.
 //
 // When a task's bounds take a new size, its app has not redrawn yet: its surface keeps the

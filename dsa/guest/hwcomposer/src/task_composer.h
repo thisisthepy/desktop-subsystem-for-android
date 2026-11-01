@@ -102,6 +102,8 @@ class TaskComposer {
         BufferSize buffers;
         // The display exists on the host connection mGeneration names.
         bool onHost = false;
+        // A frame has been sent on that connection, so the window has one to keep.
+        bool posted = false;
         // The host has been told this task's frames go to `display`.
         bool announced = false;
         // Two ColorBuffers, so the host can show one while the next is composed.
