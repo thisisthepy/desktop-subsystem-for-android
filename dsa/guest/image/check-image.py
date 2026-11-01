@@ -4,8 +4,9 @@
 
 It fails when the shell apps are still there, when the build is still debuggable, when an
 app is not signed with one of the keys in the key folder, when the agent is missing or not
-signed with the platform key, when the files do not match image.json, or when the ramdisk
-lacks the directories and links Android's first stage init needs.
+signed with the platform key, when Settings still has the preferences that crash it without
+the Bluetooth service, when the files do not match image.json, or when the ramdisk lacks the
+directories and links Android's first stage init needs.
 
 The signatures are read from the apps themselves. sign_target_files_apks copies
 META/apkcerts.txt over unchanged, so that file still names AOSP's keys after signing.
@@ -18,12 +19,17 @@ import shutil
 import stat
 
 import hashlib
+import importlib.util
 import json
 import re
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
+
+SPEC = importlib.util.spec_from_file_location("make_image", Path(__file__).with_name("make-image.py"))
+make_image = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(make_image)
 
 image = Path(sys.argv[1])
 keys = Path(sys.argv[2])
@@ -90,6 +96,19 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
             z.read("SYSTEM/etc/init/wifi.rc").decode(), re.MULTILINE):
         problems.append("wifi.rc still sets up a kernel trace instance when boot completes, which "
                         "holds lmkd past its watchdog and gets a just-opened app killed")
+    # Without the Bluetooth service, these controllers take Settings down when their screen opens.
+    for name in names:
+        if not name.endswith(make_image.SETTINGS_APK):
+            continue
+        with zipfile.ZipFile(io.BytesIO(z.read(name))) as apk:
+            files = set(apk.namelist())
+            for xml, controllers in make_image.SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH.items():
+                if xml not in files:
+                    continue
+                _, left = make_image.remove_xml_elements(apk.read(xml), "controller", set(controllers))
+                if left:
+                    problems.append(f"{name}:{xml} still has {', '.join(left)}, which crash Settings "
+                                    "without the Bluetooth service")
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
     if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:

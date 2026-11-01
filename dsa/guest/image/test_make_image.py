@@ -3,8 +3,10 @@
 import base64
 import gzip
 import importlib.util
+import io
 import json
 import re
+import struct
 import subprocess
 import sys
 import tempfile
@@ -1318,6 +1320,8 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertIn(app, make_image.REMOVED_APPS)
         extra = {f"PRODUCT/app/{app}/{app}.apk": b"apk" for app in removed}
         extra.update({name: b"apk" for name in kept})
+        # Settings.apk is opened to edit its sound screen, so it has to be an APK.
+        extra["SYSTEM/priv-app/Settings/Settings.apk"] = SettingsWithoutBluetoothTests.apk({})
         extra["META/apkcerts.txt"] = "".join(
             f'name="{Path(name).name}" certificate="c.x509.pem" private_key="c.pk8"\n'
             for name in list(extra) if name.endswith(".apk")
@@ -1335,6 +1339,210 @@ class GuestMemoryTests(unittest.TestCase):
                        "DocumentsUI", "PrintSpooler", "Settings", "Provision", "Telecom",
                        "TeleService", "DeskClock"]:
             self.assertNotIn(needed, make_image.REMOVED_APPS)
+
+
+SETTINGS_NS = "http://schemas.android.com/apk/res-auto"
+ANDROID_NS = "http://schemas.android.com/apk/res/android"
+MEDIA_OUTPUT = "com.android.settings.sound.MediaOutputPreferenceController"
+REMOTE_VOLUME = "com.android.settings.notification.RemoteVolumeGroupController"
+
+
+def compiled_xml(root, utf8=True):
+    """Compiles an element tree, (tag, [(namespace, name, value)], [children]), the way aapt2
+    lays it out: a string pool, a namespace, then a start and an end chunk per element."""
+    strings = []
+
+    def index(text):
+        if text not in strings:
+            strings.append(text)
+        return strings.index(text)
+
+    def collect(node):
+        tag, attributes, children = node
+        index(tag)
+        for namespace, name, value in attributes:
+            index(namespace)
+            index(name)
+            index(value)
+        for child in children:
+            collect(child)
+
+    index("settings")
+    index(SETTINGS_NS)
+    collect(root)
+
+    data = b""
+    offsets = []
+    for text in strings:
+        offsets.append(len(data))
+        if utf8:
+            encoded = text.encode("utf-8")
+            data += bytes([len(text), len(encoded)]) + encoded + b"\0"
+        else:
+            data += struct.pack("<H", len(text)) + text.encode("utf-16-le") + b"\0\0"
+    data += b"\0" * (-len(data) % 4)
+    strings_start = 28 + 4 * len(strings)
+    pool = struct.pack("<HHIIIIII", 0x0001, 28, strings_start + len(data), len(strings), 0,
+                       0x100 if utf8 else 0, strings_start, 0)
+    pool += b"".join(struct.pack("<I", offset) for offset in offsets) + data
+
+    def node(chunk_type, body):
+        return struct.pack("<HHIII", chunk_type, 16, 16 + len(body), 1, 0xFFFFFFFF) + body
+
+    def element(item):
+        tag, attributes, children = item
+        body = struct.pack("<IIHHHHHH", 0xFFFFFFFF, index(tag), 20, 20, len(attributes), 0, 0, 0)
+        for namespace, name, value in attributes:
+            body += struct.pack("<IIIHBBI", index(namespace), index(name), index(value), 8, 0, 0x03,
+                                index(value))
+        end = node(0x0103, struct.pack("<II", 0xFFFFFFFF, index(tag)))
+        return node(0x0102, body) + b"".join(element(child) for child in children) + end
+
+    namespace = struct.pack("<II", index("settings"), index(SETTINGS_NS))
+    tree = pool + node(0x0100, namespace) + element(root) + node(0x0101, namespace)
+    return struct.pack("<HHI", 0x0003, 8, 8 + len(tree)) + tree
+
+
+def elements(axml):
+    """The (tag, key) of each element in compiled XML, in order."""
+    strings = make_image.xml_strings(axml, 8)
+    found = []
+    offset = 8
+    while offset < len(axml):
+        chunk_type, header_size, size = struct.unpack_from("<HHI", axml, offset)
+        if chunk_type == 0x0102:
+            _, name, start, attribute_size, count = struct.unpack_from("<IIHHH", axml, offset + header_size)
+            key = None
+            for i in range(count):
+                _, attribute, raw = struct.unpack_from(
+                    "<III", axml, offset + header_size + start + i * attribute_size)
+                if strings[attribute] == "key":
+                    key = strings[raw]
+            found.append((strings[name], key))
+        offset += size
+    return found
+
+
+def preference(tag, key, controller=None, children=()):
+    attributes = [(ANDROID_NS, "key", key)]
+    if controller:
+        attributes.append((SETTINGS_NS, "controller", controller))
+    return (tag, attributes, list(children))
+
+
+# The parts of Android 16's sound screen that matter here: the remote volume category, with
+# a child to show the whole subtree goes, and the media output switcher among the sliders it
+# shares a category with.
+SOUND_SCREEN = preference("PreferenceScreen", "sound_settings", children=[
+    preference("PreferenceCategory", "remote_media_group", REMOTE_VOLUME, children=[
+        preference("Preference", "remote_session"),
+    ]),
+    preference("UntitledPreferenceCategory", "volume_controls_category", children=[
+        preference("Preference", "media_output", MEDIA_OUTPUT),
+        preference("VolumeSliderPreference", "media_volume",
+                   "com.android.settings.sound.MediaVolumePreferenceController"),
+    ]),
+    preference("Preference", "alarm_ringtone"),
+])
+
+
+class SettingsWithoutBluetoothTests(unittest.TestCase):
+    @staticmethod
+    def apk(files):
+        out = io.BytesIO()
+        entries = [("AndroidManifest.xml", b"manifest", zipfile.ZIP_DEFLATED),
+                   ("resources.arsc", b"table", zipfile.ZIP_STORED),
+                   ("classes.dex", b"dex", zipfile.ZIP_DEFLATED)]
+        entries += [(name, data, zipfile.ZIP_DEFLATED) for name, data in files.items()]
+        with zipfile.ZipFile(out, "w") as archive:
+            for name, data, compression in entries:
+                # A fixed time, so the same files make the same bytes.
+                info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+                info.compress_type = compression
+                archive.writestr(info, data)
+        return out.getvalue()
+
+    def modified_settings(self, files):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM_EXT/priv-app/Settings/Settings.apk", self.apk(files))
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+            with zipfile.ZipFile(modified) as archive:
+                return archive.read("SYSTEM_EXT/priv-app/Settings/Settings.apk")
+
+    def test_fr1_the_sound_screen_opens_without_the_bluetooth_service(self):
+        # Without Bluetooth, LocalMediaManager has no InfoMediaManager, and these two
+        # controllers call it when the screen opens: Settings died with a
+        # NullPointerException in MediaOutputPreferenceController.onStart.
+        self.assertEqual(
+            make_image.SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH["res/xml/sound_settings.xml"],
+            [MEDIA_OUTPUT, REMOTE_VOLUME],
+        )
+        apk = self.modified_settings({"res/xml/sound_settings.xml": compiled_xml(SOUND_SCREEN)})
+        with zipfile.ZipFile(io.BytesIO(apk)) as archive:
+            screen = archive.read("res/xml/sound_settings.xml")
+            infos = {info.filename: info for info in archive.infolist()}
+            self.assertEqual(archive.read("classes.dex"), b"dex")
+        self.assertEqual(elements(screen), [
+            ("PreferenceScreen", "sound_settings"),
+            ("UntitledPreferenceCategory", "volume_controls_category"),
+            ("VolumeSliderPreference", "media_volume"),
+            ("Preference", "alarm_ringtone"),
+        ])
+        self.assertEqual(struct.unpack_from("<I", screen, 4)[0], len(screen))
+        # Signing aligns stored entries again, but only if they are still stored.
+        self.assertEqual(infos["resources.arsc"].compress_type, zipfile.ZIP_STORED)
+        self.assertEqual(infos["res/xml/sound_settings.xml"].compress_type, zipfile.ZIP_DEFLATED)
+
+    def test_fr1_the_controllers_are_found_in_a_utf16_string_pool(self):
+        edited, removed = make_image.remove_xml_elements(
+            compiled_xml(SOUND_SCREEN, utf8=False), "controller", {MEDIA_OUTPUT, REMOTE_VOLUME})
+        self.assertEqual(sorted(removed), sorted([MEDIA_OUTPUT, REMOTE_VOLUME]))
+        self.assertNotIn(("Preference", "media_output"), elements(edited))
+        self.assertNotIn(("Preference", "remote_session"), elements(edited))
+        self.assertIn(("VolumeSliderPreference", "media_volume"), elements(edited))
+
+    def test_fr1_a_settings_build_without_those_preferences_is_left_as_it_is(self):
+        screen = preference("PreferenceScreen", "sound_settings", children=[
+            preference("Preference", "alarm_ringtone"),
+        ])
+        files = {"res/xml/sound_settings.xml": compiled_xml(screen)}
+        apk = self.apk(files)
+        self.assertEqual(make_image.edit_settings_apk(apk, "Settings.apk"), apk)
+        self.assertEqual(self.modified_settings({}), self.apk({}))
+
+    def test_fr1_check_image_rejects_a_sound_screen_that_needs_bluetooth(self):
+        check_script = Path(__file__).with_name("check-image.py")
+        settings = self.apk({"res/xml/sound_settings.xml": compiled_xml(SOUND_SCREEN)})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_dir = root / "image"
+            img_dir.mkdir()
+            keys_dir = root / "keys"
+            keys_dir.mkdir()
+            (img_dir / "image.json").write_text(json.dumps({"files": {}, "kernel_cmdline": ""}))
+            (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
+            outputs = []
+            for apk in [settings, make_image.edit_settings_apk(settings, "Settings.apk")]:
+                with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                    archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
+                    archive.writestr("META/apkcerts.txt", "")
+                    archive.writestr("SYSTEM_EXT/priv-app/Settings/Settings.apk", apk)
+                outputs.append(subprocess.run(
+                    [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                    capture_output=True,
+                    text=True,
+                ).stdout)
+        self.assertIn("crash Settings without the Bluetooth service", outputs[0])
+        self.assertIn(MEDIA_OUTPUT, outputs[0])
+        self.assertNotIn("crash Settings", outputs[1])
+
+    def test_fr1_compiled_xml_that_is_not_xml_is_refused(self):
+        with self.assertRaises(ValueError):
+            make_image.remove_xml_elements(b"\x02\x00\x0c\x00" + b"\0" * 8, "controller", {MEDIA_OUTPUT})
 
 
 if __name__ == "__main__":

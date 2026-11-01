@@ -59,6 +59,13 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
 - `unavailable-features.xml` withdraws the Bluetooth features, so system_server does not
   start a Bluetooth stack that has no controller to talk to, and the UWB feature, so nothing
   waits for its removed HAL.
+- Settings' sound screen loses its media output switcher and its cast volume group. Their
+  controllers need the Bluetooth service, which system_server does not start without the
+  Bluetooth features: SettingsLib's media manager is then built without its routing half, and
+  opening the screen took the Settings process and its window down. `make-image.py` removes
+  the two preferences from the compiled `res/xml/sound_settings.xml` in `Settings.apk`
+  (`SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH`), and prints each one it removes. Settings is
+  re-signed with every other app. They come back with Bluetooth.
 - Cuttlefish's `seriallogging.rc` is removed. Its logger writes to a virtio console Hyper-V
   does not have, and init would restart it every five seconds for as long as the guest runs.
 - `sepolicy/memory.cil` lets the audio HAL and the software codecs share memory through
