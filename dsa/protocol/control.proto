@@ -732,6 +732,8 @@ message WidgetPointer {
   // The position from the widget's top left corner, in the pixels it is drawn at.
   float x = 4;
   float y = 5;
+}
+
 // Host to guest, to the agent: whether a host accessibility client (a screen reader, an
 // inspection tool) wants the accessibility tree of a task's window. While one does (`on`),
 // the agent reads the task's accessibility nodes and sends them as AccessibilityTree
