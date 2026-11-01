@@ -1,7 +1,8 @@
 //! The settings a user changes from the settings app, kept by the service.
 //!
-//! Two of them are the user's own: the GPU their window manager renders on and whether their
-//! Android may be frozen when idle. Two are the machine's, shared by every user: whether the
+//! Three of them are the user's own: the GPU their window manager renders on, whether their
+//! Android may be frozen when idle, and whether web links open in apps in their Android
+//! instead of the host's browser. Two are the machine's, shared by every user: whether the
 //! service updates DSA itself and whether it downloads new Android images.
 //!
 //! Clients read and change them through the local API only. The service keeps them in its
@@ -10,7 +11,8 @@
 //!
 //! ```text
 //! <dir>/machine.json          {"program_updates": true, "image_updates": true}
-//! <dir>/users/<user>.json     {"render_gpu": "display", "freeze": false}
+//! <dir>/users/<user>.json     {"render_gpu": "display", "freeze": false,
+//!                              "links_in_android": false}
 //! ```
 //!
 //! A missing file means the defaults. A user who has never saved settings starts from what
@@ -32,6 +34,9 @@ pub struct Settings {
     pub render_gpu: String,
     /// Whether the user's Android may be frozen when idle. Off by default.
     pub freeze: bool,
+    /// Whether the web links apps in the user's Android open go to apps in it rather than to
+    /// the host's default browser. Off by default.
+    pub links_in_android: bool,
     /// Whether the service updates DSA itself.
     pub program_updates: bool,
     /// Whether the service downloads new Android images.
@@ -43,6 +48,7 @@ impl Default for Settings {
         Settings {
             render_gpu: "display".into(),
             freeze: false,
+            links_in_android: false,
             program_updates: true,
             image_updates: true,
         }
@@ -82,6 +88,8 @@ pub struct UserSettings {
     pub render_gpu: String,
     #[serde(default)]
     pub freeze: bool,
+    #[serde(default)]
+    pub links_in_android: bool,
 }
 
 impl Default for UserSettings {
@@ -89,6 +97,7 @@ impl Default for UserSettings {
         UserSettings {
             render_gpu: display(),
             freeze: false,
+            links_in_android: false,
         }
     }
 }
@@ -192,6 +201,7 @@ impl FileSettings {
                     .and_then(|value| normalise_render_gpu(&value).ok())
                     .unwrap_or_else(display),
                 freeze: false,
+                links_in_android: false,
             }),
         }
     }
@@ -226,6 +236,7 @@ impl SettingsStore for FileSettings {
         Ok(Settings {
             render_gpu: mine.render_gpu,
             freeze: mine.freeze,
+            links_in_android: mine.links_in_android,
             program_updates: machine.program_updates,
             image_updates: machine.image_updates,
         })
@@ -240,6 +251,7 @@ impl SettingsStore for FileSettings {
             &UserSettings {
                 render_gpu: render_gpu.clone(),
                 freeze: settings.freeze,
+                links_in_android: settings.links_in_android,
             },
         )?;
         write_json(
@@ -284,6 +296,7 @@ impl SettingsStore for MemorySettings {
         Ok(Settings {
             render_gpu: mine.render_gpu,
             freeze: mine.freeze,
+            links_in_android: mine.links_in_android,
             program_updates: machine.program_updates,
             image_updates: machine.image_updates,
         })
@@ -296,6 +309,7 @@ impl SettingsStore for MemorySettings {
             UserSettings {
                 render_gpu: render_gpu.clone(),
                 freeze: settings.freeze,
+                links_in_android: settings.links_in_android,
             },
         );
         *self.machine.lock().unwrap_or_else(|e| e.into_inner()) = MachineSettings {
@@ -348,6 +362,7 @@ mod tests {
                 &Settings {
                     render_gpu: " Discrete ".into(),
                     freeze: true,
+                    links_in_android: true,
                     program_updates: false,
                     image_updates: true,
                 },
@@ -388,6 +403,34 @@ mod tests {
         }
         assert!(store.machine().program_updates);
         assert!(!dir.exists(), "nothing was written");
+    }
+
+    #[test]
+    fn fr9_links_open_on_the_host_by_default_and_the_choice_is_kept() {
+        let dir = scratch("links");
+        let store = FileSettings::new(&dir);
+        assert!(!store.get("uid:1000").unwrap().links_in_android);
+        // A file saved before the setting existed keeps links on the host.
+        std::fs::create_dir_all(dir.join("users")).unwrap();
+        std::fs::write(
+            dir.join("users").join("uid_1001.json"),
+            r#"{"render_gpu": "display", "freeze": true}"#,
+        )
+        .unwrap();
+        assert!(!store.get("uid:1001").unwrap().links_in_android);
+        store
+            .set(
+                "uid:1000",
+                &Settings {
+                    links_in_android: true,
+                    ..Settings::default()
+                },
+            )
+            .unwrap();
+        let again = FileSettings::new(&dir);
+        assert!(again.get("uid:1000").unwrap().links_in_android);
+        assert!(!again.get("uid:1001").unwrap().links_in_android);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

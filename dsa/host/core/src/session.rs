@@ -39,8 +39,16 @@
 //!   the guest and wakes it.
 //! - The host's power ([`Session::set_power`]) goes to the guest whenever it changes and
 //!   each time the agent connects.
+//!
+//! The web links apps in the guest open go to every [`Session::watch_links`] watcher, which
+//! opens them in the host's browser, unless the user lets them open in the guest
+//! ([`Session::links_in_android`]). Only http and https links pass, and only a few in a row.
+//! Files from the host go to the guest with [`Session::open_file`], in chunks paced by the
+//! agent's progress reports.
 
+use std::collections::HashMap;
 use std::fmt;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
@@ -50,9 +58,11 @@ use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{self, envelope::Body};
 use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 
+use crate::files::{self, FileAction, FileTransfer};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::PointerEvent;
 use crate::keys::KeyEvent;
+use crate::links::{self, LinkGate};
 use crate::memory::{GuestMemory, GuestMemoryReport};
 use crate::power::PowerState;
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskTable, TaskWatch};
@@ -394,6 +404,8 @@ pub enum SessionError {
     Gone,
     /// The guest could not be frozen; the detail says why.
     FreezeFailed(String),
+    /// A file was not sent, or the guest did not take it; the detail says why.
+    FileRefused(String),
 }
 
 impl fmt::Display for SessionError {
@@ -403,6 +415,7 @@ impl fmt::Display for SessionError {
             SessionError::Transport(error) => write!(f, "control channel: {error}"),
             SessionError::Gone => write!(f, "the session has shut down"),
             SessionError::FreezeFailed(why) => write!(f, "the guest was not frozen: {why}"),
+            SessionError::FileRefused(why) => f.write_str(why),
         }
     }
 }
@@ -422,6 +435,8 @@ enum Command {
     FreezeAfter(Option<Duration>),
     /// Freeze the guest now.
     Freeze(Sender<Result<(), SessionError>>),
+    /// Whether web links open in the guest rather than on the host.
+    LinksInAndroid(bool),
 }
 
 struct Shared {
@@ -439,6 +454,12 @@ struct Shared {
     guest_memory: Mutex<Option<(GuestMemory, Instant)>>,
     /// What keeps the guest from being ready, while something does.
     problem: Mutex<Option<BootProblem>>,
+    /// Who opens the web links the guest sends.
+    link_watchers: Mutex<Vec<Sender<String>>>,
+    /// The file transfers under way, by ID, each with who waits for the agent's progress.
+    transfers: Mutex<HashMap<u32, Sender<control::FileProgress>>>,
+    /// The ID of the last file transfer.
+    last_transfer: AtomicU32,
 }
 
 /// The guest's tasks and who is watching them, under one lock, so a new watcher's starting
@@ -531,6 +552,31 @@ impl Shared {
         Some(sender.send(frame).map_err(SessionError::Transport))
     }
 
+    /// Hands a web link the guest opened to every link watcher still listening. False when
+    /// nobody was listening.
+    fn publish_link(&self, url: &str) -> bool {
+        let mut watchers = self
+            .link_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        watchers.retain(|watcher| watcher.send(url.to_string()).is_ok());
+        !watchers.is_empty()
+    }
+
+    /// Hands the agent's progress on a transfer to whoever sends that file.
+    fn file_progress(&self, progress: control::FileProgress) {
+        let transfers = self.transfers.lock().unwrap_or_else(|e| e.into_inner());
+        match transfers.get(&progress.transfer_id) {
+            Some(waiting) => {
+                let _ = waiting.send(progress);
+            }
+            None => eprintln!(
+                "files: dropped the agent's progress on transfer {}, which is not under way",
+                progress.transfer_id
+            ),
+        }
+    }
+
     /// Removes every task, as when the guest has gone away.
     fn clear_tasks(&self) {
         let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
@@ -570,6 +616,9 @@ impl Session {
             sender: Mutex::new(None),
             guest_memory: Mutex::new(None),
             problem: Mutex::new(None),
+            link_watchers: Mutex::new(Vec::new()),
+            transfers: Mutex::new(HashMap::new()),
+            last_transfer: AtomicU32::new(0),
         });
         let freeze_delay = config.freeze_after.unwrap_or(DEFAULT_FREEZE_AFTER);
         let (commands, command_rx) = mpsc::channel();
@@ -601,6 +650,8 @@ impl Session {
             guest_is_idle: false,
             stall_doze: None,
             frozen_at: None,
+            links_in_android: false,
+            link_gate: LinkGate::default(),
         };
         let worker = thread::Builder::new()
             .name("dsa-session".into())
@@ -783,6 +834,130 @@ impl Session {
         reply_rx.recv().map_err(|_| SessionError::Gone)?
     }
 
+    /// Sends web links the guest opens to the host (`false`, the default) or lets them open
+    /// in apps in the guest (`true`), as the user's setting says. A connected agent is told
+    /// at once, and each agent that connects is told when links open in the guest.
+    pub fn links_in_android(&self, on: bool) {
+        let _ = self.commands.send(Command::LinksInAndroid(on));
+    }
+
+    /// The web links the guest opens from now on, while they go to the host. Each is an http
+    /// or https link ([`links::web_url`]). The watch lasts across restarts of the guest.
+    pub fn watch_links(&self) -> Receiver<String> {
+        let (tx, rx) = mpsc::channel();
+        self.shared
+            .link_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(tx);
+        rx
+    }
+
+    /// Sends `file` to the guest's agent, which asks the user which app opens it (or takes
+    /// it, to share). Returns once the agent has the whole file and has asked; an error says
+    /// why it did not get there. Needs a running guest.
+    ///
+    /// The file goes in chunks of [`files::CHUNK_BYTES`], never more than
+    /// [`files::CHUNKS_IN_FLIGHT`] ahead of what the agent says it has stored.
+    pub fn open_file(&self, file: &FileTransfer) -> Result<(), SessionError> {
+        file.check().map_err(SessionError::FileRefused)?;
+        let transfer_id = self
+            .shared
+            .last_transfer
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_add(1);
+        let (tx, progress) = mpsc::channel();
+        self.shared
+            .transfers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(transfer_id, tx);
+        let result = self.send_file(transfer_id, file, &progress);
+        self.shared
+            .transfers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&transfer_id);
+        result
+    }
+
+    fn send_file(
+        &self,
+        transfer_id: u32,
+        file: &FileTransfer,
+        progress: &Receiver<control::FileProgress>,
+    ) -> Result<(), SessionError> {
+        let size = file.content.len() as u64;
+        let action = match file.action {
+            FileAction::View => control::FileAction::View,
+            FileAction::Send => control::FileAction::Send,
+        };
+        self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::OpenFile(control::OpenFile {
+                transfer_id,
+                name: file.name.clone(),
+                size,
+                action: action as i32,
+            })),
+        }))?;
+        let window = files::CHUNK_BYTES as u64 * files::CHUNKS_IN_FLIGHT;
+        let mut sent = 0u64;
+        let mut stored = 0u64;
+        let mut waited = Duration::ZERO;
+        loop {
+            while sent < size && sent < stored + window {
+                let end = (sent + files::CHUNK_BYTES as u64).min(size);
+                self.send(dsa_protocol::encode(&control::Envelope {
+                    body: Some(Body::FileChunk(control::FileChunk {
+                        transfer_id,
+                        offset: sent,
+                        data: file.content[sent as usize..end as usize].to_vec(),
+                    })),
+                }))?;
+                sent = end;
+            }
+            match progress.recv_timeout(PROGRESS_POLL) {
+                Ok(report) => {
+                    waited = Duration::ZERO;
+                    if !report.error.is_empty() {
+                        return Err(SessionError::FileRefused(format!(
+                            "Android did not take {}: {}",
+                            file.name, report.error
+                        )));
+                    }
+                    if report.received > size {
+                        return Err(SessionError::FileRefused(format!(
+                            "Android says it has {} bytes of {}, which has {size}",
+                            report.received, file.name
+                        )));
+                    }
+                    stored = stored.max(report.received);
+                    if stored == size && sent == size {
+                        return Ok(());
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    let state = self.state();
+                    if !matches!(
+                        state,
+                        SessionState::Active | SessionState::Dozing | SessionState::Frozen
+                    ) {
+                        return Err(SessionError::NotActive(state));
+                    }
+                    waited += PROGRESS_POLL;
+                    if waited >= PROGRESS_TIMEOUT {
+                        return Err(SessionError::FileRefused(format!(
+                            "Android has not taken {} after {} s; it may be busy, try again",
+                            file.name,
+                            PROGRESS_TIMEOUT.as_secs()
+                        )));
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) => return Err(SessionError::Gone),
+            }
+        }
+    }
+
     /// Asks the guest to close, resize or rescale a task, or to launch an app. Needs an
     /// active session, except for the word on shown windows, which is always taken.
     pub fn request(&self, request: TaskRequest) -> Result<(), SessionError> {
@@ -852,6 +1027,13 @@ impl Drop for Session {
 /// How often an active session checks for requests while it waits on the channel.
 const POLL: Duration = Duration::from_millis(20);
 
+/// How often a file transfer looks at the session while it waits for the agent.
+const PROGRESS_POLL: Duration = Duration::from_millis(500);
+
+/// How long a file transfer waits for the agent to store a chunk. Storing 128 KiB takes
+/// milliseconds; this long means the agent is stuck or gone.
+const PROGRESS_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// How often the session asks the launcher for what the guest cannot run without.
 const PREREQUISITE_POLL: Duration = Duration::from_secs(1);
 
@@ -904,6 +1086,10 @@ struct Worker {
     /// When the guest was frozen, while it is. Nothing runs in it then, so that time does not
     /// count against it.
     frozen_at: Option<Instant>,
+    /// Whether web links open in the guest, as the user last said.
+    links_in_android: bool,
+    /// Keeps a flood of links from reaching the host.
+    link_gate: LinkGate,
 }
 
 impl Worker {
@@ -931,6 +1117,7 @@ impl Worker {
                         Ok(Command::WindowsShown(shown)) => self.set_shown(shown),
                         Ok(Command::Power(state)) => self.set_power(state),
                         Ok(Command::FreezeAfter(after)) => self.config.freeze_after = after,
+                        Ok(Command::LinksInAndroid(on)) => self.set_links_in_android(on),
                         Ok(Command::Shutdown) | Err(_) => return,
                     }
                 }
@@ -949,6 +1136,7 @@ impl Worker {
                         Ok(Command::WindowsShown(shown)) => self.set_shown(shown),
                         Ok(Command::Power(state)) => self.set_power(state),
                         Ok(Command::FreezeAfter(after)) => self.config.freeze_after = after,
+                        Ok(Command::LinksInAndroid(on)) => self.set_links_in_android(on),
                         Ok(Command::Shutdown) | Err(_) => return,
                     }
                 }
@@ -1007,10 +1195,58 @@ impl Worker {
                 self.set_power(state);
                 true
             }
+            Command::LinksInAndroid(on) => {
+                self.set_links_in_android(on);
+                true
+            }
             Command::Freeze(reply) => {
                 let _ = reply.send(self.freeze_now());
                 true
             }
+        }
+    }
+
+    /// Takes the user's word on where web links open, and tells a connected agent.
+    fn set_links_in_android(&mut self, on: bool) {
+        if on == self.links_in_android {
+            return;
+        }
+        self.links_in_android = on;
+        eprintln!(
+            "links: web links open {}",
+            if on { "in Android" } else { "on the host" }
+        );
+        if self.running() && self.agent_connected {
+            self.send_body(Body::LinkHandling(control::LinkHandling { in_guest: on }));
+        }
+    }
+
+    /// Takes a web link an app in the guest opened, and hands it to the link watchers if it is
+    /// one the host may open.
+    fn guest_link(&mut self, url: String) {
+        if self.links_in_android {
+            eprintln!("links: dropped a link from Android; links open in Android");
+            return;
+        }
+        let url = match links::web_url(&url) {
+            Ok(url) => url.to_string(),
+            Err(why) => {
+                eprintln!("links: dropped a link from Android: {why}");
+                return;
+            }
+        };
+        if !self.link_gate.allow(Instant::now()) {
+            eprintln!(
+                "links: dropped a link from Android: more than {} in {} s",
+                links::LINKS_PER_WINDOW,
+                links::LINK_WINDOW.as_secs()
+            );
+            return;
+        }
+        if !self.shared.publish_link(&url) {
+            eprintln!(
+                "links: dropped a link from Android: no window manager is running to open it"
+            );
         }
     }
 
@@ -1210,6 +1446,10 @@ impl Worker {
             }
             if !self.screen_on {
                 self.send_body(Body::ScreenState(control::ScreenState { on: false }));
+            }
+            // A new agent takes links to go to the host.
+            if self.links_in_android {
+                self.send_body(Body::LinkHandling(control::LinkHandling { in_guest: true }));
             }
         } else {
             self.agent_lost_at = Some(now);
@@ -1520,6 +1760,10 @@ impl Worker {
                 self.set_power(state);
                 true
             }
+            Command::LinksInAndroid(on) => {
+                self.set_links_in_android(on);
+                true
+            }
             Command::Stop => {
                 self.stop(StopReason::Requested);
                 false
@@ -1659,6 +1903,8 @@ impl Worker {
                 self.shared.set_guest_memory(Some((memory, Instant::now())));
             }
             Some(Body::DeviceIdle(idle)) => self.guest_idle(idle.idle),
+            Some(Body::OpenLink(link)) => self.guest_link(link.url),
+            Some(Body::FileProgress(progress)) => self.shared.file_progress(progress),
             Some(Body::GuestBoot(boot)) => self.guest_boot(boot),
             Some(Body::AgentConnected(_)) => {
                 eprintln!("control channel: dropping a message that stops at the guest's daemon");
@@ -1673,6 +1919,9 @@ impl Worker {
             | Some(Body::KeyEvent(_))
             | Some(Body::ImeComposition(_))
             | Some(Body::ImeCommit(_))
+            | Some(Body::LinkHandling(_))
+            | Some(Body::OpenFile(_))
+            | Some(Body::FileChunk(_))
             | Some(Body::RequestGuestMemory(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
             }

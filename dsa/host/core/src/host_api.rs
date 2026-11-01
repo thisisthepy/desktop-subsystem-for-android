@@ -13,10 +13,15 @@
 //! A client that streams input ([`HostApiClient::stream_input`]) sends pointer events on its
 //! connection from then on, and the service passes each to the caller's Android as it
 //! arrives, without answering, so a pointer that moves fast is never held back.
+//!
+//! A client that watches links ([`HostApiClient::watch_links`]) receives each web link the
+//! caller's Android opens, for the host's browser. A client that sends a file
+//! ([`HostApiClient::open_file`]) sends its content in pieces after the first answer, and the
+//! service answers again once Android has the file.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -30,6 +35,7 @@ use dsa_protocol::host_api::{
 use dsa_transport::local::{LocalListener, Peer};
 use dsa_transport::{Connection, Connector, TransportError};
 
+use crate::files::{self, FileAction, FileTransfer};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{InputEvent, PointerEvent};
 use crate::keys::KeyEvent;
@@ -102,6 +108,23 @@ pub trait UserAndroid: Send + Sync {
             "this Android cannot be frozen".into(),
         ))
     }
+    /// Lets the web links apps in this Android open go to apps in it (`on`), or to the host,
+    /// as the user's setting says.
+    fn links_in_android(&self, on: bool) {
+        let _ = on;
+    }
+    /// The http and https links this Android opens from now on, while they go to the host.
+    /// `None` when this Android does not send its links.
+    fn watch_links(&self) -> Option<Receiver<String>> {
+        None
+    }
+    /// Sends a file to this Android, which asks the user which app opens or takes it.
+    fn open_file(&self, file: &FileTransfer) -> Result<(), TaskRequestError> {
+        let _ = file;
+        Err(TaskRequestError::Failed(
+            "this Android does not take files".into(),
+        ))
+    }
 }
 
 impl UserAndroid for Session {
@@ -156,6 +179,15 @@ impl UserAndroid for Session {
     }
     fn request_guest_memory(&self) -> Result<(), TaskRequestError> {
         Session::request_guest_memory(self).map_err(request_error)
+    }
+    fn links_in_android(&self, on: bool) {
+        Session::links_in_android(self, on)
+    }
+    fn watch_links(&self) -> Option<Receiver<String>> {
+        Some(Session::watch_links(self))
+    }
+    fn open_file(&self, file: &FileTransfer) -> Result<(), TaskRequestError> {
+        Session::open_file(self, file).map_err(request_error)
     }
 }
 
@@ -470,6 +502,18 @@ fn tasks_from_wire(tasks: types::Tasks) -> TaskList {
 /// changes.
 const WATCH_POLL: Duration = Duration::from_millis(100);
 
+/// How long a connection that carries links waits for its client before it looks for links
+/// again.
+const LINK_POLL: Duration = Duration::from_millis(100);
+
+/// How long the service waits for the next piece of a file a client sends. A client reads
+/// the file before it starts, so a gap this long means it is stuck or gone.
+const FILE_CHUNK_WAIT: Duration = Duration::from_secs(30);
+
+/// How long a client waits for the service to say Android has a file: sending 64 MiB into
+/// the guest takes seconds, and each chunk may wait half a minute for the agent.
+const FILE_ANSWER_WAIT: Duration = Duration::from_secs(5 * 60);
+
 fn from_wire(state: i32) -> Option<SessionState> {
     match types::SessionState::try_from(state).ok()? {
         types::SessionState::Unspecified => None,
@@ -645,6 +689,12 @@ impl HostApiService {
             if let Some(request::Body::StreamInput(_)) = request.body {
                 return self.stream_input(connection, &peer, request.id);
             }
+            if let Some(request::Body::WatchLinks(_)) = request.body {
+                return self.watch_links(connection, &peer, request.id);
+            }
+            if let Some(request::Body::OpenFile(open)) = &request.body {
+                return self.open_file(connection, &peer, request.id, open.clone());
+            }
             let response = self.answer(&peer, request);
             if send(&mut *connection, Body::Response(response)).is_err() {
                 return;
@@ -720,6 +770,201 @@ impl HostApiService {
     /// Answers a StreamInput request, then passes every pointer, key and text event the client sends to
     /// its Android until the client goes away. Input to an Android that is not running is
     /// dropped: the window that sends it can do nothing better with it.
+    /// Answers a WatchLinks request, then sends each web link the caller's Android opens until
+    /// the client goes away. A client that sends anything on this connection is disconnected.
+    fn watch_links(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
+        let watch = match self.androids.android(&peer.user) {
+            Err(why) => Err(error(ErrorCode::Unavailable, why)),
+            Ok(android) => android.watch_links().ok_or_else(|| {
+                error(
+                    ErrorCode::Unavailable,
+                    "this Android does not send its links".into(),
+                )
+            }),
+        };
+        let links = match watch {
+            Ok(links) => links,
+            Err(body) => {
+                let _ = send(
+                    &mut *connection,
+                    Body::Response(Response {
+                        id,
+                        body: Some(body),
+                    }),
+                );
+                return;
+            }
+        };
+        let answer = Response {
+            id,
+            body: Some(response::Body::Done(types::Done {})),
+        };
+        if send(&mut *connection, Body::Response(answer)).is_err() {
+            return;
+        }
+        loop {
+            loop {
+                match links.try_recv() {
+                    Ok(url) => {
+                        if send(&mut *connection, Body::OpenLink(types::OpenLink { url })).is_err()
+                        {
+                            return;
+                        }
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        connection.close();
+                        return;
+                    }
+                }
+            }
+            match connection.recv(Some(LINK_POLL)) {
+                Err(TransportError::Timeout) => {}
+                Err(_) => return,
+                Ok(_) => {
+                    eprintln!(
+                        "local API: a client of {} sent a frame on a connection that carries \
+                         links; closing its connection",
+                        peer.user
+                    );
+                    connection.close();
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Answers an OpenFile request: refuses a file that is too large or badly named, else
+    /// takes its content in FileChunk frames, sends it to the caller's Android and answers
+    /// again with the outcome. The connection ends with the transfer.
+    fn open_file(
+        &self,
+        mut connection: Box<dyn Connection>,
+        peer: &Peer,
+        id: u64,
+        open: types::OpenFile,
+    ) {
+        let answer = |connection: &mut dyn Connection, body: response::Body| {
+            let _ = send(
+                connection,
+                Body::Response(Response {
+                    id,
+                    body: Some(body),
+                }),
+            );
+        };
+        let action = match types::FileAction::try_from(open.action) {
+            Ok(types::FileAction::View) => FileAction::View,
+            Ok(types::FileAction::Send) => FileAction::Send,
+            _ => {
+                answer(
+                    &mut *connection,
+                    error(
+                        ErrorCode::FileRefused,
+                        "the request says neither to open nor to share the file".into(),
+                    ),
+                );
+                connection.close();
+                return;
+            }
+        };
+        let checked = files::check_name(&open.name).and_then(|()| files::check_size(open.size));
+        let android = match (checked, self.androids.android(&peer.user)) {
+            (Err(why), _) => {
+                eprintln!("files: refused a file from {}: {why}", peer.user);
+                answer(&mut *connection, error(ErrorCode::FileRefused, why));
+                connection.close();
+                return;
+            }
+            (_, Err(why)) => {
+                answer(&mut *connection, error(ErrorCode::Unavailable, why));
+                connection.close();
+                return;
+            }
+            (Ok(()), Ok(android)) => android,
+        };
+        answer(&mut *connection, response::Body::Done(types::Done {}));
+        let mut content = Vec::with_capacity(open.size as usize);
+        while (content.len() as u64) < open.size {
+            let refuse = |why: String| error(ErrorCode::FileRefused, why);
+            let frame = match connection.recv(Some(FILE_CHUNK_WAIT)) {
+                Ok(frame) => frame,
+                Err(error) => {
+                    eprintln!(
+                        "files: the file from {} did not arrive whole ({error}); dropping it",
+                        peer.user
+                    );
+                    answer(
+                        &mut *connection,
+                        refuse(format!("the file did not arrive whole: {error}")),
+                    );
+                    connection.close();
+                    return;
+                }
+            };
+            match decode(&frame) {
+                Ok(Envelope {
+                    body: Some(Body::FileChunk(chunk)),
+                }) if content.len() as u64 + chunk.data.len() as u64 <= open.size => {
+                    content.extend_from_slice(&chunk.data);
+                }
+                Ok(Envelope {
+                    body: Some(Body::FileChunk(_)),
+                }) => {
+                    eprintln!(
+                        "files: a client of {} sent more than the {} bytes it announced; \
+                         dropping the file",
+                        peer.user, open.size
+                    );
+                    answer(
+                        &mut *connection,
+                        refuse(format!(
+                            "more than the {} bytes announced arrived",
+                            open.size
+                        )),
+                    );
+                    connection.close();
+                    return;
+                }
+                Ok(_) | Err(_) => {
+                    eprintln!(
+                        "files: a client of {} sent something other than a piece of its file; \
+                         dropping the file and closing its connection",
+                        peer.user
+                    );
+                    answer(
+                        &mut *connection,
+                        refuse("something other than a piece of the file arrived".into()),
+                    );
+                    connection.close();
+                    return;
+                }
+            }
+        }
+        let file = FileTransfer {
+            name: open.name,
+            content,
+            action,
+        };
+        eprintln!(
+            "files: {} asked to {} {} ({} bytes) in Android",
+            peer.user,
+            file.action,
+            file.name,
+            file.content.len()
+        );
+        let body = match android.open_file(&file) {
+            Ok(()) => response::Body::Done(types::Done {}),
+            Err(TaskRequestError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(TaskRequestError::Failed(why)) => {
+                eprintln!("files: {} was not opened in Android: {why}", file.name);
+                error(ErrorCode::FileRefused, why)
+            }
+        };
+        answer(&mut *connection, body);
+        connection.close();
+    }
+
     fn stream_input(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
         let android = match self.androids.android(&peer.user) {
             Ok(android) => android,
@@ -917,7 +1162,9 @@ impl HostApiService {
                         | request::Body::GetSettings(_)
                         | request::Body::SetSettings(_)
                         | request::Body::GetMemory(_)
-                        | request::Body::StreamInput(_) => unreachable!("answered above"),
+                        | request::Body::StreamInput(_)
+                        | request::Body::WatchLinks(_)
+                        | request::Body::OpenFile(_) => unreachable!("answered above"),
                     }
                     status(android.as_ref())
                 }
@@ -1056,6 +1303,7 @@ impl HostApiService {
         let wanted = Settings {
             render_gpu: wanted.render_gpu,
             freeze: wanted.freeze,
+            links_in_android: wanted.links_in_android,
             program_updates: wanted.program_updates,
             image_updates: wanted.image_updates,
         };
@@ -1087,16 +1335,18 @@ impl HostApiService {
         }
         match store.set(&peer.user, &wanted) {
             Ok(settings) => {
-                // The caller's Android follows the freeze setting at once.
+                // The caller's Android follows the freeze and link settings at once.
                 if let Ok(android) = self.androids.android(&peer.user) {
                     android.freeze_when_idle(settings.freeze);
+                    android.links_in_android(settings.links_in_android);
                 }
                 eprintln!(
-                    "local API: {} changed the settings: render GPU {}, freeze {}, program \
-                     updates {}, image updates {}",
+                    "local API: {} changed the settings: render GPU {}, freeze {}, links in \
+                     Android {}, program updates {}, image updates {}",
                     peer.user,
                     settings.render_gpu,
                     on_off(settings.freeze),
+                    on_off(settings.links_in_android),
                     on_off(settings.program_updates),
                     on_off(settings.image_updates)
                 );
@@ -1119,6 +1369,7 @@ fn settings_to_wire(settings: &Settings, facts: &ServiceFacts) -> types::Setting
     types::Settings {
         render_gpu: settings.render_gpu.clone(),
         freeze: settings.freeze,
+        links_in_android: settings.links_in_android,
         program_updates: settings.program_updates,
         image_updates: settings.image_updates,
         program_updates_available: facts.program_updates_available,
@@ -1133,6 +1384,7 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
         settings: Settings {
             render_gpu: settings.render_gpu,
             freeze: settings.freeze,
+            links_in_android: settings.links_in_android,
             program_updates: settings.program_updates,
             image_updates: settings.image_updates,
         },
@@ -1510,6 +1762,62 @@ impl HostApiClient {
         }
     }
 
+    /// Receives the web links the caller's Android opens, for the host's browser. The
+    /// connection carries nothing else from here on, so the client is used up.
+    pub fn watch_links(mut self) -> Result<LinkStream, ClientError> {
+        match self.exchange(
+            request::Body::WatchLinks(types::WatchLinks {}),
+            self.timeout,
+        )? {
+            response::Body::Done(_) => Ok(LinkStream {
+                connection: self.connection,
+            }),
+            _ => Err(ClientError::Malformed(
+                "expected the answer that links are sent".into(),
+            )),
+        }
+    }
+
+    /// Sends `file` to the caller's Android, which asks the user which app opens or takes it.
+    /// Returns once Android has asked. The connection ends with the transfer, so the client
+    /// is used up.
+    pub fn open_file(mut self, file: &FileTransfer) -> Result<(), ClientError> {
+        let action = match file.action {
+            FileAction::View => types::FileAction::View,
+            FileAction::Send => types::FileAction::Send,
+        };
+        let id = self.next_id;
+        self.exchange(
+            request::Body::OpenFile(types::OpenFile {
+                name: file.name.clone(),
+                size: file.content.len() as u64,
+                action: action as i32,
+            }),
+            self.timeout,
+        )
+        .and_then(|body| match body {
+            response::Body::Done(_) => Ok(()),
+            _ => Err(ClientError::Malformed(
+                "expected the answer that the file is taken".into(),
+            )),
+        })?;
+        for piece in file.content.chunks(files::LOCAL_CHUNK_BYTES) {
+            send(
+                &mut *self.connection,
+                Body::FileChunk(types::FileChunk {
+                    data: piece.to_vec(),
+                }),
+            )
+            .map_err(ClientError::Transport)?;
+        }
+        match self.answer(id, FILE_ANSWER_WAIT)? {
+            response::Body::Done(_) => Ok(()),
+            _ => Err(ClientError::Malformed(
+                "expected the answer that Android has the file".into(),
+            )),
+        }
+    }
+
     fn done(&mut self, body: request::Body) -> Result<(), ClientError> {
         match self.exchange(body, self.timeout)? {
             response::Body::Done(_) => Ok(()),
@@ -1549,6 +1857,12 @@ impl HostApiClient {
             }),
         )
         .map_err(ClientError::Transport)?;
+        self.answer(id, timeout)
+    }
+
+    /// Waits at most `timeout` for the answer to request `id` and returns its body; an error
+    /// answer is an error.
+    fn answer(&mut self, id: u64, timeout: Duration) -> Result<response::Body, ClientError> {
         let frame = self
             .connection
             .recv(Some(timeout))
@@ -1613,6 +1927,31 @@ impl TaskStream {
                 Ok(_) => return Err(ClientError::Malformed("expected a task event".into())),
                 Err(error) => return Err(ClientError::Malformed(error.to_string())),
             }
+        }
+    }
+}
+
+/// The web links the caller's Android opens, from [`HostApiClient::watch_links`].
+pub struct LinkStream {
+    connection: Box<dyn Connection>,
+}
+
+impl LinkStream {
+    /// The next link, waiting at most `timeout`. `Ok(None)` means none came in time; an error
+    /// means the connection has ended, and a new one is needed. The link is as the service
+    /// sent it: the caller checks it again before opening it.
+    pub fn next(&mut self, timeout: Duration) -> Result<Option<String>, ClientError> {
+        let frame = match self.connection.recv(Some(timeout)) {
+            Ok(frame) => frame,
+            Err(TransportError::Timeout) => return Ok(None),
+            Err(error) => return Err(ClientError::Transport(error)),
+        };
+        match decode(&frame) {
+            Ok(Envelope {
+                body: Some(Body::OpenLink(link)),
+            }) => Ok(Some(link.url)),
+            Ok(_) => Err(ClientError::Malformed("expected a link".into())),
+            Err(error) => Err(ClientError::Malformed(error.to_string())),
         }
     }
 }

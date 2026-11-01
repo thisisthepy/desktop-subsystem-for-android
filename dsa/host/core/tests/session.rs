@@ -1919,3 +1919,195 @@ fn fr10_stopping_a_frozen_guest_thaws_it_first_and_stops_it() {
     assert_eq!(guest.thaws, 1);
     assert_eq!(guest.processes, 0);
 }
+
+fn open_link(url: &str) -> Body {
+    Body::OpenLink(dsa_protocol::control::OpenLink { url: url.into() })
+}
+
+#[test]
+fn fr9_a_web_link_opened_in_the_guest_reaches_a_link_watcher() {
+    let (session, mut agent, _launcher) = active_session();
+    let links = session.watch_links();
+    // Only http and https links reach the host; the rest are dropped and logged.
+    send_body(&mut agent, open_link("file:///C:/Windows/System32/calc.exe"));
+    send_body(&mut agent, open_link("ms-settings:"));
+    send_body(&mut agent, open_link("https://example.com/news?id=1"));
+    assert_eq!(
+        links.recv_timeout(WAIT).unwrap(),
+        "https://example.com/news?id=1"
+    );
+    assert!(links.recv_timeout(Duration::from_millis(100)).is_err());
+    assert_eq!(session.state(), SessionState::Active);
+}
+
+#[test]
+fn fr9_a_flood_of_links_from_the_guest_is_cut_off() {
+    let (session, mut agent, _launcher) = active_session();
+    let links = session.watch_links();
+    for i in 0..20 {
+        send_body(&mut agent, open_link(&format!("https://example.com/{i}")));
+    }
+    let mut arrived = 0;
+    while links.recv_timeout(Duration::from_millis(300)).is_ok() {
+        arrived += 1;
+    }
+    assert_eq!(arrived, dsa_host_core::links::LINKS_PER_WINDOW);
+}
+
+#[test]
+fn fr9_links_kept_in_android_are_not_sent_to_the_host_and_the_agent_is_told() {
+    let (session, mut agent, _launcher) = active_session();
+    let links = session.watch_links();
+    session.links_in_android(true);
+    assert_eq!(
+        next_body(&mut agent),
+        Body::LinkHandling(dsa_protocol::control::LinkHandling { in_guest: true })
+    );
+    send_body(&mut agent, open_link("https://example.com/"));
+    assert!(links.recv_timeout(Duration::from_millis(200)).is_err());
+    // An agent that connects again takes links to go to the host, so it is told again.
+    report_boot(&mut agent, true, false);
+    thread::sleep(Duration::from_millis(50));
+    report_boot(&mut agent, true, true);
+    assert_eq!(
+        next_body(&mut agent),
+        Body::LinkHandling(dsa_protocol::control::LinkHandling { in_guest: true })
+    );
+    session.links_in_android(false);
+    assert_eq!(
+        next_body(&mut agent),
+        Body::LinkHandling(dsa_protocol::control::LinkHandling { in_guest: false })
+    );
+    send_body(&mut agent, open_link("https://example.com/"));
+    assert_eq!(links.recv_timeout(WAIT).unwrap(), "https://example.com/");
+}
+
+fn progress(transfer_id: u32, received: u64, error: &str) -> Body {
+    Body::FileProgress(dsa_protocol::control::FileProgress {
+        transfer_id,
+        received,
+        error: error.into(),
+    })
+}
+
+#[test]
+fn fr9_a_host_file_reaches_the_guest_in_chunks_paced_by_the_agent() {
+    use dsa_host_core::files::{FileAction, FileTransfer, CHUNKS_IN_FLIGHT, CHUNK_BYTES};
+    let (session, mut agent, _launcher) = active_session();
+    let content: Vec<u8> = (0..(3 * CHUNK_BYTES + 77))
+        .map(|i| (i % 253) as u8)
+        .collect();
+    let file = FileTransfer {
+        name: "report.pdf".into(),
+        content: content.clone(),
+        action: FileAction::View,
+    };
+    thread::scope(|scope| {
+        let sending = scope.spawn(|| session.open_file(&file));
+        let Body::OpenFile(open) = next_body(&mut agent) else {
+            panic!("expected the file's announcement");
+        };
+        assert_eq!(open.name, "report.pdf");
+        assert_eq!(open.size, content.len() as u64);
+        assert_eq!(open.action, dsa_protocol::control::FileAction::View as i32);
+        let mut received = Vec::new();
+        loop {
+            // The host sends no more than the window ahead of what the agent has stored.
+            let mut batch = 0u64;
+            while let Ok(frame) = agent.recv(Some(Duration::from_millis(200))) {
+                let Some(Body::FileChunk(chunk)) = dsa_protocol::decode(&frame).unwrap().body
+                else {
+                    panic!("expected a chunk");
+                };
+                assert_eq!(chunk.transfer_id, open.transfer_id);
+                assert_eq!(chunk.offset, received.len() as u64);
+                assert!(chunk.data.len() <= CHUNK_BYTES);
+                received.extend_from_slice(&chunk.data);
+                batch += 1;
+            }
+            assert!(batch <= CHUNKS_IN_FLIGHT, "{batch} chunks in flight");
+            send_body(
+                &mut agent,
+                progress(open.transfer_id, received.len() as u64, ""),
+            );
+            if received.len() == content.len() {
+                break;
+            }
+        }
+        assert_eq!(sending.join().unwrap(), Ok(()));
+        assert_eq!(received, content);
+    });
+}
+
+#[test]
+fn fr9_a_file_the_agent_cannot_take_is_refused_with_its_reason() {
+    use dsa_host_core::files::{FileAction, FileTransfer};
+    let (session, mut agent, _launcher) = active_session();
+    let file = FileTransfer {
+        name: "a.bin".into(),
+        content: vec![1, 2, 3],
+        action: FileAction::Send,
+    };
+    thread::scope(|scope| {
+        let sending = scope.spawn(|| session.open_file(&file));
+        let Body::OpenFile(open) = next_body(&mut agent) else {
+            panic!("expected the file's announcement");
+        };
+        assert_eq!(open.action, dsa_protocol::control::FileAction::Send as i32);
+        let _chunk = next_body(&mut agent);
+        // Progress on a transfer that is not under way is dropped.
+        send_body(&mut agent, progress(open.transfer_id + 100, 3, ""));
+        send_body(
+            &mut agent,
+            progress(open.transfer_id, 0, "the guest's storage is full"),
+        );
+        match sending.join().unwrap() {
+            Err(SessionError::FileRefused(why)) => {
+                assert!(why.contains("storage is full"), "{why}")
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    });
+    assert_eq!(session.state(), SessionState::Active);
+}
+
+#[test]
+fn fr9_a_file_is_refused_before_sending_when_too_large_or_badly_named() {
+    use dsa_host_core::files::{FileAction, FileTransfer, MAX_FILE_BYTES};
+    let (session, mut agent, _launcher) = active_session();
+    let large = FileTransfer {
+        name: "big.iso".into(),
+        content: vec![0; MAX_FILE_BYTES as usize + 1],
+        action: FileAction::View,
+    };
+    assert!(matches!(
+        session.open_file(&large),
+        Err(SessionError::FileRefused(_))
+    ));
+    let named = FileTransfer {
+        name: "../etc/passwd".into(),
+        content: vec![1],
+        action: FileAction::View,
+    };
+    assert!(matches!(
+        session.open_file(&named),
+        Err(SessionError::FileRefused(_))
+    ));
+    assert!(agent.recv(Some(Duration::from_millis(100))).is_err());
+}
+
+#[test]
+fn fr9_a_file_for_a_stopped_guest_is_refused() {
+    use dsa_host_core::files::{FileAction, FileTransfer};
+    let launcher = FakeLauncher::default();
+    let (session, _connector) = session_with(launcher, WAIT);
+    let file = FileTransfer {
+        name: "a.txt".into(),
+        content: vec![1],
+        action: FileAction::View,
+    };
+    assert_eq!(
+        session.open_file(&file),
+        Err(SessionError::NotActive(SessionState::Stopped))
+    );
+}
