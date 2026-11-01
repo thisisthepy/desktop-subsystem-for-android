@@ -71,8 +71,7 @@ impl<H: WindowManagerHost> WindowManagerKeeper<H> {
                 self.waiting = if self.starts > KEEPS_EXITING_AFTER {
                     format!(
                         "the DSA Window Manager keeps exiting (started {} times), and Android \
-                         cannot boot without its renderer. Its log, \
-                         %LOCALAPPDATA%\\DSA\\logs\\dsa-wm.log, says why",
+                         cannot boot without its renderer. Its log says why",
                         self.starts
                     )
                 } else {

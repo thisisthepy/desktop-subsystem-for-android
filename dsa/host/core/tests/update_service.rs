@@ -239,10 +239,10 @@ fn updating_android(
                             },
                         )),
                     }));
-                    while matches!(
-                        watched.state(),
-                        SessionState::Starting | SessionState::Active
-                    ) && !finished.load(Ordering::Relaxed)
+                    // Held until this boot ends, and no longer: the next boot needs a new one.
+                    watched.wait_for(SessionState::Active, Duration::from_secs(1));
+                    while watched.state() == SessionState::Active
+                        && !finished.load(Ordering::Relaxed)
                     {
                         thread::sleep(Duration::from_millis(20));
                     }

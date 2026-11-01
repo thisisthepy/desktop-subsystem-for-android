@@ -85,10 +85,7 @@ fn fr3_a_window_manager_that_keeps_exiting_is_retried_more_slowly_and_reported()
         }
     }
     let starts = host.0.lock().unwrap().starts;
-    assert!(
-        (5..=15).contains(&starts),
-        "{starts} starts in ten minutes"
-    );
+    assert!((5..=15).contains(&starts), "{starts} starts in ten minutes");
     assert!(said.contains("keeps exiting"), "{said}");
 }
 

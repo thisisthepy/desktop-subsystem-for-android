@@ -197,10 +197,7 @@ fn report_boot(daemon: &mut Box<dyn Connection>, boot_completed: bool, agent_con
 }
 
 /// Connects as the channel daemon does, long before Android has finished booting.
-fn connect_daemon(
-    connector: &mut MemoryConnector,
-    launcher: &FakeLauncher,
-) -> Box<dyn Connection> {
+fn connect_daemon(connector: &mut MemoryConnector, launcher: &FakeLauncher) -> Box<dyn Connection> {
     let secret = launcher.secret();
     let mut agent = connector.connect(WAIT).expect("the agent connects");
     guest_connect(
@@ -340,7 +337,11 @@ fn fr2_a_guest_that_does_not_finish_booting_in_time_stalls_with_the_cause_and_re
         other => panic!("expected BootUnfinished, got {other:?}"),
     }
     assert_eq!(launcher.processes(), 3, "the guest is left running");
-    assert!(session.problem().unwrap().to_string().contains("29 restarts"));
+    assert!(session
+        .problem()
+        .unwrap()
+        .to_string()
+        .contains("29 restarts"));
 
     // It may only be slow: when it does finish, nothing else is needed.
     report_boot(&mut daemon, true, true);
@@ -406,7 +407,11 @@ fn fr2_a_guest_is_not_started_while_what_it_cannot_run_without_is_missing() {
     );
     session.start();
     assert!(session.wait_for(SessionState::Stalled, WAIT));
-    assert_eq!(launcher.0.lock().unwrap().starts, 0, "no guest to crash-loop");
+    assert_eq!(
+        launcher.0.lock().unwrap().starts,
+        0,
+        "no guest to crash-loop"
+    );
     assert_eq!(
         session.problem(),
         Some(BootProblem::Prerequisite(
