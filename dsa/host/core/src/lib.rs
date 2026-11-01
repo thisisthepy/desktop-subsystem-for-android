@@ -25,6 +25,7 @@
 
 pub mod bootconfig;
 pub mod clipboard;
+pub mod clock_trace;
 pub mod compositor;
 pub mod files;
 pub mod guest_display;

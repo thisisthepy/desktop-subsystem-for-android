@@ -408,6 +408,33 @@ Davey는 이 로그에 2건뿐이고 둘 다 액티비티 전환이다. 리플�
 - `app.frame`의 `late`가 큰 프레임과 같은 때의 `Slow dispatch` 줄: 액티비티 시작의 어느 단계가 메인 스레드를 잡는지.
 - 백그라운드 dexopt가 이 VM에서 실제로 도는지(ArtService의 `bg-dexopt` 로그).
 
+## 앱이 프레임을 끝낸 뒤 화면에 닿기까지 (FR-5)
+
+**확인 대상**: feat/touch-latency 8b0558f(#157) 위의 이 브랜치. AOSP SurfaceFlinger의 기본값은 android16-qpr1-release 소스(`VsyncConfiguration`, `FrameTracker`)로 읽었다.
+
+**방법**: 앱이 프레임을 끝낸 뒤 호스트가 그 프레임을 보여 주기까지의 코드를 읽었다. 이 조사에서는 빌드도 실행도 하지 않았다. 아래의 프레임 수는 코드와 기본값에서 계산한 것이고 측정값이 아니다. 측정은 이 PR이 더한 추적으로 한다(`dsa/guest/image/README.md`의 "Tracing a click").
+
+**확인한 것**
+
+1. **SurfaceFlinger의 vsync 설정.** `make-image.py`는 `debug.sf.*`와 `ro.surface_flinger.*`를 하나도 두지 않는다. 그러면 SurfaceFlinger는 작업 시간 방식의 기본값을 쓴다. 앱과 SurfaceFlinger의 작업 시간이 둘 다 vsync 주기 하나이므로, 앱은 화면에 나갈 vsync보다 두 주기 앞에 깨고 SurfaceFlinger는 한 주기 앞에 깬다. 60 Hz에서 앱이 그리기 시작해 SurfaceFlinger가 표시하기까지 최소 33 ms다. 이것은 AOSP 기기와 같은 값이며 잘못된 설정이 아니다. 줄이면 앱이나 SurfaceFlinger가 시간 안에 끝내지 못한 프레임을 놓친다.
+2. **hwcomposer의 vsync 스레드.** `VsyncThread`는 `CLOCK_MONOTONIC`의 주기 격자에 맞춰 깨어 콜백을 부르고, 놓친 주기는 건너뛴다. 타임스탬프는 깨어난 시각이 아니라 격자 위의 값이다. 지연을 더하는 곳은 보이지 않는다.
+3. **present와 `FramePipeline`.** `submit`은 앞 프레임의 호스트 작업이 끝나기만 기다리고, 이번 프레임은 기다리지 않는다. SurfaceFlinger는 release fence 없이 버퍼를 돌려주므로, 앞 프레임의 버퍼를 호스트가 다 읽기 전에 다음 present가 돌아가면 안 된다. 그러므로 이 대기는 정확성을 위한 것이다. 호스트 왕복(`wm.frame`)이 한 주기보다 짧으면 SurfaceFlinger의 다음 프레임을 막지 않는다. 앞 측정에서 그 왕복은 중앙 0.8 ms, p99 8.6 ms였다.
+4. **호스트 창 관리자.** `hosts.rs`는 프레임마다 창 호스트에 알리고, 창 호스트가 공유 텍스처에서 복사를 끝냈다는 답을 기다린다. 쌓이는 큐는 없다.
+5. **창 호스트의 스왑체인.** 버퍼 3개, `DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL`, `Present(0, 0)`이고, 프레임 지연 대기 객체는 쓰지 않는다. flip 모델에서 sync interval 0으로 올린 present는 DWM이 수직 동기마다 하나씩 보여 준다. 한 주기 안에 present가 둘 들어오면 하나가 큐에 남는다. 게스트도 같은 60 Hz로 프레임을 내므로, 한번 쌓인 present는 줄지 않고 프레임마다 한 주기씩 늦게 보일 수 있다(추론). 버퍼가 3개이므로 큐는 많아야 두 프레임, 약 33 ms다.
+
+**결정**
+
+- 코드만으로 확실한 원인은 찾지 못했다. 그래서 이 PR은 고치지 않는다. 1을 줄이는 것과 5에 프레임 지연 대기를 넣는 것은 둘 다 프레임을 놓치거나 렌더러를 막는 대가가 있다. 측정이 그 구간을 원인으로 보여 줄 때 정한다.
+- 대신 한 클릭의 전 구간을 호스트 시계 하나에 놓는 추적을 더한다. 호스트의 모든 줄에 성능 카운터 시각(`host=`)을 넣는다. 서비스는 초당 한 번 게스트 데몬과 시계를 맞춰 `clock` 줄을 남긴다. 창 호스트는 스왑체인의 프레임 통계로 실제 표시 시각(`app.shown`)을 남긴다. 에이전트는 SurfaceFlinger의 레이어별 시각(`sf.frame`)을 남긴다. `scripts/input-trace.py`가 이 줄들을 합친다.
+
+**측정으로 답할 질문** (합친 추적의 구간 이름)
+
+- 앱이 그린 프레임이 SurfaceFlinger의 표시까지 몇 주기 걸리는가: `app.frame`의 의도 vsync와 `total`에서 `sf.frame`의 `actual`까지. 두 주기(33 ms)를 크게 넘으면 1의 설정보다 버퍼 대기(`dequeue`)나 BLAST 동기화를 의심한다.
+- SurfaceFlinger의 표시에서 hwcomposer의 게시까지: `sf.frame`의 `actual`에서 `hwc.frame`까지. `waited`가 크면 3의 대기가 막고 있는 것이다.
+- 호스트 present에서 실제 표시까지: `app.present`에서 `app.shown`까지. 계속 한 주기보다 크면 5의 큐가 쌓인 것이고, 이때 프레임 지연 대기나 `SetMaximumFrameLatency(1)`을 검토한다.
+- 누름 뒤 첫 프레임이 언제 그려지는가: `agent.inject`에서 첫 `app.frame`까지. 100 ms 근처면 탭 타임아웃 오버레이가 적용되지 않은 것이다.
+- 스왑체인이 프레임 통계를 주지 않으면 창 호스트 로그에 한 번 남는다. 그때는 `app.shown` 대신 외부 캡처로 이 구간을 잰다.
+
 ## R6. 커널 명령줄에서 같은 `androidboot` 값을 두 번 주면 어느 쪽이 이기는가 (FR-4)
 
 **배경**: 게스트 디스플레이 크기를 호스트가 정하려면, 이미지의 `kernel_cmdline`에 이미 있는 `androidboot.dsa.display_width` 뒤에 값을 덧붙이면 되는지 확인해야 했다.

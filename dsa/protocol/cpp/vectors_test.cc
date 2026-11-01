@@ -228,6 +228,12 @@ std::map<std::string, v1::Envelope> Cases() {
     boot->set_boot_completed(true);
     boot->set_agent_connected(true);
   }
+  cases["clock_probe"].mutable_clock_probe()->set_host_sent_ns(1234567890123ULL);
+  {
+    v1::ClockAnswer* answer = cases["clock_answer"].mutable_clock_answer();
+    answer->set_host_sent_ns(1234567890123ULL);
+    answer->set_guest_mono_ns(987654321098ULL);
+  }
   {
     v1::HelloRejected* rejected = cases["hello_rejected_authentication"].mutable_hello_rejected();
     rejected->set_reason(v1::REJECT_REASON_AUTHENTICATION_FAILED);

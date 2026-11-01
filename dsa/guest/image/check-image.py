@@ -3,17 +3,11 @@
     uv run dsa/guest/image/check-image.py dsa/target/image/17.0.0-16373615 .scratch/image-keys
 
 It fails when the shell apps are still there, when the build is still debuggable, when an
-<<<<<<< HEAD
 app is not signed with one of the keys in the key folder, when the framework overlay or the
-trace script is missing, when the agent is missing or not
-signed with the platform key, when the files do not match image.json, or when the ramdisk
-lacks the directories and links Android's first stage init needs.
-=======
-app is not signed with one of the keys in the key folder, when the agent is missing or not
-signed with the platform key, when Settings still has the preferences that crash it without
-the Bluetooth service, when the files do not match image.json, or when the ramdisk lacks the
-directories and links Android's first stage init needs.
->>>>>>> origin/develop
+trace script is missing, when the agent is missing or not signed with the platform key, when
+Settings still has the preferences that crash it without the Bluetooth service, when the files
+do not match image.json, or when the ramdisk lacks the directories and links Android's first
+stage init needs.
 
 The signatures are read from the apps themselves. sign_target_files_apks copies
 META/apkcerts.txt over unchanged, so that file still names AOSP's keys after signing.

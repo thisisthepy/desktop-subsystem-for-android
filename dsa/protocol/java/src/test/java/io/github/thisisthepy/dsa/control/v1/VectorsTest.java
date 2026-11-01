@@ -237,6 +237,14 @@ public final class VectorsTest {
         cases.put("guest_boot", Envelope.newBuilder()
                 .setGuestBoot(GuestBoot.newBuilder().setBootCompleted(true).setAgentConnected(true))
                 .build());
+        cases.put("clock_probe", Envelope.newBuilder()
+                .setClockProbe(ClockProbe.newBuilder().setHostSentNs(1_234_567_890_123L))
+                .build());
+        cases.put("clock_answer", Envelope.newBuilder()
+                .setClockAnswer(ClockAnswer.newBuilder()
+                        .setHostSentNs(1_234_567_890_123L)
+                        .setGuestMonoNs(987_654_321_098L))
+                .build());
         cases.put("hello_rejected_authentication", Envelope.newBuilder()
                 .setHelloRejected(HelloRejected.newBuilder()
                         .setReason(RejectReason.REJECT_REASON_AUTHENTICATION_FAILED)
