@@ -502,5 +502,49 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.NotificationDismissed getNotificationDismissed();
 
+  /**
+   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+   * @return Whether the accessibilityWatch field is set.
+   */
+  boolean hasAccessibilityWatch();
+  /**
+   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+   * @return The accessibilityWatch.
+   */
+  io.github.thisisthepy.dsa.control.v1.AccessibilityWatch getAccessibilityWatch();
+
+  /**
+   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+   * @return Whether the accessibilityTree field is set.
+   */
+  boolean hasAccessibilityTree();
+  /**
+   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+   * @return The accessibilityTree.
+   */
+  io.github.thisisthepy.dsa.control.v1.AccessibilityTree getAccessibilityTree();
+
+  /**
+   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+   * @return Whether the accessibilityAction field is set.
+   */
+  boolean hasAccessibilityAction();
+  /**
+   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+   * @return The accessibilityAction.
+   */
+  io.github.thisisthepy.dsa.control.v1.AccessibilityAction getAccessibilityAction();
+
+  /**
+   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+   * @return Whether the accessibilityActionResult field is set.
+   */
+  boolean hasAccessibilityActionResult();
+  /**
+   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+   * @return The accessibilityActionResult.
+   */
+  io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult getAccessibilityActionResult();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }
