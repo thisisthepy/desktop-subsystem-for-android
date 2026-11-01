@@ -61,7 +61,13 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
 - `unavailable-features.xml` withdraws the Bluetooth features, so system_server does not
   start a Bluetooth stack that has no controller to talk to, and the UWB feature, so nothing
   waits for its removed HAL.
-<<<<<<< HEAD
+- Settings' sound screen loses its media output switcher and its cast volume group. Their
+  controllers need the Bluetooth service, which system_server does not start without the
+  Bluetooth features: SettingsLib's media manager is then built without its routing half, and
+  opening the screen took the Settings process and its window down. `make-image.py` removes
+  the two preferences from the compiled `res/xml/sound_settings.xml` in `Settings.apk`
+  (`SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH`), and prints each one it removes. Settings is
+  re-signed with every other app. They come back with Bluetooth.
 - A static overlay (`/vendor/overlay/DsaFrameworkOverlay.apk`) sets the framework's tap
   timeout to 0. A view inside anything that scrolls, which includes every list row, waits that
   long before it shows that it is pressed, in case the touch becomes a scroll, so a mouse
@@ -71,15 +77,6 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
 - With the input trace on (`androidboot.hardware.dsa_input_trace=1`), `dsa-trace.rc` makes every
   app's main thread log each message it takes 16 ms or more to handle, or starts 16 ms or more
   late.
-=======
-- Settings' sound screen loses its media output switcher and its cast volume group. Their
-  controllers need the Bluetooth service, which system_server does not start without the
-  Bluetooth features: SettingsLib's media manager is then built without its routing half, and
-  opening the screen took the Settings process and its window down. `make-image.py` removes
-  the two preferences from the compiled `res/xml/sound_settings.xml` in `Settings.apk`
-  (`SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH`), and prints each one it removes. Settings is
-  re-signed with every other app. They come back with Bluetooth.
->>>>>>> origin/develop
 - Cuttlefish's `seriallogging.rc` is removed. Its logger writes to a virtio console Hyper-V
   does not have, and init would restart it every five seconds for as long as the guest runs.
 - `sepolicy/memory.cil` lets the audio HAL and the software codecs share memory through
