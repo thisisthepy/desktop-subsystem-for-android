@@ -19,6 +19,13 @@ bool endsWith(const std::string& s, const std::string& tail) {
 
 }  // namespace
 
+TEST(fr5_a_frame_says_how_long_it_waited_before_its_compose_began) {
+    // Without it a frame held behind a fence looks the same as no frame at all.
+    EXPECT_EQ(frameTraceLine(4, kWall, 1234.5, 835.04, 2.84, 0.11),
+              std::string("input-trace stage=hwc.frame task=4 utc=2026-10-26T06:23:03.123Z "
+                          "mono=1234.500 waited=835.0 compose=2.8 post=0.1"));
+}
+
 TEST(fr4_trace_times_are_utc_with_milliseconds) {
     EXPECT_EQ(ResizeTrace::utcStamp(0), std::string("1970-01-01T00:00:00.000Z"));
     EXPECT_EQ(ResizeTrace::utcStamp(kWall), std::string("2026-10-26T06:23:03.123Z"));

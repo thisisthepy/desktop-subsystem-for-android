@@ -23,6 +23,12 @@
 
 namespace dsa::hwc {
 
+// The input trace's line for one frame sent to the host. `waitedMs` is from SurfaceFlinger
+// handing the frame over to its compose starting: the frame before it and the layers' acquire
+// fences. `composeMs` and `postMs` are how long the host took to compose it and to take it.
+std::string frameTraceLine(int32_t task, int64_t wallMs, double monoMs, double waitedMs,
+                           double composeMs, double postMs);
+
 class ResizeTrace {
    public:
     static constexpr double kSummaryIntervalMs = 500.0;

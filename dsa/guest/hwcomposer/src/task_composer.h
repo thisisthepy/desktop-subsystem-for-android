@@ -109,8 +109,9 @@ class TaskComposer {
         int next = 0;
     };
 
-    // Composes and posts every task's frame, on the pipeline's thread.
-    void compose(Frame& frame);
+    // Composes and posts every task's frame, on the pipeline's thread. `presentedMs` is when
+    // SurfaceFlinger handed the frame over, on the trace's clock.
+    void compose(Frame& frame, double presentedMs);
     uint32_t sharedHandleLocked(const BufferRef& buffer);
     void releaseOutputLocked(Output& output);
     void syncGenerationLocked();
