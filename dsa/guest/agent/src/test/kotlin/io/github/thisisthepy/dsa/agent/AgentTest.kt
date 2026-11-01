@@ -819,6 +819,30 @@ class AgentTest {
     }
 
     @Test
+    fun fr5_with_the_trace_on_releasing_a_press_reads_that_apps_frame_timings() {
+        tasks.running = listOf(appTask(4, packageName = "com.android.settings"))
+        locator.up = daemon
+        val reads = FakeScheduler()
+        val read = mutableListOf<String>()
+        val frames = io.github.thisisthepy.dsa.agent.trace.FrameStatsTrace(
+            log, enabled = true, scheduler = reads, dump = { pkg -> read += pkg; "" },
+        )
+        Agent(AGENT, tasks, actions, locator, windowing, injector, scheduler, log, frameTrace = frames).start()
+        scheduler.runDue()
+
+        daemon.deliver(pointerFrame(4, PointerAction.POINTER_ACTION_DOWN, 10f, 30f, buttons = 1))
+        scheduler.runDue()
+        reads.advance(2_000)
+        assertTrue(read.isEmpty())
+
+        daemon.deliver(pointerFrame(4, PointerAction.POINTER_ACTION_UP, 10f, 30f))
+        scheduler.runDue()
+        reads.advance(io.github.thisisthepy.dsa.agent.trace.FrameStatsTrace.DELAY_MILLIS)
+
+        assertEquals(listOf("com.android.settings"), read)
+    }
+
+    @Test
     fun fr5_input_for_a_task_the_host_was_never_told_about_is_dropped() {
         tasks.running = listOf(appTask(4), appTask(5, packageName = AGENT))
         started()

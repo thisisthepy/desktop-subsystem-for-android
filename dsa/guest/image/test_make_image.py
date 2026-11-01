@@ -1569,5 +1569,116 @@ class SettingsWithoutBluetoothTests(unittest.TestCase):
             make_image.remove_xml_elements(b"\x02\x00\x0c\x00" + b"\0" * 8, "controller", {MEDIA_OUTPUT})
 
 
+class TouchLatencyTests(unittest.TestCase):
+    """What the image changes so a press shows sooner, and what it logs to measure the rest."""
+
+    def _modify(self, root, extra=None, **kw):
+        source = root / "target-files.zip"
+        with zipfile.ZipFile(source, "w") as archive:
+            archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+            archive.writestr("META/filesystem_config.txt", "system/bin/sh 0 2000 755 capabilities=0x0\n")
+            archive.writestr("META/apkcerts.txt", 'name="Settings.apk" certificate="c.x509.pem" private_key="c.pk8"\n')
+            archive.writestr("VENDOR/etc/selinux/vendor_file_contexts", "/vendor/bin/sh u:object_r:vendor_shell_exec:s0\n")
+            for name, data in (extra or {}).items():
+                archive.writestr(name, data)
+        modified = root / "modified.zip"
+        make_image.modify(source, modified, **kw)
+        return zipfile.ZipFile(modified)
+
+    def test_fr5_a_press_on_a_list_row_is_not_held_back_by_the_tap_timeout(self):
+        # Settings' rows sit in a RecyclerView, so View.onTouchEvent posts setPressed after
+        # config_tapTimeoutMillis (100 ms) instead of calling it on the press.
+        self.assertEqual(make_image.FRAMEWORK_OVERLAY_INTEGERS, {"config_tapTimeoutMillis": 0})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_image.framework_overlay_sources(root / "src")
+            manifest = (root / "src/AndroidManifest.xml").read_text()
+            values = (root / "src/res/values/dsa.xml").read_text()
+            self.assertIn('android:targetPackage="android"', manifest)
+            self.assertIn('android:isStatic="true"', manifest)
+            self.assertIn('android:hasCode="false"', manifest)
+            self.assertIn('android:targetSdkVersion="35"', manifest)
+            self.assertIn('<integer name="config_tapTimeoutMillis">0</integer>', values)
+
+            overlay = root / "DsaFrameworkOverlay.apk"
+            overlay.write_bytes(b"overlay")
+            with self._modify(root, framework_overlay=overlay) as archive:
+                self.assertEqual(archive.read("VENDOR/overlay/DsaFrameworkOverlay.apk"), b"overlay")
+                certs = archive.read("META/apkcerts.txt").decode()
+                fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
+                contexts = archive.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
+            self.assertEqual(certs.count('name="DsaFrameworkOverlay.apk"'), 1)
+            self.assertIn('partition="vendor"', certs)
+            self.assertIn("vendor/overlay/DsaFrameworkOverlay.apk 0 0 644 capabilities=0x0", fs_config)
+            self.assertIn(make_image.VENDOR_OVERLAY_CONTEXT, contexts)
+
+    def test_fr5_an_existing_overlay_label_is_not_specified_twice(self):
+        existing = "/(vendor|system/vendor)/overlay(/.*)? u:object_r:vendor_overlay_file:s0\n"
+        contexts = make_image.update_vendor_file_contexts(existing)
+        self.assertEqual(contexts.count("overlay(/.*)?"), 1)
+
+    def test_fr5_the_overlay_is_built_against_the_images_own_framework(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(make_image, "run") as run:
+            root = Path(tmp)
+            apk = make_image.build_framework_overlay(Path("/sdk/aapt2"), root / "framework-res.apk", root)
+            compile_call, link_call = (call.args for call in run.call_args_list)
+            self.assertEqual(compile_call[:2], (Path("/sdk/aapt2"), "compile"))
+            self.assertEqual(link_call[:2], (Path("/sdk/aapt2"), "link"))
+            self.assertIn(root / "framework-res.apk", link_call)
+            self.assertEqual(link_call[link_call.index("-o") + 1], apk)
+            self.assertEqual(link_call[-1], compile_call[compile_call.index("-o") + 1])
+
+    def test_fr5_without_aapt2_the_image_has_no_overlay(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            self.assertNotIn("VENDOR/overlay/DsaFrameworkOverlay.apk", archive.namelist())
+            self.assertNotIn("DsaFrameworkOverlay", archive.read("META/apkcerts.txt").decode())
+
+    def test_fr5_aapt2_is_found_in_the_newest_build_tools(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sdk = Path(tmp)
+            for version in ["34.0.0", "36.0.0", "9.0.0"]:
+                (sdk / "build-tools" / version).mkdir(parents=True)
+                (sdk / "build-tools" / version / "aapt2").write_text("")
+            with patch.dict("os.environ", {"ANDROID_HOME": str(sdk)}, clear=True):
+                self.assertEqual(make_image.find_aapt2(), sdk / "build-tools/36.0.0/aapt2")
+            with patch.dict("os.environ", {}, clear=True):
+                self.assertIsNone(make_image.find_aapt2())
+
+    def test_fr5_the_input_trace_turns_on_main_thread_timing(self):
+        rc = (Path(make_image.__file__).with_name("dsa-trace.rc")).read_text()
+        self.assertIn("on property:ro.boot.hardware.dsa_input_trace=1\n    setprop log.looper.any.main.slow 16\n", rc)
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            self.assertEqual(archive.read("SYSTEM/etc/init/dsa-trace.rc").decode(), rc)
+            self.assertIn("system/etc/init/dsa-trace.rc 0 0 644 capabilities=0x0",
+                          archive.read("META/filesystem_config.txt").decode())
+
+    def test_fr5_check_image_rejects_an_image_without_them(self):
+        check_script = Path(__file__).with_name("check-image.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_dir = root / "image"
+            img_dir.mkdir()
+            keys_dir = root / "keys"
+            keys_dir.mkdir()
+            (img_dir / "image.json").write_text(json.dumps({"files": {}, "kernel_cmdline": ""}))
+            (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
+            outputs = []
+            for complete in [False, True]:
+                with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                    props = "ro.debuggable=0\n"
+                    archive.writestr("META/apkcerts.txt", "")
+                    if complete:
+                        archive.writestr("VENDOR/overlay/DsaFrameworkOverlay.apk", b"overlay")
+                        archive.writestr("SYSTEM/etc/init/dsa-trace.rc", b"rc")
+                    archive.writestr("SYSTEM/build.prop", props)
+                outputs.append(subprocess.run(
+                    [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                    capture_output=True, text=True,
+                ).stdout)
+        for missing in ["DsaFrameworkOverlay.apk is missing", "dsa-trace.rc is missing"]:
+            self.assertIn(missing, outputs[0])
+            self.assertNotIn(missing, outputs[1])
+
+
 if __name__ == "__main__":
     unittest.main()

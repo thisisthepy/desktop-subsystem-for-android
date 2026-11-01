@@ -27,6 +27,7 @@ import io.github.thisisthepy.dsa.agent.tasks.LauncherApps
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.tasks.TaskReporter
 import io.github.thisisthepy.dsa.agent.tasks.TaskSource
+import io.github.thisisthepy.dsa.agent.trace.FrameStatsTrace
 import io.github.thisisthepy.dsa.agent.trace.InputTrace
 import io.github.thisisthepy.dsa.agent.trace.ResizeTrace
 import io.github.thisisthepy.dsa.agent.windowing.FreeformSetup
@@ -34,6 +35,7 @@ import io.github.thisisthepy.dsa.agent.windowing.TaskArranger
 import io.github.thisisthepy.dsa.agent.windowing.WindowingControl
 import io.github.thisisthepy.dsa.control.v1.AgentConnected
 import io.github.thisisthepy.dsa.control.v1.Envelope
+import io.github.thisisthepy.dsa.control.v1.PointerAction
 
 /**
  * The agent: makes the display freeform, keeps app tasks from overlapping on it, reports
@@ -76,6 +78,7 @@ class Agent(
     memory: MemorySource? = null,
     private val inputScheduler: Scheduler = scheduler,
     private val inputTrace: InputTrace = InputTrace(log),
+    private val frameTrace: FrameStatsTrace? = null,
     private val touchSounds: TouchSounds = TouchSounds.NONE,
     clipboard: GuestClipboard = GuestClipboard.NONE,
 ) {
@@ -102,6 +105,11 @@ class Agent(
             log.warn("injecting pointer input failed", e)
         }
         inputTrace.injected(event, queuedNanos, System.nanoTime() - started)
+        val frames = frameTrace
+        if (frames != null && event.action == PointerAction.POINTER_ACTION_UP) {
+            // The reporter belongs to the scheduler's thread.
+            scheduler.post { frames.released(reporter.reportedPackage(event.taskId)) }
+        }
     }
     private val keys = KeyInput(injector, reporter::isReported, reporter::reportedFocused, actions::focusTask, log)
     private val text = TextInput(

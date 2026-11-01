@@ -18,6 +18,7 @@ them with the project's keys.
 | `dsa-channeld.rc` | The service that runs the control channel daemon, and the trigger that drops the guest's caches when it asks |
 | `dsa-memory.rc` | Turns on the zram swap and tunes the kernel for it |
 | `dsa-channel-manifest.xml` | The vendor manifest entry declaring the daemon's binder service |
+| `dsa-trace.rc` | Turns on main thread timing in every app when the input trace is on |
 | `sepolicy/` | Policy added to the image: vsock for graphics, the control daemon's domain and binder service, the memory controls (`memory.cil`), and what the agent needs to force Doze and set the battery (`agent.cil`) |
 
 ```
@@ -32,7 +33,8 @@ uv run dsa/guest/image/make-image.py --major 17 --keys .scratch/image-keys --cha
 uv run dsa/guest/image/check-image.py dsa/target/image/17.0.0-16373615 .scratch/image-keys
 ```
 
-It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and OpenSSL.
+It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and OpenSSL, and
+aapt2 from the Android SDK's build-tools for the framework overlay.
 
 ## What changes
 
@@ -59,6 +61,17 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
 - `unavailable-features.xml` withdraws the Bluetooth features, so system_server does not
   start a Bluetooth stack that has no controller to talk to, and the UWB feature, so nothing
   waits for its removed HAL.
+<<<<<<< HEAD
+- A static overlay (`/vendor/overlay/DsaFrameworkOverlay.apk`) sets the framework's tap
+  timeout to 0. A view inside anything that scrolls, which includes every list row, waits that
+  long before it shows that it is pressed, in case the touch becomes a scroll, so a mouse
+  click's ripple started 100 ms late. A touch that becomes a scroll now shows the row pressed
+  until it moves past the touch slop. `make-image.py` builds the overlay with aapt2 from the
+  Android SDK (`--aapt2`, or found under `ANDROID_HOME`) against the image's own framework.
+- With the input trace on (`androidboot.hardware.dsa_input_trace=1`), `dsa-trace.rc` makes every
+  app's main thread log each message it takes 16 ms or more to handle, or starts 16 ms or more
+  late.
+=======
 - Settings' sound screen loses its media output switcher and its cast volume group. Their
   controllers need the Bluetooth service, which system_server does not start without the
   Bluetooth features: SettingsLib's media manager is then built without its routing half, and
@@ -66,6 +79,7 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
   the two preferences from the compiled `res/xml/sound_settings.xml` in `Settings.apk`
   (`SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH`), and prints each one it removes. Settings is
   re-signed with every other app. They come back with Bluetooth.
+>>>>>>> origin/develop
 - Cuttlefish's `seriallogging.rc` is removed. Its logger writes to a virtio console Hyper-V
   does not have, and init would restart it every five seconds for as long as the guest runs.
 - `sepolicy/memory.cil` lets the audio HAL and the software codecs share memory through

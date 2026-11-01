@@ -40,6 +40,9 @@ class TaskReporter(
     /** Where the host was last told the task is; null for a task it was not told about. */
     fun reportedBounds(taskId: Int): TaskBounds? = told[taskId]?.bounds
 
+    /** The package of the task's root activity as the host was last told; null when unknown. */
+    fun reportedPackage(taskId: Int): String? = told[taskId]?.packageName
+
     /** Whether the task held the input focus when the host was last told about it. */
     fun reportedFocused(taskId: Int): Boolean = told[taskId]?.focused == true
 

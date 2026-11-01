@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.HandlerThread
 import android.os.Process
 import io.github.thisisthepy.dsa.agent.Agent
+import io.github.thisisthepy.dsa.agent.trace.FrameStatsTrace
 import io.github.thisisthepy.dsa.agent.trace.InputTrace
 
 /**
@@ -18,6 +19,15 @@ class AgentApplication : Application() {
         // threads, so it waits neither behind the agent's binder calls nor behind apps.
         val input = HandlerThread("dsa-input", Process.THREAD_PRIORITY_URGENT_DISPLAY).apply { start() }
         val log = AndroidLog
+        val traced = inputTraceRequested()
+        // Reading an app's frame timings is a binder call that can take tens of milliseconds,
+        // so it has a thread of its own, made only when the trace is on.
+        val frameTrace = if (traced) {
+            val reads = HandlerThread("dsa-frame-trace").apply { start() }
+            FrameStatsTrace(log, enabled = true, scheduler = HandlerScheduler(reads.looper), dump = AndroidFrameStats::dump)
+        } else {
+            null
+        }
         val agent = Agent(
             ownPackage = packageName,
             tasks = AndroidTaskSource(this, log),
@@ -39,7 +49,8 @@ class AgentApplication : Application() {
             launcherApps = AndroidLauncherApps(this, log),
             memory = AndroidMemorySource(this),
             inputScheduler = HandlerScheduler(input.looper),
-            inputTrace = InputTrace(log, enabled = inputTraceRequested()),
+            inputTrace = InputTrace(log, enabled = traced),
+            frameTrace = frameTrace,
             touchSounds = AndroidTouchSounds(this),
             clipboard = AndroidClipboard(this, log),
         )
