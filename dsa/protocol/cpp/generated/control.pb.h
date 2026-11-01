@@ -72,6 +72,12 @@ extern DeviceIdleDefaultTypeInternal _DeviceIdle_default_instance_;
 class Envelope;
 struct EnvelopeDefaultTypeInternal;
 extern EnvelopeDefaultTypeInternal _Envelope_default_instance_;
+class FileChunk;
+struct FileChunkDefaultTypeInternal;
+extern FileChunkDefaultTypeInternal _FileChunk_default_instance_;
+class FileProgress;
+struct FileProgressDefaultTypeInternal;
+extern FileProgressDefaultTypeInternal _FileProgress_default_instance_;
 class GuestBoot;
 struct GuestBootDefaultTypeInternal;
 extern GuestBootDefaultTypeInternal _GuestBoot_default_instance_;
@@ -108,6 +114,15 @@ extern KeyEventDefaultTypeInternal _KeyEvent_default_instance_;
 class LaunchApp;
 struct LaunchAppDefaultTypeInternal;
 extern LaunchAppDefaultTypeInternal _LaunchApp_default_instance_;
+class LinkHandling;
+struct LinkHandlingDefaultTypeInternal;
+extern LinkHandlingDefaultTypeInternal _LinkHandling_default_instance_;
+class OpenFile;
+struct OpenFileDefaultTypeInternal;
+extern OpenFileDefaultTypeInternal _OpenFile_default_instance_;
+class OpenLink;
+struct OpenLinkDefaultTypeInternal;
+extern OpenLinkDefaultTypeInternal _OpenLink_default_instance_;
 class PointerEvent;
 struct PointerEventDefaultTypeInternal;
 extern PointerEventDefaultTypeInternal _PointerEvent_default_instance_;
@@ -154,6 +169,8 @@ template<> ::dsa::control::v1::ClipboardText* Arena::CreateMaybeMessage<::dsa::c
 template<> ::dsa::control::v1::CloseTask* Arena::CreateMaybeMessage<::dsa::control::v1::CloseTask>(Arena*);
 template<> ::dsa::control::v1::DeviceIdle* Arena::CreateMaybeMessage<::dsa::control::v1::DeviceIdle>(Arena*);
 template<> ::dsa::control::v1::Envelope* Arena::CreateMaybeMessage<::dsa::control::v1::Envelope>(Arena*);
+template<> ::dsa::control::v1::FileChunk* Arena::CreateMaybeMessage<::dsa::control::v1::FileChunk>(Arena*);
+template<> ::dsa::control::v1::FileProgress* Arena::CreateMaybeMessage<::dsa::control::v1::FileProgress>(Arena*);
 template<> ::dsa::control::v1::GuestBoot* Arena::CreateMaybeMessage<::dsa::control::v1::GuestBoot>(Arena*);
 template<> ::dsa::control::v1::GuestMemory* Arena::CreateMaybeMessage<::dsa::control::v1::GuestMemory>(Arena*);
 template<> ::dsa::control::v1::Hello* Arena::CreateMaybeMessage<::dsa::control::v1::Hello>(Arena*);
@@ -166,6 +183,9 @@ template<> ::dsa::control::v1::InstalledApp* Arena::CreateMaybeMessage<::dsa::co
 template<> ::dsa::control::v1::InstalledApps* Arena::CreateMaybeMessage<::dsa::control::v1::InstalledApps>(Arena*);
 template<> ::dsa::control::v1::KeyEvent* Arena::CreateMaybeMessage<::dsa::control::v1::KeyEvent>(Arena*);
 template<> ::dsa::control::v1::LaunchApp* Arena::CreateMaybeMessage<::dsa::control::v1::LaunchApp>(Arena*);
+template<> ::dsa::control::v1::LinkHandling* Arena::CreateMaybeMessage<::dsa::control::v1::LinkHandling>(Arena*);
+template<> ::dsa::control::v1::OpenFile* Arena::CreateMaybeMessage<::dsa::control::v1::OpenFile>(Arena*);
+template<> ::dsa::control::v1::OpenLink* Arena::CreateMaybeMessage<::dsa::control::v1::OpenLink>(Arena*);
 template<> ::dsa::control::v1::PointerEvent* Arena::CreateMaybeMessage<::dsa::control::v1::PointerEvent>(Arena*);
 template<> ::dsa::control::v1::PowerState* Arena::CreateMaybeMessage<::dsa::control::v1::PowerState>(Arena*);
 template<> ::dsa::control::v1::ProcessMemory* Arena::CreateMaybeMessage<::dsa::control::v1::ProcessMemory>(Arena*);
@@ -323,6 +343,28 @@ inline const std::string& KeyAction_Name(T enum_t_value) {
 }
 bool KeyAction_Parse(
     ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, KeyAction* value);
+enum FileAction : int {
+  FILE_ACTION_UNSPECIFIED = 0,
+  FILE_ACTION_VIEW = 1,
+  FILE_ACTION_SEND = 2,
+  FileAction_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
+  FileAction_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
+};
+bool FileAction_IsValid(int value);
+constexpr FileAction FileAction_MIN = FILE_ACTION_UNSPECIFIED;
+constexpr FileAction FileAction_MAX = FILE_ACTION_SEND;
+constexpr int FileAction_ARRAYSIZE = FileAction_MAX + 1;
+
+const std::string& FileAction_Name(FileAction value);
+template<typename T>
+inline const std::string& FileAction_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, FileAction>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function FileAction_Name.");
+  return FileAction_Name(static_cast<FileAction>(enum_t_value));
+}
+bool FileAction_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, FileAction* value);
 // ===================================================================
 
 class Hello final :
@@ -5205,6 +5247,753 @@ class GuestBoot final :
 };
 // -------------------------------------------------------------------
 
+class OpenLink final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.OpenLink) */ {
+ public:
+  inline OpenLink() : OpenLink(nullptr) {}
+  ~OpenLink() override;
+  explicit PROTOBUF_CONSTEXPR OpenLink(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  OpenLink(const OpenLink& from);
+  OpenLink(OpenLink&& from) noexcept
+    : OpenLink() {
+    *this = ::std::move(from);
+  }
+
+  inline OpenLink& operator=(const OpenLink& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline OpenLink& operator=(OpenLink&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const OpenLink& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const OpenLink* internal_default_instance() {
+    return reinterpret_cast<const OpenLink*>(
+               &_OpenLink_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    31;
+
+  friend void swap(OpenLink& a, OpenLink& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(OpenLink* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(OpenLink* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  OpenLink* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<OpenLink>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const OpenLink& from);
+  void MergeFrom(const OpenLink& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(OpenLink* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.OpenLink";
+  }
+  protected:
+  explicit OpenLink(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kUrlFieldNumber = 1,
+  };
+  // string url = 1;
+  void clear_url();
+  const std::string& url() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_url(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_url();
+  PROTOBUF_NODISCARD std::string* release_url();
+  void set_allocated_url(std::string* url);
+  private:
+  const std::string& _internal_url() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_url(const std::string& value);
+  std::string* _internal_mutable_url();
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.OpenLink)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr url_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class LinkHandling final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.LinkHandling) */ {
+ public:
+  inline LinkHandling() : LinkHandling(nullptr) {}
+  ~LinkHandling() override;
+  explicit PROTOBUF_CONSTEXPR LinkHandling(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  LinkHandling(const LinkHandling& from);
+  LinkHandling(LinkHandling&& from) noexcept
+    : LinkHandling() {
+    *this = ::std::move(from);
+  }
+
+  inline LinkHandling& operator=(const LinkHandling& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline LinkHandling& operator=(LinkHandling&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const LinkHandling& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const LinkHandling* internal_default_instance() {
+    return reinterpret_cast<const LinkHandling*>(
+               &_LinkHandling_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    32;
+
+  friend void swap(LinkHandling& a, LinkHandling& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(LinkHandling* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(LinkHandling* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  LinkHandling* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<LinkHandling>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const LinkHandling& from);
+  void MergeFrom(const LinkHandling& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(LinkHandling* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.LinkHandling";
+  }
+  protected:
+  explicit LinkHandling(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kInGuestFieldNumber = 1,
+  };
+  // bool in_guest = 1;
+  void clear_in_guest();
+  bool in_guest() const;
+  void set_in_guest(bool value);
+  private:
+  bool _internal_in_guest() const;
+  void _internal_set_in_guest(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.LinkHandling)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    bool in_guest_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class OpenFile final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.OpenFile) */ {
+ public:
+  inline OpenFile() : OpenFile(nullptr) {}
+  ~OpenFile() override;
+  explicit PROTOBUF_CONSTEXPR OpenFile(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  OpenFile(const OpenFile& from);
+  OpenFile(OpenFile&& from) noexcept
+    : OpenFile() {
+    *this = ::std::move(from);
+  }
+
+  inline OpenFile& operator=(const OpenFile& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline OpenFile& operator=(OpenFile&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const OpenFile& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const OpenFile* internal_default_instance() {
+    return reinterpret_cast<const OpenFile*>(
+               &_OpenFile_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    33;
+
+  friend void swap(OpenFile& a, OpenFile& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(OpenFile* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(OpenFile* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  OpenFile* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<OpenFile>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const OpenFile& from);
+  void MergeFrom(const OpenFile& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(OpenFile* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.OpenFile";
+  }
+  protected:
+  explicit OpenFile(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kNameFieldNumber = 2,
+    kTransferIdFieldNumber = 1,
+    kActionFieldNumber = 4,
+    kSizeFieldNumber = 3,
+  };
+  // string name = 2;
+  void clear_name();
+  const std::string& name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_name();
+  PROTOBUF_NODISCARD std::string* release_name();
+  void set_allocated_name(std::string* name);
+  private:
+  const std::string& _internal_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_name(const std::string& value);
+  std::string* _internal_mutable_name();
+  public:
+
+  // uint32 transfer_id = 1;
+  void clear_transfer_id();
+  uint32_t transfer_id() const;
+  void set_transfer_id(uint32_t value);
+  private:
+  uint32_t _internal_transfer_id() const;
+  void _internal_set_transfer_id(uint32_t value);
+  public:
+
+  // .dsa.control.v1.FileAction action = 4;
+  void clear_action();
+  ::dsa::control::v1::FileAction action() const;
+  void set_action(::dsa::control::v1::FileAction value);
+  private:
+  ::dsa::control::v1::FileAction _internal_action() const;
+  void _internal_set_action(::dsa::control::v1::FileAction value);
+  public:
+
+  // uint64 size = 3;
+  void clear_size();
+  uint64_t size() const;
+  void set_size(uint64_t value);
+  private:
+  uint64_t _internal_size() const;
+  void _internal_set_size(uint64_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.OpenFile)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr name_;
+    uint32_t transfer_id_;
+    int action_;
+    uint64_t size_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class FileChunk final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.FileChunk) */ {
+ public:
+  inline FileChunk() : FileChunk(nullptr) {}
+  ~FileChunk() override;
+  explicit PROTOBUF_CONSTEXPR FileChunk(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  FileChunk(const FileChunk& from);
+  FileChunk(FileChunk&& from) noexcept
+    : FileChunk() {
+    *this = ::std::move(from);
+  }
+
+  inline FileChunk& operator=(const FileChunk& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline FileChunk& operator=(FileChunk&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const FileChunk& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const FileChunk* internal_default_instance() {
+    return reinterpret_cast<const FileChunk*>(
+               &_FileChunk_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    34;
+
+  friend void swap(FileChunk& a, FileChunk& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(FileChunk* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(FileChunk* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  FileChunk* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<FileChunk>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const FileChunk& from);
+  void MergeFrom(const FileChunk& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(FileChunk* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.FileChunk";
+  }
+  protected:
+  explicit FileChunk(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kDataFieldNumber = 3,
+    kOffsetFieldNumber = 2,
+    kTransferIdFieldNumber = 1,
+  };
+  // bytes data = 3;
+  void clear_data();
+  const std::string& data() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_data(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_data();
+  PROTOBUF_NODISCARD std::string* release_data();
+  void set_allocated_data(std::string* data);
+  private:
+  const std::string& _internal_data() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_data(const std::string& value);
+  std::string* _internal_mutable_data();
+  public:
+
+  // uint64 offset = 2;
+  void clear_offset();
+  uint64_t offset() const;
+  void set_offset(uint64_t value);
+  private:
+  uint64_t _internal_offset() const;
+  void _internal_set_offset(uint64_t value);
+  public:
+
+  // uint32 transfer_id = 1;
+  void clear_transfer_id();
+  uint32_t transfer_id() const;
+  void set_transfer_id(uint32_t value);
+  private:
+  uint32_t _internal_transfer_id() const;
+  void _internal_set_transfer_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.FileChunk)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr data_;
+    uint64_t offset_;
+    uint32_t transfer_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class FileProgress final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.FileProgress) */ {
+ public:
+  inline FileProgress() : FileProgress(nullptr) {}
+  ~FileProgress() override;
+  explicit PROTOBUF_CONSTEXPR FileProgress(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  FileProgress(const FileProgress& from);
+  FileProgress(FileProgress&& from) noexcept
+    : FileProgress() {
+    *this = ::std::move(from);
+  }
+
+  inline FileProgress& operator=(const FileProgress& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline FileProgress& operator=(FileProgress&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const FileProgress& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const FileProgress* internal_default_instance() {
+    return reinterpret_cast<const FileProgress*>(
+               &_FileProgress_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    35;
+
+  friend void swap(FileProgress& a, FileProgress& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(FileProgress* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(FileProgress* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  FileProgress* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<FileProgress>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const FileProgress& from);
+  void MergeFrom(const FileProgress& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(FileProgress* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.FileProgress";
+  }
+  protected:
+  explicit FileProgress(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kErrorFieldNumber = 3,
+    kReceivedFieldNumber = 2,
+    kTransferIdFieldNumber = 1,
+  };
+  // string error = 3;
+  void clear_error();
+  const std::string& error() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_error(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_error();
+  PROTOBUF_NODISCARD std::string* release_error();
+  void set_allocated_error(std::string* error);
+  private:
+  const std::string& _internal_error() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_error(const std::string& value);
+  std::string* _internal_mutable_error();
+  public:
+
+  // uint64 received = 2;
+  void clear_received();
+  uint64_t received() const;
+  void set_received(uint64_t value);
+  private:
+  uint64_t _internal_received() const;
+  void _internal_set_received(uint64_t value);
+  public:
+
+  // uint32 transfer_id = 1;
+  void clear_transfer_id();
+  uint32_t transfer_id() const;
+  void set_transfer_id(uint32_t value);
+  private:
+  uint32_t _internal_transfer_id() const;
+  void _internal_set_transfer_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.FileProgress)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr error_;
+    uint64_t received_;
+    uint32_t transfer_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class Envelope final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.Envelope) */ {
  public:
@@ -5269,6 +6058,11 @@ class Envelope final :
     kScreenState = 40,
     kPowerState = 41,
     kDeviceIdle = 42,
+    kOpenLink = 50,
+    kLinkHandling = 51,
+    kOpenFile = 52,
+    kFileChunk = 53,
+    kFileProgress = 54,
     BODY_NOT_SET = 0,
   };
 
@@ -5277,7 +6071,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    31;
+    36;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -5370,6 +6164,11 @@ class Envelope final :
     kScreenStateFieldNumber = 40,
     kPowerStateFieldNumber = 41,
     kDeviceIdleFieldNumber = 42,
+    kOpenLinkFieldNumber = 50,
+    kLinkHandlingFieldNumber = 51,
+    kOpenFileFieldNumber = 52,
+    kFileChunkFieldNumber = 53,
+    kFileProgressFieldNumber = 54,
   };
   // .dsa.control.v1.Hello hello = 1;
   bool has_hello() const;
@@ -5893,6 +6692,96 @@ class Envelope final :
       ::dsa::control::v1::DeviceIdle* device_idle);
   ::dsa::control::v1::DeviceIdle* unsafe_arena_release_device_idle();
 
+  // .dsa.control.v1.OpenLink open_link = 50;
+  bool has_open_link() const;
+  private:
+  bool _internal_has_open_link() const;
+  public:
+  void clear_open_link();
+  const ::dsa::control::v1::OpenLink& open_link() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::OpenLink* release_open_link();
+  ::dsa::control::v1::OpenLink* mutable_open_link();
+  void set_allocated_open_link(::dsa::control::v1::OpenLink* open_link);
+  private:
+  const ::dsa::control::v1::OpenLink& _internal_open_link() const;
+  ::dsa::control::v1::OpenLink* _internal_mutable_open_link();
+  public:
+  void unsafe_arena_set_allocated_open_link(
+      ::dsa::control::v1::OpenLink* open_link);
+  ::dsa::control::v1::OpenLink* unsafe_arena_release_open_link();
+
+  // .dsa.control.v1.LinkHandling link_handling = 51;
+  bool has_link_handling() const;
+  private:
+  bool _internal_has_link_handling() const;
+  public:
+  void clear_link_handling();
+  const ::dsa::control::v1::LinkHandling& link_handling() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::LinkHandling* release_link_handling();
+  ::dsa::control::v1::LinkHandling* mutable_link_handling();
+  void set_allocated_link_handling(::dsa::control::v1::LinkHandling* link_handling);
+  private:
+  const ::dsa::control::v1::LinkHandling& _internal_link_handling() const;
+  ::dsa::control::v1::LinkHandling* _internal_mutable_link_handling();
+  public:
+  void unsafe_arena_set_allocated_link_handling(
+      ::dsa::control::v1::LinkHandling* link_handling);
+  ::dsa::control::v1::LinkHandling* unsafe_arena_release_link_handling();
+
+  // .dsa.control.v1.OpenFile open_file = 52;
+  bool has_open_file() const;
+  private:
+  bool _internal_has_open_file() const;
+  public:
+  void clear_open_file();
+  const ::dsa::control::v1::OpenFile& open_file() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::OpenFile* release_open_file();
+  ::dsa::control::v1::OpenFile* mutable_open_file();
+  void set_allocated_open_file(::dsa::control::v1::OpenFile* open_file);
+  private:
+  const ::dsa::control::v1::OpenFile& _internal_open_file() const;
+  ::dsa::control::v1::OpenFile* _internal_mutable_open_file();
+  public:
+  void unsafe_arena_set_allocated_open_file(
+      ::dsa::control::v1::OpenFile* open_file);
+  ::dsa::control::v1::OpenFile* unsafe_arena_release_open_file();
+
+  // .dsa.control.v1.FileChunk file_chunk = 53;
+  bool has_file_chunk() const;
+  private:
+  bool _internal_has_file_chunk() const;
+  public:
+  void clear_file_chunk();
+  const ::dsa::control::v1::FileChunk& file_chunk() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::FileChunk* release_file_chunk();
+  ::dsa::control::v1::FileChunk* mutable_file_chunk();
+  void set_allocated_file_chunk(::dsa::control::v1::FileChunk* file_chunk);
+  private:
+  const ::dsa::control::v1::FileChunk& _internal_file_chunk() const;
+  ::dsa::control::v1::FileChunk* _internal_mutable_file_chunk();
+  public:
+  void unsafe_arena_set_allocated_file_chunk(
+      ::dsa::control::v1::FileChunk* file_chunk);
+  ::dsa::control::v1::FileChunk* unsafe_arena_release_file_chunk();
+
+  // .dsa.control.v1.FileProgress file_progress = 54;
+  bool has_file_progress() const;
+  private:
+  bool _internal_has_file_progress() const;
+  public:
+  void clear_file_progress();
+  const ::dsa::control::v1::FileProgress& file_progress() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::FileProgress* release_file_progress();
+  ::dsa::control::v1::FileProgress* mutable_file_progress();
+  void set_allocated_file_progress(::dsa::control::v1::FileProgress* file_progress);
+  private:
+  const ::dsa::control::v1::FileProgress& _internal_file_progress() const;
+  ::dsa::control::v1::FileProgress* _internal_mutable_file_progress();
+  public:
+  void unsafe_arena_set_allocated_file_progress(
+      ::dsa::control::v1::FileProgress* file_progress);
+  ::dsa::control::v1::FileProgress* unsafe_arena_release_file_progress();
+
   void clear_body();
   BodyCase body_case() const;
   // @@protoc_insertion_point(class_scope:dsa.control.v1.Envelope)
@@ -5927,6 +6816,11 @@ class Envelope final :
   void set_has_screen_state();
   void set_has_power_state();
   void set_has_device_idle();
+  void set_has_open_link();
+  void set_has_link_handling();
+  void set_has_open_file();
+  void set_has_file_chunk();
+  void set_has_file_progress();
 
   inline bool has_body() const;
   inline void clear_has_body();
@@ -5967,6 +6861,11 @@ class Envelope final :
       ::dsa::control::v1::ScreenState* screen_state_;
       ::dsa::control::v1::PowerState* power_state_;
       ::dsa::control::v1::DeviceIdle* device_idle_;
+      ::dsa::control::v1::OpenLink* open_link_;
+      ::dsa::control::v1::LinkHandling* link_handling_;
+      ::dsa::control::v1::OpenFile* open_file_;
+      ::dsa::control::v1::FileChunk* file_chunk_;
+      ::dsa::control::v1::FileProgress* file_progress_;
     } body_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -8903,6 +9802,386 @@ inline void GuestBoot::set_agent_connected(bool value) {
 
 // -------------------------------------------------------------------
 
+// OpenLink
+
+// string url = 1;
+inline void OpenLink::clear_url() {
+  _impl_.url_.ClearToEmpty();
+}
+inline const std::string& OpenLink::url() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.OpenLink.url)
+  return _internal_url();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void OpenLink::set_url(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.url_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.OpenLink.url)
+}
+inline std::string* OpenLink::mutable_url() {
+  std::string* _s = _internal_mutable_url();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.OpenLink.url)
+  return _s;
+}
+inline const std::string& OpenLink::_internal_url() const {
+  return _impl_.url_.Get();
+}
+inline void OpenLink::_internal_set_url(const std::string& value) {
+  
+  _impl_.url_.Set(value, GetArenaForAllocation());
+}
+inline std::string* OpenLink::_internal_mutable_url() {
+  
+  return _impl_.url_.Mutable(GetArenaForAllocation());
+}
+inline std::string* OpenLink::release_url() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.OpenLink.url)
+  return _impl_.url_.Release();
+}
+inline void OpenLink::set_allocated_url(std::string* url) {
+  if (url != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.url_.SetAllocated(url, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.url_.IsDefault()) {
+    _impl_.url_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.OpenLink.url)
+}
+
+// -------------------------------------------------------------------
+
+// LinkHandling
+
+// bool in_guest = 1;
+inline void LinkHandling::clear_in_guest() {
+  _impl_.in_guest_ = false;
+}
+inline bool LinkHandling::_internal_in_guest() const {
+  return _impl_.in_guest_;
+}
+inline bool LinkHandling::in_guest() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LinkHandling.in_guest)
+  return _internal_in_guest();
+}
+inline void LinkHandling::_internal_set_in_guest(bool value) {
+  
+  _impl_.in_guest_ = value;
+}
+inline void LinkHandling::set_in_guest(bool value) {
+  _internal_set_in_guest(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LinkHandling.in_guest)
+}
+
+// -------------------------------------------------------------------
+
+// OpenFile
+
+// uint32 transfer_id = 1;
+inline void OpenFile::clear_transfer_id() {
+  _impl_.transfer_id_ = 0u;
+}
+inline uint32_t OpenFile::_internal_transfer_id() const {
+  return _impl_.transfer_id_;
+}
+inline uint32_t OpenFile::transfer_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.OpenFile.transfer_id)
+  return _internal_transfer_id();
+}
+inline void OpenFile::_internal_set_transfer_id(uint32_t value) {
+  
+  _impl_.transfer_id_ = value;
+}
+inline void OpenFile::set_transfer_id(uint32_t value) {
+  _internal_set_transfer_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.OpenFile.transfer_id)
+}
+
+// string name = 2;
+inline void OpenFile::clear_name() {
+  _impl_.name_.ClearToEmpty();
+}
+inline const std::string& OpenFile::name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.OpenFile.name)
+  return _internal_name();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void OpenFile::set_name(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.OpenFile.name)
+}
+inline std::string* OpenFile::mutable_name() {
+  std::string* _s = _internal_mutable_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.OpenFile.name)
+  return _s;
+}
+inline const std::string& OpenFile::_internal_name() const {
+  return _impl_.name_.Get();
+}
+inline void OpenFile::_internal_set_name(const std::string& value) {
+  
+  _impl_.name_.Set(value, GetArenaForAllocation());
+}
+inline std::string* OpenFile::_internal_mutable_name() {
+  
+  return _impl_.name_.Mutable(GetArenaForAllocation());
+}
+inline std::string* OpenFile::release_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.OpenFile.name)
+  return _impl_.name_.Release();
+}
+inline void OpenFile::set_allocated_name(std::string* name) {
+  if (name != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.name_.SetAllocated(name, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.name_.IsDefault()) {
+    _impl_.name_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.OpenFile.name)
+}
+
+// uint64 size = 3;
+inline void OpenFile::clear_size() {
+  _impl_.size_ = uint64_t{0u};
+}
+inline uint64_t OpenFile::_internal_size() const {
+  return _impl_.size_;
+}
+inline uint64_t OpenFile::size() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.OpenFile.size)
+  return _internal_size();
+}
+inline void OpenFile::_internal_set_size(uint64_t value) {
+  
+  _impl_.size_ = value;
+}
+inline void OpenFile::set_size(uint64_t value) {
+  _internal_set_size(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.OpenFile.size)
+}
+
+// .dsa.control.v1.FileAction action = 4;
+inline void OpenFile::clear_action() {
+  _impl_.action_ = 0;
+}
+inline ::dsa::control::v1::FileAction OpenFile::_internal_action() const {
+  return static_cast< ::dsa::control::v1::FileAction >(_impl_.action_);
+}
+inline ::dsa::control::v1::FileAction OpenFile::action() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.OpenFile.action)
+  return _internal_action();
+}
+inline void OpenFile::_internal_set_action(::dsa::control::v1::FileAction value) {
+  
+  _impl_.action_ = value;
+}
+inline void OpenFile::set_action(::dsa::control::v1::FileAction value) {
+  _internal_set_action(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.OpenFile.action)
+}
+
+// -------------------------------------------------------------------
+
+// FileChunk
+
+// uint32 transfer_id = 1;
+inline void FileChunk::clear_transfer_id() {
+  _impl_.transfer_id_ = 0u;
+}
+inline uint32_t FileChunk::_internal_transfer_id() const {
+  return _impl_.transfer_id_;
+}
+inline uint32_t FileChunk::transfer_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.FileChunk.transfer_id)
+  return _internal_transfer_id();
+}
+inline void FileChunk::_internal_set_transfer_id(uint32_t value) {
+  
+  _impl_.transfer_id_ = value;
+}
+inline void FileChunk::set_transfer_id(uint32_t value) {
+  _internal_set_transfer_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.FileChunk.transfer_id)
+}
+
+// uint64 offset = 2;
+inline void FileChunk::clear_offset() {
+  _impl_.offset_ = uint64_t{0u};
+}
+inline uint64_t FileChunk::_internal_offset() const {
+  return _impl_.offset_;
+}
+inline uint64_t FileChunk::offset() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.FileChunk.offset)
+  return _internal_offset();
+}
+inline void FileChunk::_internal_set_offset(uint64_t value) {
+  
+  _impl_.offset_ = value;
+}
+inline void FileChunk::set_offset(uint64_t value) {
+  _internal_set_offset(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.FileChunk.offset)
+}
+
+// bytes data = 3;
+inline void FileChunk::clear_data() {
+  _impl_.data_.ClearToEmpty();
+}
+inline const std::string& FileChunk::data() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.FileChunk.data)
+  return _internal_data();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void FileChunk::set_data(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.data_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.FileChunk.data)
+}
+inline std::string* FileChunk::mutable_data() {
+  std::string* _s = _internal_mutable_data();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.FileChunk.data)
+  return _s;
+}
+inline const std::string& FileChunk::_internal_data() const {
+  return _impl_.data_.Get();
+}
+inline void FileChunk::_internal_set_data(const std::string& value) {
+  
+  _impl_.data_.Set(value, GetArenaForAllocation());
+}
+inline std::string* FileChunk::_internal_mutable_data() {
+  
+  return _impl_.data_.Mutable(GetArenaForAllocation());
+}
+inline std::string* FileChunk::release_data() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.FileChunk.data)
+  return _impl_.data_.Release();
+}
+inline void FileChunk::set_allocated_data(std::string* data) {
+  if (data != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.data_.SetAllocated(data, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.data_.IsDefault()) {
+    _impl_.data_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.FileChunk.data)
+}
+
+// -------------------------------------------------------------------
+
+// FileProgress
+
+// uint32 transfer_id = 1;
+inline void FileProgress::clear_transfer_id() {
+  _impl_.transfer_id_ = 0u;
+}
+inline uint32_t FileProgress::_internal_transfer_id() const {
+  return _impl_.transfer_id_;
+}
+inline uint32_t FileProgress::transfer_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.FileProgress.transfer_id)
+  return _internal_transfer_id();
+}
+inline void FileProgress::_internal_set_transfer_id(uint32_t value) {
+  
+  _impl_.transfer_id_ = value;
+}
+inline void FileProgress::set_transfer_id(uint32_t value) {
+  _internal_set_transfer_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.FileProgress.transfer_id)
+}
+
+// uint64 received = 2;
+inline void FileProgress::clear_received() {
+  _impl_.received_ = uint64_t{0u};
+}
+inline uint64_t FileProgress::_internal_received() const {
+  return _impl_.received_;
+}
+inline uint64_t FileProgress::received() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.FileProgress.received)
+  return _internal_received();
+}
+inline void FileProgress::_internal_set_received(uint64_t value) {
+  
+  _impl_.received_ = value;
+}
+inline void FileProgress::set_received(uint64_t value) {
+  _internal_set_received(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.FileProgress.received)
+}
+
+// string error = 3;
+inline void FileProgress::clear_error() {
+  _impl_.error_.ClearToEmpty();
+}
+inline const std::string& FileProgress::error() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.FileProgress.error)
+  return _internal_error();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void FileProgress::set_error(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.error_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.FileProgress.error)
+}
+inline std::string* FileProgress::mutable_error() {
+  std::string* _s = _internal_mutable_error();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.FileProgress.error)
+  return _s;
+}
+inline const std::string& FileProgress::_internal_error() const {
+  return _impl_.error_.Get();
+}
+inline void FileProgress::_internal_set_error(const std::string& value) {
+  
+  _impl_.error_.Set(value, GetArenaForAllocation());
+}
+inline std::string* FileProgress::_internal_mutable_error() {
+  
+  return _impl_.error_.Mutable(GetArenaForAllocation());
+}
+inline std::string* FileProgress::release_error() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.FileProgress.error)
+  return _impl_.error_.Release();
+}
+inline void FileProgress::set_allocated_error(std::string* error) {
+  if (error != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.error_.SetAllocated(error, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.error_.IsDefault()) {
+    _impl_.error_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.FileProgress.error)
+}
+
+// -------------------------------------------------------------------
+
 // Envelope
 
 // .dsa.control.v1.Hello hello = 1;
@@ -11051,6 +12330,376 @@ inline ::dsa::control::v1::DeviceIdle* Envelope::mutable_device_idle() {
   return _msg;
 }
 
+// .dsa.control.v1.OpenLink open_link = 50;
+inline bool Envelope::_internal_has_open_link() const {
+  return body_case() == kOpenLink;
+}
+inline bool Envelope::has_open_link() const {
+  return _internal_has_open_link();
+}
+inline void Envelope::set_has_open_link() {
+  _impl_._oneof_case_[0] = kOpenLink;
+}
+inline void Envelope::clear_open_link() {
+  if (_internal_has_open_link()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.open_link_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::OpenLink* Envelope::release_open_link() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.open_link)
+  if (_internal_has_open_link()) {
+    clear_has_body();
+    ::dsa::control::v1::OpenLink* temp = _impl_.body_.open_link_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.open_link_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::OpenLink& Envelope::_internal_open_link() const {
+  return _internal_has_open_link()
+      ? *_impl_.body_.open_link_
+      : reinterpret_cast< ::dsa::control::v1::OpenLink&>(::dsa::control::v1::_OpenLink_default_instance_);
+}
+inline const ::dsa::control::v1::OpenLink& Envelope::open_link() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.open_link)
+  return _internal_open_link();
+}
+inline ::dsa::control::v1::OpenLink* Envelope::unsafe_arena_release_open_link() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.open_link)
+  if (_internal_has_open_link()) {
+    clear_has_body();
+    ::dsa::control::v1::OpenLink* temp = _impl_.body_.open_link_;
+    _impl_.body_.open_link_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_open_link(::dsa::control::v1::OpenLink* open_link) {
+  clear_body();
+  if (open_link) {
+    set_has_open_link();
+    _impl_.body_.open_link_ = open_link;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.open_link)
+}
+inline ::dsa::control::v1::OpenLink* Envelope::_internal_mutable_open_link() {
+  if (!_internal_has_open_link()) {
+    clear_body();
+    set_has_open_link();
+    _impl_.body_.open_link_ = CreateMaybeMessage< ::dsa::control::v1::OpenLink >(GetArenaForAllocation());
+  }
+  return _impl_.body_.open_link_;
+}
+inline ::dsa::control::v1::OpenLink* Envelope::mutable_open_link() {
+  ::dsa::control::v1::OpenLink* _msg = _internal_mutable_open_link();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.open_link)
+  return _msg;
+}
+
+// .dsa.control.v1.LinkHandling link_handling = 51;
+inline bool Envelope::_internal_has_link_handling() const {
+  return body_case() == kLinkHandling;
+}
+inline bool Envelope::has_link_handling() const {
+  return _internal_has_link_handling();
+}
+inline void Envelope::set_has_link_handling() {
+  _impl_._oneof_case_[0] = kLinkHandling;
+}
+inline void Envelope::clear_link_handling() {
+  if (_internal_has_link_handling()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.link_handling_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::LinkHandling* Envelope::release_link_handling() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.link_handling)
+  if (_internal_has_link_handling()) {
+    clear_has_body();
+    ::dsa::control::v1::LinkHandling* temp = _impl_.body_.link_handling_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.link_handling_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::LinkHandling& Envelope::_internal_link_handling() const {
+  return _internal_has_link_handling()
+      ? *_impl_.body_.link_handling_
+      : reinterpret_cast< ::dsa::control::v1::LinkHandling&>(::dsa::control::v1::_LinkHandling_default_instance_);
+}
+inline const ::dsa::control::v1::LinkHandling& Envelope::link_handling() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.link_handling)
+  return _internal_link_handling();
+}
+inline ::dsa::control::v1::LinkHandling* Envelope::unsafe_arena_release_link_handling() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.link_handling)
+  if (_internal_has_link_handling()) {
+    clear_has_body();
+    ::dsa::control::v1::LinkHandling* temp = _impl_.body_.link_handling_;
+    _impl_.body_.link_handling_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_link_handling(::dsa::control::v1::LinkHandling* link_handling) {
+  clear_body();
+  if (link_handling) {
+    set_has_link_handling();
+    _impl_.body_.link_handling_ = link_handling;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.link_handling)
+}
+inline ::dsa::control::v1::LinkHandling* Envelope::_internal_mutable_link_handling() {
+  if (!_internal_has_link_handling()) {
+    clear_body();
+    set_has_link_handling();
+    _impl_.body_.link_handling_ = CreateMaybeMessage< ::dsa::control::v1::LinkHandling >(GetArenaForAllocation());
+  }
+  return _impl_.body_.link_handling_;
+}
+inline ::dsa::control::v1::LinkHandling* Envelope::mutable_link_handling() {
+  ::dsa::control::v1::LinkHandling* _msg = _internal_mutable_link_handling();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.link_handling)
+  return _msg;
+}
+
+// .dsa.control.v1.OpenFile open_file = 52;
+inline bool Envelope::_internal_has_open_file() const {
+  return body_case() == kOpenFile;
+}
+inline bool Envelope::has_open_file() const {
+  return _internal_has_open_file();
+}
+inline void Envelope::set_has_open_file() {
+  _impl_._oneof_case_[0] = kOpenFile;
+}
+inline void Envelope::clear_open_file() {
+  if (_internal_has_open_file()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.open_file_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::OpenFile* Envelope::release_open_file() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.open_file)
+  if (_internal_has_open_file()) {
+    clear_has_body();
+    ::dsa::control::v1::OpenFile* temp = _impl_.body_.open_file_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.open_file_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::OpenFile& Envelope::_internal_open_file() const {
+  return _internal_has_open_file()
+      ? *_impl_.body_.open_file_
+      : reinterpret_cast< ::dsa::control::v1::OpenFile&>(::dsa::control::v1::_OpenFile_default_instance_);
+}
+inline const ::dsa::control::v1::OpenFile& Envelope::open_file() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.open_file)
+  return _internal_open_file();
+}
+inline ::dsa::control::v1::OpenFile* Envelope::unsafe_arena_release_open_file() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.open_file)
+  if (_internal_has_open_file()) {
+    clear_has_body();
+    ::dsa::control::v1::OpenFile* temp = _impl_.body_.open_file_;
+    _impl_.body_.open_file_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_open_file(::dsa::control::v1::OpenFile* open_file) {
+  clear_body();
+  if (open_file) {
+    set_has_open_file();
+    _impl_.body_.open_file_ = open_file;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.open_file)
+}
+inline ::dsa::control::v1::OpenFile* Envelope::_internal_mutable_open_file() {
+  if (!_internal_has_open_file()) {
+    clear_body();
+    set_has_open_file();
+    _impl_.body_.open_file_ = CreateMaybeMessage< ::dsa::control::v1::OpenFile >(GetArenaForAllocation());
+  }
+  return _impl_.body_.open_file_;
+}
+inline ::dsa::control::v1::OpenFile* Envelope::mutable_open_file() {
+  ::dsa::control::v1::OpenFile* _msg = _internal_mutable_open_file();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.open_file)
+  return _msg;
+}
+
+// .dsa.control.v1.FileChunk file_chunk = 53;
+inline bool Envelope::_internal_has_file_chunk() const {
+  return body_case() == kFileChunk;
+}
+inline bool Envelope::has_file_chunk() const {
+  return _internal_has_file_chunk();
+}
+inline void Envelope::set_has_file_chunk() {
+  _impl_._oneof_case_[0] = kFileChunk;
+}
+inline void Envelope::clear_file_chunk() {
+  if (_internal_has_file_chunk()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.file_chunk_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::FileChunk* Envelope::release_file_chunk() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.file_chunk)
+  if (_internal_has_file_chunk()) {
+    clear_has_body();
+    ::dsa::control::v1::FileChunk* temp = _impl_.body_.file_chunk_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.file_chunk_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::FileChunk& Envelope::_internal_file_chunk() const {
+  return _internal_has_file_chunk()
+      ? *_impl_.body_.file_chunk_
+      : reinterpret_cast< ::dsa::control::v1::FileChunk&>(::dsa::control::v1::_FileChunk_default_instance_);
+}
+inline const ::dsa::control::v1::FileChunk& Envelope::file_chunk() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.file_chunk)
+  return _internal_file_chunk();
+}
+inline ::dsa::control::v1::FileChunk* Envelope::unsafe_arena_release_file_chunk() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.file_chunk)
+  if (_internal_has_file_chunk()) {
+    clear_has_body();
+    ::dsa::control::v1::FileChunk* temp = _impl_.body_.file_chunk_;
+    _impl_.body_.file_chunk_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_file_chunk(::dsa::control::v1::FileChunk* file_chunk) {
+  clear_body();
+  if (file_chunk) {
+    set_has_file_chunk();
+    _impl_.body_.file_chunk_ = file_chunk;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.file_chunk)
+}
+inline ::dsa::control::v1::FileChunk* Envelope::_internal_mutable_file_chunk() {
+  if (!_internal_has_file_chunk()) {
+    clear_body();
+    set_has_file_chunk();
+    _impl_.body_.file_chunk_ = CreateMaybeMessage< ::dsa::control::v1::FileChunk >(GetArenaForAllocation());
+  }
+  return _impl_.body_.file_chunk_;
+}
+inline ::dsa::control::v1::FileChunk* Envelope::mutable_file_chunk() {
+  ::dsa::control::v1::FileChunk* _msg = _internal_mutable_file_chunk();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.file_chunk)
+  return _msg;
+}
+
+// .dsa.control.v1.FileProgress file_progress = 54;
+inline bool Envelope::_internal_has_file_progress() const {
+  return body_case() == kFileProgress;
+}
+inline bool Envelope::has_file_progress() const {
+  return _internal_has_file_progress();
+}
+inline void Envelope::set_has_file_progress() {
+  _impl_._oneof_case_[0] = kFileProgress;
+}
+inline void Envelope::clear_file_progress() {
+  if (_internal_has_file_progress()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.file_progress_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::FileProgress* Envelope::release_file_progress() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.file_progress)
+  if (_internal_has_file_progress()) {
+    clear_has_body();
+    ::dsa::control::v1::FileProgress* temp = _impl_.body_.file_progress_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.file_progress_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::FileProgress& Envelope::_internal_file_progress() const {
+  return _internal_has_file_progress()
+      ? *_impl_.body_.file_progress_
+      : reinterpret_cast< ::dsa::control::v1::FileProgress&>(::dsa::control::v1::_FileProgress_default_instance_);
+}
+inline const ::dsa::control::v1::FileProgress& Envelope::file_progress() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.file_progress)
+  return _internal_file_progress();
+}
+inline ::dsa::control::v1::FileProgress* Envelope::unsafe_arena_release_file_progress() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.file_progress)
+  if (_internal_has_file_progress()) {
+    clear_has_body();
+    ::dsa::control::v1::FileProgress* temp = _impl_.body_.file_progress_;
+    _impl_.body_.file_progress_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_file_progress(::dsa::control::v1::FileProgress* file_progress) {
+  clear_body();
+  if (file_progress) {
+    set_has_file_progress();
+    _impl_.body_.file_progress_ = file_progress;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.file_progress)
+}
+inline ::dsa::control::v1::FileProgress* Envelope::_internal_mutable_file_progress() {
+  if (!_internal_has_file_progress()) {
+    clear_body();
+    set_has_file_progress();
+    _impl_.body_.file_progress_ = CreateMaybeMessage< ::dsa::control::v1::FileProgress >(GetArenaForAllocation());
+  }
+  return _impl_.body_.file_progress_;
+}
+inline ::dsa::control::v1::FileProgress* Envelope::mutable_file_progress() {
+  ::dsa::control::v1::FileProgress* _msg = _internal_mutable_file_progress();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.file_progress)
+  return _msg;
+}
+
 inline bool Envelope::has_body() const {
   return body_case() != BODY_NOT_SET;
 }
@@ -11063,6 +12712,16 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
@@ -11140,6 +12799,7 @@ template <> struct is_proto_enum< ::dsa::control::v1::RejectReason> : ::std::tru
 template <> struct is_proto_enum< ::dsa::control::v1::PointerAction> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::PointerTool> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::KeyAction> : ::std::true_type {};
+template <> struct is_proto_enum< ::dsa::control::v1::FileAction> : ::std::true_type {};
 
 PROTOBUF_NAMESPACE_CLOSE
 

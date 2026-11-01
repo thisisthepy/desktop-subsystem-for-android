@@ -49,6 +49,11 @@ public  final class Envelope extends
     SCREEN_STATE(40),
     POWER_STATE(41),
     DEVICE_IDLE(42),
+    OPEN_LINK(50),
+    LINK_HANDLING(51),
+    OPEN_FILE(52),
+    FILE_CHUNK(53),
+    FILE_PROGRESS(54),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -93,6 +98,11 @@ public  final class Envelope extends
         case 40: return SCREEN_STATE;
         case 41: return POWER_STATE;
         case 42: return DEVICE_IDLE;
+        case 50: return OPEN_LINK;
+        case 51: return LINK_HANDLING;
+        case 52: return OPEN_FILE;
+        case 53: return FILE_CHUNK;
+        case 54: return FILE_PROGRESS;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -1559,6 +1569,256 @@ public  final class Envelope extends
    */
   private void clearDeviceIdle() {
     if (bodyCase_ == 42) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int OPEN_LINK_FIELD_NUMBER = 50;
+  /**
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+   */
+  @java.lang.Override
+  public boolean hasOpenLink() {
+    return bodyCase_ == 50;
+  }
+  /**
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.OpenLink getOpenLink() {
+    if (bodyCase_ == 50) {
+       return (io.github.thisisthepy.dsa.control.v1.OpenLink) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.OpenLink.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+   */
+  private void setOpenLink(io.github.thisisthepy.dsa.control.v1.OpenLink value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 50;
+  }
+  /**
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+   */
+  private void mergeOpenLink(io.github.thisisthepy.dsa.control.v1.OpenLink value) {
+    value.getClass();
+  if (bodyCase_ == 50 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.OpenLink.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.OpenLink.newBuilder((io.github.thisisthepy.dsa.control.v1.OpenLink) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 50;
+  }
+  /**
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+   */
+  private void clearOpenLink() {
+    if (bodyCase_ == 50) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int LINK_HANDLING_FIELD_NUMBER = 51;
+  /**
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+   */
+  @java.lang.Override
+  public boolean hasLinkHandling() {
+    return bodyCase_ == 51;
+  }
+  /**
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.LinkHandling getLinkHandling() {
+    if (bodyCase_ == 51) {
+       return (io.github.thisisthepy.dsa.control.v1.LinkHandling) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.LinkHandling.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+   */
+  private void setLinkHandling(io.github.thisisthepy.dsa.control.v1.LinkHandling value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 51;
+  }
+  /**
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+   */
+  private void mergeLinkHandling(io.github.thisisthepy.dsa.control.v1.LinkHandling value) {
+    value.getClass();
+  if (bodyCase_ == 51 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.LinkHandling.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.LinkHandling.newBuilder((io.github.thisisthepy.dsa.control.v1.LinkHandling) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 51;
+  }
+  /**
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+   */
+  private void clearLinkHandling() {
+    if (bodyCase_ == 51) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int OPEN_FILE_FIELD_NUMBER = 52;
+  /**
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+   */
+  @java.lang.Override
+  public boolean hasOpenFile() {
+    return bodyCase_ == 52;
+  }
+  /**
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.OpenFile getOpenFile() {
+    if (bodyCase_ == 52) {
+       return (io.github.thisisthepy.dsa.control.v1.OpenFile) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.OpenFile.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+   */
+  private void setOpenFile(io.github.thisisthepy.dsa.control.v1.OpenFile value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 52;
+  }
+  /**
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+   */
+  private void mergeOpenFile(io.github.thisisthepy.dsa.control.v1.OpenFile value) {
+    value.getClass();
+  if (bodyCase_ == 52 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.OpenFile.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.OpenFile.newBuilder((io.github.thisisthepy.dsa.control.v1.OpenFile) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 52;
+  }
+  /**
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+   */
+  private void clearOpenFile() {
+    if (bodyCase_ == 52) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int FILE_CHUNK_FIELD_NUMBER = 53;
+  /**
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+   */
+  @java.lang.Override
+  public boolean hasFileChunk() {
+    return bodyCase_ == 53;
+  }
+  /**
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.FileChunk getFileChunk() {
+    if (bodyCase_ == 53) {
+       return (io.github.thisisthepy.dsa.control.v1.FileChunk) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.FileChunk.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+   */
+  private void setFileChunk(io.github.thisisthepy.dsa.control.v1.FileChunk value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 53;
+  }
+  /**
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+   */
+  private void mergeFileChunk(io.github.thisisthepy.dsa.control.v1.FileChunk value) {
+    value.getClass();
+  if (bodyCase_ == 53 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.FileChunk.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.FileChunk.newBuilder((io.github.thisisthepy.dsa.control.v1.FileChunk) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 53;
+  }
+  /**
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+   */
+  private void clearFileChunk() {
+    if (bodyCase_ == 53) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int FILE_PROGRESS_FIELD_NUMBER = 54;
+  /**
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   */
+  @java.lang.Override
+  public boolean hasFileProgress() {
+    return bodyCase_ == 54;
+  }
+  /**
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.FileProgress getFileProgress() {
+    if (bodyCase_ == 54) {
+       return (io.github.thisisthepy.dsa.control.v1.FileProgress) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.FileProgress.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   */
+  private void setFileProgress(io.github.thisisthepy.dsa.control.v1.FileProgress value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 54;
+  }
+  /**
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   */
+  private void mergeFileProgress(io.github.thisisthepy.dsa.control.v1.FileProgress value) {
+    value.getClass();
+  if (bodyCase_ == 54 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.FileProgress.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.FileProgress.newBuilder((io.github.thisisthepy.dsa.control.v1.FileProgress) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 54;
+  }
+  /**
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   */
+  private void clearFileProgress() {
+    if (bodyCase_ == 54) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -3067,6 +3327,246 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+     */
+    @java.lang.Override
+    public boolean hasOpenLink() {
+      return instance.hasOpenLink();
+    }
+    /**
+     * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.OpenLink getOpenLink() {
+      return instance.getOpenLink();
+    }
+    /**
+     * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+     */
+    public Builder setOpenLink(io.github.thisisthepy.dsa.control.v1.OpenLink value) {
+      copyOnWrite();
+      instance.setOpenLink(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+     */
+    public Builder setOpenLink(
+        io.github.thisisthepy.dsa.control.v1.OpenLink.Builder builderForValue) {
+      copyOnWrite();
+      instance.setOpenLink(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+     */
+    public Builder mergeOpenLink(io.github.thisisthepy.dsa.control.v1.OpenLink value) {
+      copyOnWrite();
+      instance.mergeOpenLink(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+     */
+    public Builder clearOpenLink() {
+      copyOnWrite();
+      instance.clearOpenLink();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+     */
+    @java.lang.Override
+    public boolean hasLinkHandling() {
+      return instance.hasLinkHandling();
+    }
+    /**
+     * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.LinkHandling getLinkHandling() {
+      return instance.getLinkHandling();
+    }
+    /**
+     * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+     */
+    public Builder setLinkHandling(io.github.thisisthepy.dsa.control.v1.LinkHandling value) {
+      copyOnWrite();
+      instance.setLinkHandling(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+     */
+    public Builder setLinkHandling(
+        io.github.thisisthepy.dsa.control.v1.LinkHandling.Builder builderForValue) {
+      copyOnWrite();
+      instance.setLinkHandling(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+     */
+    public Builder mergeLinkHandling(io.github.thisisthepy.dsa.control.v1.LinkHandling value) {
+      copyOnWrite();
+      instance.mergeLinkHandling(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+     */
+    public Builder clearLinkHandling() {
+      copyOnWrite();
+      instance.clearLinkHandling();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+     */
+    @java.lang.Override
+    public boolean hasOpenFile() {
+      return instance.hasOpenFile();
+    }
+    /**
+     * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.OpenFile getOpenFile() {
+      return instance.getOpenFile();
+    }
+    /**
+     * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+     */
+    public Builder setOpenFile(io.github.thisisthepy.dsa.control.v1.OpenFile value) {
+      copyOnWrite();
+      instance.setOpenFile(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+     */
+    public Builder setOpenFile(
+        io.github.thisisthepy.dsa.control.v1.OpenFile.Builder builderForValue) {
+      copyOnWrite();
+      instance.setOpenFile(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+     */
+    public Builder mergeOpenFile(io.github.thisisthepy.dsa.control.v1.OpenFile value) {
+      copyOnWrite();
+      instance.mergeOpenFile(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+     */
+    public Builder clearOpenFile() {
+      copyOnWrite();
+      instance.clearOpenFile();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+     */
+    @java.lang.Override
+    public boolean hasFileChunk() {
+      return instance.hasFileChunk();
+    }
+    /**
+     * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.FileChunk getFileChunk() {
+      return instance.getFileChunk();
+    }
+    /**
+     * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+     */
+    public Builder setFileChunk(io.github.thisisthepy.dsa.control.v1.FileChunk value) {
+      copyOnWrite();
+      instance.setFileChunk(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+     */
+    public Builder setFileChunk(
+        io.github.thisisthepy.dsa.control.v1.FileChunk.Builder builderForValue) {
+      copyOnWrite();
+      instance.setFileChunk(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+     */
+    public Builder mergeFileChunk(io.github.thisisthepy.dsa.control.v1.FileChunk value) {
+      copyOnWrite();
+      instance.mergeFileChunk(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+     */
+    public Builder clearFileChunk() {
+      copyOnWrite();
+      instance.clearFileChunk();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+     */
+    @java.lang.Override
+    public boolean hasFileProgress() {
+      return instance.hasFileProgress();
+    }
+    /**
+     * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.FileProgress getFileProgress() {
+      return instance.getFileProgress();
+    }
+    /**
+     * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+     */
+    public Builder setFileProgress(io.github.thisisthepy.dsa.control.v1.FileProgress value) {
+      copyOnWrite();
+      instance.setFileProgress(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+     */
+    public Builder setFileProgress(
+        io.github.thisisthepy.dsa.control.v1.FileProgress.Builder builderForValue) {
+      copyOnWrite();
+      instance.setFileProgress(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+     */
+    public Builder mergeFileProgress(io.github.thisisthepy.dsa.control.v1.FileProgress value) {
+      copyOnWrite();
+      instance.mergeFileProgress(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+     */
+    public Builder clearFileProgress() {
+      copyOnWrite();
+      instance.clearFileProgress();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -3114,13 +3614,19 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.ScreenState.class,
             io.github.thisisthepy.dsa.control.v1.PowerState.class,
             io.github.thisisthepy.dsa.control.v1.DeviceIdle.class,
+            io.github.thisisthepy.dsa.control.v1.OpenLink.class,
+            io.github.thisisthepy.dsa.control.v1.LinkHandling.class,
+            io.github.thisisthepy.dsa.control.v1.OpenFile.class,
+            io.github.thisisthepy.dsa.control.v1.FileChunk.class,
+            io.github.thisisthepy.dsa.control.v1.FileProgress.class,
           };
           java.lang.String info =
-              "\u0000\u001d\u0001\u0000\u0001*\u001d\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000" +
-              "\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000" +
-              "\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012" +
-              "<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000" +
-              "\u0019<\u0000\u001a<\u0000\u001b<\u0000(<\u0000)<\u0000*<\u0000";
+              "\u0000\"\u0001\u0000\u00016\"\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<" +
+              "\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<\u0000" +
+              "\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012<\u0000" +
+              "\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000\u0019" +
+              "<\u0000\u001a<\u0000\u001b<\u0000(<\u0000)<\u0000*<\u00002<\u00003<\u00004<\u0000" +
+              "5<\u00006<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through
