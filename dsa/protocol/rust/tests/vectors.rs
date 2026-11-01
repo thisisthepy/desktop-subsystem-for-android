@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use dsa_protocol::control::{
-    envelope::Body, AgentConnected, AppInfo, AuthChallenge, AuthProof, CloseTask, DeviceIdle,
+    envelope::Body, AgentConnected, AppInfo, AuthChallenge, AuthProof, ClockAnswer, ClockProbe, CloseTask,
+    DeviceIdle,
     Envelope, GuestBoot, GuestMemory, Hello, HelloAccepted, HelloRejected, ImeCommit,
     ImeComposition, ImeCursor, KeyAction, KeyEvent, LaunchApp, PointerAction, PointerEvent,
     PointerTool, PowerState, ProcessMemory, Rect, RejectReason, RequestGuestMemory, ResizeTask,
@@ -323,6 +324,19 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
             wrap(Body::GuestBoot(GuestBoot {
                 boot_completed: true,
                 agent_connected: true,
+            })),
+        ),
+        (
+            "clock_probe",
+            wrap(Body::ClockProbe(ClockProbe {
+                host_sent_ns: 1_234_567_890_123,
+            })),
+        ),
+        (
+            "clock_answer",
+            wrap(Body::ClockAnswer(ClockAnswer {
+                host_sent_ns: 1_234_567_890_123,
+                guest_mono_ns: 987_654_321_098,
             })),
         ),
         (

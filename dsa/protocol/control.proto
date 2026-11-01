@@ -413,6 +413,25 @@ message GuestBoot {
   bool agent_connected = 2;
 }
 
+// Host to guest, to the control daemon: a probe that pairs the host's clock with the guest's,
+// so trace lines from both can be put on one time line. The daemon answers at once with
+// ClockAnswer and passes the probe to no one else. Sent only while the host traces input.
+message ClockProbe {
+  // When the host sent the probe, in nanoseconds on its monotonic clock, which every host
+  // process shares.
+  uint64 host_sent_ns = 1;
+}
+
+// Guest to host, from the control daemon: the answer to a ClockProbe, sent as soon as the
+// probe is read.
+message ClockAnswer {
+  // The probe's host_sent_ns, unchanged.
+  uint64 host_sent_ns = 1;
+  // When the daemon read the probe, in nanoseconds on the guest's CLOCK_MONOTONIC, the clock
+  // the guest's trace lines use.
+  uint64 guest_mono_ns = 2;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -440,6 +459,8 @@ message Envelope {
     InstalledApps installed_apps = 23;
     AgentConnected agent_connected = 24;
     GuestBoot guest_boot = 25;
+    ClockProbe clock_probe = 26;
+    ClockAnswer clock_answer = 27;
     ScreenState screen_state = 40;
     PowerState power_state = 41;
     DeviceIdle device_idle = 42;
