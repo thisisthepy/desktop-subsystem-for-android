@@ -273,6 +273,109 @@ std::map<std::string, v1::Envelope> Cases() {
     progress->set_received(1000);
     progress->set_error("storage is full");
   }
+  {
+    v1::AccessibilityWatch* watch = cases["accessibility_watch_on"].mutable_accessibility_watch();
+    watch->set_task_id(42);
+    watch->set_on(true);
+  }
+  cases["accessibility_watch_off"].mutable_accessibility_watch()->set_task_id(42);
+  {
+    v1::AccessibilityTree* tree = cases["accessibility_tree_full"].mutable_accessibility_tree();
+    tree->set_task_id(42);
+    tree->set_epoch(1);
+    tree->set_full(true);
+    tree->add_root_ids(1);
+    v1::AccessibilityNode* frame = tree->add_nodes();
+    frame->set_id(1);
+    frame->add_child_ids(2);
+    frame->add_child_ids(3);
+    frame->set_class_name("android.widget.FrameLayout");
+    frame->mutable_bounds()->set_left(0);
+    frame->mutable_bounds()->set_top(0);
+    frame->mutable_bounds()->set_right(400);
+    frame->mutable_bounds()->set_bottom(600);
+    frame->set_enabled(true);
+    v1::AccessibilityNode* item = tree->add_nodes();
+    item->set_id(2);
+    item->set_class_name("android.widget.TextView");
+    item->set_text("Network & internet");
+    item->mutable_bounds()->set_left(0);
+    item->mutable_bounds()->set_top(0);
+    item->mutable_bounds()->set_right(400);
+    item->mutable_bounds()->set_bottom(80);
+    item->set_enabled(true);
+    item->set_clickable(true);
+    item->add_actions(v1::NODE_ACTION_CLICK);
+    item->add_actions(v1::NODE_ACTION_ACCESSIBILITY_FOCUS);
+    v1::AccessibilityNode* slider = tree->add_nodes();
+    slider->set_id(3);
+    slider->set_class_name("android.widget.SeekBar");
+    slider->set_content_description("Volume");
+    slider->mutable_bounds()->set_left(16);
+    slider->mutable_bounds()->set_top(100);
+    slider->mutable_bounds()->set_right(384);
+    slider->mutable_bounds()->set_bottom(140);
+    slider->set_enabled(true);
+    slider->set_focusable(true);
+    slider->mutable_range()->set_min(0.0f);
+    slider->mutable_range()->set_max(100.0f);
+    slider->mutable_range()->set_current(50.0f);
+    slider->add_actions(v1::NODE_ACTION_SCROLL_FORWARD);
+    slider->add_actions(v1::NODE_ACTION_SCROLL_BACKWARD);
+    slider->set_state_description("50 percent");
+    tree->set_focused_id(3);
+  }
+  {
+    v1::AccessibilityTree* tree = cases["accessibility_tree_delta"].mutable_accessibility_tree();
+    tree->set_task_id(42);
+    tree->set_epoch(1);
+    tree->add_root_ids(1);
+    v1::AccessibilityNode* node = tree->add_nodes();
+    node->set_id(2);
+    node->set_class_name("android.widget.EditText");
+    node->set_text("Wi-Fi");
+    node->set_hint("Name");
+    node->set_view_id("com.android.settings:id/title");
+    node->mutable_bounds()->set_left(0);
+    node->mutable_bounds()->set_top(0);
+    node->mutable_bounds()->set_right(400);
+    node->mutable_bounds()->set_bottom(80);
+    node->set_checkable(true);
+    node->set_checked(true);
+    node->set_selected(true);
+    node->set_enabled(true);
+    node->set_focusable(true);
+    node->set_focused(true);
+    node->set_scrollable(true);
+    node->set_clickable(true);
+    node->set_long_clickable(true);
+    node->set_editable(true);
+    node->set_password(true);
+    node->set_heading(true);
+    node->add_actions(v1::NODE_ACTION_CLICK);
+    node->add_actions(v1::NODE_ACTION_LONG_CLICK);
+    node->add_actions(v1::NODE_ACTION_SET_TEXT);
+    node->add_actions(v1::NODE_ACTION_FOCUS);
+    node->add_actions(v1::NODE_ACTION_SELECT);
+    tree->add_removed_ids(3);
+  }
+  {
+    v1::AccessibilityAction* action = cases["accessibility_action"].mutable_accessibility_action();
+    action->set_task_id(42);
+    action->set_epoch(1);
+    action->set_node_id(2);
+    action->set_action(v1::NODE_ACTION_SET_TEXT);
+    action->set_text("hello");
+    action->set_request_id(7);
+  }
+  {
+    v1::AccessibilityActionResult* result =
+        cases["accessibility_action_result"].mutable_accessibility_action_result();
+    result->set_task_id(42);
+    result->set_request_id(7);
+    result->set_done(false);
+    result->set_error("the node is gone");
+  }
   return cases;
 }
 

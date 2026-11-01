@@ -508,6 +508,126 @@ message ClockAnswer {
   uint64 guest_mono_ns = 2;
 }
 
+// Host to guest, to the agent: whether a host accessibility client (a screen reader, an
+// inspection tool) wants the accessibility tree of a task's window. While one does (`on`),
+// the agent reads the task's accessibility nodes and sends them as AccessibilityTree
+// messages: a full tree first, then changes. Once no task is watched, the agent's
+// accessibility service is off and reads nothing, so a user who uses no such client pays
+// nothing for it. The host says `on` again for every watched task each time the agent
+// connects, and a repeated `on` makes the agent send a full tree again.
+message AccessibilityWatch {
+  int32 task_id = 1;
+  bool on = 2;
+}
+
+// What can be done to an accessibility node, as the host asks it and as a node says it
+// supports.
+enum NodeAction {
+  NODE_ACTION_UNSPECIFIED = 0;
+  // Press it, as a tap would, without touching the screen.
+  NODE_ACTION_CLICK = 1;
+  NODE_ACTION_LONG_CLICK = 2;
+  // Replace an editable node's text with AccessibilityAction.text.
+  NODE_ACTION_SET_TEXT = 3;
+  // Scroll a scrollable node by a page, forward (down or right) or backward.
+  NODE_ACTION_SCROLL_FORWARD = 4;
+  NODE_ACTION_SCROLL_BACKWARD = 5;
+  // Give it the input focus.
+  NODE_ACTION_FOCUS = 6;
+  // Give it the accessibility focus, which a screen reader's cursor follows.
+  NODE_ACTION_ACCESSIBILITY_FOCUS = 7;
+  // Select it, as an item of a list or a tab.
+  NODE_ACTION_SELECT = 8;
+}
+
+// The range a slider or a progress bar has, and where it stands in it.
+message NodeRange {
+  float min = 1;
+  float max = 2;
+  float current = 3;
+}
+
+// One accessibility node of a task, as the guest's accessibility framework describes it.
+message AccessibilityNode {
+  // Unique among the nodes of one tree epoch, never 0. A node keeps its ID for as long as
+  // the epoch lasts.
+  uint32 id = 1;
+  // The node's children, in order. Every child is a node of the same tree.
+  repeated uint32 child_ids = 2;
+  // The Android class the node says it is (android.widget.Button, say), from which the host
+  // works out its role.
+  string class_name = 3;
+  string text = 4;
+  string content_description = 5;
+  // What an empty editable node asks for.
+  string hint = 6;
+  // The resource name of the node's view (com.android.settings:id/title), when it has one.
+  string view_id = 7;
+  // Where the node is, in pixels of the task's window: (0, 0) is the window's top left.
+  Rect bounds = 8;
+  bool checkable = 9;
+  bool checked = 10;
+  bool selected = 11;
+  bool enabled = 12;
+  bool focusable = 13;
+  bool focused = 14;
+  bool scrollable = 15;
+  bool clickable = 16;
+  bool long_clickable = 17;
+  bool editable = 18;
+  bool password = 19;
+  bool heading = 20;
+  // Set for a slider or a progress bar.
+  NodeRange range = 21;
+  // What the node can do, in the order of NodeAction.
+  repeated NodeAction actions = 22;
+  // The node's state in words, when the app gives one ("On", "50 percent").
+  string state_description = 23;
+}
+
+// Guest to host, from the agent: a task's accessibility tree, or what changed in it. A full
+// tree (`full`) replaces whatever the host had and starts a new epoch; node IDs of earlier
+// epochs mean nothing in it. A change carries the epoch it applies to, each node that is new
+// or changed (whole), and the IDs of the nodes that are gone. The agent sends a few of these
+// a second at most, however fast the task's content changes.
+message AccessibilityTree {
+  int32 task_id = 1;
+  uint32 epoch = 2;
+  bool full = 3;
+  // The nodes that have no parent in the task (the root of each of its windows), in order.
+  repeated uint32 root_ids = 4;
+  repeated AccessibilityNode nodes = 5;
+  repeated uint32 removed_ids = 6;
+  // The node with the input focus, or 0 for none.
+  uint32 focused_id = 7;
+}
+
+// Host to guest, to the agent: do something to a node of a task, for a host accessibility
+// client (an Invoke from a screen reader, say). The agent answers with
+// AccessibilityActionResult.
+message AccessibilityAction {
+  int32 task_id = 1;
+  // The epoch the node's ID belongs to. An action for an earlier epoch is refused, because
+  // its ID may now name another node.
+  uint32 epoch = 2;
+  uint32 node_id = 3;
+  NodeAction action = 4;
+  // The new text, for NODE_ACTION_SET_TEXT.
+  string text = 5;
+  // Names the action in its answer.
+  uint32 request_id = 6;
+}
+
+// Guest to host, from the agent: what came of an AccessibilityAction.
+message AccessibilityActionResult {
+  int32 task_id = 1;
+  uint32 request_id = 2;
+  // True when the node did it.
+  bool done = 3;
+  // Why it was not done, in words a person can act on. Empty when it was.
+  string error = 4;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -547,5 +667,9 @@ message Envelope {
     OpenFile open_file = 52;
     FileChunk file_chunk = 53;
     FileProgress file_progress = 54;
+    AccessibilityWatch accessibility_watch = 80;
+    AccessibilityTree accessibility_tree = 81;
+    AccessibilityAction accessibility_action = 82;
+    AccessibilityActionResult accessibility_action_result = 83;
   }
 }
