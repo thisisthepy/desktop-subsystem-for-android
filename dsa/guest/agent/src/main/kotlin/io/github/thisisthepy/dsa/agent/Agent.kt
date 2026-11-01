@@ -16,6 +16,12 @@ import io.github.thisisthepy.dsa.agent.input.PointerQueue
 import io.github.thisisthepy.dsa.agent.input.TextInput
 import io.github.thisisthepy.dsa.agent.input.TextKeys
 import io.github.thisisthepy.dsa.agent.input.TouchSounds
+import io.github.thisisthepy.dsa.agent.files.FileOpener
+import io.github.thisisthepy.dsa.agent.files.FileReceiver
+import io.github.thisisthepy.dsa.agent.files.TransferStore
+import io.github.thisisthepy.dsa.agent.links.BrowserRole
+import io.github.thisisthepy.dsa.agent.links.GuestBrowser
+import io.github.thisisthepy.dsa.agent.links.Links
 import io.github.thisisthepy.dsa.agent.power.DevicePower
 import io.github.thisisthepy.dsa.agent.power.Lifecycle
 import io.github.thisisthepy.dsa.agent.memory.MemoryReporter
@@ -59,8 +65,10 @@ import io.github.thisisthepy.dsa.control.v1.PointerAction
  * shown the agent turns the screen off and puts the device into Doze, and the host's battery
  * becomes the guest's ([Lifecycle]). Text copied on the host becomes the guest's clipboard
  * text, and text copied in the guest goes to the host, while the user shares the clipboard
- * ([ClipboardSync]). APKs the host sends are installed through the guest's package installer
- * ([ApkInstaller]), and the host is told how each install went.
+ * ([ClipboardSync]). Web links apps open go to the host's browser unless the host says they
+ * stay in the guest ([Links]), and files the host sends are stored and offered to the apps
+ * that can open them ([FileReceiver]). APKs the host sends are installed through the guest's
+ * package installer ([ApkInstaller]), and the host is told how each install went.
  */
 class Agent(
     private val ownPackage: String,
@@ -83,6 +91,10 @@ class Agent(
     private val inputTrace: InputTrace = InputTrace(log),
     private val frameTrace: FrameStatsTrace? = null,
     private val touchSounds: TouchSounds = TouchSounds.NONE,
+    browserRole: BrowserRole = BrowserRole.NONE,
+    guestBrowser: GuestBrowser = GuestBrowser.NONE,
+    fileStore: TransferStore? = null,
+    fileOpener: FileOpener = FileOpener.NONE,
     clipboard: GuestClipboard = GuestClipboard.NONE,
     packageInstaller: PackageInstallerPort = PackageInstallerPort.NONE,
 ) {
@@ -143,6 +155,8 @@ class Agent(
     private val freeform = FreeformSetup(windowing, scheduler, log)
     private val arranger = TaskArranger(actions, windowing::displaySize, log)
     private val installed = InstalledAppReporter(ownPackage) { frame -> channel.send(frame) }
+    private val links = Links(browserRole, guestBrowser, { frame -> channel.send(frame) }, log)
+    private val files = FileReceiver(fileStore, fileOpener, { frame -> channel.send(frame) }, log)
     private var refreshPending = false
     private var appsPending = false
     private var checkPending = false
@@ -227,6 +241,8 @@ class Agent(
         apkInstaller.connected()
         installed.resend()
         memoryReporter?.connected()
+        links.connected()
+        files.connected()
         requestRefresh()
         requestAppsRefresh()
     }
@@ -234,6 +250,7 @@ class Agent(
     private fun onFrame(frame: ByteArray) {
         if (input(frame)) return
         if (memoryRequest(frame)) return
+        if (linksOrFiles(frame)) return
         val result = try {
             requests.handle(frame)
         } catch (e: Exception) {
@@ -302,6 +319,30 @@ class Agent(
             else -> return false
         }
         return true
+    }
+
+    /** Takes the frame if it is about web links or a file from the host. False for any other frame. */
+    private fun linksOrFiles(frame: ByteArray): Boolean {
+        val envelope = try {
+            Envelope.parseFrom(frame)
+        } catch (e: InvalidProtocolBufferException) {
+            return false
+        }
+        return try {
+            links.handle(envelope) || files.handle(envelope)
+        } catch (e: Exception) {
+            log.warn("acting on a link or file frame from the host failed", e)
+            true
+        }
+    }
+
+    /**
+     * An app opened [url] through the agent's browser activity: it goes to the host, or opens
+     * in a browser in the guest when links stay there or the host cannot be reached. Called
+     * from any thread.
+     */
+    fun openLink(url: String?) {
+        scheduler.post { links.open(url, channel.connected) }
     }
 
     /** Reports the guest's memory if the frame asks for it. False for any other frame. */

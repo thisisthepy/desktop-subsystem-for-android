@@ -13,6 +13,7 @@
 //! closes.
 
 pub mod apk_install;
+pub mod host_file;
 pub mod ime;
 pub mod keys;
 pub mod launch;

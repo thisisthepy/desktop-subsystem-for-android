@@ -18,6 +18,7 @@ use dsa_transport::local::LocalListener;
 use dsa_transport::Connector;
 
 use crate::apk::{self, InstallOutcome, InstallStatus};
+use crate::files::{FileAction, FileTransfer, MAX_FILE_BYTES};
 use crate::host_api::{
     running_of, stop_every, ClientError, HostApiClient, HostApiService, InstallError,
     ProgramUpdate, ServiceFacts, UpdateProgram, UserAndroid, UserAndroids,
@@ -54,6 +55,11 @@ pub struct FakeAndroid {
     pub shown: Mutex<Vec<bool>>,
     /// Each word on whether it may be frozen when idle, in order.
     pub freeze_when_idle: Mutex<Vec<bool>>,
+    /// Each word on whether web links open in it, in order.
+    pub links_in_android: Mutex<Vec<bool>>,
+    link_watchers: Mutex<Vec<Sender<String>>>,
+    /// The files it was given, in order.
+    pub files: Mutex<Vec<FileTransfer>>,
     /// Each word on whether the clipboard is shared, in order.
     pub clipboard_shared: Mutex<Vec<bool>>,
     /// The text copied on the host it was given, in order.
@@ -86,6 +92,9 @@ impl FakeAndroid {
             text: Mutex::new(Vec::new()),
             shown: Mutex::new(Vec::new()),
             freeze_when_idle: Mutex::new(Vec::new()),
+            links_in_android: Mutex::new(Vec::new()),
+            link_watchers: Mutex::new(Vec::new()),
+            files: Mutex::new(Vec::new()),
             clipboard_shared: Mutex::new(Vec::new()),
             host_clipboard: Mutex::new(Vec::new()),
             clipboard_watchers: Mutex::new(Vec::new()),
@@ -94,6 +103,14 @@ impl FakeAndroid {
             install_time: Mutex::new(Duration::ZERO),
             install_turn: Mutex::new(()),
         }
+    }
+
+    /// Opens `url` as an app in this Android would, and tells the link watchers.
+    pub fn open_link_in_android(&self, url: &str) {
+        self.link_watchers
+            .lock()
+            .unwrap()
+            .retain(|watcher| watcher.send(url.to_string()).is_ok());
     }
 
     /// Copies `text` as an app in this Android would, and tells the clipboard watchers.
@@ -153,6 +170,24 @@ impl UserAndroid for FakeAndroid {
     }
     fn freeze_when_idle(&self, on: bool) {
         self.freeze_when_idle.lock().unwrap().push(on);
+    }
+    fn links_in_android(&self, on: bool) {
+        self.links_in_android.lock().unwrap().push(on);
+    }
+    fn watch_links(&self) -> Option<mpsc::Receiver<String>> {
+        let (tx, rx) = mpsc::channel();
+        self.link_watchers.lock().unwrap().push(tx);
+        Some(rx)
+    }
+    fn open_file(&self, file: &FileTransfer) -> Result<(), TaskRequestError> {
+        if self.state() != SessionState::Active {
+            return Err(TaskRequestError::NotRunning(format!(
+                "Android is {}, not running",
+                self.state()
+            )));
+        }
+        self.files.lock().unwrap().push(file.clone());
+        Ok(())
     }
     fn share_clipboard(&self, on: bool) {
         self.clipboard_shared.lock().unwrap().push(on);
@@ -528,6 +563,34 @@ macro_rules! host_api_conformance {
         #[test]
         fn nfr5_a_client_that_sends_something_else_during_an_install_is_refused() {
             $crate::host_api_conformance::malformed_install_is_refused(&mut || $make);
+        }
+        #[test]
+        fn fr9_a_link_opened_in_the_callers_android_reaches_the_client() {
+            $crate::host_api_conformance::link_reaches_the_client(&mut || $make);
+        }
+        #[test]
+        fn fr9_the_link_setting_reaches_the_callers_android() {
+            $crate::host_api_conformance::link_setting_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn nfr5_a_link_client_that_sends_a_frame_is_disconnected() {
+            $crate::host_api_conformance::link_client_that_sends_is_disconnected(&mut || $make);
+        }
+        #[test]
+        fn fr9_a_host_file_reaches_the_callers_android_whole() {
+            $crate::host_api_conformance::file_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr9_a_file_larger_than_the_limit_is_refused() {
+            $crate::host_api_conformance::oversized_file_is_refused(&mut || $make);
+        }
+        #[test]
+        fn fr9_a_file_for_an_android_that_is_not_running_is_refused() {
+            $crate::host_api_conformance::file_for_stopped_android_is_refused(&mut || $make);
+        }
+        #[test]
+        fn nfr5_a_file_client_that_sends_something_else_is_refused() {
+            $crate::host_api_conformance::malformed_file_is_refused(&mut || $make);
         }
         #[test]
         fn fr17_settings_are_read_and_changed_through_the_service() {
@@ -1546,6 +1609,254 @@ pub fn clipboard_client_that_sends_a_request_is_disconnected(make: MakeLocal<'_>
     assert_eq!(
         connect(&mut *connector).status().unwrap().state,
         SessionState::Stopped
+    );
+}
+
+pub fn link_reaches_the_client(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut links = connect(&mut *connector)
+        .watch_links()
+        .expect("watching links");
+    let android = androids.of(&user).expect("the caller's Android");
+    assert_eq!(links.next(Duration::from_millis(50)).unwrap(), None);
+    android.open_link_in_android("https://example.com/page");
+    assert_eq!(
+        links.next(WAIT).unwrap().as_deref(),
+        Some("https://example.com/page")
+    );
+}
+
+pub fn link_setting_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let service =
+        HostApiService::new(androids.clone(), "test service").with_settings(store.clone(), facts());
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    assert!(
+        !client.settings().unwrap().settings.links_in_android,
+        "links open on the host by default"
+    );
+    let changed = client
+        .set_settings(&Settings {
+            links_in_android: true,
+            ..Settings::default()
+        })
+        .expect("letting links open in Android");
+    assert!(changed.settings.links_in_android);
+    assert!(store.get(&user).unwrap().links_in_android);
+    client.set_settings(&Settings::default()).unwrap();
+    assert_eq!(
+        *androids.of(&user).unwrap().links_in_android.lock().unwrap(),
+        vec![true, false]
+    );
+}
+
+pub fn link_client_that_sends_is_disconnected(make: MakeLocal<'_>) {
+    use dsa_protocol::host_api::types as wire;
+    let (listener, mut connector, _) = make();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let mut connection = connector.connect(WAIT).unwrap();
+    client_connect(&mut *connection, &local_hello(Role::Client, "client"), WAIT).unwrap();
+    let watch = wire::Request {
+        id: 1,
+        body: Some(wire::request::Body::WatchLinks(wire::WatchLinks {})),
+    };
+    dsa_protocol::host_api::send(
+        &mut *connection,
+        wire::envelope::Body::Request(watch.clone()),
+    )
+    .unwrap();
+    connection
+        .recv(Some(WAIT))
+        .expect("the answer to the watch");
+    dsa_protocol::host_api::send(&mut *connection, wire::envelope::Body::Request(watch)).unwrap();
+    assert!(
+        connection.recv(Some(WAIT)).is_err(),
+        "the service closes a link client that sends a frame"
+    );
+    assert_eq!(
+        connect(&mut *connector).status().unwrap().state,
+        SessionState::Stopped,
+        "the service goes on"
+    );
+}
+
+pub fn file_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    // Larger than one piece on the local API, and not a whole number of them.
+    let content: Vec<u8> = (0..(2 * crate::files::LOCAL_CHUNK_BYTES + 12_345))
+        .map(|i| (i % 251) as u8)
+        .collect();
+    let file = FileTransfer {
+        name: "\u{c0ac}\u{c9c4} photo.jpg".into(),
+        content,
+        action: FileAction::Send,
+    };
+    connect(&mut *connector)
+        .open_file(&file)
+        .expect("sending the file");
+    let empty = FileTransfer {
+        name: "empty.txt".into(),
+        content: Vec::new(),
+        action: FileAction::View,
+    };
+    connect(&mut *connector)
+        .open_file(&empty)
+        .expect("sending an empty file");
+    assert_eq!(
+        *androids.of(&user).unwrap().files.lock().unwrap(),
+        vec![file, empty]
+    );
+}
+
+/// Sends an OpenFile request by hand and returns the connection and the first answer.
+fn raw_open_file(
+    connector: &mut dyn Connector,
+    open: dsa_protocol::host_api::types::OpenFile,
+) -> (
+    Box<dyn dsa_transport::Connection>,
+    dsa_protocol::host_api::types::Response,
+) {
+    use dsa_protocol::host_api::types as wire;
+    let mut connection = connector.connect(WAIT).unwrap();
+    client_connect(&mut *connection, &local_hello(Role::Client, "client"), WAIT).unwrap();
+    dsa_protocol::host_api::send(
+        &mut *connection,
+        wire::envelope::Body::Request(wire::Request {
+            id: 7,
+            body: Some(wire::request::Body::OpenFile(open)),
+        }),
+    )
+    .unwrap();
+    let answer = response_of(&mut *connection);
+    (connection, answer)
+}
+
+fn response_of(
+    connection: &mut dyn dsa_transport::Connection,
+) -> dsa_protocol::host_api::types::Response {
+    use dsa_protocol::host_api::types as wire;
+    let frame = connection.recv(Some(WAIT)).expect("an answer");
+    match dsa_protocol::host_api::decode(&frame) {
+        Ok(wire::Envelope {
+            body: Some(wire::envelope::Body::Response(response)),
+        }) => response,
+        other => panic!("expected a response, got {other:?}"),
+    }
+}
+
+fn refusal(response: &dsa_protocol::host_api::types::Response) -> Option<(i32, String)> {
+    match &response.body {
+        Some(dsa_protocol::host_api::types::response::Body::Error(error)) => {
+            Some((error.code, error.detail.clone()))
+        }
+        _ => None,
+    }
+}
+
+pub fn oversized_file_is_refused(make: MakeLocal<'_>) {
+    use dsa_protocol::host_api::types as wire;
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let (_connection, answer) = raw_open_file(
+        &mut *connector,
+        wire::OpenFile {
+            name: "movie.mp4".into(),
+            size: MAX_FILE_BYTES + 1,
+            action: wire::FileAction::View as i32,
+        },
+    );
+    let (code, detail) = refusal(&answer).expect("the file is refused");
+    assert_eq!(code, ErrorCode::FileRefused as i32);
+    assert!(detail.contains("MiB"), "{detail}");
+    let (_connection, answer) = raw_open_file(
+        &mut *connector,
+        wire::OpenFile {
+            name: "..\\secret".into(),
+            size: 3,
+            action: wire::FileAction::View as i32,
+        },
+    );
+    assert_eq!(
+        refusal(&answer).map(|(code, _)| code),
+        Some(ErrorCode::FileRefused as i32),
+        "a name with a folder is refused"
+    );
+    assert!(androids.of(&user).unwrap().files.lock().unwrap().is_empty());
+}
+
+pub fn file_for_stopped_android_is_refused(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let file = FileTransfer {
+        name: "a.txt".into(),
+        content: b"abc".to_vec(),
+        action: FileAction::View,
+    };
+    match connect(&mut *connector).open_file(&file) {
+        Err(ClientError::Service { code, detail }) => {
+            assert_eq!(code, ErrorCode::NotRunning);
+            assert!(detail.contains("not running"), "{detail}");
+        }
+        other => panic!("expected the file to be refused, got {other:?}"),
+    }
+}
+
+pub fn malformed_file_is_refused(make: MakeLocal<'_>) {
+    use dsa_protocol::host_api::types as wire;
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let open = wire::OpenFile {
+        name: "a.txt".into(),
+        size: 4,
+        action: wire::FileAction::View as i32,
+    };
+
+    // More bytes than announced.
+    let (mut connection, answer) = raw_open_file(&mut *connector, open.clone());
+    assert!(refusal(&answer).is_none(), "the file is taken at first");
+    dsa_protocol::host_api::send(
+        &mut *connection,
+        wire::envelope::Body::FileChunk(wire::FileChunk {
+            data: b"too long".to_vec(),
+        }),
+    )
+    .unwrap();
+    let (code, _) = refusal(&response_of(&mut *connection)).expect("refused");
+    assert_eq!(code, ErrorCode::FileRefused as i32);
+
+    // An unreadable frame in place of a piece.
+    let (mut connection, _) = raw_open_file(&mut *connector, open.clone());
+    connection.send(&[0xff, 0xff, 0xff]).unwrap();
+    let (code, _) = refusal(&response_of(&mut *connection)).expect("refused");
+    assert_eq!(code, ErrorCode::FileRefused as i32);
+
+    // Neither open nor share.
+    let (_connection, answer) = raw_open_file(
+        &mut *connector,
+        wire::OpenFile {
+            action: wire::FileAction::Unspecified as i32,
+            ..open
+        },
+    );
+    assert!(refusal(&answer).is_some());
+
+    assert!(androids.of(&user).unwrap().files.lock().unwrap().is_empty());
+    assert_eq!(
+        connect(&mut *connector).status().unwrap().state,
+        SessionState::Active,
+        "the service goes on"
     );
 }
 

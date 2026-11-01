@@ -284,6 +284,27 @@ std::map<std::string, v1::Envelope> Cases() {
     process->set_pss_kb(180000);
     process->set_swap_pss_kb(1000);
   }
+  cases["open_link"].mutable_open_link()->set_url("https://example.com/");
+  cases["link_handling"].mutable_link_handling()->set_in_guest(true);
+  {
+    v1::OpenFile* open = cases["open_file"].mutable_open_file();
+    open->set_transfer_id(3);
+    open->set_name("photo.jpg");
+    open->set_size(1000);
+    open->set_action(v1::FILE_ACTION_SEND);
+  }
+  {
+    v1::FileChunk* chunk = cases["file_chunk"].mutable_file_chunk();
+    chunk->set_transfer_id(3);
+    chunk->set_offset(131072);
+    chunk->set_data(std::string("\x01\x02\x03", 3));
+  }
+  {
+    v1::FileProgress* progress = cases["file_progress"].mutable_file_progress();
+    progress->set_transfer_id(3);
+    progress->set_received(1000);
+    progress->set_error("storage is full");
+  }
   return cases;
 }
 

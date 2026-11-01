@@ -471,10 +471,13 @@ where
         match &android {
             // Freezing is the user's choice, kept with their settings; off unless they chose it.
             // So is clipboard sharing, kept with them too; on unless they turned it off.
+            // Opening web links in Android rather than the browser is theirs too; off unless they
+            // chose it.
             Ok(android) => {
                 let settings = factory_store.get(sid).ok();
                 android.freeze_when_idle(settings.as_ref().is_some_and(|s| s.freeze));
                 android.share_clipboard(settings.as_ref().is_none_or(|s| s.clipboard));
+                android.links_in_android(settings.as_ref().is_some_and(|s| s.links_in_android));
             }
             Err(why) => eprintln!("{factory_build}: no Android for {sid}: {why}"),
         }

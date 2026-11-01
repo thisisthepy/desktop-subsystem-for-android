@@ -748,6 +748,15 @@ impl UserAndroid for WithProgramStatus {
     fn freeze_when_idle(&self, on: bool) {
         self.android.freeze_when_idle(on)
     }
+    fn links_in_android(&self, on: bool) {
+        self.android.links_in_android(on)
+    }
+    fn watch_links(&self) -> Option<std::sync::mpsc::Receiver<String>> {
+        self.android.watch_links()
+    }
+    fn open_file(&self, file: &crate::files::FileTransfer) -> Result<(), TaskRequestError> {
+        self.android.open_file(file)
+    }
     fn guest_memory(&self) -> Option<GuestMemoryReport> {
         self.android.guest_memory()
     }

@@ -99,7 +99,8 @@ public sealed class DsaService
         Bool(json, "image_updates_available"),
         String(json, "version"),
         OptionalString(json, "log_dir"),
-        Bool(json, "clipboard", missing: true));
+        Bool(json, "clipboard", missing: true),
+        Bool(json, "links_in_android"));
 
     public async Task<SettingsInfo> SettingsAsync() =>
         ReadSettings(await RunJsonAsync("settings").ConfigureAwait(true));
@@ -110,6 +111,8 @@ public sealed class DsaService
     public Task<SettingsInfo> SetRenderGpuAsync(string value) => SetAsync("render-gpu", value);
 
     public Task<SettingsInfo> SetFreezeAsync(bool on) => SetAsync("freeze", on ? "on" : "off");
+
+    public Task<SettingsInfo> SetLinksInAndroidAsync(bool on) => SetAsync("links-in-android", on ? "on" : "off");
 
     public Task<SettingsInfo> SetClipboardAsync(bool on) => SetAsync("clipboard", on ? "on" : "off");
 

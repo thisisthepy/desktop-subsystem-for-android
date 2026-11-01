@@ -349,59 +349,59 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.DeviceIdle getDeviceIdle();
 
   /**
-   * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
-   * @return Whether the installApk field is set.
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+   * @return Whether the openLink field is set.
    */
-  boolean hasInstallApk();
+  boolean hasOpenLink();
   /**
-   * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
-   * @return The installApk.
+   * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
+   * @return The openLink.
    */
-  io.github.thisisthepy.dsa.control.v1.InstallApk getInstallApk();
+  io.github.thisisthepy.dsa.control.v1.OpenLink getOpenLink();
 
   /**
-   * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
-   * @return Whether the apkChunk field is set.
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+   * @return Whether the linkHandling field is set.
    */
-  boolean hasApkChunk();
+  boolean hasLinkHandling();
   /**
-   * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
-   * @return The apkChunk.
+   * <code>.dsa.control.v1.LinkHandling link_handling = 51;</code>
+   * @return The linkHandling.
    */
-  io.github.thisisthepy.dsa.control.v1.ApkChunk getApkChunk();
+  io.github.thisisthepy.dsa.control.v1.LinkHandling getLinkHandling();
 
   /**
-   * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
-   * @return Whether the cancelInstall field is set.
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+   * @return Whether the openFile field is set.
    */
-  boolean hasCancelInstall();
+  boolean hasOpenFile();
   /**
-   * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
-   * @return The cancelInstall.
+   * <code>.dsa.control.v1.OpenFile open_file = 52;</code>
+   * @return The openFile.
    */
-  io.github.thisisthepy.dsa.control.v1.CancelInstall getCancelInstall();
+  io.github.thisisthepy.dsa.control.v1.OpenFile getOpenFile();
 
   /**
-   * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
-   * @return Whether the installProgress field is set.
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+   * @return Whether the fileChunk field is set.
    */
-  boolean hasInstallProgress();
+  boolean hasFileChunk();
   /**
-   * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
-   * @return The installProgress.
+   * <code>.dsa.control.v1.FileChunk file_chunk = 53;</code>
+   * @return The fileChunk.
    */
-  io.github.thisisthepy.dsa.control.v1.InstallProgress getInstallProgress();
+  io.github.thisisthepy.dsa.control.v1.FileChunk getFileChunk();
 
   /**
-   * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
-   * @return Whether the installResult field is set.
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   * @return Whether the fileProgress field is set.
    */
-  boolean hasInstallResult();
+  boolean hasFileProgress();
   /**
-   * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
-   * @return The installResult.
+   * <code>.dsa.control.v1.FileProgress file_progress = 54;</code>
+   * @return The fileProgress.
    */
-  io.github.thisisthepy.dsa.control.v1.InstallResult getInstallResult();
+  io.github.thisisthepy.dsa.control.v1.FileProgress getFileProgress();
 
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

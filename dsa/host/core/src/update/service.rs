@@ -265,6 +265,15 @@ impl UserAndroid for UpdatingAndroid {
     fn freeze_when_idle(&self, on: bool) {
         UserAndroid::freeze_when_idle(&*self.session, on)
     }
+    fn links_in_android(&self, on: bool) {
+        UserAndroid::links_in_android(&*self.session, on)
+    }
+    fn watch_links(&self) -> Option<std::sync::mpsc::Receiver<String>> {
+        UserAndroid::watch_links(&*self.session)
+    }
+    fn open_file(&self, file: &crate::files::FileTransfer) -> Result<(), TaskRequestError> {
+        UserAndroid::open_file(&*self.session, file)
+    }
     fn guest_memory(&self) -> Option<GuestMemoryReport> {
         UserAndroid::guest_memory(&*self.session)
     }

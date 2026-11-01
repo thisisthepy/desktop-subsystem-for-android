@@ -2,10 +2,11 @@
 <!--
   The guest agent. coreApp makes it start in the core-only boot stages too; persistent makes
   the activity manager start it at boot and restart it if it dies. The host is the shell: the
-  agent reports tasks and acts on the host's requests, and its one activity is the guest's
-  invisible home (platform/HomeActivity.kt), which Android requires and nobody sees. Its one
-  service is the guest's input method (platform/HostInputMethod.kt), which shows nothing and
-  types what the host's input method composes.
+  agent reports tasks and acts on the host's requests, and its activities are the guest's
+  invisible home (platform/HomeActivity.kt), which Android requires and nobody sees, and the
+  guest's browser while web links go to the host (platform/LinkActivity.kt), which shows
+  nothing. Its one service is the guest's input method (platform/HostInputMethod.kt), which
+  shows nothing and types what the host's input method composes.
   Every permission here is also in privapp-permissions-dsa-agent.xml.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -45,6 +46,12 @@
     <!-- Installing the APKs the host sends, without asking the user to confirm each one. -->
     <uses-permission android:name="android.permission.INSTALL_PACKAGES" />
 
+    <!--
+      Making the agent the guest's browser while web links go to the host, and giving the
+      role back to a browser app when the user keeps links in the guest.
+    -->
+    <uses-permission android:name="android.permission.MANAGE_ROLE_HOLDERS" />
+
     <application
         android:name=".platform.AgentApplication"
         android:allowBackup="false"
@@ -74,6 +81,37 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!--
+          The guest's browser while web links go to the host: it shows nothing, hands each
+          http and https link to the agent, which sends it to the host, and finishes at once.
+          A link an installed app has verified as its own (an App Link) never comes here:
+          Android opens it in that app.
+        -->
+        <activity
+            android:name=".platform.LinkActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          The files the host sends, read only, to the app the user picks. Not exported: an app
+          reads a file only through the permission granted with the intent that offers it.
+        -->
+        <provider
+            android:name=".platform.HostFileProvider"
+            android:authorities="io.github.thisisthepy.dsa.agent.hostfiles"
+            android:exported="false"
+            android:grantUriPermissions="true" />
 
         <!--
           The guest's only input method. It is no keyboard: it has no view and is never shown,
