@@ -107,8 +107,7 @@ fn next_probe(guest: &mut Box<dyn Connection>, within: Duration) -> Option<contr
     while Instant::now() < deadline {
         match guest.recv(Some(Duration::from_millis(20))) {
             Ok(frame) => {
-                if let Some(Body::ClockProbe(probe)) = dsa_protocol::decode(&frame).unwrap().body
-                {
+                if let Some(Body::ClockProbe(probe)) = dsa_protocol::decode(&frame).unwrap().body {
                     return Some(probe);
                 }
             }
@@ -142,7 +141,10 @@ fn fr5_while_the_trace_is_on_the_session_probes_the_guests_clock_and_logs_each_a
         thread::sleep(Duration::from_millis(5));
     };
     let sent = probe.host_sent_ns as f64 / 1e6;
-    assert!(line.starts_with("input-trace stage=clock task=0 "), "{line}");
+    assert!(
+        line.starts_with("input-trace stage=clock task=0 "),
+        "{line}"
+    );
     assert!(
         line.contains(&format!(" host_sent={sent:.3} guest=500.000 ")),
         "{line}"
@@ -160,7 +162,10 @@ fn fr5_while_the_trace_is_on_the_session_probes_the_guests_clock_and_logs_each_a
     let (received, rtt, offset) = (field("host_received"), field("rtt"), field("offset"));
     assert!(rtt >= 2.0, "{line}");
     assert!((received - sent - rtt).abs() < 1e-6, "{line}");
-    assert!((offset - (500.0 - (sent + received) / 2.0)).abs() < 1e-6, "{line}");
+    assert!(
+        (offset - (500.0 - (sent + received) / 2.0)).abs() < 1e-6,
+        "{line}"
+    );
     // The probes go on.
     assert!(next_probe(&mut setup.guest, WAIT).is_some());
     setup.session.stop();
@@ -169,7 +174,10 @@ fn fr5_while_the_trace_is_on_the_session_probes_the_guests_clock_and_logs_each_a
 #[test]
 fn fr5_while_the_trace_is_off_the_session_sends_no_probe() {
     let mut setup = setup(false);
-    assert_eq!(next_probe(&mut setup.guest, Duration::from_millis(500)), None);
+    assert_eq!(
+        next_probe(&mut setup.guest, Duration::from_millis(500)),
+        None
+    );
     assert!(setup.lines.lock().unwrap().is_empty());
     setup.session.stop();
 }

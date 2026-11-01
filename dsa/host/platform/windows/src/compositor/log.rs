@@ -138,13 +138,17 @@ pub fn host_clock() -> Duration {
     qpc_to_duration(now, frequency)
 }
 
-/// A performance counter reading `ticks` at `frequency` ticks a second, as a duration.
-pub fn qpc_to_duration(ticks: i64, frequency: i64) -> Duration {
-    if ticks <= 0 || frequency <= 0 {
-        return Duration::ZERO;
+pub use dsa_host_core::compositor::present_watch::qpc_to_duration;
+
+/// The performance counter's ticks a second.
+pub fn qpc_frequency() -> i64 {
+    use windows_sys::Win32::System::Performance::QueryPerformanceFrequency;
+    let mut frequency = 0i64;
+    // SAFETY: writes one local integer.
+    unsafe {
+        QueryPerformanceFrequency(&mut frequency);
     }
-    let (ticks, frequency) = (ticks as u128, frequency as u128);
-    Duration::from_nanos((ticks * 1_000_000_000 / frequency) as u64)
+    frequency
 }
 
 /// [`host_clock`] for the platform-neutral clock pairing.
@@ -255,19 +259,4 @@ pub fn trace_forget(task_id: i32) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .forget(task_id);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fr5_the_host_clock_turns_performance_counter_ticks_into_time() {
-        assert_eq!(qpc_to_duration(10_000_000, 10_000_000), Duration::from_secs(1));
-        assert_eq!(
-            qpc_to_duration(1_234_567, 10_000_000),
-            Duration::from_nanos(123_456_700)
-        );
-        assert_eq!(qpc_to_duration(5, 0), Duration::ZERO);
-    }
 }

@@ -56,7 +56,10 @@ pub fn guest_monotonic() -> Duration {
     if unsafe { clock_gettime(CLOCK_MONOTONIC, &mut time) } != 0 {
         return Duration::ZERO;
     }
-    Duration::new(time.tv_sec.max(0) as u64, time.tv_nsec.clamp(0, 999_999_999) as u32)
+    Duration::new(
+        time.tv_sec.max(0) as u64,
+        time.tv_nsec.clamp(0, 999_999_999) as u32,
+    )
 }
 
 /// Off Linux there is no guest clock to pair; the time since the daemon first looked stands

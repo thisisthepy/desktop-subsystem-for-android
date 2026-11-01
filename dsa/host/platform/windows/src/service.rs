@@ -47,7 +47,6 @@ use dsa_transport::Listener;
 
 use crate::android_vm::AndroidVmLauncher;
 use crate::compositor::log::PerformanceCounterClock;
-use dsa_host_core::clock_trace::ClockTrace;
 use crate::guest_communication_services::register_graphics_service_guids;
 use crate::guid::Guid;
 use crate::host_config::{local_app_data, HostConfig};
@@ -62,6 +61,7 @@ use crate::user_disk::{bring_disk_to, prepare_user_data_disk, prepare_user_disk_
 use crate::vm::AndroidVmConfig;
 use crate::vm_listener::VmBoundListener;
 use crate::window_manager::UserWindowManager;
+use dsa_host_core::clock_trace::ClockTrace;
 
 /// What the service shares between users when it updates the image.
 #[derive(Clone)]
@@ -88,7 +88,9 @@ pub const GUEST_INPUT_TRACE: &str = "androidboot.hardware.dsa_input_trace=1";
 
 /// Whether a guest booted with `cmdline` writes the input trace.
 pub fn guest_traces_input(cmdline: &str) -> bool {
-    cmdline.split_whitespace().any(|word| word == GUEST_INPUT_TRACE)
+    cmdline
+        .split_whitespace()
+        .any(|word| word == GUEST_INPUT_TRACE)
 }
 
 /// The user's Android: their data disk, VM and session, created on their first request.
@@ -573,6 +575,8 @@ mod tests {
             "androidboot.hardware=dsa androidboot.hardware.dsa_input_trace=1"
         ));
         assert!(!guest_traces_input("androidboot.hardware=dsa"));
-        assert!(!guest_traces_input("androidboot.hardware.dsa_input_trace=0"));
+        assert!(!guest_traces_input(
+            "androidboot.hardware.dsa_input_trace=0"
+        ));
     }
 }

@@ -300,7 +300,9 @@ fn fr5_the_daemon_answers_a_clock_probe_itself_with_the_guests_clock() {
     assert!(answer.guest_mono_ns >= before.as_nanos() as u64);
     assert!(answer.guest_mono_ns <= after.as_nanos() as u64);
     // The probe is the daemon's own; the guest's clients never see it.
-    assert!(to_guest_rx.recv_timeout(Duration::from_millis(200)).is_err());
+    assert!(to_guest_rx
+        .recv_timeout(Duration::from_millis(200))
+        .is_err());
 
     stop.store(true, Ordering::Relaxed);
     assert_eq!(daemon.join().unwrap(), ChannelError::Stopped);
