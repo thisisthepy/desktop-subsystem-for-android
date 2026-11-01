@@ -251,6 +251,31 @@ public final class VectorsTest {
                                 .setPssKb(180000)
                                 .setSwapPssKb(1000)))
                 .build());
+        cases.put("open_link", Envelope.newBuilder()
+                .setOpenLink(OpenLink.newBuilder().setUrl("https://example.com/"))
+                .build());
+        cases.put("link_handling", Envelope.newBuilder()
+                .setLinkHandling(LinkHandling.newBuilder().setInGuest(true))
+                .build());
+        cases.put("open_file", Envelope.newBuilder()
+                .setOpenFile(OpenFile.newBuilder()
+                        .setTransferId(3)
+                        .setName("photo.jpg")
+                        .setSize(1000)
+                        .setAction(FileAction.FILE_ACTION_SEND))
+                .build());
+        cases.put("file_chunk", Envelope.newBuilder()
+                .setFileChunk(FileChunk.newBuilder()
+                        .setTransferId(3)
+                        .setOffset(131072)
+                        .setData(ByteString.copyFrom(new byte[] {1, 2, 3})))
+                .build());
+        cases.put("file_progress", Envelope.newBuilder()
+                .setFileProgress(FileProgress.newBuilder()
+                        .setTransferId(3)
+                        .setReceived(1000)
+                        .setError("storage is full"))
+                .build());
         return cases;
     }
 
