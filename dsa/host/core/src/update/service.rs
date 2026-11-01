@@ -280,6 +280,15 @@ impl UserAndroid for UpdatingAndroid {
     fn ime(&self, event: &ImeEvent) -> Result<(), TaskRequestError> {
         UserAndroid::ime(&*self.session, event)
     }
+    fn share_clipboard(&self, on: bool) {
+        UserAndroid::share_clipboard(&*self.session, on)
+    }
+    fn host_clipboard(&self, text: String) {
+        UserAndroid::host_clipboard(&*self.session, text)
+    }
+    fn watch_clipboard(&self) -> Option<std::sync::mpsc::Receiver<String>> {
+        UserAndroid::watch_clipboard(&*self.session)
+    }
 
     fn start(&self) {
         if self.no_image_yet() {

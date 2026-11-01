@@ -1,7 +1,8 @@
 //! The settings a user changes from the settings app, kept by the service.
 //!
-//! Two of them are the user's own: the GPU their window manager renders on and whether their
-//! Android may be frozen when idle. Two are the machine's, shared by every user: whether the
+//! Three of them are the user's own: the GPU their window manager renders on, whether their
+//! Android may be frozen when idle, and whether their clipboard is shared with it. Two are the
+//! machine's, shared by every user: whether the
 //! service updates DSA itself and whether it downloads new Android images.
 //!
 //! Clients read and change them through the local API only. The service keeps them in its
@@ -10,7 +11,7 @@
 //!
 //! ```text
 //! <dir>/machine.json          {"program_updates": true, "image_updates": true}
-//! <dir>/users/<user>.json     {"render_gpu": "display", "freeze": false}
+//! <dir>/users/<user>.json     {"render_gpu": "display", "freeze": false, "clipboard": true}
 //! ```
 //!
 //! A missing file means the defaults. A user who has never saved settings starts from what
@@ -32,6 +33,9 @@ pub struct Settings {
     pub render_gpu: String,
     /// Whether the user's Android may be frozen when idle. Off by default.
     pub freeze: bool,
+    /// Whether text copied on the host can be pasted in the user's Android, and the reverse.
+    /// On by default.
+    pub clipboard: bool,
     /// Whether the service updates DSA itself.
     pub program_updates: bool,
     /// Whether the service downloads new Android images.
@@ -43,6 +47,7 @@ impl Default for Settings {
         Settings {
             render_gpu: "display".into(),
             freeze: false,
+            clipboard: true,
             program_updates: true,
             image_updates: true,
         }
@@ -82,6 +87,8 @@ pub struct UserSettings {
     pub render_gpu: String,
     #[serde(default)]
     pub freeze: bool,
+    #[serde(default = "yes")]
+    pub clipboard: bool,
 }
 
 impl Default for UserSettings {
@@ -89,6 +96,7 @@ impl Default for UserSettings {
         UserSettings {
             render_gpu: display(),
             freeze: false,
+            clipboard: true,
         }
     }
 }
@@ -192,6 +200,7 @@ impl FileSettings {
                     .and_then(|value| normalise_render_gpu(&value).ok())
                     .unwrap_or_else(display),
                 freeze: false,
+                clipboard: true,
             }),
         }
     }
@@ -226,6 +235,7 @@ impl SettingsStore for FileSettings {
         Ok(Settings {
             render_gpu: mine.render_gpu,
             freeze: mine.freeze,
+            clipboard: mine.clipboard,
             program_updates: machine.program_updates,
             image_updates: machine.image_updates,
         })
@@ -240,6 +250,7 @@ impl SettingsStore for FileSettings {
             &UserSettings {
                 render_gpu: render_gpu.clone(),
                 freeze: settings.freeze,
+                clipboard: settings.clipboard,
             },
         )?;
         write_json(
@@ -284,6 +295,7 @@ impl SettingsStore for MemorySettings {
         Ok(Settings {
             render_gpu: mine.render_gpu,
             freeze: mine.freeze,
+            clipboard: mine.clipboard,
             program_updates: machine.program_updates,
             image_updates: machine.image_updates,
         })
@@ -296,6 +308,7 @@ impl SettingsStore for MemorySettings {
             UserSettings {
                 render_gpu: render_gpu.clone(),
                 freeze: settings.freeze,
+                clipboard: settings.clipboard,
             },
         );
         *self.machine.lock().unwrap_or_else(|e| e.into_inner()) = MachineSettings {
@@ -348,6 +361,7 @@ mod tests {
                 &Settings {
                     render_gpu: " Discrete ".into(),
                     freeze: true,
+                    clipboard: false,
                     program_updates: false,
                     image_updates: true,
                 },
@@ -359,11 +373,13 @@ mod tests {
         let mine = again.get("S-1-5-21-1-2-3-1001").unwrap();
         assert_eq!(mine.render_gpu, "discrete");
         assert!(mine.freeze);
+        assert!(!mine.clipboard);
         assert!(!mine.program_updates);
         // Another user has their own GPU and freeze, and shares the machine's updates.
         let theirs = again.get("S-1-5-21-1-2-3-1002").unwrap();
         assert_eq!(theirs.render_gpu, "display");
         assert!(!theirs.freeze);
+        assert!(theirs.clipboard);
         assert!(!theirs.program_updates);
         assert!(!again.machine().program_updates);
         let _ = std::fs::remove_dir_all(&dir);
@@ -388,6 +404,32 @@ mod tests {
         }
         assert!(store.machine().program_updates);
         assert!(!dir.exists(), "nothing was written");
+    }
+
+    #[test]
+    fn fr13_clipboard_sharing_is_on_by_default_and_kept_when_turned_off() {
+        let dir = scratch("clipboard");
+        let store = FileSettings::new(&dir);
+        assert!(store.get("uid:1000").unwrap().clipboard);
+        // A file saved before the setting existed keeps it on.
+        std::fs::create_dir_all(dir.join("users")).unwrap();
+        std::fs::write(
+            dir.join("users").join("uid_1001.json"),
+            r#"{"render_gpu": "display", "freeze": true}"#,
+        )
+        .unwrap();
+        assert!(store.get("uid:1001").unwrap().clipboard);
+        store
+            .set(
+                "uid:1000",
+                &Settings {
+                    clipboard: false,
+                    ..Settings::default()
+                },
+            )
+            .unwrap();
+        assert!(!FileSettings::new(&dir).get("uid:1000").unwrap().clipboard);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -76,6 +76,11 @@ impl UserAndroid for MockAndroid {
     fn ime(&self, _: &ImeEvent) -> Result<(), TaskRequestError> {
         Err(TaskRequestError::Failed("no input here".into()))
     }
+    fn share_clipboard(&self, _: bool) {}
+    fn host_clipboard(&self, _: String) {}
+    fn watch_clipboard(&self) -> Option<std::sync::mpsc::Receiver<String>> {
+        None
+    }
 }
 
 #[test]

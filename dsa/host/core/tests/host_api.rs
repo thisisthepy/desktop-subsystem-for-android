@@ -191,6 +191,11 @@ impl UserAndroid for Notifying {
     fn ime(&self, _: &ImeEvent) -> Result<(), TaskRequestError> {
         Err(TaskRequestError::Failed("no input here".into()))
     }
+    fn share_clipboard(&self, _: bool) {}
+    fn host_clipboard(&self, _: String) {}
+    fn watch_clipboard(&self) -> Option<std::sync::mpsc::Receiver<String>> {
+        None
+    }
 }
 
 #[test]
@@ -237,6 +242,11 @@ impl UserAndroid for CrashedAndroid {
     }
     fn ime(&self, _: &ImeEvent) -> Result<(), TaskRequestError> {
         Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn share_clipboard(&self, _: bool) {}
+    fn host_clipboard(&self, _: String) {}
+    fn watch_clipboard(&self) -> Option<std::sync::mpsc::Receiver<String>> {
+        None
     }
 }
 
@@ -336,6 +346,11 @@ impl UserAndroid for Booting {
     fn ime(&self, _: &ImeEvent) -> Result<(), TaskRequestError> {
         Err(TaskRequestError::Failed("no input here".into()))
     }
+    fn share_clipboard(&self, _: bool) {}
+    fn host_clipboard(&self, _: String) {}
+    fn watch_clipboard(&self) -> Option<std::sync::mpsc::Receiver<String>> {
+        None
+    }
 }
 
 fn booting_client(android: Arc<Booting>) -> (HostApiClient, RunningService) {
@@ -405,6 +420,11 @@ impl UserAndroid for Stalled {
     }
     fn ime(&self, _: &ImeEvent) -> Result<(), TaskRequestError> {
         Err(TaskRequestError::Failed("no input here".into()))
+    }
+    fn share_clipboard(&self, _: bool) {}
+    fn host_clipboard(&self, _: String) {}
+    fn watch_clipboard(&self) -> Option<std::sync::mpsc::Receiver<String>> {
+        None
     }
 }
 

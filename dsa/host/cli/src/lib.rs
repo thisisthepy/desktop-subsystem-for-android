@@ -24,8 +24,9 @@
 //!
 //! `dsa settings` shows the settings the service keeps: the GPU the window manager renders on
 //! (`render-gpu`: `display`, `integrated`, `discrete` or part of a GPU's name), whether
-//! Android may be frozen when idle (`freeze`), and whether DSA (`program-updates`) and the
-//! Android image (`image-updates`) are updated. `dsa settings set <name> <value>` changes one;
+//! Android may be frozen when idle (`freeze`), whether text copied on the host can be pasted in
+//! Android and the reverse (`clipboard`, on by default), and whether DSA (`program-updates`) and
+//! the Android image (`image-updates`) are updated. `dsa settings set <name> <value>` changes one;
 //! the switches take `on` or `off`. `dsa memory` shows how much memory the user's Android
 //! takes, on the host and inside Android. `dsa gpus` lists the GPUs of this machine, for
 //! choosing the render GPU.
@@ -88,6 +89,7 @@ pub enum Command {
 pub enum Change {
     RenderGpu(String),
     Freeze(bool),
+    Clipboard(bool),
     ProgramUpdates(bool),
     ImageUpdates(bool),
 }
@@ -102,11 +104,12 @@ impl Change {
         match name {
             "render-gpu" => Ok(Change::RenderGpu(value.to_string())),
             "freeze" => switch().map(Change::Freeze),
+            "clipboard" => switch().map(Change::Clipboard),
             "program-updates" => switch().map(Change::ProgramUpdates),
             "image-updates" => switch().map(Change::ImageUpdates),
             _ => Err(format!(
                 "there is no setting {name:?}; the settings are render-gpu, freeze, \
-                 program-updates and image-updates"
+                 clipboard, program-updates and image-updates"
             )),
         }
     }
@@ -284,6 +287,7 @@ pub fn settings_json(report: &SettingsReport) -> Value {
     json!({
         "render_gpu": report.settings.render_gpu,
         "freeze": report.settings.freeze,
+        "clipboard": report.settings.clipboard,
         "program_updates": report.settings.program_updates,
         "image_updates": report.settings.image_updates,
         "program_updates_available": report.facts.program_updates_available,
@@ -315,6 +319,7 @@ pub fn describe_settings(report: &SettingsReport) -> String {
     let mut lines = vec![
         format!("Render GPU: {}", settings.render_gpu),
         format!("Freeze when idle: {}", on_off(settings.freeze)),
+        format!("Clipboard sharing: {}", on_off(settings.clipboard)),
         format!(
             "Program updates: {}",
             available(settings.program_updates, facts.program_updates_available)
@@ -423,6 +428,7 @@ fn settings(invocation: &Invocation, client: &mut HostApiClient) -> Result<Strin
         match change {
             Change::RenderGpu(value) => wanted.render_gpu = value.clone(),
             Change::Freeze(on) => wanted.freeze = *on,
+            Change::Clipboard(on) => wanted.clipboard = *on,
             Change::ProgramUpdates(on) => wanted.program_updates = *on,
             Change::ImageUpdates(on) => wanted.image_updates = *on,
         }

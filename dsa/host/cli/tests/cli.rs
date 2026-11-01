@@ -326,6 +326,11 @@ impl UserAndroid for Updated {
     fn ime(&self, _: &ImeEvent) -> Result<(), TaskRequestError> {
         Err(TaskRequestError::Failed("no input here".into()))
     }
+    fn share_clipboard(&self, _: bool) {}
+    fn host_clipboard(&self, _: String) {}
+    fn watch_clipboard(&self) -> Option<std::sync::mpsc::Receiver<String>> {
+        None
+    }
 }
 
 #[test]
@@ -647,6 +652,10 @@ fn fr17_dsa_settings_set_is_parsed() {
             .change,
         Some(Change::ProgramUpdates(false))
     );
+    assert_eq!(
+        parse(&args("settings set clipboard off")).unwrap().change,
+        Some(Change::Clipboard(false))
+    );
     assert!(parse(&args("settings set freeze maybe")).is_err());
     assert!(parse(&args("settings set colour blue")).is_err());
     assert!(parse(&args("settings set render-gpu")).is_err());
@@ -674,6 +683,7 @@ fn fr17_dsa_settings_reads_and_changes_the_settings_through_the_service() {
     let settings = json_of(&dsa(&endpoint, "settings --json"));
     assert_eq!(settings["render_gpu"], "display");
     assert_eq!(settings["freeze"], false);
+    assert_eq!(settings["clipboard"], true);
     assert_eq!(settings["program_updates"], true);
     assert_eq!(settings["version"], "0.0.9");
     assert_eq!(settings["log_dir"], "C:\\ProgramData\\DSA\\logs");
@@ -687,8 +697,17 @@ fn fr17_dsa_settings_reads_and_changes_the_settings_through_the_service() {
         "one change keeps the others"
     );
 
+    let changed = json_of(&dsa(&endpoint, "settings set clipboard off --json"));
+    assert_eq!(changed["clipboard"], false);
+    assert_eq!(changed["freeze"], true, "one change keeps the others");
+
     let text = dsa(&endpoint, "settings");
     assert!(text.status.success(), "{}", stderr(&text));
+    assert!(
+        stdout(&text).contains("Clipboard sharing: off"),
+        "{}",
+        stdout(&text)
+    );
     assert!(
         stdout(&text).contains("Render GPU: integrated"),
         "{}",
