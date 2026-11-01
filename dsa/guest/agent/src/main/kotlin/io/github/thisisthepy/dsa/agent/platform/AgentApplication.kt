@@ -53,6 +53,7 @@ class AgentApplication : Application() {
             frameTrace = frameTrace,
             touchSounds = AndroidTouchSounds(this),
             clipboard = AndroidClipboard(this, log),
+            packageInstaller = AndroidPackageInstaller(this, log),
         )
         HostInputMethod.onCursor = { rect -> agent.cursorMoved(rect.left, rect.top, rect.right, rect.bottom) }
         agent.start()
