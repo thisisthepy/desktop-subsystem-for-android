@@ -25,6 +25,7 @@
 //! - [`user_disk`]: each user's Android disk (Windows only).
 //! - [`account`]: the Windows account the host runs as (Windows only).
 //! - [`render_gpu`]: which GPU the host renderer runs on, and the setting that chooses it.
+//! - [`window_manager`]: starting a user's window manager in their session (Windows only).
 //! - [`compositor`]: the DSA Window Manager, which owns no window and hands each task's
 //!   frames to its app's window host (Windows only).
 //! - [`app_window`]: the app window host, the program that owns an app's task windows
@@ -86,3 +87,5 @@ pub mod uninstall;
 pub mod user_disk;
 pub mod vm;
 pub mod vm_listener;
+#[cfg(windows)]
+pub mod window_manager;

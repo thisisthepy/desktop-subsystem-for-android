@@ -116,6 +116,16 @@ installer starts it at sign-in. One copy runs per session, and it ends at sign-o
 writes its messages to `%LOCALAPPDATA%\DSA\logs\dsa-wm.log`. Earlier releases called it
 `dsa-compositor`.
 
+Android cannot finish booting without the renderer in `dsa-wm.exe`, so the service makes sure it
+runs. When a user's Android starts, and about once a second while it runs, the service looks
+for the window manager's pipe in the user's sessions. When it is not there the service starts
+`dsa-wm.exe` in the user's session, as the user, with the limited token Windows gives it for that
+session (`WTSQueryUserToken` and `CreateProcessAsUserW`, which SYSTEM may call). A window manager
+that keeps exiting is retried more and more slowly. Without a session to start it in (the user
+signed out, or only reached the computer over the network), a stopped Android waits without
+starting its VM, so it cannot crash-loop, and `dsa status` says why; a running Android is stopped
+after two minutes. `"keep_window_manager": false` turns this off.
+
 - It owns no window. Each Android app task shows in a window of the app's own window
   program (below). The window manager watches the user's tasks through the service's
   local API, starts each app's window program, and tells it to open a window for each

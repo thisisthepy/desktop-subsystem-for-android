@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use dsa_host_core::compositor::FakeRenderer;
 use dsa_host_core::host_api_conformance::{FakeAndroids, RunningService};
 use dsa_host_core::tasks::{AppInfo, TaskEvent};
-use dsa_host_windows::app_window::launch::ensure_window_manager;
+use dsa_host_windows::app_window::launch::{ensure_window_manager, prepare_app};
 use dsa_host_windows::app_window::{
     this_process_app_user_model_id, use_app_user_model_id, PACKAGE_ARGUMENT,
 };
@@ -194,6 +194,29 @@ fn fr7_the_app_window_program_takes_its_apps_own_id() {
         this_process_app_user_model_id().as_deref(),
         Some("DSA.com.example.clock")
     );
+}
+
+#[test]
+fn fr7_opening_an_app_starts_the_window_manager_before_it_waits_for_android() {
+    let order = std::cell::RefCell::new(Vec::new());
+    prepare_app(
+        || {
+            order.borrow_mut().push("window manager");
+            Ok(())
+        },
+        || {
+            order.borrow_mut().push("android");
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(*order.borrow(), ["window manager", "android"]);
+
+    let failed = prepare_app(
+        || Err("not installed".to_string()),
+        || panic!("Android would wait for a renderer that is not coming"),
+    );
+    assert!(failed.is_err());
 }
 
 #[test]

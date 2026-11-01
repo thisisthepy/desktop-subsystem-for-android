@@ -15,6 +15,10 @@
 //! once on `dsa update`. Setup stops this service and starts the new one, which tells the
 //! users how the update went.
 //!
+//! Android cannot boot without the renderer in the user's window manager, so with
+//! `keep_window_manager` each user's Android waits for it: the service starts it in the user's
+//! session when their Android starts, and again if it dies (`window_manager`).
+//!
 //! The settings users change from the settings app live in the service's own folder
 //! (`settings_dir`). Turning either kind of update off there stops the checks while the
 //! service runs; the render GPU is for each user's window manager, which asks for it.
@@ -37,6 +41,7 @@ use dsa_host_core::update::service::{
     check_reporting, next_image_check, Download, UpdateNotices, UpdatingAndroid,
 };
 use dsa_host_core::update::store::ImageStore;
+use dsa_host_core::window_manager::WindowManagerKeeper;
 use dsa_transport::Listener;
 
 use crate::android_vm::AndroidVmLauncher;
@@ -51,6 +56,7 @@ use crate::render_gpu::previous_render_gpu;
 use crate::setup::SetupInstaller;
 use crate::user_disk::{bring_disk_to, prepare_user_data_disk, prepare_user_disk_folder};
 use crate::vm_listener::VmBoundListener;
+use crate::window_manager::UserWindowManager;
 
 /// What the service shares between users when it updates the image.
 #[derive(Clone)]
@@ -108,6 +114,12 @@ pub fn create_user_android(
         }
     }
     .with_console_log(console_log);
+    let launcher = if config.keep_window_manager {
+        let mut keeper = WindowManagerKeeper::new(UserWindowManager::new(sid));
+        launcher.with_prerequisite(Box::new(move || keeper.check(Instant::now())))
+    } else {
+        launcher
+    };
     let service = Guid::vsock_service(config.control_port);
     let listener = VmBoundListener::new(
         launcher.vm_id_slot(),
