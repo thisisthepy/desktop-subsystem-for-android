@@ -459,8 +459,8 @@ message Envelope {
     InstalledApps installed_apps = 23;
     AgentConnected agent_connected = 24;
     GuestBoot guest_boot = 25;
-    ClockProbe clock_probe = 26;
-    ClockAnswer clock_answer = 27;
+    ClockProbe clock_probe = 28;
+    ClockAnswer clock_answer = 29;
     ScreenState screen_state = 40;
     PowerState power_state = 41;
     DeviceIdle device_idle = 42;
