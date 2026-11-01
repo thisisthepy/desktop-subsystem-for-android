@@ -12,6 +12,9 @@
 (allow platform_app deviceidle_service (service_manager (find)))
 (allow platform_app battery_service (service_manager (find)))
 (allow platform_app activity_service (service_manager (find)))
+; The graphics service, which the input trace reads apps' frame timings from. It writes them
+; into the agent's pipe the way a shell command's output is written, below.
+(allow platform_app gfxinfo_service (service_manager (find)))
 
 ; system_server takes the descriptors the agent hands it, and writes the command's output.
 (allow system_server platform_app (fd (use)))
