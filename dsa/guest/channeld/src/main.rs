@@ -36,7 +36,7 @@ mod daemon {
     use std::sync::Arc;
     use std::thread;
 
-    use dsa_guest_channeld::router::Router;
+    use dsa_guest_channeld::router::{Peer, Router};
     use dsa_guest_channeld::{ChannelEvent, Credentials, RetryPolicy};
     use dsa_guest_transport::vsock::{VsockConnector, VMADDR_CID_HOST};
     use dsa_protocol::auth::{secret_from_bootconfig, BOOTCONFIG_KEY};
@@ -98,6 +98,17 @@ mod daemon {
     }
 
     /// A Linux system other than Android has no servicemanager to register with.
+    #[cfg(target_os = "android")]
+    fn check_agent(peer: Peer) -> Result<(), String> {
+        dsa_guest_channeld::binder::check_agent(peer)
+    }
+
+    /// A Linux system other than Android has no agent.
+    #[cfg(not(target_os = "android"))]
+    fn check_agent(_peer: Peer) -> Result<(), String> {
+        Err("this system has no agent".to_string())
+    }
+
     #[cfg(not(target_os = "android"))]
     fn serve_clients(_router: &Arc<Router>) {
         say!("no binder service off Android; only the connection runs");
@@ -241,7 +252,7 @@ mod daemon {
         // The guest's clients (the agent and the hwcomposer) reach the daemon over binder.
         // Frames they send go to the host through `to_host`; the host's frames go to them.
         let (to_host, from_guest) = mpsc::channel::<Vec<u8>>();
-        let router = Arc::new(Router::new(to_host));
+        let router = Arc::new(Router::new(to_host, check_agent));
         let (to_guest, from_host) = mpsc::channel::<Vec<u8>>();
         {
             let router = Arc::clone(&router);

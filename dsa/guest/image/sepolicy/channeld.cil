@@ -64,6 +64,12 @@
 (allow dsa_channeld platform_app (binder (call transfer)))
 (allow dsa_channeld hal_graphics_composer_server (binder (call transfer)))
 
+; A caller that says it is the agent has its process name read, from /proc/<pid>/cmdline.
+(allow dsa_channeld system_app (dir (search)))
+(allow dsa_channeld system_app (file (read open)))
+(allow dsa_channeld platform_app (dir (search)))
+(allow dsa_channeld platform_app (file (read open)))
+
 ; vendor.dsa.boot_completed (vendor_property_contexts): init sets it to 1 when Android has
 ; finished booting, and the daemon reads it to tell the host. Nothing else may set it.
 (type dsa_boot_prop)

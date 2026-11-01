@@ -14,6 +14,8 @@
 //! - The agent says it is there (`AgentConnected`); that stops here. The host hears how far the
 //!   guest has got (`GuestBoot`) each time it connects and on each change: whether Android has
 //!   finished booting, and whether the agent is connected, which ends when its process dies.
+//!   Only the agent may say so: the platform gives the router a check for the caller, and
+//!   [`agent_caller`] is the rule it applies to what binder and the kernel say of the caller.
 //!
 //! None of this knows about binder: a listener is anything that can take a frame, so the
 //! rules run and are tested on any platform. The binder service in `binder` is a thin layer
@@ -25,6 +27,35 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{Envelope, GuestBoot};
+
+/// The agent's package, which is the name of its process.
+pub const AGENT_PROCESS: &str = "io.github.thisisthepy.dsa.agent";
+
+/// Whether a caller is the agent, from its SELinux context as binder reports it and its process's
+/// `/proc/<pid>/cmdline`. The domain comes from the kernel, and keeps out the hwcomposer and
+/// anything else that may call the daemon. The name tells the agent from other platform-signed
+/// apps in the same domain. An error says what did not match.
+pub fn agent_caller(context: Option<&str>, cmdline: Option<&[u8]>) -> Result<(), String> {
+    let context = context.ok_or_else(|| "binder did not say the caller's context".to_string())?;
+    let domain = context
+        .strip_prefix("u:r:")
+        .and_then(|rest| rest.split(':').next())
+        .unwrap_or_default();
+    if !matches!(domain, "platform_app" | "system_app") {
+        return Err(format!(
+            "the caller runs in {context:?}, not as a platform app"
+        ));
+    }
+    let cmdline = cmdline.ok_or_else(|| "the caller's process name cannot be read".to_string())?;
+    let process = cmdline.split(|byte| *byte == 0).next().unwrap_or_default();
+    if process != AGENT_PROCESS.as_bytes() {
+        return Err(format!(
+            "the caller is the process {:?}, not {AGENT_PROCESS}",
+            String::from_utf8_lossy(process)
+        ));
+    }
+    Ok(())
+}
 
 /// The guest process a call came from (its process ID, as binder reports the caller).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -141,15 +172,23 @@ impl State {
 pub struct Router {
     to_host: Sender<Vec<u8>>,
     state: Mutex<State>,
+    agent_check: AgentCheck,
 }
+
+/// Says whether the caller of the current call is the agent. It runs on the caller's thread.
+type AgentCheck = Box<dyn Fn(Peer) -> Result<(), String> + Send + Sync>;
 
 impl Router {
     /// A router that hands the host's share of guest frames to `to_host`, the channel the
-    /// connection pump drains.
-    pub fn new(to_host: Sender<Vec<u8>>) -> Router {
+    /// connection pump drains. `agent_check` says whether a caller is the agent.
+    pub fn new(
+        to_host: Sender<Vec<u8>>,
+        agent_check: impl Fn(Peer) -> Result<(), String> + Send + Sync + 'static,
+    ) -> Router {
         Router {
             to_host,
             state: Mutex::new(State::default()),
+            agent_check: Box::new(agent_check),
         }
     }
 
@@ -292,6 +331,9 @@ impl Router {
                         "an agent subscribes before it says it is connected".to_string(),
                     ));
                 }
+                (self.agent_check)(sender).map_err(|why| {
+                    SendError::NotAllowed(format!("only the agent may say it is connected: {why}"))
+                })?;
                 if state.agent != Some(sender) {
                     state.agent = Some(sender);
                     let _ = self.to_host.send(state.boot_report());

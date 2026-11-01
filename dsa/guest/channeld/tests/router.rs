@@ -5,7 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
-use dsa_guest_channeld::router::{Delivery, Listener, Peer, Router, SendError};
+use dsa_guest_channeld::router::{
+    agent_caller, Delivery, Listener, Peer, Router, SendError, AGENT_PROCESS,
+};
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{
     AgentConnected, AppInfo, AuthProof, CloseTask, Envelope, GuestBoot, Hello, LaunchApp, Rect,
@@ -63,7 +65,14 @@ const COMPOSER: Peer = Peer(800);
 
 fn router() -> (Router, mpsc::Receiver<Vec<u8>>) {
     let (to_host, host) = mpsc::channel();
-    (Router::new(to_host), host)
+    let is_agent = |peer| {
+        if peer == AGENT {
+            Ok(())
+        } else {
+            Err("not the agent".to_string())
+        }
+    };
+    (Router::new(to_host, is_agent), host)
 }
 
 #[test]
@@ -336,6 +345,43 @@ fn fr2_the_composer_does_not_count_as_the_agent() {
     router.boot_completed();
     router.host_connected();
     assert_eq!(reports(&host), vec![(true, false), (true, false)]);
+}
+
+#[test]
+fn fr2_only_the_agent_may_say_it_is_connected() {
+    let (router, host) = router();
+    router.subscribe(COMPOSER, Arc::new(Recorder::default()));
+    assert!(matches!(
+        router.from_guest(COMPOSER, agent_connected()),
+        Err(SendError::NotAllowed(_))
+    ));
+    assert!(reports(&host).is_empty(), "the host hears nothing of it");
+
+    router.host_connected();
+    assert_eq!(reports(&host), vec![(false, false)]);
+}
+
+#[test]
+fn fr2_the_agent_is_told_by_its_domain_and_its_process() {
+    let agent = format!("{AGENT_PROCESS}\0");
+    let agent = Some(agent.as_bytes());
+    assert_eq!(
+        agent_caller(Some("u:r:platform_app:s0:c512,c768"), agent),
+        Ok(())
+    );
+    assert_eq!(agent_caller(Some("u:r:system_app:s0"), agent), Ok(()));
+
+    // The hwcomposer, and an agent whose certificates the package manager no longer trusts.
+    assert!(agent_caller(Some("u:r:hal_graphics_composer_default:s0"), agent).is_err());
+    assert!(agent_caller(Some("u:r:priv_app:s0:c512,c768"), agent).is_err());
+    // Another platform-signed app, and one whose name only starts the same.
+    let other = Some(b"com.android.settings\0".as_slice());
+    assert!(agent_caller(Some("u:r:system_app:s0"), other).is_err());
+    let longer = format!("{AGENT_PROCESS}.helper\0");
+    assert!(agent_caller(Some("u:r:platform_app:s0"), Some(longer.as_bytes())).is_err());
+    // What cannot be told is not the agent.
+    assert!(agent_caller(None, agent).is_err());
+    assert!(agent_caller(Some("u:r:platform_app:s0"), None).is_err());
 }
 
 #[test]

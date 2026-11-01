@@ -14,7 +14,7 @@ use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::sync::{Arc, OnceLock};
 
 use crate::aidl;
-use crate::router::{Delivery, Listener, ListenerId, Peer, Router};
+use crate::router::{agent_caller, Delivery, Listener, ListenerId, Peer, Router};
 
 #[allow(non_camel_case_types)]
 type binder_status_t = i32;
@@ -186,9 +186,50 @@ impl Ndk {
     }
 }
 
+/// The calls that report a caller's SELinux context. They are platform calls rather than NDK
+/// ones, so a library without them must not stop the service: without them no caller can show
+/// it is the agent, and the daemon says so.
+struct CallerContext {
+    set_requesting: unsafe extern "C" fn(*mut AIBinder, bool),
+    get: unsafe extern "C" fn() -> *const c_char,
+}
+
+impl CallerContext {
+    fn open() -> Option<CallerContext> {
+        // SAFETY: a constant NUL-terminated name; the library is already open, and stays so.
+        let library = unsafe { dlopen(c"libbinder_ndk.so".as_ptr(), RTLD_NOW) };
+        if library.is_null() {
+            return None;
+        }
+        // SAFETY: NUL-terminated names and a handle dlopen returned.
+        let (set_requesting, get) = unsafe {
+            (
+                dlsym(library, c"AIBinder_setRequestingSid".as_ptr()),
+                dlsym(library, c"AIBinder_getCallingSid".as_ptr()),
+            )
+        };
+        if set_requesting.is_null() || get.is_null() {
+            return None;
+        }
+        // SAFETY: the symbols are the functions of those names, with these C signatures.
+        unsafe {
+            Some(CallerContext {
+                set_requesting: std::mem::transmute::<
+                    *mut c_void,
+                    unsafe extern "C" fn(*mut AIBinder, bool),
+                >(set_requesting),
+                get: std::mem::transmute::<*mut c_void, unsafe extern "C" fn() -> *const c_char>(
+                    get,
+                ),
+            })
+        }
+    }
+}
+
 /// Everything the binder callbacks reach. Set once, when the service starts.
 struct Service {
     ndk: Ndk,
+    caller_context: Option<CallerContext>,
     router: Arc<Router>,
     listener_class: *mut AIBinderClass,
     death: *mut AIBinderDeathRecipient,
@@ -236,8 +277,16 @@ pub fn serve(router: Arc<Router>) -> Result<(), String> {
     if channel_class.is_null() || listener_class.is_null() || death.is_null() {
         return Err("libbinder_ndk could not define the channel's classes".to_string());
     }
+    let caller_context = CallerContext::open();
+    if caller_context.is_none() {
+        eprintln!(
+            "libbinder_ndk.so does not report a caller's SELinux context, so the agent cannot be \
+             recognised and the host will report that it is not connected"
+        );
+    }
     let service = Service {
         ndk,
+        caller_context,
         router,
         listener_class,
         death,
@@ -254,6 +303,10 @@ pub fn serve(router: Arc<Router>) -> Result<(), String> {
         if binder.is_null() {
             return Err("libbinder_ndk could not make the channel's binder".to_string());
         }
+        // Each call then carries its caller's context, which `check_agent` reads.
+        if let Some(caller_context) = &service.caller_context {
+            (caller_context.set_requesting)(binder, true);
+        }
         // The interface is declared in the vendor manifest, and system apps call it.
         (ndk.AIBinder_markVintfStability)(binder);
         let exception = (ndk.AServiceManager_addService)(binder, instance.as_ptr());
@@ -269,6 +322,33 @@ pub fn serve(router: Arc<Router>) -> Result<(), String> {
         (ndk.ABinderProcess_startThreadPool)();
     }
     Ok(())
+}
+
+/// Whether the caller of the binder call this thread is handling is the agent.
+pub fn check_agent(peer: Peer) -> Result<(), String> {
+    let context = SERVICE
+        .get()
+        .and_then(|service| service.caller_context.as_ref())
+        .and_then(|caller_context| {
+            // SAFETY: called during the transaction; null, or a string that outlives it.
+            let context = unsafe { (caller_context.get)() };
+            (!context.is_null()).then(|| {
+                // SAFETY: not null, and NUL-terminated.
+                unsafe { CStr::from_ptr(context) }
+                    .to_string_lossy()
+                    .into_owned()
+            })
+        });
+    // The call is not one way, so the caller waits in it and its process ID is still its own.
+    let cmdline = std::fs::read(format!("/proc/{}/cmdline", peer.0)).ok();
+    let checked = agent_caller(context.as_deref(), cmdline.as_deref());
+    if let Err(why) = &checked {
+        eprintln!(
+            "refused a claim to be the agent from process {}: {why}",
+            peer.0
+        );
+    }
+    checked
 }
 
 unsafe extern "C" fn on_create(args: *mut c_void) -> *mut c_void {

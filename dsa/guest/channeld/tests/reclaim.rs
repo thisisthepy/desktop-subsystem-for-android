@@ -147,7 +147,7 @@ fn nfr1_an_idle_guest_reclaims_again_only_when_memory_has_grown_back() {
 #[test]
 fn nfr1_minimized_tasks_do_not_hold_the_idle_reclaim_back() {
     let (to_host, _host) = mpsc::channel();
-    let router = Router::new(to_host);
+    let router = Router::new(to_host, |_| Err("no agent here".to_string()));
     router
         .from_guest(
             Peer(10),
@@ -183,7 +183,7 @@ fn frame(body: Body) -> Vec<u8> {
 #[test]
 fn nfr2_the_router_counts_the_open_tasks_the_reclaim_waits_for() {
     let (to_host, _host) = mpsc::channel();
-    let router = Router::new(to_host);
+    let router = Router::new(to_host, |_| Err("no agent here".to_string()));
     let agent = Peer(10);
     assert_eq!(router.task_count(), 0);
     for task_id in [1, 2] {
