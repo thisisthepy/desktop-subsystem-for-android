@@ -103,6 +103,11 @@ REMOVED_APEXES = [
     "com.google.cf.rild",
 ]
 
+# Cuttlefish's logger writes to a virtio console Hyper-V does not have, so it exits as soon as
+# it starts. init starts it again every five seconds, and each exit runs flags_health_check.
+# console-logcat.rc is what logs here.
+REMOVED_INIT_SCRIPTS = ["VENDOR/etc/init/seriallogging.rc"]
+
 # The user's disk. The super partition's UUID is how first-stage init finds the disk, so it
 # is fixed and passed on the kernel command line.
 SUPER_UUID = "6b1ad5ad-0d5a-4dd3-9a6b-5a0a1d5a5a17"
@@ -358,10 +363,14 @@ def removed_apexes(hwcomposer=False):
 
 
 def removed(name, hwcomposer=False):
-    """Whether a target_files member belongs to an app or a HAL the guest must not have."""
-    return any(f"/{app}/" in name for app in REMOVED_APPS) or any(
-        name in (f"VENDOR/apex/{apex}.apex", f"VENDOR/apex/{apex}.capex")
-        for apex in removed_apexes(hwcomposer)
+    """Whether a target_files member belongs to an app, a HAL or a service the guest must not have."""
+    return (
+        name in REMOVED_INIT_SCRIPTS
+        or any(f"/{app}/" in name for app in REMOVED_APPS)
+        or any(
+            name in (f"VENDOR/apex/{apex}.apex", f"VENDOR/apex/{apex}.capex")
+            for apex in removed_apexes(hwcomposer)
+        )
     )
 
 

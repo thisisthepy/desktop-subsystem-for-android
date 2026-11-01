@@ -1236,6 +1236,11 @@ class GuestMemoryTests(unittest.TestCase):
             xml = archive.read("VENDOR/etc/permissions/dsa-unavailable-features.xml").decode()
         self.assertIn('<unavailable-feature name="android.hardware.uwb" />', xml)
 
+    def test_fr5_the_logger_of_a_console_hyper_v_does_not_have_is_removed(self):
+        # It exits as soon as it starts, init starts it again every five seconds, and each
+        # exit runs flags_health_check too.
+        self.assertTrue(make_image.removed("VENDOR/etc/init/seriallogging.rc"))
+
     def test_nfr2_only_the_control_daemon_asks_init_to_reclaim(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
             contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
