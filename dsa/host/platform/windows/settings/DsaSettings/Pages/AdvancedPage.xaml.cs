@@ -15,6 +15,9 @@ public partial class AdvancedPage : Page
         Loaded += async (_, _) => await ViewModel.LoadAsync();
     }
 
+    private async void OnLinksToggled(object sender, RoutedEventArgs e) =>
+        await ViewModel.SetLinksInAndroidAsync(LinksSwitch.IsChecked == true);
+
     private async void OnFreezeToggled(object sender, RoutedEventArgs e) =>
         await ViewModel.SetFreezeAsync(FreezeSwitch.IsChecked == true);
 

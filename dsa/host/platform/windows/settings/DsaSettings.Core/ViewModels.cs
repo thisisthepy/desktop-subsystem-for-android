@@ -159,6 +159,9 @@ public sealed class SettingsViewModel : ObservableObject
     public string Error => _error ?? "";
     public bool HasError => _error is not null;
     public bool Freeze => _settings?.Freeze ?? false;
+    /// <summary>Whether web links apps in Android open go to Android apps instead of the
+    /// default browser.</summary>
+    public bool LinksInAndroid => _settings?.LinksInAndroid ?? false;
     public bool ProgramUpdates => _settings?.ProgramUpdates ?? false;
     public bool ImageUpdates => _settings?.ImageUpdates ?? false;
     public bool ProgramUpdatesAvailable => _settings?.ProgramUpdatesAvailable ?? false;
@@ -283,6 +286,9 @@ public sealed class SettingsViewModel : ObservableObject
 
     public Task SetFreezeAsync(bool on) =>
         on == Freeze && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetFreezeAsync(on));
+
+    public Task SetLinksInAndroidAsync(bool on) =>
+        on == LinksInAndroid && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetLinksInAndroidAsync(on));
 
     public Task SetProgramUpdatesAsync(bool on) =>
         on == ProgramUpdates && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetProgramUpdatesAsync(on));

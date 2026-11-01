@@ -316,6 +316,12 @@
   <data name="AdvancedTitle.Text" xml:space="preserve">
     <value>Advanced</value>
   </data>
+  <data name="LinksCard.Header" xml:space="preserve">
+    <value>Open web links in Android apps</value>
+  </data>
+  <data name="LinksCard.Description" xml:space="preserve">
+    <value>Off by default: a web link you tap in an Android app opens in your default browser in Windows. On, it opens in an Android app, as on a phone. A link an installed app has verified as its own opens in that app either way.</value>
+  </data>
   <data name="FreezeCard.Header" xml:space="preserve">
     <value>Freeze Android when idle</value>
   </data>
