@@ -55,6 +55,9 @@
   <data name="StopButton.Content" xml:space="preserve">
     <value>Stop</value>
   </data>
+  <data name="ProblemBar.Title" xml:space="preserve">
+    <value>Android is not ready</value>
+  </data>
   <data name="LastReasonBar.Title" xml:space="preserve">
     <value>Last stopped</value>
   </data>
@@ -96,6 +99,9 @@
   </data>
   <data name="State_Stopping" xml:space="preserve">
     <value>Stopping</value>
+  </data>
+  <data name="State_Stalled" xml:space="preserve">
+    <value>Not ready</value>
   </data>
   <data name="Problem_CliMissing" xml:space="preserve">
     <value>The dsa command could not be started. Reinstall DSA.</value>

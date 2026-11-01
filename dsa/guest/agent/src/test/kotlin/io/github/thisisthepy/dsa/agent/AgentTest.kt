@@ -52,6 +52,12 @@ class AgentTest {
     }
 
     @Test
+    fun fr2_the_agent_tells_the_daemon_it_is_there_each_time_it_connects() {
+        started()
+        assertEquals(1, daemon.connectionsAnnounced)
+    }
+
+    @Test
     fun fr3_at_boot_the_display_is_freeform_and_running_app_tasks_are_reported() {
         tasks.running = listOf(appTask(1), appTask(2, packageName = AGENT))
 

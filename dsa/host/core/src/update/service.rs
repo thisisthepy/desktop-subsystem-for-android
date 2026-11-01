@@ -19,7 +19,7 @@ use crate::ime::ImeEvent;
 use crate::input::PointerEvent;
 use crate::keys::KeyEvent;
 use crate::memory::GuestMemoryReport;
-use crate::session::{Session, SessionState};
+use crate::session::{BootProblem, Session, SessionState};
 use crate::tasks::{TaskRequest, TaskRequestError, TaskWatch};
 
 /// The latest news about the image, shared by every user's Android.
@@ -157,11 +157,23 @@ impl Boot for SessionBoot {
         let session = &self.0;
         let events = session.events();
         session.start();
-        let deadline = Instant::now() + timeout;
+        let mut deadline = Instant::now() + timeout;
         loop {
-            let left = deadline.saturating_duration_since(Instant::now());
+            // What the guest cannot run without being missing says nothing about the image, so
+            // the time on trial starts again once it is there.
+            if matches!(session.problem(), Some(BootProblem::Prerequisite(_))) {
+                deadline = Instant::now() + timeout;
+            }
+            let left = deadline
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_secs(1));
             match events.recv_timeout(left) {
                 Ok(event) if event.state == SessionState::Active => return Ok(()),
+                Ok(event) if event.state == SessionState::Stalled => match session.problem() {
+                    // Not the image's fault; the same when it moved on again in between.
+                    Some(BootProblem::Prerequisite(_)) | None => {}
+                    Some(problem) => return Err(problem.to_string()),
+                },
                 Ok(event) if event.state == SessionState::Stopped => {
                     return Err(event
                         .reason
@@ -169,6 +181,7 @@ impl Boot for SessionBoot {
                         .unwrap_or_else(|| "it stopped while starting".into()))
                 }
                 Ok(_) => {}
+                Err(RecvTimeoutError::Timeout) if Instant::now() < deadline => {}
                 Err(RecvTimeoutError::Timeout) | Err(RecvTimeoutError::Disconnected) => {
                     return Err(format!(
                         "it did not finish booting within {} seconds",
@@ -219,6 +232,9 @@ impl UserAndroid for UpdatingAndroid {
             return Some(NO_IMAGE_YET.into());
         }
         UserAndroid::last_reason(&*self.session)
+    }
+    fn problem(&self) -> Option<String> {
+        UserAndroid::problem(&*self.session)
     }
     fn stop(&self) {
         self.session.stop()

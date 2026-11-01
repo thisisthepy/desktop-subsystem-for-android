@@ -64,6 +64,16 @@
 (allow dsa_channeld platform_app (binder (call transfer)))
 (allow dsa_channeld hal_graphics_composer_server (binder (call transfer)))
 
+; vendor.dsa.boot_completed (vendor_property_contexts): init sets it to 1 when Android has
+; finished booting, and the daemon reads it to tell the host. Nothing else may set it.
+(type dsa_boot_prop)
+(roletype object_r dsa_boot_prop)
+(typeattributeset property_type (dsa_boot_prop))
+(typeattributeset vendor_property_type (dsa_boot_prop))
+(allow vendor_init dsa_boot_prop (property_service (set)))
+(allow vendor_init dsa_boot_prop (file (read open getattr map)))
+(allow dsa_channeld dsa_boot_prop (file (read open getattr map)))
+
 ; Handing idle memory back to the host: the daemon reads how the guest uses its memory and,
 ; when it should drop its caches, sets vendor.dsa.memory.reclaim (its type, dsa_memory_prop,
 ; is in memory.cil). init's vendor scripts do the rest (dsa-channeld.rc).

@@ -11,6 +11,9 @@
 //!   subscribes later, such as a restarted hwcomposer, is told the tasks already there, and
 //!   the host each time it connects again is told the apps and then the tasks, since a client
 //!   sends them only when they change.
+//! - The agent says it is there (`AgentConnected`); that stops here. The host hears how far the
+//!   guest has got (`GuestBoot`) each time it connects and on each change: whether Android has
+//!   finished booting, and whether the agent is connected, which ends when its process dies.
 //!
 //! None of this knows about binder: a listener is anything that can take a frame, so the
 //! rules run and are tested on any platform. The binder service in `binder` is a thin layer
@@ -21,6 +24,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use dsa_protocol::control::envelope::Body;
+use dsa_protocol::control::{Envelope, GuestBoot};
 
 /// The guest process a call came from (its process ID, as binder reports the caller).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -97,6 +101,10 @@ struct State {
     /// The host said no task window is shown: open tasks are minimized, and the guest dozes.
     screen_off: bool,
     next_id: u64,
+    /// Android has finished booting.
+    boot_completed: bool,
+    /// The process of the agent, while it is connected.
+    agent: Option<Peer>,
 }
 
 impl State {
@@ -105,6 +113,27 @@ impl State {
     fn deliver(&mut self, frame: &[u8], except: Option<Peer>) {
         self.listeners
             .retain(|s| Some(s.peer) == except || s.listener.deliver(frame) != Delivery::Gone);
+    }
+
+    /// What the host is told about how far the guest has got.
+    fn boot_report(&self) -> Vec<u8> {
+        dsa_protocol::encode(&Envelope {
+            body: Some(Body::GuestBoot(GuestBoot {
+                boot_completed: self.boot_completed,
+                agent_connected: self.agent.is_some(),
+            })),
+        })
+    }
+
+    /// Whether the agent's listener is gone, which ends its connection; then forgets it.
+    fn agent_left(&mut self) -> bool {
+        let gone = self
+            .agent
+            .is_some_and(|agent| !self.listeners.iter().any(|s| s.peer == agent));
+        if gone {
+            self.agent = None;
+        }
+        gone
     }
 }
 
@@ -146,7 +175,24 @@ impl Router {
         let mut state = self.lock();
         let before = state.listeners.len();
         state.listeners.retain(|s| s.id != id);
-        state.listeners.len() != before
+        let removed = state.listeners.len() != before;
+        self.tell_host_if_agent_left(&mut state);
+        removed
+    }
+
+    /// Android has finished booting. The host is told once.
+    pub fn boot_completed(&self) {
+        let mut state = self.lock();
+        if !state.boot_completed {
+            state.boot_completed = true;
+            let _ = self.to_host.send(state.boot_report());
+        }
+    }
+
+    fn tell_host_if_agent_left(&self, state: &mut State) {
+        if state.agent_left() {
+            let _ = self.to_host.send(state.boot_report());
+        }
     }
 
     /// How many listeners take frames now.
@@ -184,6 +230,7 @@ impl Router {
             state.screen_off = !screen.on;
         }
         state.deliver(frame, None);
+        self.tell_host_if_agent_left(&mut state);
     }
 
     /// Tells a host that has just connected the state of every live task. Frames that were
@@ -192,6 +239,7 @@ impl Router {
         let mut state = self.lock();
         // The host takes the screen to be on when it connects, and says so if not.
         state.screen_off = false;
+        let _ = self.to_host.send(state.boot_report());
         for frame in state.apps.values() {
             let _ = self.to_host.send(frame.clone());
         }
@@ -233,6 +281,23 @@ impl Router {
                         .to_string(),
                 ))
             }
+            Some(Body::GuestBoot(_)) => {
+                return Err(SendError::NotAllowed(
+                    "how far the guest has got is the daemon's to say".to_string(),
+                ))
+            }
+            Some(Body::AgentConnected(_)) => {
+                if !state.listeners.iter().any(|s| s.peer == sender) {
+                    return Err(SendError::NotAllowed(
+                        "an agent subscribes before it says it is connected".to_string(),
+                    ));
+                }
+                if state.agent != Some(sender) {
+                    state.agent = Some(sender);
+                    let _ = self.to_host.send(state.boot_report());
+                }
+                return Ok(());
+            }
             Some(Body::TaskUpdated(updated)) => {
                 let task = state.tasks.entry(updated.task_id).or_default();
                 task.updated = Some((sender, frame.clone()));
@@ -257,6 +322,7 @@ impl Router {
             }
             Some(_) => {}
         }
+        self.tell_host_if_agent_left(&mut state);
         // Sent with the state locked, so the host gets the frames in the order the state
         // changed. The pump owns the other end for as long as the daemon runs; if it has
         // gone, the daemon is stopping and the frame has nowhere to go.

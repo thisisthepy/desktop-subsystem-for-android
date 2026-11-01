@@ -434,6 +434,10 @@ pub struct Status {
     /// there is nothing to tell.
     #[prost(string, tag = "3")]
     pub update_notice: ::prost::alloc::string::String,
+    /// What keeps a running or starting Android from being ready, and what to do about it, in
+    /// words a person can act on. Empty when nothing does.
+    #[prost(string, tag = "4")]
+    pub problem: ::prost::alloc::string::String,
 }
 /// The answer to UpdateProgram.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -728,6 +732,9 @@ pub enum SessionState {
     Dozing = 4,
     Frozen = 5,
     Stopping = 6,
+    /// The guest runs but is not ready and has taken too long; Status.problem says why. It
+    /// leaves this state by itself when the cause goes away.
+    Stalled = 7,
 }
 impl SessionState {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -743,6 +750,7 @@ impl SessionState {
             Self::Dozing => "SESSION_STATE_DOZING",
             Self::Frozen => "SESSION_STATE_FROZEN",
             Self::Stopping => "SESSION_STATE_STOPPING",
+            Self::Stalled => "SESSION_STATE_STALLED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -755,6 +763,7 @@ impl SessionState {
             "SESSION_STATE_DOZING" => Some(Self::Dozing),
             "SESSION_STATE_FROZEN" => Some(Self::Frozen),
             "SESSION_STATE_STOPPING" => Some(Self::Stopping),
+            "SESSION_STATE_STALLED" => Some(Self::Stalled),
             _ => None,
         }
     }

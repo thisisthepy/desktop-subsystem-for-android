@@ -30,6 +30,10 @@
 //! takes, on the host and inside Android. `dsa gpus` lists the GPUs of this machine, for
 //! choosing the render GPU.
 //!
+//! `dsa status` says `Active` only once Android has finished booting and its agent is connected.
+//! An Android that runs but has taken too long is `Stalled`, and a line after the state says why
+//! and what to do; so does `problem` in the JSON. `dsa start --wait` fails on it.
+//!
 //! `--json` prints what `status`, `start`, `stop`, `settings`, `memory` and `gpus` report as
 //! one JSON object, for programs such as the settings app. Errors still go to standard error,
 //! with exit code 1.
@@ -144,6 +148,13 @@ pub fn default_starter(endpoint: Option<&str>) -> Option<Box<dyn ServiceStarter>
 /// first.
 const UPDATE_ANSWER_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
+/// How long `dsa start --wait` waits unless told otherwise: longer than Android may take to
+/// finish booting before it is reported as stalled, so that report is what ends the wait.
+const START_TIMEOUT: Duration = Duration::from_secs(360);
+
+/// How long the other waits last unless told otherwise.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// A parsed command line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invocation {
@@ -174,7 +185,7 @@ fn is_package_name(name: &str) -> bool {
 pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut command = None;
     let mut wait = false;
-    let mut timeout = Duration::from_secs(120);
+    let mut timeout = None;
     let mut endpoint = None;
     let mut package = None;
     let mut change = None;
@@ -227,7 +238,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                 let seconds: u64 = value
                     .parse()
                     .map_err(|_| format!("--timeout needs a number of seconds, not {value:?}"))?;
-                timeout = Duration::from_secs(seconds);
+                timeout = Some(Duration::from_secs(seconds));
             }
             "--pipe" | "--socket" => {
                 let value = args.next().ok_or_else(|| format!("{arg} needs a value"))?;
@@ -246,7 +257,11 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     Ok(Invocation {
         command,
         wait,
-        timeout,
+        timeout: timeout.unwrap_or(if command == Command::Start {
+            START_TIMEOUT
+        } else {
+            DEFAULT_TIMEOUT
+        }),
         endpoint,
         package,
         change,
@@ -260,6 +275,7 @@ pub fn status_json(status: &Status) -> Value {
         "state": status.state.to_string(),
         "last_reason": status.last_reason,
         "update_notice": status.update_notice,
+        "problem": status.problem,
     })
 }
 
@@ -469,6 +485,9 @@ pub fn describe(status: &Status) -> String {
             let _ = write!(line, "\n{detail}");
         }
     }
+    for problem in status.problem.iter().flat_map(|problem| problem.lines()) {
+        let _ = write!(line, "\nProblem: {problem}");
+    }
     for notice in status
         .update_notice
         .iter()
@@ -634,7 +653,7 @@ pub fn run_with_starter(
     let (done, failed): (&[SessionState], &[SessionState]) = match invocation.command {
         Command::Start => (
             &[SessionState::Active, SessionState::Dozing],
-            &[SessionState::Stopped],
+            &[SessionState::Stopped, SessionState::Stalled],
         ),
         _ => (&[SessionState::Stopped], &[]),
     };

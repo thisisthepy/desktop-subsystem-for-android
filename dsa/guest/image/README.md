@@ -64,7 +64,9 @@ It needs `gdisk` and `qemu-utils` (Debian and Ubuntu package names), Java and Op
 - The build becomes a user build: not debuggable, adb only when authorised.
 - The control channel daemon (`/vendor/bin/dsa-channeld`) is added and runs in its own
   SELinux domain, the only one that may read `/proc/bootconfig`, where the host puts the
-  boot's secret. It connects to the host, which makes the session active.
+  boot's secret. It connects to the host, and tells the host when Android has finished booting
+  (`vendor.dsa.boot_completed`, which init sets) and whether the agent is connected. The host
+  calls Android active only then.
 - The daemon registers the binder service `io.github.thisisthepy.dsa.channel.IChannel/default`,
   which the agent and the hwcomposer call. `dsa-channel-manifest.xml` declares it in the
   vendor manifest, because servicemanager refuses a stable service no manifest declares.

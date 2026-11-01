@@ -248,6 +248,15 @@ pub struct HostConfig {
     pub connect_timeout_secs: u64,
     #[serde(default = "default_stop_timeout_secs")]
     pub stop_timeout_secs: u64,
+    /// How long Android may take to finish booting before it is reported as stalled. It keeps
+    /// trying after that; this only decides when the user is told.
+    #[serde(default = "default_ready_timeout_secs")]
+    pub ready_timeout_secs: u64,
+    /// Whether the service starts each user's window manager in their session when their
+    /// Android starts, and again if it dies, since Android cannot boot without its renderer.
+    /// Off only for running without windows, as the tests do.
+    #[serde(default = "default_true")]
+    pub keep_window_manager: bool,
     /// How long no Android window may be shown before Android's screen goes off and it goes
     /// into Doze.
     #[serde(default = "default_doze_delay_secs")]
@@ -258,6 +267,10 @@ pub struct HostConfig {
     /// (`dsa-hostd <config.json>`), the setting alone turns freezing on.
     #[serde(default)]
     pub freeze_after_minutes: Option<u64>,
+}
+
+fn default_ready_timeout_secs() -> u64 {
+    dsa_host_core::session::DEFAULT_READY_TIMEOUT.as_secs()
 }
 
 fn default_doze_delay_secs() -> u64 {
@@ -576,11 +589,13 @@ impl HostConfig {
     pub fn session_config(&self) -> SessionConfig {
         SessionConfig {
             connect_timeout: Duration::from_secs(self.connect_timeout_secs),
+            ready_timeout: Duration::from_secs(self.ready_timeout_secs),
             stop_timeout: Duration::from_secs(self.stop_timeout_secs),
             doze_delay: Duration::from_secs(self.doze_delay_secs),
             freeze_after: self
                 .freeze_after_minutes
                 .map(|minutes| Duration::from_secs(minutes.saturating_mul(60))),
+            ..SessionConfig::default()
         }
     }
 }

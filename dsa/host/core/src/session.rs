@@ -14,7 +14,19 @@
 //! sends every few minutes and when the host asks ([`Session::request_guest_memory`]).
 //!
 //! The states are those of the lifecycle: `Stopped`, `Starting`, `Active`, `Dozing`,
-//! `Frozen` and `Stopping`. While the guest is up the session follows the lifecycle:
+//! `Frozen` and `Stopping`, and `Stalled` for a guest that runs but has taken too long to be
+//! ready.
+//!
+//! A connection on the control channel says only that the guest's kernel and init run: its
+//! daemon connects long before Android has finished starting. So the session stays `Starting`
+//! until the daemon reports that the guest has finished booting and that the agent is connected
+//! ([`control::GuestBoot`]). A guest that does not get there in time is `Stalled`, with a
+//! [`BootProblem`] saying why; the guest keeps running, because the cause may go away, and the
+//! session moves on by itself when it does. What the guest cannot run without at all
+//! ([`GuestLauncher::prerequisite`]) is waited for before the guest starts, so a guest never
+//! crash-loops for want of it; lost for good while the guest runs, it stops the guest.
+//!
+//! While the guest is up the session follows the lifecycle:
 //!
 //! - Once no task window has been shown ([`TaskRequest::WindowsShown`]) for
 //!   [`SessionConfig::doze_delay`], the session tells the guest its screen is off. The agent
@@ -50,9 +62,9 @@ use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskTable, Tas
 pub enum SessionState {
     /// No guest is running.
     Stopped,
-    /// The guest was started and the host is waiting for the agent to connect.
+    /// The guest is being started, and has not yet finished booting with its agent connected.
     Starting,
-    /// The agent is connected and the handshake succeeded.
+    /// The guest has finished booting and the agent is connected.
     Active,
     /// No task window is visible and the guest is in Doze.
     Dozing,
@@ -60,6 +72,9 @@ pub enum SessionState {
     Frozen,
     /// The guest is being stopped.
     Stopping,
+    /// The guest runs but is not ready and has taken too long; [`Session::problem`] says why.
+    /// The session leaves this state by itself when the cause goes away.
+    Stalled,
 }
 
 impl fmt::Display for SessionState {
@@ -96,6 +111,9 @@ pub enum StopReason {
     /// Stopping the guest failed and some of its processes may still run. The session stays
     /// in `Stopping`; asking to stop again retries.
     StopFailed(String),
+    /// What the guest cannot run without was lost while it ran and did not come back. The
+    /// guest was stopped so that it does not crash-loop; a new start waits for it.
+    PrerequisiteLost(String),
 }
 
 impl fmt::Display for StopReason {
@@ -126,8 +144,70 @@ impl fmt::Display for StopReason {
             }
             StopReason::ChannelLost(why) => write!(f, "the control channel was lost: {why}"),
             StopReason::StopFailed(why) => write!(f, "the guest did not stop: {why}"),
+            StopReason::PrerequisiteLost(why) => {
+                write!(
+                    f,
+                    "Android was stopped so that it does not keep failing: {why}"
+                )
+            }
         }
     }
+}
+
+/// What keeps a guest from being ready.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BootProblem {
+    /// What the guest cannot run without is missing ([`GuestLauncher::prerequisite`]). Not the
+    /// guest's fault, so an image on trial is not blamed for it.
+    Prerequisite(String),
+    /// The guest has not finished booting. `detail` is what the launcher can tell about it.
+    BootUnfinished {
+        waited: Duration,
+        detail: Option<String>,
+    },
+    /// The guest has finished booting, but its agent is not connected.
+    AgentUnreachable {
+        waited: Duration,
+        detail: Option<String>,
+    },
+}
+
+impl BootProblem {
+    fn same_kind(&self, other: &BootProblem) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
+}
+
+impl fmt::Display for BootProblem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BootProblem::Prerequisite(why) => f.write_str(why),
+            BootProblem::BootUnfinished { waited, detail } => {
+                write!(
+                    f,
+                    "Android has not finished booting after {} s, and keeps trying",
+                    waited.as_secs()
+                )?;
+                write_diagnostics(f, detail)
+            }
+            BootProblem::AgentUnreachable { waited, detail } => {
+                write!(
+                    f,
+                    "Android finished booting, but its agent has not reached the control channel \
+                     for {} s, so there are no app windows, no memory reports and no Doze",
+                    waited.as_secs()
+                )?;
+                write_diagnostics(f, detail)
+            }
+        }
+    }
+}
+
+/// Which delay a launcher is asked to explain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestStall {
+    BootUnfinished,
+    AgentUnreachable,
 }
 
 /// Puts a launcher's diagnostics on the lines after a reason, so they can be copied whole.
@@ -175,6 +255,21 @@ pub trait GuestLauncher: Send + 'static {
 
     /// The runtime ID of the guest, if running (such as the VM GUID on Windows).
     fn vm_id(&self) -> Option<String> {
+        None
+    }
+
+    /// What the guest cannot run without and is missing now, as a sentence saying so and what
+    /// to do; `None` when nothing is. The launcher tries to provide it each time it is asked.
+    /// The session asks before it starts the guest, and about once a second while the guest
+    /// runs, so it must not take long.
+    fn prerequisite(&mut self) -> Option<String> {
+        None
+    }
+
+    /// What the launcher can tell about a running guest that is late, such as what its console
+    /// shows and what to do. It must not take long.
+    fn explain_stall(&mut self, stall: GuestStall) -> Option<String> {
+        let _ = stall;
         None
     }
 
@@ -227,8 +322,17 @@ impl fmt::Display for Refusal {
 /// Timing for a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionConfig {
-    /// How long to wait for the agent to connect after the guest starts.
+    /// How long to wait for the guest's daemon to connect after the guest starts.
     pub connect_timeout: Duration,
+    /// How long the guest may take to finish booting before the session is `Stalled`.
+    pub ready_timeout: Duration,
+    /// How long a booted guest may be without its agent before the session is `Stalled`.
+    pub agent_timeout: Duration,
+    /// How long a prerequisite may be missing, while it may still be on its way, before the
+    /// session is `Stalled`.
+    pub prerequisite_grace: Duration,
+    /// How long a running guest may be without a prerequisite before it is stopped.
+    pub prerequisite_stop_after: Duration,
     /// How long the launcher may take to end every guest process.
     pub stop_timeout: Duration,
     /// How long no task window may be shown before the guest's screen goes off and the
@@ -247,10 +351,18 @@ pub const DEFAULT_DOZE_DELAY: Duration = Duration::from_secs(30);
 /// and nothing else says how long.
 pub const DEFAULT_FREEZE_AFTER: Duration = Duration::from_secs(30 * 60);
 
+/// The default of [`SessionConfig::ready_timeout`]. A first boot on a new disk compiles the
+/// apps' code, which takes minutes, so it is long; going past it only reports the delay.
+pub const DEFAULT_READY_TIMEOUT: Duration = Duration::from_secs(300);
+
 impl Default for SessionConfig {
     fn default() -> Self {
         SessionConfig {
             connect_timeout: Duration::from_secs(120),
+            ready_timeout: DEFAULT_READY_TIMEOUT,
+            agent_timeout: Duration::from_secs(60),
+            prerequisite_grace: Duration::from_secs(30),
+            prerequisite_stop_after: Duration::from_secs(120),
             stop_timeout: Duration::from_secs(30),
             doze_delay: DEFAULT_DOZE_DELAY,
             freeze_after: None,
@@ -312,6 +424,8 @@ struct Shared {
     sender: Mutex<Option<Box<dyn FrameSender>>>,
     /// The guest's last memory report, and when it arrived. Cleared when the guest stops.
     guest_memory: Mutex<Option<(GuestMemory, Instant)>>,
+    /// What keeps the guest from being ready, while something does.
+    problem: Mutex<Option<BootProblem>>,
 }
 
 /// The guest's tasks and who is watching them, under one lock, so a new watcher's starting
@@ -344,6 +458,17 @@ impl Shared {
 
     fn set_vm_id(&self, vm_id: Option<String>) {
         *self.vm_id.lock().unwrap_or_else(|e| e.into_inner()) = vm_id;
+    }
+
+    fn set_problem(&self, problem: Option<BootProblem>) {
+        *self.problem.lock().unwrap_or_else(|e| e.into_inner()) = problem;
+    }
+
+    fn problem(&self) -> Option<BootProblem> {
+        self.problem
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     fn set_guest_memory(&self, memory: Option<(GuestMemory, Instant)>) {
@@ -431,6 +556,7 @@ impl Session {
             tasks: Mutex::new(TaskHub::default()),
             sender: Mutex::new(None),
             guest_memory: Mutex::new(None),
+            problem: Mutex::new(None),
         });
         let freeze_delay = config.freeze_after.unwrap_or(DEFAULT_FREEZE_AFTER);
         let (commands, command_rx) = mpsc::channel();
@@ -452,6 +578,13 @@ impl Session {
             dozing_since: None,
             power: None,
             power_pending: false,
+            started_at: Instant::now(),
+            boot_completed_at: None,
+            agent_connected: false,
+            agent_lost_at: None,
+            prerequisite_missing: None,
+            next_prerequisite_check: Instant::now(),
+            next_diagnosis: Instant::now(),
         };
         let worker = thread::Builder::new()
             .name("dsa-session".into())
@@ -505,6 +638,11 @@ impl Session {
             .unwrap_or_else(|e| e.into_inner())
             .1
             .clone()
+    }
+
+    /// What keeps the guest from being ready, while something does.
+    pub fn problem(&self) -> Option<BootProblem> {
+        self.shared.problem()
     }
 
     /// The runtime ID of the guest, if running.
@@ -698,6 +836,12 @@ impl Drop for Session {
 /// How often an active session checks for requests while it waits on the channel.
 const POLL: Duration = Duration::from_millis(20);
 
+/// How often the session asks the launcher for what the guest cannot run without.
+const PREREQUISITE_POLL: Duration = Duration::from_secs(1);
+
+/// How often a reported problem's detail is read again, as the counts in it grow.
+const DIAGNOSIS_POLL: Duration = Duration::from_secs(10);
+
 struct Worker {
     launcher: Box<dyn GuestLauncher>,
     listener: Box<dyn Listener>,
@@ -724,6 +868,18 @@ struct Worker {
     power: Option<PowerState>,
     /// Set when the power changed while the guest was frozen, so it is told after the thaw.
     power_pending: bool,
+    /// When the guest was started.
+    started_at: Instant,
+    /// When the guest said it had finished booting.
+    boot_completed_at: Option<Instant>,
+    /// Whether the guest says its agent is connected.
+    agent_connected: bool,
+    /// When the guest said its agent had gone.
+    agent_lost_at: Option<Instant>,
+    /// Since when a prerequisite is missing, and what the launcher says about it.
+    prerequisite_missing: Option<(Instant, String)>,
+    next_prerequisite_check: Instant,
+    next_diagnosis: Instant,
 }
 
 impl Worker {
@@ -772,8 +928,12 @@ impl Worker {
                         Ok(Command::Shutdown) | Err(_) => return,
                     }
                 }
-                SessionState::Starting => unreachable!("start() leaves Starting before returning"),
-                SessionState::Active | SessionState::Dozing | SessionState::Frozen => self.serve(),
+                // start() returns in these only once the guest's daemon has connected.
+                SessionState::Starting
+                | SessionState::Stalled
+                | SessionState::Active
+                | SessionState::Dozing
+                | SessionState::Frozen => self.serve(),
             }
         }
     }
@@ -833,7 +993,11 @@ impl Worker {
     fn running(&self) -> bool {
         matches!(
             self.state(),
-            SessionState::Active | SessionState::Dozing | SessionState::Frozen
+            SessionState::Starting
+                | SessionState::Stalled
+                | SessionState::Active
+                | SessionState::Dozing
+                | SessionState::Frozen
         )
     }
 
@@ -904,9 +1068,12 @@ impl Worker {
         }
         self.power = Some(state);
         match self.state() {
-            SessionState::Active | SessionState::Dozing => {
-                self.send_body(Body::PowerState(state.to_control()))
-            }
+            // A guest still starting may have its agent already; if not, the agent is told
+            // when it connects.
+            SessionState::Starting
+            | SessionState::Stalled
+            | SessionState::Active
+            | SessionState::Dozing => self.send_body(Body::PowerState(state.to_control())),
             SessionState::Frozen => self.power_pending = true,
             _ => {}
         }
@@ -971,8 +1138,190 @@ impl Worker {
         }
     }
 
+    /// The guest says how far it has got. An agent that comes takes the screen to be on and
+    /// knows nothing of the power, so it is told both.
+    fn guest_boot(&mut self, boot: control::GuestBoot) {
+        let now = Instant::now();
+        if boot.boot_completed && self.boot_completed_at.is_none() {
+            self.boot_completed_at = Some(now);
+            eprintln!(
+                "lifecycle: Android finished booting after {:.1} s",
+                now.duration_since(self.started_at).as_secs_f64()
+            );
+        }
+        if boot.agent_connected == self.agent_connected {
+            return;
+        }
+        self.agent_connected = boot.agent_connected;
+        if boot.agent_connected {
+            self.agent_lost_at = None;
+            eprintln!("lifecycle: the agent is connected");
+            if let Some(power) = self.power {
+                self.send_body(Body::PowerState(power.to_control()));
+            }
+            if !self.screen_on {
+                self.send_body(Body::ScreenState(control::ScreenState { on: false }));
+            }
+        } else {
+            self.agent_lost_at = Some(now);
+            eprintln!("lifecycle: the agent is gone");
+        }
+    }
+
+    /// Asks the launcher, every so often, for what the guest cannot run without.
+    fn check_prerequisite(&mut self, now: Instant) {
+        if now < self.next_prerequisite_check {
+            return;
+        }
+        self.next_prerequisite_check = now + PREREQUISITE_POLL;
+        let missing = self.launcher.prerequisite();
+        self.prerequisite_missing = missing.map(|why| {
+            let since = self
+                .prerequisite_missing
+                .as_ref()
+                .map_or(now, |(since, _)| *since);
+            (since, why)
+        });
+    }
+
+    /// What keeps the running guest from being ready and has lasted too long, if anything.
+    fn overdue(&mut self, now: Instant) -> Option<BootProblem> {
+        if let Some((since, why)) = &self.prerequisite_missing {
+            if now.duration_since(*since) >= self.config.prerequisite_grace {
+                return Some(BootProblem::Prerequisite(why.clone()));
+            }
+        }
+        let (stall, waited, limit) = match self.boot_completed_at {
+            None => (
+                GuestStall::BootUnfinished,
+                now.duration_since(self.started_at),
+                self.config.ready_timeout,
+            ),
+            Some(_) if self.agent_connected => return None,
+            Some(booted) => (
+                GuestStall::AgentUnreachable,
+                now.duration_since(self.agent_lost_at.map_or(booted, |lost| lost.max(booted))),
+                self.config.agent_timeout,
+            ),
+        };
+        if waited < limit {
+            return None;
+        }
+        let detail = if now < self.next_diagnosis {
+            // The launcher reads its console for this, so only every so often.
+            match self.shared.problem() {
+                Some(
+                    BootProblem::BootUnfinished { detail, .. }
+                    | BootProblem::AgentUnreachable { detail, .. },
+                ) => detail,
+                _ => self.launcher.explain_stall(stall),
+            }
+        } else {
+            self.next_diagnosis = now + DIAGNOSIS_POLL;
+            self.launcher.explain_stall(stall)
+        };
+        Some(match stall {
+            GuestStall::BootUnfinished => BootProblem::BootUnfinished { waited, detail },
+            GuestStall::AgentUnreachable => BootProblem::AgentUnreachable { waited, detail },
+        })
+    }
+
+    /// Records `problem` as what keeps the guest from being ready, logging a new kind of it.
+    fn report_problem(&mut self, problem: BootProblem) {
+        let new = self
+            .shared
+            .problem()
+            .is_none_or(|old| !old.same_kind(&problem));
+        if new {
+            eprintln!("lifecycle: {problem}");
+        }
+        self.shared.set_problem(Some(problem));
+    }
+
+    /// Moves the session on with what the guest last said. Returns false once the session has
+    /// left the running states.
+    fn tick_boot(&mut self) -> bool {
+        if self.state() == SessionState::Frozen {
+            return true;
+        }
+        let now = Instant::now();
+        self.check_prerequisite(now);
+        if let Some((since, why)) = &self.prerequisite_missing {
+            if now.duration_since(*since) >= self.config.prerequisite_stop_after {
+                let why = why.clone();
+                self.stop(StopReason::PrerequisiteLost(why));
+                return false;
+            }
+        }
+        if let Some(problem) = self.overdue(now) {
+            self.report_problem(problem);
+            if self.state() != SessionState::Stalled {
+                self.dozing_since = None;
+                self.shared.set(SessionState::Stalled, None);
+            }
+            return true;
+        }
+        let ready = self.boot_completed_at.is_some()
+            && self.agent_connected
+            && self.prerequisite_missing.is_none();
+        match self.state() {
+            SessionState::Starting | SessionState::Stalled if ready => {
+                self.shared.set_problem(None);
+                // The doze delay counts from here when no window is shown.
+                self.hidden_since = now;
+                self.shared.set(SessionState::Active, None);
+            }
+            SessionState::Stalled => {
+                self.shared.set_problem(None);
+                self.shared.set(SessionState::Starting, None);
+            }
+            _ => {}
+        }
+        true
+    }
+
+    /// Waits until the guest can run. Returns false once the start was abandoned.
+    fn wait_for_prerequisite(&mut self) -> bool {
+        let began = Instant::now();
+        loop {
+            let Some(why) = self.launcher.prerequisite() else {
+                self.shared.set_problem(None);
+                if self.state() == SessionState::Stalled {
+                    self.shared.set(SessionState::Starting, None);
+                }
+                return true;
+            };
+            self.report_problem(BootProblem::Prerequisite(why));
+            if self.state() == SessionState::Starting
+                && began.elapsed() >= self.config.prerequisite_grace
+            {
+                self.shared.set(SessionState::Stalled, None);
+            }
+            match self.commands.recv_timeout(PREREQUISITE_POLL) {
+                Ok(command) => {
+                    if !self.handle_starting(command) {
+                        return false;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    self.shutting_down = true;
+                    self.stop(StopReason::Requested);
+                    return false;
+                }
+            }
+        }
+    }
+
     fn start(&mut self) {
         self.shared.set(SessionState::Starting, None);
+        self.boot_completed_at = None;
+        self.agent_connected = false;
+        self.agent_lost_at = None;
+        self.prerequisite_missing = None;
+        if !self.wait_for_prerequisite() {
+            return;
+        }
         let secret = match BootSecret::generate() {
             Ok(secret) => secret,
             Err(why) => {
@@ -998,6 +1347,8 @@ impl Worker {
         // binds its sockets to this ID, so it is known from the moment the guest runs.
         self.shared.set_vm_id(self.launcher.vm_id());
         let started = Instant::now();
+        self.started_at = started;
+        self.next_prerequisite_check = started + PREREQUISITE_POLL;
         let deadline = started + self.config.connect_timeout;
         loop {
             loop {
@@ -1038,16 +1389,12 @@ impl Worker {
                             self.shared.set_sender(connection.try_clone_sender());
                             self.connection = Some(connection);
                             self.shared.set_vm_id(self.launcher.vm_id());
-                            // The agent takes the screen to be on when it connects; the doze
-                            // delay counts from here when no window is shown.
+                            // The agent takes the screen to be on when it connects. The session
+                            // stays Starting until the guest says it is ready.
                             self.screen_on = true;
                             self.hidden_since = Instant::now();
                             self.dozing_since = None;
                             self.power_pending = false;
-                            self.shared.set(SessionState::Active, None);
-                            if let Some(power) = self.power {
-                                self.send_body(Body::PowerState(power.to_control()));
-                            }
                             return;
                         }
                         Err(Refusal::NotTheGuest(why)) => {
@@ -1119,6 +1466,9 @@ impl Worker {
                     return;
                 }
             }
+            if !self.tick_boot() {
+                return;
+            }
             self.tick_lifecycle();
             let Some(connection) = self.connection.as_mut() else {
                 self.stop(StopReason::ChannelLost("no connection".into()));
@@ -1133,7 +1483,15 @@ impl Worker {
                 },
                 Err(TransportError::Timeout) => {}
                 Err(error) => {
-                    self.stop(StopReason::ChannelLost(error.to_string()));
+                    // A guest that dies while it boots has its console to show for it.
+                    if matches!(self.state(), SessionState::Starting | SessionState::Stalled) {
+                        self.stop_failed_start(|diagnostics| StopReason::GuestExited {
+                            why: format!("the control channel was lost during boot: {error}"),
+                            diagnostics,
+                        });
+                    } else {
+                        self.stop(StopReason::ChannelLost(error.to_string()));
+                    }
                     return;
                 }
             }
@@ -1218,6 +1576,10 @@ impl Worker {
                 self.shared.set_guest_memory(Some((memory, Instant::now())));
             }
             Some(Body::DeviceIdle(idle)) => self.guest_idle(idle.idle),
+            Some(Body::GuestBoot(boot)) => self.guest_boot(boot),
+            Some(Body::AgentConnected(_)) => {
+                eprintln!("control channel: dropping a message that stops at the guest's daemon");
+            }
             Some(Body::ScreenState(_))
             | Some(Body::PowerState(_))
             | Some(Body::CloseTask(_))
@@ -1256,6 +1618,7 @@ impl Worker {
             }
         }
         self.shared.set_vm_id(None);
+        self.shared.set_problem(None);
         self.shared.set(SessionState::Stopping, None);
         self.shared.set_sender(None);
         if let Some(mut connection) = self.connection.take() {

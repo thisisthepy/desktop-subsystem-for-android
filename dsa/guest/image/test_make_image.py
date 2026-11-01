@@ -1271,8 +1271,25 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertEqual(contexts[0], existing.strip())
             self.assertEqual(contexts.count(make_image.RECLAIM_PROPERTY_CONTEXT), 1)
             self.assertEqual(contexts.count(make_image.TRIM_PROPERTY_CONTEXT), 1)
-        both = make_image.RECLAIM_PROPERTY_CONTEXT + "\n" + make_image.TRIM_PROPERTY_CONTEXT + "\n"
-        self.assertEqual(make_image.update_vendor_property_contexts(both), both)
+        all_of_them = (
+            make_image.RECLAIM_PROPERTY_CONTEXT + "\n"
+            + make_image.TRIM_PROPERTY_CONTEXT + "\n"
+            + make_image.BOOT_PROPERTY_CONTEXT + "\n"
+        )
+        self.assertEqual(make_image.update_vendor_property_contexts(all_of_them), all_of_them)
+
+    def test_fr2_init_tells_the_daemon_when_android_has_finished_booting(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
+            contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
+            self.assertIn("vendor.dsa.boot_completed u:object_r:dsa_boot_prop:s0 exact bool", contexts)
+            rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
+            trigger = rc[rc.index("on property:sys.boot_completed=1\n"):]
+            self.assertIn("setprop vendor.dsa.boot_completed 1", trigger.split("\n\n")[0])
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            self.assertIn("(typeattributeset vendor_property_type (dsa_boot_prop))", policy)
+            setters = re.findall(r"\(allow (\S+) dsa_boot_prop \(property_service \(set\)\)\)", policy)
+            self.assertEqual(setters, ["vendor_init"])
+            self.assertIn("(allow dsa_channeld dsa_boot_prop (file (read open getattr map)))", policy)
 
     def test_nfr1_apps_a_desktop_has_no_use_for_are_removed_and_the_ones_apps_need_are_kept(self):
         removed = ["Dialer", "messaging", "Stk", "BasicDreams", "LiveWallpapersPicker", "QuickSearchBox"]

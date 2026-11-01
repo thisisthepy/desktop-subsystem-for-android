@@ -62,19 +62,21 @@ public sealed class DsaService
         "Dozing" => SessionState.Dozing,
         "Frozen" => SessionState.Frozen,
         "Stopping" => SessionState.Stopping,
+        "Stalled" => SessionState.Stalled,
         _ => SessionState.Unknown,
     };
 
     private static StatusInfo ReadStatus(JsonElement json) => new(
         ParseState(OptionalString(json, "state")),
         OptionalString(json, "last_reason"),
-        OptionalString(json, "update_notice"));
+        OptionalString(json, "update_notice"),
+        OptionalString(json, "problem"));
 
     public async Task<StatusInfo> StatusAsync() => ReadStatus(await RunJsonAsync("status").ConfigureAwait(true));
 
     /// <summary>Starts Android and waits until it has started or failed.</summary>
     public async Task<StatusInfo> StartAsync() =>
-        ReadStatus(await RunJsonAsync("start", "--wait", "--timeout", "180").ConfigureAwait(true));
+        ReadStatus(await RunJsonAsync("start", "--wait", "--timeout", "360").ConfigureAwait(true));
 
     /// <summary>Stops Android and waits until it has stopped.</summary>
     public async Task<StatusInfo> StopAsync() =>

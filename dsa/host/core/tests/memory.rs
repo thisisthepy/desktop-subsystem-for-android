@@ -144,6 +144,17 @@ fn setup() -> Setup {
         WAIT,
     )
     .expect("the host accepts the agent");
+    // The guest has finished booting and its agent has connected, as its daemon reports.
+    agent
+        .send(&dsa_protocol::encode(&dsa_protocol::control::Envelope {
+            body: Some(dsa_protocol::control::envelope::Body::GuestBoot(
+                dsa_protocol::control::GuestBoot {
+                    boot_completed: true,
+                    agent_connected: true,
+                },
+            )),
+        }))
+        .expect("the host takes the report");
     assert!(session.wait_for(SessionState::Active, WAIT));
     Setup {
         session,

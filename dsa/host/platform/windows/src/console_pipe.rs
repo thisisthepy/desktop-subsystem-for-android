@@ -33,7 +33,7 @@ use windows_sys::Win32::System::Pipes::{
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 
-use crate::console_log::ConsoleLog;
+use crate::console_log::{ConsoleLog, ConsoleSigns};
 use crate::pipe::{millis, new_event, wide, OwnedHandle, PipeStream};
 
 /// Who may open the console pipe: SYSTEM and administrators, and the VM worker processes
@@ -295,6 +295,11 @@ impl ConsoleCapture {
             .unwrap_or_else(|e| e.into_inner())
             .path()
             .to_path_buf()
+    }
+
+    /// What this boot's console has shown about why it is late.
+    pub fn signs(&self) -> ConsoleSigns {
+        self.log.lock().unwrap_or_else(|e| e.into_inner()).signs()
     }
 
     /// What a failed start reports about this boot's console.

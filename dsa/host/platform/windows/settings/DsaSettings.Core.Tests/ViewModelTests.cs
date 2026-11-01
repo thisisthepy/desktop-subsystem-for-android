@@ -55,11 +55,26 @@ public class ViewModelTests
     }
 
     [Fact]
+    public async Task Fr17_general_page_shows_what_keeps_a_stalled_android_from_being_ready()
+    {
+        var cli = new FakeCli()
+            .Answer("status --json", "{\"state\":\"Stalled\",\"last_reason\":null,\"update_notice\":null,\"problem\":\"the agent cannot reach the channel\"}");
+        var vm = new GeneralViewModel(new DsaService(cli), new KeyText());
+        await vm.RefreshAsync();
+        Assert.Equal(SessionState.Stalled, vm.State);
+        Assert.Equal("State_Stalled", vm.StateText);
+        Assert.True(vm.HasProblem);
+        Assert.Equal("the agent cannot reach the channel", vm.Problem);
+        Assert.False(vm.CanStart);
+        Assert.True(vm.CanStop);
+    }
+
+    [Fact]
     public async Task Fr17_general_page_shows_the_state_and_the_last_error()
     {
         var cli = new FakeCli()
             .Answer("status --json", "{\"state\":\"Stopped\",\"last_reason\":\"the VM exited\",\"update_notice\":null}")
-            .Answer("start --wait --timeout 180 --json", "{\"state\":\"Active\",\"last_reason\":null,\"update_notice\":null}");
+            .Answer("start --wait --timeout 360 --json", "{\"state\":\"Active\",\"last_reason\":null,\"update_notice\":null}");
         var vm = new GeneralViewModel(new DsaService(cli), new KeyText());
         await vm.RefreshAsync();
         Assert.Equal(SessionState.Stopped, vm.State);

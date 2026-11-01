@@ -29,6 +29,7 @@ import io.github.thisisthepy.dsa.agent.trace.ResizeTrace
 import io.github.thisisthepy.dsa.agent.windowing.FreeformSetup
 import io.github.thisisthepy.dsa.agent.windowing.TaskArranger
 import io.github.thisisthepy.dsa.agent.windowing.WindowingControl
+import io.github.thisisthepy.dsa.control.v1.AgentConnected
 import io.github.thisisthepy.dsa.control.v1.Envelope
 
 /**
@@ -185,6 +186,8 @@ class Agent(
     }
 
     private fun onConnected() {
+        // The daemon tells the host from this that the guest's requests have someone to reach.
+        channel.send(Envelope.newBuilder().setAgentConnected(AgentConnected.getDefaultInstance()).build().toByteArray())
         reporter.resend()
         lifecycle.connected()
         installed.resend()

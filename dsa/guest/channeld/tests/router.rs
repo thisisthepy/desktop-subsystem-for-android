@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use dsa_guest_channeld::router::{Delivery, Listener, Peer, Router, SendError};
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{
-    AppInfo, AuthProof, CloseTask, Envelope, Hello, LaunchApp, Rect, TaskFrames, TaskRemoved,
-    TaskUpdated,
+    AgentConnected, AppInfo, AuthProof, CloseTask, Envelope, GuestBoot, Hello, LaunchApp, Rect,
+    TaskFrames, TaskRemoved, TaskUpdated,
 };
 
 /// A client's callback that keeps what it is given, and can be made to die.
@@ -209,7 +209,7 @@ fn fr3_a_host_that_connects_again_learns_the_live_tasks() {
     assert_eq!(sent_before.len(), 4);
 
     router.host_connected();
-    assert_eq!(host.try_iter().collect::<Vec<_>>(), vec![updated, frames]);
+    assert_eq!(apart_from_boot(&host), vec![updated, frames]);
 }
 
 #[test]
@@ -266,7 +266,7 @@ fn fr3_a_host_that_connects_again_learns_the_apps_before_their_tasks() {
     assert_eq!(host.try_iter().count(), 2);
 
     router.host_connected();
-    assert_eq!(host.try_iter().collect::<Vec<_>>(), vec![notes, updated]);
+    assert_eq!(apart_from_boot(&host), vec![notes, updated]);
     assert!(!composer
         .frames()
         .contains(&app_info("org.example.notes", "Notes")));
@@ -277,5 +277,109 @@ fn fr3_a_host_that_connects_again_learns_the_apps_before_their_tasks() {
         .unwrap();
     host.try_iter().count();
     router.host_connected();
-    assert!(host.try_iter().next().is_none());
+    assert!(apart_from_boot(&host).is_empty());
+}
+
+/// What the host was sent, without the reports of how far the guest has got.
+fn apart_from_boot(host: &mpsc::Receiver<Vec<u8>>) -> Vec<Vec<u8>> {
+    host.try_iter()
+        .filter(|frame| boot_report(frame).is_none())
+        .collect()
+}
+
+/// `(boot_completed, agent_connected)`, if the frame is a report of how far the guest has got.
+fn boot_report(frame: &[u8]) -> Option<(bool, bool)> {
+    match dsa_protocol::decode(frame).unwrap().body {
+        Some(Body::GuestBoot(boot)) => Some((boot.boot_completed, boot.agent_connected)),
+        _ => None,
+    }
+}
+
+fn reports(host: &mpsc::Receiver<Vec<u8>>) -> Vec<(bool, bool)> {
+    host.try_iter()
+        .filter_map(|frame| boot_report(&frame))
+        .collect()
+}
+
+fn agent_connected() -> Vec<u8> {
+    frame(Body::AgentConnected(AgentConnected {}))
+}
+
+#[test]
+fn fr2_the_host_hears_when_android_has_booted_and_the_agent_has_connected() {
+    let (router, host) = router();
+    let agent = Arc::new(Recorder::default());
+    router.subscribe(AGENT, agent);
+    router.host_connected();
+    assert_eq!(reports(&host), vec![(false, false)]);
+
+    router.from_guest(AGENT, agent_connected()).unwrap();
+    assert_eq!(
+        reports(&host),
+        vec![(false, true)],
+        "only the report goes to the host, not the agent's own message"
+    );
+
+    router.boot_completed();
+    router.boot_completed();
+    assert_eq!(reports(&host), vec![(true, true)], "told once");
+
+    // A host that connects again is told where things stand.
+    router.host_connected();
+    assert_eq!(reports(&host), vec![(true, true)]);
+}
+
+#[test]
+fn fr2_the_composer_does_not_count_as_the_agent() {
+    let (router, host) = router();
+    router.subscribe(COMPOSER, Arc::new(Recorder::default()));
+    router.boot_completed();
+    router.host_connected();
+    assert_eq!(reports(&host), vec![(true, false), (true, false)]);
+}
+
+#[test]
+fn fr2_an_agent_must_subscribe_before_it_says_it_is_connected() {
+    let (router, host) = router();
+    assert!(matches!(
+        router.from_guest(AGENT, agent_connected()),
+        Err(SendError::NotAllowed(_))
+    ));
+    assert!(reports(&host).is_empty());
+}
+
+#[test]
+fn fr2_a_client_cannot_report_how_far_the_guest_has_got() {
+    let (router, host) = router();
+    router.subscribe(COMPOSER, Arc::new(Recorder::default()));
+    let forged = frame(Body::GuestBoot(GuestBoot {
+        boot_completed: true,
+        agent_connected: true,
+    }));
+    assert!(matches!(
+        router.from_guest(COMPOSER, forged),
+        Err(SendError::NotAllowed(_))
+    ));
+    assert!(reports(&host).is_empty());
+}
+
+#[test]
+fn fr2_the_host_hears_when_the_agent_dies() {
+    let (router, host) = router();
+    let agent = Arc::new(Recorder::default());
+    let id = router.subscribe(AGENT, agent);
+    router.from_guest(AGENT, agent_connected()).unwrap();
+    host.try_iter().count();
+
+    assert!(router.remove(id));
+    assert_eq!(reports(&host), vec![(false, false)]);
+
+    // Its process is found dead when a frame cannot be delivered, too.
+    let agent = Arc::new(Recorder::default());
+    router.subscribe(AGENT, agent.clone());
+    router.from_guest(AGENT, agent_connected()).unwrap();
+    host.try_iter().count();
+    agent.die();
+    router.from_host(&frame(Body::CloseTask(CloseTask { task_id: 1 })));
+    assert_eq!(reports(&host), vec![(false, false)]);
 }

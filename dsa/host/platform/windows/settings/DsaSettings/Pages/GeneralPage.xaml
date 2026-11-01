@@ -29,6 +29,8 @@
                 </StackPanel>
             </ui:CardControl>
 
+            <ui:InfoBar Title="{l:Text ProblemBar.Title}" Severity="Error" IsClosable="False"
+                        IsOpen="{Binding HasProblem, Mode=OneWay}" Message="{Binding Problem, Mode=OneWay}" Margin="0,0,0,4" />
             <ui:InfoBar Title="{l:Text LastReasonBar.Title}" Severity="Warning" IsClosable="False"
                         IsOpen="{Binding HasLastReason, Mode=OneWay}" Message="{Binding LastReason, Mode=OneWay}" Margin="0,0,0,4" />
             <ui:InfoBar Title="{l:Text UpdateNoticeBar.Title}" Severity="Informational" IsClosable="False"

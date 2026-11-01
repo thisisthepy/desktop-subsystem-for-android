@@ -15,10 +15,11 @@ class ChannelClientTest {
     private val locator = FakeLocator()
     private val frames = mutableListOf<String>()
     private var connections = 0
+    private val log = RecordingLog()
     private val client = ChannelClient(
         locator = locator,
         scheduler = scheduler,
-        log = RecordingLog(),
+        log = log,
         onFrame = { frames += String(it) },
         onConnected = { connections++ },
         retryMillis = 1000,
@@ -43,6 +44,13 @@ class ChannelClientTest {
         daemon.deliver("from the host".toByteArray())
         scheduler.runDue()
         assertEquals(listOf("from the host"), frames)
+    }
+
+    @Test
+    fun fr2_an_agent_that_never_finds_the_daemon_says_so_once_in_its_log() {
+        scheduler.post { client.start() }
+        scheduler.advance(120_000)
+        assertEquals(1, log.lines.count { it.contains("SELinux") })
     }
 
     @Test

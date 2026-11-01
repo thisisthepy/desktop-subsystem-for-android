@@ -231,8 +231,18 @@ fn updating_android(
                         &boot_secret,
                         WAIT,
                     );
-                    while watched.state() == SessionState::Active
-                        && !finished.load(Ordering::Relaxed)
+                    let _ = agent.send(&dsa_protocol::encode(&dsa_protocol::control::Envelope {
+                        body: Some(dsa_protocol::control::envelope::Body::GuestBoot(
+                            dsa_protocol::control::GuestBoot {
+                                boot_completed: true,
+                                agent_connected: true,
+                            },
+                        )),
+                    }));
+                    while matches!(
+                        watched.state(),
+                        SessionState::Starting | SessionState::Active
+                    ) && !finished.load(Ordering::Relaxed)
                     {
                         thread::sleep(Duration::from_millis(20));
                     }

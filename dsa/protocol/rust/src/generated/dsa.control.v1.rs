@@ -403,12 +403,29 @@ pub struct GuestMemory {
     #[prost(message, repeated, tag = "14")]
     pub top_processes: ::prost::alloc::vec::Vec<ProcessMemory>,
 }
+/// From the agent to the guest's control daemon, on each connection to it: the agent has
+/// subscribed and takes the host's frames. It stops at the daemon, which tells the host with
+/// GuestBoot and notices when the agent's process dies.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AgentConnected {}
+/// Guest to host, from the control daemon: how far the guest has got. The daemon connects long
+/// before Android has finished starting, so a connection says only that the kernel and init
+/// run. Sent on each connection and on each change.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GuestBoot {
+    /// Android has finished booting (sys.boot_completed).
+    #[prost(bool, tag = "1")]
+    pub boot_completed: bool,
+    /// The agent is connected to the daemon, so the host's requests reach it.
+    #[prost(bool, tag = "2")]
+    pub agent_connected: bool,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 40, 41, 42"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 40, 41, 42"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -460,6 +477,10 @@ pub mod envelope {
         InstalledApp(super::InstalledApp),
         #[prost(message, tag = "23")]
         InstalledApps(super::InstalledApps),
+        #[prost(message, tag = "24")]
+        AgentConnected(super::AgentConnected),
+        #[prost(message, tag = "25")]
+        GuestBoot(super::GuestBoot),
         #[prost(message, tag = "40")]
         ScreenState(super::ScreenState),
         #[prost(message, tag = "41")]

@@ -121,6 +121,36 @@ mod daemon {
         }
     }
 
+    /// Tells the router once Android has finished booting. Init sets the property the daemon
+    /// may read when `sys.boot_completed` is set (`dsa-channeld.rc`). The property lasts for
+    /// the boot, and the daemon restarts within it, so a late look still sees it.
+    #[cfg(target_os = "android")]
+    fn watch_boot(router: Arc<Router>) {
+        use std::ffi::{c_char, c_int, CStr};
+        extern "C" {
+            fn __system_property_get(name: *const c_char, value: *mut c_char) -> c_int;
+        }
+        /// bionic's `PROP_VALUE_MAX`.
+        const VALUE_MAX: usize = 92;
+        let name = c"vendor.dsa.boot_completed";
+        loop {
+            let mut value = [0 as c_char; VALUE_MAX];
+            // SAFETY: a NUL-terminated name and a buffer of the size bionic writes at most.
+            unsafe { __system_property_get(name.as_ptr(), value.as_mut_ptr()) };
+            // SAFETY: bionic leaves a NUL-terminated string there, empty if the property is unset.
+            if unsafe { CStr::from_ptr(value.as_ptr()) }.to_bytes() == b"1" {
+                say!("Android has finished booting");
+                router.boot_completed();
+                return;
+            }
+            thread::sleep(std::time::Duration::from_secs(1));
+        }
+    }
+
+    /// A Linux system other than Android has no such property.
+    #[cfg(not(target_os = "android"))]
+    fn watch_boot(_router: Arc<Router>) {}
+
     /// Hands idle memory back to the host: every so often, decides whether the guest should
     /// reclaim now (see `reclaim`), and has init do it. Only init may write the
     /// kernel's memory controls; the daemon only asks.
@@ -225,6 +255,10 @@ mod daemon {
         {
             let router = Arc::clone(&router);
             thread::spawn(move || reclaim_idle_memory(router));
+        }
+        {
+            let router = Arc::clone(&router);
+            thread::spawn(move || watch_boot(router));
         }
         let (events, event_rx) = mpsc::channel();
         thread::spawn(move || {

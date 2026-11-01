@@ -225,6 +225,12 @@ public final class VectorsTest {
         cases.put("device_idle", Envelope.newBuilder()
                 .setDeviceIdle(DeviceIdle.newBuilder().setIdle(true))
                 .build());
+        cases.put("agent_connected", Envelope.newBuilder()
+                .setAgentConnected(AgentConnected.getDefaultInstance())
+                .build());
+        cases.put("guest_boot", Envelope.newBuilder()
+                .setGuestBoot(GuestBoot.newBuilder().setBootCompleted(true).setAgentConnected(true))
+                .build());
         cases.put("hello_rejected_authentication", Envelope.newBuilder()
                 .setHelloRejected(HelloRejected.newBuilder()
                         .setReason(RejectReason.REJECT_REASON_AUTHENTICATION_FAILED)

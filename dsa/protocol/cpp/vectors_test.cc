@@ -220,6 +220,12 @@ std::map<std::string, v1::Envelope> Cases() {
     power->set_power_saver(true);
   }
   cases["device_idle"].mutable_device_idle()->set_idle(true);
+  cases["agent_connected"].mutable_agent_connected();
+  {
+    v1::GuestBoot* boot = cases["guest_boot"].mutable_guest_boot();
+    boot->set_boot_completed(true);
+    boot->set_agent_connected(true);
+  }
   {
     v1::HelloRejected* rejected = cases["hello_rejected_authentication"].mutable_hello_rejected();
     rejected->set_reason(v1::REJECT_REASON_AUTHENTICATION_FAILED);

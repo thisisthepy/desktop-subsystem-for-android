@@ -10,9 +10,10 @@ public enum SessionState
     Dozing,
     Frozen,
     Stopping,
+    Stalled,
 }
 
-public sealed record StatusInfo(SessionState State, string? LastReason, string? UpdateNotice);
+public sealed record StatusInfo(SessionState State, string? LastReason, string? UpdateNotice, string? Problem = null);
 
 /// <summary>Which GPU the window manager renders on.</summary>
 public enum RenderGpuKind

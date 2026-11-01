@@ -11,7 +11,8 @@ use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use dsa_host_core::keys::{keycode, meta, KeyAction, KeyEvent};
 use dsa_host_core::power::{PowerHub, PowerState};
 use dsa_host_core::session::{
-    GuestLauncher, Session, SessionConfig, SessionError, SessionEvent, SessionState, StopReason,
+    BootProblem, GuestLauncher, GuestStall, Session, SessionConfig, SessionError, SessionEvent,
+    SessionState, StopReason,
 };
 use dsa_host_core::tasks::{Bounds, Task, TaskEvent, TaskRequest};
 use dsa_protocol::auth::BootSecret;
@@ -49,6 +50,10 @@ struct Guest {
     thaws: usize,
     /// Set to make freezing fail, as on a host that cannot pause the guest.
     cannot_freeze: Option<String>,
+    /// What the guest cannot run without and is missing now.
+    missing: Option<String>,
+    /// What the launcher tells about a guest that is late.
+    stall: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -121,6 +126,14 @@ impl GuestLauncher for FakeLauncher {
         (self.0.lock().unwrap().processes > 0).then(|| "fake-vm".into())
     }
 
+    fn prerequisite(&mut self) -> Option<String> {
+        self.0.lock().unwrap().missing.clone()
+    }
+
+    fn explain_stall(&mut self, _stall: GuestStall) -> Option<String> {
+        self.0.lock().unwrap().stall.clone()
+    }
+
     fn freeze(&mut self) -> Result<(), String> {
         let mut guest = self.0.lock().unwrap();
         if let Some(why) = guest.cannot_freeze.clone() {
@@ -167,6 +180,27 @@ fn states(events: &[SessionEvent]) -> Vec<SessionState> {
 /// Connects as the guest's channel daemon would: the transport, then the handshake with the
 /// secret the launcher gave this boot.
 fn connect_agent(connector: &mut MemoryConnector, launcher: &FakeLauncher) -> Box<dyn Connection> {
+    let mut agent = connect_daemon(connector, launcher);
+    report_boot(&mut agent, true, true);
+    agent
+}
+
+/// Reports how far the guest has got, as its channel daemon does.
+fn report_boot(daemon: &mut Box<dyn Connection>, boot_completed: bool, agent_connected: bool) {
+    send_body(
+        daemon,
+        Body::GuestBoot(dsa_protocol::control::GuestBoot {
+            boot_completed,
+            agent_connected,
+        }),
+    );
+}
+
+/// Connects as the channel daemon does, long before Android has finished booting.
+fn connect_daemon(
+    connector: &mut MemoryConnector,
+    launcher: &FakeLauncher,
+) -> Box<dyn Connection> {
     let secret = launcher.secret();
     let mut agent = connector.connect(WAIT).expect("the agent connects");
     guest_connect(
@@ -216,6 +250,252 @@ fn fr2_the_session_is_active_once_the_agent_connects() {
         states(&next_states(&events, 2)),
         [SessionState::Starting, SessionState::Active]
     );
+}
+
+/// A session with `config`, and the time it allows for the guest's handshake.
+fn timed_session(launcher: FakeLauncher, config: SessionConfig) -> (Session, MemoryConnector) {
+    let (listener, connector) = memory::pair();
+    let config = SessionConfig {
+        connect_timeout: WAIT,
+        stop_timeout: WAIT,
+        ..config
+    };
+    (
+        Session::new(
+            launcher,
+            Box::new(listener),
+            ControlHandshake::new("dsa-host test", WAIT),
+            config,
+        ),
+        connector,
+    )
+}
+
+fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + WAIT;
+    while !done() {
+        assert!(std::time::Instant::now() < deadline, "never: {what}");
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn fr2_the_session_stays_starting_until_the_guest_has_booted_and_its_agent_is_connected() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut daemon = connect_daemon(&mut connector, &launcher);
+
+    // The handshake alone, and then each half of being ready, leave it Starting.
+    thread::sleep(Duration::from_millis(100));
+    assert_eq!(session.state(), SessionState::Starting);
+    report_boot(&mut daemon, false, true);
+    thread::sleep(Duration::from_millis(100));
+    assert_eq!(session.state(), SessionState::Starting);
+    report_boot(&mut daemon, true, false);
+    thread::sleep(Duration::from_millis(100));
+    assert_eq!(session.state(), SessionState::Starting);
+    assert_eq!(session.problem(), None);
+
+    report_boot(&mut daemon, true, true);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+}
+
+#[test]
+fn fr2_requests_are_refused_until_the_guest_is_ready() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut daemon = connect_daemon(&mut connector, &launcher);
+    thread::sleep(Duration::from_millis(50));
+    assert_eq!(
+        session.request(TaskRequest::Launch {
+            package_name: "com.android.settings".into()
+        }),
+        Err(SessionError::NotActive(SessionState::Starting))
+    );
+    report_boot(&mut daemon, true, true);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+}
+
+#[test]
+fn fr2_a_guest_that_does_not_finish_booting_in_time_stalls_with_the_cause_and_recovers() {
+    let launcher = FakeLauncher::default();
+    launcher.0.lock().unwrap().stall =
+        Some("the window manager was not running: 29 restarts".into());
+    let (session, mut connector) = timed_session(
+        launcher.clone(),
+        SessionConfig {
+            ready_timeout: Duration::from_millis(100),
+            ..SessionConfig::default()
+        },
+    );
+    session.start();
+    let mut daemon = connect_daemon(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Stalled, WAIT));
+    match session.problem() {
+        Some(BootProblem::BootUnfinished { detail, .. }) => {
+            assert!(detail.unwrap().contains("29 restarts"))
+        }
+        other => panic!("expected BootUnfinished, got {other:?}"),
+    }
+    assert_eq!(launcher.processes(), 3, "the guest is left running");
+    assert!(session.problem().unwrap().to_string().contains("29 restarts"));
+
+    // It may only be slow: when it does finish, nothing else is needed.
+    report_boot(&mut daemon, true, true);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(session.problem(), None);
+}
+
+#[test]
+fn fr2_a_booted_guest_whose_agent_cannot_reach_the_channel_stalls_with_an_actionable_problem() {
+    let launcher = FakeLauncher::default();
+    launcher.0.lock().unwrap().stall = Some("move the data disk aside".into());
+    let (session, mut connector) = timed_session(
+        launcher.clone(),
+        SessionConfig {
+            agent_timeout: Duration::from_millis(100),
+            ..SessionConfig::default()
+        },
+    );
+    session.start();
+    let mut daemon = connect_daemon(&mut connector, &launcher);
+    report_boot(&mut daemon, true, false);
+    assert!(session.wait_for(SessionState::Stalled, WAIT));
+    let problem = session.problem().expect("a problem").to_string();
+    assert!(problem.contains("agent"), "{problem}");
+    assert!(problem.contains("move the data disk aside"), "{problem}");
+    assert_eq!(launcher.processes(), 3, "the user's Android keeps running");
+
+    report_boot(&mut daemon, true, true);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+}
+
+#[test]
+fn fr2_an_agent_that_dies_and_does_not_come_back_stalls_a_running_session() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = timed_session(
+        launcher.clone(),
+        SessionConfig {
+            agent_timeout: Duration::from_millis(100),
+            ..SessionConfig::default()
+        },
+    );
+    session.start();
+    let mut daemon = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    report_boot(&mut daemon, true, false);
+    assert!(session.wait_for(SessionState::Stalled, WAIT));
+
+    report_boot(&mut daemon, true, true);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+}
+
+#[test]
+fn fr2_a_guest_is_not_started_while_what_it_cannot_run_without_is_missing() {
+    let launcher = FakeLauncher::default();
+    launcher.0.lock().unwrap().missing = Some("the window manager cannot start".into());
+    let (session, mut connector) = timed_session(
+        launcher.clone(),
+        SessionConfig {
+            prerequisite_grace: Duration::from_millis(50),
+            ..SessionConfig::default()
+        },
+    );
+    session.start();
+    assert!(session.wait_for(SessionState::Stalled, WAIT));
+    assert_eq!(launcher.0.lock().unwrap().starts, 0, "no guest to crash-loop");
+    assert_eq!(
+        session.problem(),
+        Some(BootProblem::Prerequisite(
+            "the window manager cannot start".into()
+        ))
+    );
+
+    launcher.0.lock().unwrap().missing = None;
+    let _agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(session.problem(), None);
+}
+
+#[test]
+fn fr2_a_waiting_start_can_be_stopped() {
+    let launcher = FakeLauncher::default();
+    launcher.0.lock().unwrap().missing = Some("the window manager cannot start".into());
+    let (session, _connector) = timed_session(launcher.clone(), SessionConfig::default());
+    session.start();
+    assert!(session.wait_for(SessionState::Starting, WAIT));
+    wait_until("the problem is reported", || session.problem().is_some());
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(session.problem(), None);
+}
+
+#[test]
+fn nfr5_a_running_guest_is_stopped_when_what_it_cannot_run_without_stays_gone() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = timed_session(
+        launcher.clone(),
+        SessionConfig {
+            prerequisite_grace: Duration::from_millis(50),
+            prerequisite_stop_after: Duration::from_millis(1500),
+            ..SessionConfig::default()
+        },
+    );
+    session.start();
+    let _agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    launcher.0.lock().unwrap().missing = Some("no one is signed in".into());
+    assert!(session.wait_for(SessionState::Stalled, WAIT));
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(
+        session.last_reason(),
+        Some(StopReason::PrerequisiteLost("no one is signed in".into()))
+    );
+    assert_eq!(launcher.processes(), 0);
+}
+
+#[test]
+fn nfr5_a_window_manager_that_comes_back_returns_the_session_to_active() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = timed_session(
+        launcher.clone(),
+        SessionConfig {
+            prerequisite_grace: Duration::from_millis(50),
+            ..SessionConfig::default()
+        },
+    );
+    session.start();
+    let _agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    launcher.0.lock().unwrap().missing = Some("the window manager has gone".into());
+    assert!(session.wait_for(SessionState::Stalled, WAIT));
+    launcher.0.lock().unwrap().missing = None;
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(launcher.processes(), 3);
+}
+
+#[test]
+fn fr2_an_agent_that_connects_again_is_told_the_screen_and_the_power() {
+    let (session, mut daemon, _launcher) = lifecycle_session(None);
+    assert_eq!(next_body(&mut daemon), screen(false));
+    session.set_power(on_battery(40));
+    assert_eq!(
+        next_body(&mut daemon),
+        Body::PowerState(on_battery(40).to_control())
+    );
+    report_boot(&mut daemon, true, false);
+    thread::sleep(Duration::from_millis(50));
+    report_boot(&mut daemon, true, true);
+    assert_eq!(
+        next_body(&mut daemon),
+        Body::PowerState(on_battery(40).to_control())
+    );
+    assert_eq!(next_body(&mut daemon), screen(false));
 }
 
 #[test]
@@ -1180,6 +1460,7 @@ fn fr5_pointer_input_does_not_wait_for_the_session_to_stop_reading_the_channel()
         WAIT,
     )
     .expect("the host accepts the agent");
+    report_boot(&mut agent, true, true);
     assert!(session.wait_for(SessionState::Active, WAIT));
 
     // The session waits on the channel for up to 20 ms at a time. An event that waited for
@@ -1220,6 +1501,7 @@ fn lifecycle_session(
             stop_timeout: WAIT,
             doze_delay: DOZE_DELAY,
             freeze_after,
+            ..SessionConfig::default()
         },
     );
     session.start();
