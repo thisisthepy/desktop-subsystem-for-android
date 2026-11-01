@@ -168,6 +168,38 @@ pub struct ClipboardText {
     #[prost(string, tag = "1")]
     pub text: ::prost::alloc::string::String,
 }
+/// Installs an APK in the caller's Android. The service answers at once: Done when it takes an
+/// APK of this name and size, or an error. After Done the client sends the APK's `size` bytes
+/// in ApkChunk frames, which are not answered, and the service answers the same request id once
+/// more: InstallResult once Android has installed the app or refused it, or an error when the
+/// APK did not reach Android. The connection then ends. A second install waits for the first.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InstallApk {
+    /// The file's name, without any folder. It ends in ".apk".
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    /// The APK's length in bytes.
+    #[prost(uint64, tag = "2")]
+    pub size: u64,
+}
+/// Part of an APK's content, on a connection that installs one (InstallApk).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApkChunk {
+    #[prost(bytes = "vec", tag = "1")]
+    pub data: ::prost::alloc::vec::Vec<u8>,
+}
+/// The second answer to InstallApk: how the install ended.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InstallResult {
+    #[prost(enumeration = "InstallStatus", tag = "1")]
+    pub status: i32,
+    /// The package that was installed, or that the APK is, when Android says.
+    #[prost(string, tag = "2")]
+    pub package_name: ::prost::alloc::string::String,
+    /// Android's own words on what happened; empty when it gave none.
+    #[prost(string, tag = "3")]
+    pub message: ::prost::alloc::string::String,
+}
 /// Pointer input in a task's window, sent on a connection that streams input.
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct PointerEvent {
@@ -575,7 +607,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 27"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -625,13 +657,15 @@ pub mod request {
         OpenFile(super::OpenFile),
         #[prost(message, tag = "22")]
         WatchClipboard(super::WatchClipboard),
+        #[prost(message, tag = "27")]
+        InstallApk(super::InstallApk),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Response {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "response::Body", tags = "2, 3, 4, 5, 6, 7, 8, 9, 10")]
+    #[prost(oneof = "response::Body", tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11")]
     pub body: ::core::option::Option<response::Body>,
 }
 /// Nested message and enum types in `Response`.
@@ -656,6 +690,8 @@ pub mod response {
         InstalledApps(super::InstalledApps),
         #[prost(message, tag = "10")]
         Settings(super::Settings),
+        #[prost(message, tag = "11")]
+        InstallResult(super::InstallResult),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.
@@ -663,7 +699,7 @@ pub mod response {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11, 14"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -697,6 +733,8 @@ pub mod envelope {
         FileChunk(super::FileChunk),
         #[prost(message, tag = "11")]
         ClipboardText(super::ClipboardText),
+        #[prost(message, tag = "14")]
+        ApkChunk(super::ApkChunk),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -873,6 +911,60 @@ impl FileAction {
         }
     }
 }
+/// Whether an APK was installed, and if not, why. The reasons are stable, so a client can say
+/// in the user's language what went wrong.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum InstallStatus {
+    Unspecified = 0,
+    Success = 1,
+    /// The app does not run on this Android: its ABI, its minimum version or a feature it needs.
+    Incompatible = 2,
+    /// The app is installed already, signed with another key.
+    ConflictingSignature = 3,
+    /// The file is not an APK Android can read, or it is not signed.
+    InvalidApk = 4,
+    InsufficientStorage = 5,
+    /// A newer version of the app is installed.
+    Downgrade = 6,
+    /// A policy of the Android does not allow the app.
+    Blocked = 7,
+    Other = 8,
+}
+impl InstallStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "INSTALL_STATUS_UNSPECIFIED",
+            Self::Success => "INSTALL_STATUS_SUCCESS",
+            Self::Incompatible => "INSTALL_STATUS_INCOMPATIBLE",
+            Self::ConflictingSignature => "INSTALL_STATUS_CONFLICTING_SIGNATURE",
+            Self::InvalidApk => "INSTALL_STATUS_INVALID_APK",
+            Self::InsufficientStorage => "INSTALL_STATUS_INSUFFICIENT_STORAGE",
+            Self::Downgrade => "INSTALL_STATUS_DOWNGRADE",
+            Self::Blocked => "INSTALL_STATUS_BLOCKED",
+            Self::Other => "INSTALL_STATUS_OTHER",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "INSTALL_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "INSTALL_STATUS_SUCCESS" => Some(Self::Success),
+            "INSTALL_STATUS_INCOMPATIBLE" => Some(Self::Incompatible),
+            "INSTALL_STATUS_CONFLICTING_SIGNATURE" => Some(Self::ConflictingSignature),
+            "INSTALL_STATUS_INVALID_APK" => Some(Self::InvalidApk),
+            "INSTALL_STATUS_INSUFFICIENT_STORAGE" => Some(Self::InsufficientStorage),
+            "INSTALL_STATUS_DOWNGRADE" => Some(Self::Downgrade),
+            "INSTALL_STATUS_BLOCKED" => Some(Self::Blocked),
+            "INSTALL_STATUS_OTHER" => Some(Self::Other),
+            _ => None,
+        }
+    }
+}
 /// What a pointer did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
@@ -1016,6 +1108,9 @@ pub enum ErrorCode {
     /// A file sent to Android was refused: it is too large, its name cannot be used, it did not
     /// arrive whole, or Android could not take it. The detail says which.
     FileRefused = 7,
+    /// An APK was not taken: it is too large, its name is not an APK's, or it did not arrive
+    /// whole. The detail says which. An APK Android refused is answered with InstallResult.
+    InstallRefused = 8,
 }
 impl ErrorCode {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1032,6 +1127,7 @@ impl ErrorCode {
             Self::InvalidSetting => "ERROR_CODE_INVALID_SETTING",
             Self::NotAllowed => "ERROR_CODE_NOT_ALLOWED",
             Self::FileRefused => "ERROR_CODE_FILE_REFUSED",
+            Self::InstallRefused => "ERROR_CODE_INSTALL_REFUSED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1045,6 +1141,7 @@ impl ErrorCode {
             "ERROR_CODE_INVALID_SETTING" => Some(Self::InvalidSetting),
             "ERROR_CODE_NOT_ALLOWED" => Some(Self::NotAllowed),
             "ERROR_CODE_FILE_REFUSED" => Some(Self::FileRefused),
+            "ERROR_CODE_INSTALL_REFUSED" => Some(Self::InstallRefused),
             _ => None,
         }
     }

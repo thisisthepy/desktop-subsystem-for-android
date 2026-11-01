@@ -51,6 +51,11 @@ public  final class Envelope extends
     SCREEN_STATE(40),
     POWER_STATE(41),
     DEVICE_IDLE(42),
+    INSTALL_APK(60),
+    APK_CHUNK(61),
+    CANCEL_INSTALL(62),
+    INSTALL_PROGRESS(63),
+    INSTALL_RESULT(64),
     OPEN_LINK(50),
     LINK_HANDLING(51),
     OPEN_FILE(52),
@@ -102,6 +107,11 @@ public  final class Envelope extends
         case 40: return SCREEN_STATE;
         case 41: return POWER_STATE;
         case 42: return DEVICE_IDLE;
+        case 60: return INSTALL_APK;
+        case 61: return APK_CHUNK;
+        case 62: return CANCEL_INSTALL;
+        case 63: return INSTALL_PROGRESS;
+        case 64: return INSTALL_RESULT;
         case 50: return OPEN_LINK;
         case 51: return LINK_HANDLING;
         case 52: return OPEN_FILE;
@@ -1673,6 +1683,256 @@ public  final class Envelope extends
    */
   private void clearDeviceIdle() {
     if (bodyCase_ == 42) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int INSTALL_APK_FIELD_NUMBER = 60;
+  /**
+   * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
+   */
+  @java.lang.Override
+  public boolean hasInstallApk() {
+    return bodyCase_ == 60;
+  }
+  /**
+   * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.InstallApk getInstallApk() {
+    if (bodyCase_ == 60) {
+       return (io.github.thisisthepy.dsa.control.v1.InstallApk) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.InstallApk.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
+   */
+  private void setInstallApk(io.github.thisisthepy.dsa.control.v1.InstallApk value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 60;
+  }
+  /**
+   * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
+   */
+  private void mergeInstallApk(io.github.thisisthepy.dsa.control.v1.InstallApk value) {
+    value.getClass();
+  if (bodyCase_ == 60 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.InstallApk.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.InstallApk.newBuilder((io.github.thisisthepy.dsa.control.v1.InstallApk) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 60;
+  }
+  /**
+   * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
+   */
+  private void clearInstallApk() {
+    if (bodyCase_ == 60) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int APK_CHUNK_FIELD_NUMBER = 61;
+  /**
+   * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
+   */
+  @java.lang.Override
+  public boolean hasApkChunk() {
+    return bodyCase_ == 61;
+  }
+  /**
+   * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ApkChunk getApkChunk() {
+    if (bodyCase_ == 61) {
+       return (io.github.thisisthepy.dsa.control.v1.ApkChunk) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ApkChunk.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
+   */
+  private void setApkChunk(io.github.thisisthepy.dsa.control.v1.ApkChunk value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 61;
+  }
+  /**
+   * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
+   */
+  private void mergeApkChunk(io.github.thisisthepy.dsa.control.v1.ApkChunk value) {
+    value.getClass();
+  if (bodyCase_ == 61 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ApkChunk.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ApkChunk.newBuilder((io.github.thisisthepy.dsa.control.v1.ApkChunk) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 61;
+  }
+  /**
+   * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
+   */
+  private void clearApkChunk() {
+    if (bodyCase_ == 61) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int CANCEL_INSTALL_FIELD_NUMBER = 62;
+  /**
+   * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
+   */
+  @java.lang.Override
+  public boolean hasCancelInstall() {
+    return bodyCase_ == 62;
+  }
+  /**
+   * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.CancelInstall getCancelInstall() {
+    if (bodyCase_ == 62) {
+       return (io.github.thisisthepy.dsa.control.v1.CancelInstall) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.CancelInstall.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
+   */
+  private void setCancelInstall(io.github.thisisthepy.dsa.control.v1.CancelInstall value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 62;
+  }
+  /**
+   * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
+   */
+  private void mergeCancelInstall(io.github.thisisthepy.dsa.control.v1.CancelInstall value) {
+    value.getClass();
+  if (bodyCase_ == 62 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.CancelInstall.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.CancelInstall.newBuilder((io.github.thisisthepy.dsa.control.v1.CancelInstall) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 62;
+  }
+  /**
+   * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
+   */
+  private void clearCancelInstall() {
+    if (bodyCase_ == 62) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int INSTALL_PROGRESS_FIELD_NUMBER = 63;
+  /**
+   * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
+   */
+  @java.lang.Override
+  public boolean hasInstallProgress() {
+    return bodyCase_ == 63;
+  }
+  /**
+   * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.InstallProgress getInstallProgress() {
+    if (bodyCase_ == 63) {
+       return (io.github.thisisthepy.dsa.control.v1.InstallProgress) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.InstallProgress.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
+   */
+  private void setInstallProgress(io.github.thisisthepy.dsa.control.v1.InstallProgress value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 63;
+  }
+  /**
+   * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
+   */
+  private void mergeInstallProgress(io.github.thisisthepy.dsa.control.v1.InstallProgress value) {
+    value.getClass();
+  if (bodyCase_ == 63 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.InstallProgress.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.InstallProgress.newBuilder((io.github.thisisthepy.dsa.control.v1.InstallProgress) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 63;
+  }
+  /**
+   * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
+   */
+  private void clearInstallProgress() {
+    if (bodyCase_ == 63) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int INSTALL_RESULT_FIELD_NUMBER = 64;
+  /**
+   * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
+   */
+  @java.lang.Override
+  public boolean hasInstallResult() {
+    return bodyCase_ == 64;
+  }
+  /**
+   * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.InstallResult getInstallResult() {
+    if (bodyCase_ == 64) {
+       return (io.github.thisisthepy.dsa.control.v1.InstallResult) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.InstallResult.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
+   */
+  private void setInstallResult(io.github.thisisthepy.dsa.control.v1.InstallResult value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 64;
+  }
+  /**
+   * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
+   */
+  private void mergeInstallResult(io.github.thisisthepy.dsa.control.v1.InstallResult value) {
+    value.getClass();
+  if (bodyCase_ == 64 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.InstallResult.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.InstallResult.newBuilder((io.github.thisisthepy.dsa.control.v1.InstallResult) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 64;
+  }
+  /**
+   * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
+   */
+  private void clearInstallResult() {
+    if (bodyCase_ == 64) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -3528,6 +3788,246 @@ public  final class Envelope extends
     }
 
     /**
+     * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
+     */
+    @java.lang.Override
+    public boolean hasInstallApk() {
+      return instance.hasInstallApk();
+    }
+    /**
+     * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.InstallApk getInstallApk() {
+      return instance.getInstallApk();
+    }
+    /**
+     * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
+     */
+    public Builder setInstallApk(io.github.thisisthepy.dsa.control.v1.InstallApk value) {
+      copyOnWrite();
+      instance.setInstallApk(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
+     */
+    public Builder setInstallApk(
+        io.github.thisisthepy.dsa.control.v1.InstallApk.Builder builderForValue) {
+      copyOnWrite();
+      instance.setInstallApk(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
+     */
+    public Builder mergeInstallApk(io.github.thisisthepy.dsa.control.v1.InstallApk value) {
+      copyOnWrite();
+      instance.mergeInstallApk(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
+     */
+    public Builder clearInstallApk() {
+      copyOnWrite();
+      instance.clearInstallApk();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
+     */
+    @java.lang.Override
+    public boolean hasApkChunk() {
+      return instance.hasApkChunk();
+    }
+    /**
+     * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ApkChunk getApkChunk() {
+      return instance.getApkChunk();
+    }
+    /**
+     * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
+     */
+    public Builder setApkChunk(io.github.thisisthepy.dsa.control.v1.ApkChunk value) {
+      copyOnWrite();
+      instance.setApkChunk(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
+     */
+    public Builder setApkChunk(
+        io.github.thisisthepy.dsa.control.v1.ApkChunk.Builder builderForValue) {
+      copyOnWrite();
+      instance.setApkChunk(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
+     */
+    public Builder mergeApkChunk(io.github.thisisthepy.dsa.control.v1.ApkChunk value) {
+      copyOnWrite();
+      instance.mergeApkChunk(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ApkChunk apk_chunk = 61;</code>
+     */
+    public Builder clearApkChunk() {
+      copyOnWrite();
+      instance.clearApkChunk();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
+     */
+    @java.lang.Override
+    public boolean hasCancelInstall() {
+      return instance.hasCancelInstall();
+    }
+    /**
+     * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.CancelInstall getCancelInstall() {
+      return instance.getCancelInstall();
+    }
+    /**
+     * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
+     */
+    public Builder setCancelInstall(io.github.thisisthepy.dsa.control.v1.CancelInstall value) {
+      copyOnWrite();
+      instance.setCancelInstall(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
+     */
+    public Builder setCancelInstall(
+        io.github.thisisthepy.dsa.control.v1.CancelInstall.Builder builderForValue) {
+      copyOnWrite();
+      instance.setCancelInstall(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
+     */
+    public Builder mergeCancelInstall(io.github.thisisthepy.dsa.control.v1.CancelInstall value) {
+      copyOnWrite();
+      instance.mergeCancelInstall(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.CancelInstall cancel_install = 62;</code>
+     */
+    public Builder clearCancelInstall() {
+      copyOnWrite();
+      instance.clearCancelInstall();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
+     */
+    @java.lang.Override
+    public boolean hasInstallProgress() {
+      return instance.hasInstallProgress();
+    }
+    /**
+     * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.InstallProgress getInstallProgress() {
+      return instance.getInstallProgress();
+    }
+    /**
+     * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
+     */
+    public Builder setInstallProgress(io.github.thisisthepy.dsa.control.v1.InstallProgress value) {
+      copyOnWrite();
+      instance.setInstallProgress(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
+     */
+    public Builder setInstallProgress(
+        io.github.thisisthepy.dsa.control.v1.InstallProgress.Builder builderForValue) {
+      copyOnWrite();
+      instance.setInstallProgress(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
+     */
+    public Builder mergeInstallProgress(io.github.thisisthepy.dsa.control.v1.InstallProgress value) {
+      copyOnWrite();
+      instance.mergeInstallProgress(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstallProgress install_progress = 63;</code>
+     */
+    public Builder clearInstallProgress() {
+      copyOnWrite();
+      instance.clearInstallProgress();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
+     */
+    @java.lang.Override
+    public boolean hasInstallResult() {
+      return instance.hasInstallResult();
+    }
+    /**
+     * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.InstallResult getInstallResult() {
+      return instance.getInstallResult();
+    }
+    /**
+     * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
+     */
+    public Builder setInstallResult(io.github.thisisthepy.dsa.control.v1.InstallResult value) {
+      copyOnWrite();
+      instance.setInstallResult(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
+     */
+    public Builder setInstallResult(
+        io.github.thisisthepy.dsa.control.v1.InstallResult.Builder builderForValue) {
+      copyOnWrite();
+      instance.setInstallResult(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
+     */
+    public Builder mergeInstallResult(io.github.thisisthepy.dsa.control.v1.InstallResult value) {
+      copyOnWrite();
+      instance.mergeInstallResult(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.InstallResult install_result = 64;</code>
+     */
+    public Builder clearInstallResult() {
+      copyOnWrite();
+      instance.clearInstallResult();
+      return this;
+    }
+
+    /**
      * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
      */
     @java.lang.Override
@@ -3821,14 +4321,19 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.OpenFile.class,
             io.github.thisisthepy.dsa.control.v1.FileChunk.class,
             io.github.thisisthepy.dsa.control.v1.FileProgress.class,
+            io.github.thisisthepy.dsa.control.v1.InstallApk.class,
+            io.github.thisisthepy.dsa.control.v1.ApkChunk.class,
+            io.github.thisisthepy.dsa.control.v1.CancelInstall.class,
+            io.github.thisisthepy.dsa.control.v1.InstallProgress.class,
+            io.github.thisisthepy.dsa.control.v1.InstallResult.class,
           };
           java.lang.String info =
-              "\u0000$\u0001\u0000\u00016$\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<\u0000" +
+              "\u0000)\u0001\u0000\u0001@)\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<\u0000" +
               "\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<\u0000\u000b" +
               "<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012<\u0000\u0013" +
               "<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000\u0019<\u0000" +
               "\u001a<\u0000\u001b<\u0000\u001c<\u0000\u001d<\u0000(<\u0000)<\u0000*<\u00002<\u0000" +
-              "3<\u00004<\u00005<\u00006<\u0000";
+              "3<\u00004<\u00005<\u00006<\u0000<<\u0000=<\u0000><\u0000?<\u0000@<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through
