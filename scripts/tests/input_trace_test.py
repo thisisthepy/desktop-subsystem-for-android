@@ -2,6 +2,7 @@
 
 import importlib.util
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("input_trace", HERE.parent / "input-trace.py")
 trace = importlib.util.module_from_spec(spec)
+# Registered before it runs: its dataclasses look their module up by name.
+sys.modules["input_trace"] = trace
 spec.loader.exec_module(trace)
 
 HOST_LOG = """\
