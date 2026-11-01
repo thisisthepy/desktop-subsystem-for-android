@@ -413,6 +413,66 @@ message GuestBoot {
   bool agent_connected = 2;
 }
 
+// Guest to host, from the agent: an app in the guest opened a web link, which the host opens
+// in the user's default browser. Only http and https links are sent; the host checks the link
+// again and drops anything else, so an app in the guest can never make the host run a
+// program. The agent sends none while links open in the guest (LinkHandling).
+message OpenLink {
+  string url = 1;
+}
+
+// Host to guest: where the web links that apps in the guest open go. The agent takes them to
+// go to the host when it connects; the host says so when they do not, and on every change
+// after that. While they go to the host, the agent is the guest's browser. A link that an
+// installed app has verified as its own (an Android App Link) still opens in that app, which
+// the guest decides by itself.
+message LinkHandling {
+  // True when links open in an app in the guest, as on a phone.
+  bool in_guest = 1;
+}
+
+// What the user wants done with a file the host sends.
+enum FileAction {
+  FILE_ACTION_UNSPECIFIED = 0;
+  // Open it in an app the user picks.
+  FILE_ACTION_VIEW = 1;
+  // Share it with an app the user picks.
+  FILE_ACTION_SEND = 2;
+}
+
+// Host to guest: a file from the host, whose content follows in FileChunk messages of the
+// same `transfer_id`, in order. Once the agent has all `size` bytes, it asks the user which
+// app opens (or takes) the file, and that app shows as a task window. The host sends at most
+// a few chunks ahead of the agent's FileProgress, so the guest is never handed more than it
+// has taken.
+message OpenFile {
+  // Unique among the transfers of one connection.
+  uint32 transfer_id = 1;
+  // The file's name, without any folder. Its extension gives its type.
+  string name = 2;
+  // The file's length in bytes.
+  uint64 size = 3;
+  FileAction action = 4;
+}
+
+// Host to guest: part of the content of a file an OpenFile announced.
+message FileChunk {
+  uint32 transfer_id = 1;
+  // Where `data` starts in the file.
+  uint64 offset = 2;
+  bytes data = 3;
+}
+
+// Guest to host, from the agent: how far a transfer has got. Sent after each chunk the agent
+// has stored. When `received` is the file's whole size, the agent has asked the user which
+// app takes it. A non-empty `error` ends the transfer: it says, in words a person can act on,
+// why the agent could not take the file.
+message FileProgress {
+  uint32 transfer_id = 1;
+  uint64 received = 2;
+  string error = 3;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -443,5 +503,10 @@ message Envelope {
     ScreenState screen_state = 40;
     PowerState power_state = 41;
     DeviceIdle device_idle = 42;
+    OpenLink open_link = 50;
+    LinkHandling link_handling = 51;
+    OpenFile open_file = 52;
+    FileChunk file_chunk = 53;
+    FileProgress file_progress = 54;
   }
 }
