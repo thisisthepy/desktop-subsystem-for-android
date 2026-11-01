@@ -445,6 +445,7 @@ CUTTLEFISH_COMPOSER_APEXES = [
 ]
 # The freeform display every task window lives on, as the hwcomposer reads it from
 # ro.boot.dsa.*. The host shows windows, not this display, so its size bounds a window's.
+# These are defaults: the host replaces the width and height from the user's monitors.
 DISPLAY_BOOTCONFIG = {
     "display_width": 1920,
     "display_height": 1080,

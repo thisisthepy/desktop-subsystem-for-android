@@ -285,8 +285,15 @@ impl Compositor {
             .spawn(move || {
                 let mut connector = monitor_connector_factory;
                 let mut client_opt: Option<HostApiClient> = None;
+                let mut monitors = crate::monitors::MonitorWatch::default();
 
                 while !monitor_stop.load(Ordering::Relaxed) {
+                    // The next start of Android sizes its display from this record.
+                    if let Err(why) = monitors.check() {
+                        if let Some(logger) = &monitor_logger {
+                            logger.log(&why);
+                        }
+                    }
                     let client = match client_opt.as_mut() {
                         Some(c) => c,
                         None => {

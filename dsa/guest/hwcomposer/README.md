@@ -111,8 +111,9 @@ holds when the process dies.
 
 ## Display
 
-The display's size and density come from the kernel command line, which
-`make-image.py` writes into `image.json`:
+The display's size and density come from the kernel command line. `make-image.py` writes
+these defaults into `image.json`, and the host replaces the width and height with a square as
+long as the user's longest monitor when it starts the VM:
 
 | Property | Default |
 |---|---|
@@ -121,7 +122,9 @@ The display's size and density come from the kernel command line, which
 | `androidboot.dsa.display_dpi` | 160 |
 | `androidboot.dsa.display_refresh_rate` | 60 |
 
-A window cannot be larger than this display.
+A window cannot be larger than this display. A task's ColorBuffers follow the task's own
+size in steps (`taskBufferSize`), so a large display costs nothing per window. Only the client
+target has the display's size, and only once SurfaceFlinger composes something itself.
 
 ## Build and test
 

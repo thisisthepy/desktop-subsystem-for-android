@@ -57,6 +57,7 @@ mod windows_host {
     use dsa_host_core::handshake::ControlHandshake;
     use dsa_host_core::power::PowerHub;
     use dsa_host_core::session::{Session, SessionState};
+    use dsa_host_core::guest_display::{display_for, with_display_size};
     use dsa_host_windows::account::current_user_sid;
     use dsa_host_windows::android_vm::AndroidVmLauncher;
     use dsa_host_windows::guid::Guid;
@@ -186,9 +187,13 @@ mod windows_host {
         } else {
             None
         };
-        let vm = config
+        let mut vm = config
             .vm_config(fallback_sid.as_deref())
             .map_err(|e| e.to_string())?;
+        // Run by hand, this process is in the user's session and sees their monitors.
+        if let Some(size) = display_for(&dsa_host_windows::monitors::current()) {
+            vm.kernel_cmdline = with_display_size(&vm.kernel_cmdline, size);
+        }
         let user = config.user_sid.clone().or(fallback_sid).unwrap_or_default();
         let console_log = config.console_log_path(&user, &vm.data_disk);
         println!("the Android console is kept in {}", console_log.display());
