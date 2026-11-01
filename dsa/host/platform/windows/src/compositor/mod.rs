@@ -15,7 +15,8 @@
 //! the user and their Android ([`clipboard`]), since the service cannot reach the user's
 //! clipboard, and opens the web links apps in Android open in the user's default browser
 //! ([`links`]). It shows the notifications of the user's Android as toasts, and passes the
-//! user's dismissals back ([`notifications`]).
+//! user's dismissals back ([`notifications`]). It shows the widgets the user placed on the
+//! desktop, each in a borderless window of its own on the desktop ([`widgets`]).
 
 pub mod adapter;
 pub mod clipboard;
@@ -30,6 +31,7 @@ pub mod shutdown;
 pub mod single_instance;
 pub mod tasks;
 pub mod trim;
+pub mod widgets;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -116,6 +118,8 @@ pub struct Compositor {
     share_clipboard: bool,
     /// Whether the notifications of the user's Android are shown as toasts.
     show_notifications: bool,
+    /// Whether the widgets of the user's Android are shown on the desktop.
+    show_widgets: bool,
 }
 
 /// The installed apps an event from the watch of the tasks carries, if it carries them.
@@ -193,6 +197,7 @@ impl Compositor {
             link_opener: Some(Box::new(links::ShellOpener)),
             share_clipboard: true,
             show_notifications: true,
+            show_widgets: true,
         }
     }
 
@@ -221,6 +226,7 @@ impl Compositor {
             link_opener: None,
             share_clipboard: false,
             show_notifications: false,
+            show_widgets: false,
         }
     }
 
@@ -321,6 +327,7 @@ impl Compositor {
         let links_thread = self.start_links(&stop);
         let clipboard_thread = self.start_clipboard(&stop);
         let notifications_thread = self.start_notifications(&stop);
+        let widgets_thread = self.start_widgets(&stop);
 
         // 1. Monitor thread that tracks the VM ID and state via the local API.
         let monitor_stop = Arc::clone(&stop);
@@ -510,6 +517,9 @@ impl Compositor {
         if let Some(thread) = notifications_thread {
             let _ = thread.join();
         }
+        if let Some(thread) = widgets_thread {
+            let _ = thread.join();
+        }
 
         if let Some(logger) = &self.logger {
             logger.log("dsa-wm stopped cleanly");
@@ -548,6 +558,41 @@ impl Compositor {
                 note(
                     failed.as_deref(),
                     &format!("could not start the clipboard's thread: {e}"),
+                )
+            })
+            .ok()
+    }
+
+    /// Starts showing the widgets of the user's Android on the desktop, on a thread of its own
+    /// that ends with `stop`. Windows that cannot open are logged; the rest of the window
+    /// manager goes on.
+    fn start_widgets(&self, stop: &Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
+        if !self.show_widgets {
+            return None;
+        }
+        let connector = (self.local_api_connector)();
+        let stop = Arc::clone(stop);
+        let logger = self.logger.clone();
+        let failed = self.logger.clone();
+        thread::Builder::new()
+            .name("dsa-wm-widgets".into())
+            .spawn(move || {
+                let mut windows = match widgets::WindowsWidgetWindows::open(logger.clone()) {
+                    Ok(windows) => windows,
+                    Err(why) => {
+                        note(
+                            logger.as_deref(),
+                            &format!("widgets are not shown on the desktop: {why}"),
+                        );
+                        return;
+                    }
+                };
+                widgets::sync(connector, &mut windows, stop, logger);
+            })
+            .map_err(|e| {
+                note(
+                    failed.as_deref(),
+                    &format!("could not start the widgets' thread: {e}"),
                 )
             })
             .ok()

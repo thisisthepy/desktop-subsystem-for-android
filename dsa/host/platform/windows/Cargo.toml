@@ -75,6 +75,8 @@ windows = { version = "0.62", features = [
     "Data_Xml_Dom",
     "Foundation",
     "UI_Notifications",
+    # Decoding the PNG frames of the widgets on the desktop.
+    "Win32_Graphics_Imaging",
 ] }
 
 [build-dependencies]
