@@ -6,8 +6,8 @@
 // the task's window, which becomes the current frame of that task's own host display and is
 // posted. The host never receives the display as a whole.
 //
-// The ColorBuffers are kept at the display's size (taskBufferSize), so resizing a window
-// remakes none of them: only the host display's size, which tells the host how much of the
+// The ColorBuffers follow the task's size in steps (taskBufferSize), so most steps of a resize
+// remake none of them: only the host display's size, which tells the host how much of the
 // buffer the frame fills, changes with the task.
 
 #pragma once
@@ -102,6 +102,8 @@ class TaskComposer {
         BufferSize buffers;
         // The display exists on the host connection mGeneration names.
         bool onHost = false;
+        // A frame has been sent on that connection, so the window has one to keep.
+        bool posted = false;
         // The host has been told this task's frames go to `display`.
         bool announced = false;
         // Two ColorBuffers, so the host can show one while the next is composed.

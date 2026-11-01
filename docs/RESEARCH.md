@@ -348,7 +348,7 @@ starting a second VM, for any project that wants it.
 
 - 프레임 게시가 호스트 복사를 기다리는 시간: post는 1 ms 안팎이다.
 - 호스트 복사와 표시 쪽 Present: `Present(0, 0)`이고 `took`이 작다.
-- acquire fence: 이 드라이버는 fence 없이 렌더링이 끝난 뒤 돌아오므로 fence가 -1이다(패치 0008). 다만 hwc 추적에 대기 시간이 없어 코드로만 판단했다. `waited` 칸을 추가해 다음 측정에서 확인한다.
+- acquire fence: fence는 -1이다. 이 측정 당시에는 호스트가 이미지 해제를 대기열에 넣자마자 답했으므로, 패치 0008의 설명과 달리 렌더링이 끝났다는 보장이 없었다. 패치 0010(#151)부터 GPU 작업이 끝난 뒤 답한다. 이 때문에 앱의 present가 늦어질 수 있어 다음 측정에서 확인한다.
 - 오디오 재시도의 CPU 자체: 초당 10번의 binder 호출은 작다. 낭비의 주된 부분은 직렬 포트 바이트인데, 바이트당 비용은 아직 측정하지 않았다.
 - `SIGABRT`로 죽는 `main`: 이 로그에는 없다. 시그널로 끝난 서비스도 없다.
 
@@ -364,3 +364,16 @@ Davey는 이 로그에 2건뿐이고 둘 다 액티비티 전환이다. 리플�
 - 호스트 첫 표시 44 ms와 외부 첫 변화 약 120 ms 사이의 약 75 ms. `app.present` 뒤 DWM은 많아야 두 프레임이다. 나머지는 첫 프레임들에 눈에 띄는 변화가 없어서로 보인다. 마우스를 누를 때의 호버 해제와, 스크롤 안의 뷰가 누름 표시를 `ViewConfiguration.getTapTimeout()`(100 ms)만큼 미루는 것이 후보다. 스크롤 없는 버튼과 목록 행의 첫 변화 시간을 비교하면 갈린다.
 - 앱이 쓰는 시간이 재지 않은 채로 남아 있으므로 `debug.sf.late.app.duration`을 줄이는 것은 보류한다. 놓치는 프레임이 늘 수 있다.
 - 작업이 열린 동안의 `MostlyCache` 회수(02:21:53)는 익명 메모리 1 GiB를 zram으로 보내고 캐시를 버린다. 3분 뒤 첫 누름의 `inject=16.1`과 첫 페이지의 비용에 얼마나 기여하는지 재지 않았다.
+
+## R6. 커널 명령줄에서 같은 `androidboot` 값을 두 번 주면 어느 쪽이 이기는가 (FR-4)
+
+**배경**: 게스트 디스플레이 크기를 호스트가 정하려면, 이미지의 `kernel_cmdline`에 이미 있는 `androidboot.dsa.display_width` 뒤에 값을 덧붙이면 되는지 확인해야 했다.
+
+**확인 방법**: AOSP `system/core/init/property_service.cpp`(`android16-release`)를 읽었다. 실제 부팅으로는 확인하지 않았다.
+
+**결과**:
+- `PropertyInit`은 `ProcessKernelDt`, `ProcessKernelCmdline`, `ProcessBootconfig` 순으로 부른다.
+- `PropertySet`은 `ro.*` 속성을 한 번만 쓰게 하고, 다시 쓰면 "Read-only property was already set"으로 거절한다.
+- 따라서 **앞의 값이 이긴다**. 뒤에 덧붙인 값도, bootconfig의 값도 이미지의 명령줄 값을 덮지 못한다.
+
+**결정**: 호스트는 이미지의 너비와 높이 단어를 지우고 자기 값을 넣는다(`dsa_host_core::guest_display::with_display_size`).
