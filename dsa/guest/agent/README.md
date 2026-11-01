@@ -51,6 +51,17 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   clipboard as the guest's default input method, which Android 10 and later allow whichever
   app has the focus. It does not send back the clip it set, drops text longer than 256 KiB
   of UTF-8, and sends nothing while the host says sharing is off (`ClipboardSharing`).
+- **Notifications.** The guest has no SystemUI, so the agent's notification listener reads
+  the guest's notifications and sends each one a person would see to the host
+  (`GuestNotification`): title, text, app name, a 96-pixel PNG icon, its importance, and
+  whether it is high priority. It leaves out group summaries, the ongoing notices of
+  foreground services, minimum-importance and empty notifications. A notification posted
+  again replaces the host's, and a removed one is removed there (`NotificationRemoved`).
+  A click on the host (`NotificationClicked`) sends the notification's content intent, which
+  may start an activity from the background; a dismissal (`NotificationDismissed`) cancels
+  it. The agent allows its own listener at start (`MANAGE_NOTIFICATION_LISTENERS`). The
+  listener is called over binder in the agent's persistent process, so notifications still
+  arrive while the device is in Doze.
 - **Battery.** The host sends its power (`PowerState`): AC or battery, the charge, whether
   it charges, battery saver. The agent sets the battery service to it (the `battery set`
   shell command) and battery saver with it (`PowerManager.setPowerSaveModeEnabled`). A host
@@ -351,6 +362,7 @@ The release APK, `build/outputs/apk/release/dsa-agent-release-unsigned.apk`, is 
 | `src/main/kotlin/.../agent/` | The agent: task reports, requests, pointer, key and text input, the channel client, the freeform setup, task placement |
 | `src/main/kotlin/.../agent/power/` | The screen, Doze and the battery, as the host asks |
 | `src/main/kotlin/.../agent/clipboard/` | The clipboard shared with the host |
+| `src/main/kotlin/.../agent/notifications/` | The notifications shown on the host |
 | `src/main/kotlin/.../agent/platform/` | The framework side: the application, task source, actions, windowing, input injection, the input method, binder channel, power controls |
 | `src/test/` | The unit tests |
 | `hidden-api/` | Compile-only declarations of framework classes outside the SDK |

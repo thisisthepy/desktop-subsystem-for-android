@@ -131,6 +131,14 @@ after two minutes. `"keep_window_manager": false` turns this off.
   clipboard and passes new text to the service, and the text Android copies goes on the
   user's clipboard. Text it set itself is not passed back. `dsa settings set clipboard off`,
   or the switch in the settings app, stops the sharing in both directions.
+- It shows the notifications of the user's Android as toasts, each under the AppUserModelID
+  of the app that posted it, so it carries the app's name and icon and groups with its
+  taskbar button. A new version of a notification replaces its toast, and a notification
+  removed in Android removes its toast. Clicking a toast launches the
+  `dsa-notification:` protocol, which the window manager registers for the user to run
+  `dsa-wm.exe --notification <uri>`: that passes the click to the service and ends, and the
+  app opens in Android, which leaves Doze first. Dismissing a toast dismisses the
+  notification in Android too, unless the app keeps it.
 - It owns no window. Each Android app task shows in a window of the app's own window
   program (below). The window manager watches the user's tasks through the service's
   local API, starts each app's window program, and tells it to open a window for each

@@ -13,13 +13,15 @@
 //! itself, without passing through the window manager. While no task window is open, it gives
 //! back the memory it is not using ([`trim`]). It also carries the text clipboard between
 //! the user and their Android ([`clipboard`]), since the service cannot reach the user's
-//! clipboard.
+//! clipboard. It shows the notifications of the user's Android as toasts, and passes the
+//! user's dismissals back ([`notifications`]).
 
 pub mod adapter;
 pub mod clipboard;
 pub mod display_gpu;
 pub mod frames;
 pub mod hosts;
+pub mod notifications;
 pub mod log;
 pub mod present;
 pub mod shutdown;
@@ -108,6 +110,8 @@ pub struct Compositor {
     start_menu: Option<StartMenuSetup>,
     /// Whether the user's clipboard is shared with their Android.
     share_clipboard: bool,
+    /// Whether the notifications of the user's Android are shown as toasts.
+    show_notifications: bool,
 }
 
 /// The installed apps an event from the watch of the tasks carries, if it carries them.
@@ -183,6 +187,7 @@ impl Compositor {
             windows: Arc::new(Mutex::new(Vec::new())),
             start_menu: crate::start_menu::StartMenuSetup::default_for_user(),
             share_clipboard: true,
+            show_notifications: true,
         }
     }
 
@@ -209,6 +214,7 @@ impl Compositor {
             windows: Arc::new(Mutex::new(Vec::new())),
             start_menu: None,
             share_clipboard: false,
+            show_notifications: false,
         }
     }
 
@@ -280,6 +286,7 @@ impl Compositor {
         // them.
         let task_windows = self.start_task_windows(&stop);
         let clipboard_thread = self.start_clipboard(&stop);
+        let notifications_thread = self.start_notifications(&stop);
 
         // 1. Monitor thread that tracks the VM ID and state via the local API.
         let monitor_stop = Arc::clone(&stop);
@@ -463,6 +470,9 @@ impl Compositor {
         if let Some(thread) = clipboard_thread {
             let _ = thread.join();
         }
+        if let Some(thread) = notifications_thread {
+            let _ = thread.join();
+        }
 
         if let Some(logger) = &self.logger {
             logger.log("dsa-wm stopped cleanly");
@@ -501,6 +511,55 @@ impl Compositor {
                 note(
                     failed.as_deref(),
                     &format!("could not start the clipboard's thread: {e}"),
+                )
+            })
+            .ok()
+    }
+
+    /// Starts showing the notifications of the user's Android as toasts, on a thread of its
+    /// own that ends with `stop`. The protocol a click on a toast launches is registered for
+    /// this program first; a problem with either is logged, and the rest of the window manager
+    /// goes on.
+    fn start_notifications(&self, stop: &Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
+        if !self.show_notifications {
+            return None;
+        }
+        match std::env::current_exe() {
+            Ok(program) => {
+                if let Err(why) = notifications::register_protocol(&program) {
+                    note(
+                        self.logger.as_deref(),
+                        &format!("clicking a notification cannot open it: {why}"),
+                    );
+                }
+            }
+            Err(why) => note(
+                self.logger.as_deref(),
+                &format!("clicking a notification cannot open it: {why}"),
+            ),
+        }
+        let connector = (self.local_api_connector)();
+        let stop = Arc::clone(stop);
+        let logger = self.logger.clone();
+        let failed = self.logger.clone();
+        thread::Builder::new()
+            .name("dsa-wm-notifications".into())
+            .spawn(move || {
+                // WinRT, which shows the toasts, needs COM on this thread.
+                let _com = crate::start_menu::ComApartment::enter();
+                let mut toasts = notifications::WindowsToasts::new();
+                notifications::sync(
+                    connector,
+                    &mut toasts,
+                    notifications::default_icon_dir(),
+                    stop,
+                    logger,
+                );
+            })
+            .map_err(|e| {
+                note(
+                    failed.as_deref(),
+                    &format!("could not start the notifications' thread: {e}"),
                 )
             })
             .ok()
