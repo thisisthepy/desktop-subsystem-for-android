@@ -142,6 +142,13 @@ pub struct ConsoleSigns {
 }
 
 impl ConsoleSigns {
+    /// Whether the agent was refused the channel for running as `priv_app`, which is what the
+    /// package manager makes of a disk from other signing keys. Another domain refused says
+    /// nothing about the disk.
+    pub fn agent_refused_for_keys(&self) -> bool {
+        self.channel_denials > 0 && self.denied_domain.as_deref() == Some("priv_app")
+    }
+
     fn read(&mut self, line: &str) {
         if line.contains("denied") && line.contains("IChannel/default") {
             self.channel_denials += 1;

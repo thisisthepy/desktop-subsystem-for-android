@@ -171,6 +171,8 @@ fn fr14_the_user_is_told_when_their_version_lost_support() {
 struct StoreLauncher {
     store: Arc<ImageStore>,
     broken: Vec<String>,
+    /// What its console shows: the agent was refused because of the disk's signing keys.
+    other_keys: bool,
     /// The running boot's secret, which the agent answers the host's challenge with.
     secret: Arc<Mutex<Option<BootSecret>>>,
 }
@@ -193,6 +195,9 @@ impl GuestLauncher for StoreLauncher {
     fn stop(&mut self, _: Duration) -> Result<(), String> {
         Ok(())
     }
+    fn agent_refused_for_keys(&mut self) -> bool {
+        self.other_keys
+    }
 }
 
 /// A session over the store, with an agent that connects whenever the guest is up.
@@ -206,6 +211,7 @@ fn updating_android(
         StoreLauncher {
             store: Arc::clone(store),
             broken: broken.iter().map(|b| b.to_string()).collect(),
+            other_keys: false,
             secret: Arc::clone(&secret),
         },
         Box::new(listener),
@@ -320,6 +326,83 @@ fn fr14_a_new_image_that_does_not_boot_is_undone_and_the_session_started_again()
     assert_eq!(state.current.version, "16.0.1");
     assert_eq!(state.failed, ["16.0.2"]);
     done.store(true, Ordering::Relaxed);
+}
+
+#[test]
+fn fr14_a_new_image_on_a_disk_from_other_keys_is_neither_blamed_nor_kept() {
+    let store = fresh_store();
+    check(
+        &store,
+        &server(&[16], &[("16.0.2", 16, 2)], &key()),
+        "mem://list.json",
+        &trusted(),
+    )
+    .unwrap();
+    let (listener, mut connector) = memory::pair();
+    let secret = Arc::new(Mutex::new(None));
+    let session = Arc::new(Session::new(
+        StoreLauncher {
+            store: Arc::clone(&store),
+            broken: Vec::new(),
+            other_keys: true,
+            secret: Arc::clone(&secret),
+        },
+        Box::new(listener),
+        ControlHandshake::new("test host", WAIT),
+        SessionConfig {
+            connect_timeout: WAIT,
+            stop_timeout: WAIT,
+            agent_timeout: Duration::from_millis(100),
+            ..SessionConfig::default()
+        },
+    ));
+    let android = UpdatingAndroid {
+        session,
+        store: Arc::clone(&store),
+        notices: Arc::new(UpdateNotices::default()),
+        boot_timeout: WAIT,
+        trial_running: Arc::new(AtomicBool::new(false)),
+    };
+    android.start();
+
+    let deadline = Instant::now() + WAIT;
+    let boot_secret = loop {
+        if let Some(boot_secret) = secret.lock().unwrap().clone() {
+            break boot_secret;
+        }
+        assert!(Instant::now() < deadline, "the guest was never started");
+        thread::sleep(Duration::from_millis(5));
+    };
+    let mut daemon = connector.connect(WAIT).unwrap();
+    guest_connect(
+        &mut *daemon,
+        &local_hello(Role::Guest, "daemon"),
+        &boot_secret,
+        WAIT,
+    )
+    .unwrap();
+    daemon
+        .send(&dsa_protocol::encode(&dsa_protocol::control::Envelope {
+            body: Some(dsa_protocol::control::envelope::Body::GuestBoot(
+                dsa_protocol::control::GuestBoot {
+                    boot_completed: true,
+                    agent_connected: false,
+                },
+            )),
+        }))
+        .unwrap();
+
+    let notice = wait_for_notice(&android);
+    assert!(notice.contains("16.0.2 is kept on trial"), "{notice}");
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "16.0.2", "not rolled back");
+    assert!(state.on_trial, "not kept either");
+    assert!(state.failed.is_empty(), "not marked as failed");
+    assert_eq!(
+        android.session.state(),
+        SessionState::Stalled,
+        "the user's Android keeps running, with the problem to read"
+    );
 }
 
 #[test]

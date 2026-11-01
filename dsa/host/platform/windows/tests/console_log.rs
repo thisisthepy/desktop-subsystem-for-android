@@ -53,6 +53,23 @@ fn fr2_a_log_over_the_limit_is_moved_aside_with_one_old_copy() {
 }
 
 #[test]
+fn fr14_only_a_refusal_as_priv_app_points_at_the_disks_signing_keys() {
+    let refusal = |domain: &str| {
+        format!(
+            "servicemanager E SELinux: avc:  denied  {{ find }} for pid=812 uid=10099 \
+             name=io.github.thisisthepy.dsa.channel.IChannel/default \
+             scontext=u:r:{domain}:s0:c512,c768 tcontext=u:object_r:dsa_channel_service:s0\n"
+        )
+    };
+    let mut tail = ConsoleTail::new(2);
+    assert!(!tail.signs().agent_refused_for_keys());
+    tail.push(refusal("untrusted_app").as_bytes());
+    assert!(!tail.signs().agent_refused_for_keys());
+    tail.push(refusal("priv_app").as_bytes());
+    assert!(tail.signs().agent_refused_for_keys());
+}
+
+#[test]
 fn fr2_a_refused_agent_is_counted_with_its_domain_and_gets_a_way_out_that_keeps_its_data() {
     let mut tail = ConsoleTail::new(2);
     let denial = "10-31 12:00:00.000 servicemanager E SELinux: avc:  denied  { find } for pid=812 \

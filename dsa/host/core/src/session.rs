@@ -170,6 +170,12 @@ pub enum BootProblem {
         waited: Duration,
         detail: Option<String>,
     },
+    /// The same, and what the guest printed shows the disk was made under other signing keys
+    /// ([`GuestLauncher::agent_refused_for_keys`]). The disk is the cause, whichever image runs.
+    DiskFromOtherKeys {
+        waited: Duration,
+        detail: Option<String>,
+    },
 }
 
 impl BootProblem {
@@ -190,7 +196,8 @@ impl fmt::Display for BootProblem {
                 )?;
                 write_diagnostics(f, detail)
             }
-            BootProblem::AgentUnreachable { waited, detail } => {
+            BootProblem::AgentUnreachable { waited, detail }
+            | BootProblem::DiskFromOtherKeys { waited, detail } => {
                 write!(
                     f,
                     "Android finished booting, but its agent has not reached the control channel \
@@ -271,6 +278,12 @@ pub trait GuestLauncher: Send + 'static {
     fn explain_stall(&mut self, stall: GuestStall) -> Option<String> {
         let _ = stall;
         None
+    }
+
+    /// Whether what the guest printed shows its agent was refused the control channel because
+    /// its data disk was made under other signing keys. It must not take long.
+    fn agent_refused_for_keys(&mut self) -> bool {
+        false
     }
 
     /// Stops every process of the running guest where it is, keeping its memory, until
@@ -1243,21 +1256,36 @@ impl Worker {
         if waited < limit {
             return None;
         }
-        let detail = if now < self.next_diagnosis {
-            // The launcher reads its console for this, so only every so often.
-            match self.shared.problem() {
-                Some(
-                    BootProblem::BootUnfinished { detail, .. }
-                    | BootProblem::AgentUnreachable { detail, .. },
-                ) => detail,
-                _ => self.launcher.explain_stall(stall),
+        // The launcher reads its console for this, so only every so often.
+        let known = if now < self.next_diagnosis {
+            match (stall, self.shared.problem()) {
+                (GuestStall::BootUnfinished, Some(BootProblem::BootUnfinished { detail, .. })) => {
+                    Some((detail, false))
+                }
+                (
+                    GuestStall::AgentUnreachable,
+                    Some(BootProblem::AgentUnreachable { detail, .. }),
+                ) => Some((detail, false)),
+                (
+                    GuestStall::AgentUnreachable,
+                    Some(BootProblem::DiskFromOtherKeys { detail, .. }),
+                ) => Some((detail, true)),
+                _ => None,
             }
         } else {
-            self.next_diagnosis = now + DIAGNOSIS_POLL;
-            self.launcher.explain_stall(stall)
+            None
         };
+        let (detail, other_keys) = known.unwrap_or_else(|| {
+            self.next_diagnosis = now + DIAGNOSIS_POLL;
+            let other_keys =
+                stall == GuestStall::AgentUnreachable && self.launcher.agent_refused_for_keys();
+            (self.launcher.explain_stall(stall), other_keys)
+        });
         Some(match stall {
             GuestStall::BootUnfinished => BootProblem::BootUnfinished { waited, detail },
+            GuestStall::AgentUnreachable if other_keys => {
+                BootProblem::DiskFromOtherKeys { waited, detail }
+            }
             GuestStall::AgentUnreachable => BootProblem::AgentUnreachable { waited, detail },
         })
     }

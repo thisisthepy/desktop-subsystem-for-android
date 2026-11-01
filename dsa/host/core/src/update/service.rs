@@ -148,6 +148,14 @@ pub fn next_image_check(
 pub struct SessionBoot(pub Arc<Session>);
 
 impl Boot for SessionBoot {
+    /// A disk made under other signing keys stops the agent whichever image runs on it.
+    fn image_to_blame(&self) -> bool {
+        !matches!(
+            self.0.problem(),
+            Some(BootProblem::DiskFromOtherKeys { .. })
+        )
+    }
+
     fn boot(
         &mut self,
         _image: &InstalledImage,
@@ -324,6 +332,10 @@ impl UserAndroid for UpdatingAndroid {
                      service downloads another image if there is one, and the next \
                      version of DSA tries this one again",
                     failed.version
+                ),
+                Ok(Outcome::Undecided { image, reason }) => format!(
+                    "Android {} is kept on trial and is not to blame: {reason}",
+                    image.version
                 ),
                 Err(error) => error.to_string(),
             });

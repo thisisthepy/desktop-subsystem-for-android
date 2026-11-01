@@ -301,6 +301,12 @@ impl GuestLauncher for AndroidVmLauncher {
         self.prerequisite.as_mut().and_then(|check| check())
     }
 
+    fn agent_refused_for_keys(&mut self) -> bool {
+        self.console
+            .as_ref()
+            .is_some_and(|console| console.signs().agent_refused_for_keys())
+    }
+
     fn explain_stall(&mut self, stall: GuestStall) -> Option<String> {
         let console = self.console.as_ref()?;
         let (signs, log) = (console.signs(), console.log_path());
