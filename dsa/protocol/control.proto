@@ -370,6 +370,54 @@ message ClipboardSharing {
   bool on = 1;
 }
 
+// Guest to host, from the agent: a notification an app posted, or a new version of one it
+// posted before under the same key, which replaces it. Only notifications a person would see
+// come: not the ongoing notice of a foreground service, and not a group's summary, whose
+// members come one by one. The icon is a PNG image of at most 96 pixels on a side and 64 KiB;
+// a larger one is left out.
+message GuestNotification {
+  // Android's key of the notification: unique in the guest while it is posted.
+  string key = 1;
+  // The package that posted it.
+  string package_name = 2;
+  // The posting app's name, as the guest shows it.
+  string app_label = 3;
+  string title = 4;
+  string text = 5;
+  // The notification's large icon, else the app's icon, as a PNG image; empty for none.
+  bytes icon_png = 6;
+  // The importance of its channel, as Android numbers it (NotificationManager.IMPORTANCE_*):
+  // 1 minimum, 2 low, 3 default, 4 high.
+  int32 importance = 7;
+  // Whether the app asked for it to interrupt: a high importance channel or a high
+  // priority. Such a notification reaches the host while the guest is in Doze too.
+  bool high_priority = 8;
+  // Whether the user may dismiss it. A notification that is not stays until the app removes
+  // it, and the host does not ask the guest to remove it.
+  bool clearable = 9;
+  // When it was posted, in milliseconds since the Unix epoch, as the app gave it.
+  int64 when_millis = 10;
+}
+
+// Guest to host, from the agent: the notification with this key is gone from the guest,
+// because the app removed it, the user opened it, or the host asked.
+message NotificationRemoved {
+  string key = 1;
+}
+
+// Host to guest: the user clicked the notification with this key on the host. The agent runs
+// the notification's content intent, as clicking it in the guest would. A key the guest does
+// not have is answered with NotificationRemoved.
+message NotificationClicked {
+  string key = 1;
+}
+
+// Host to guest: the user dismissed the notification with this key on the host. The agent
+// cancels it in the guest. A key the guest does not have is answered with NotificationRemoved.
+message NotificationDismissed {
+  string key = 1;
+}
+
 // Host to guest: asks the agent for a GuestMemory report now, instead of at its next
 // periodic one.
 message RequestGuestMemory {}
@@ -461,5 +509,9 @@ message Envelope {
     ScreenState screen_state = 40;
     PowerState power_state = 41;
     DeviceIdle device_idle = 42;
+    GuestNotification notification = 70;
+    NotificationRemoved notification_removed = 71;
+    NotificationClicked notification_clicked = 72;
+    NotificationDismissed notification_dismissed = 73;
   }
 }
