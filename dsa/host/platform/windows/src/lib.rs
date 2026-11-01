@@ -12,6 +12,7 @@
 //! - [`guid`]: the VM and service IDs those sockets are addressed by.
 //! - [`vm_listener`]: a control channel listener that follows the VM's ID across restarts.
 //! - [`host_config`]: the configuration file `dsa-hostd` reads.
+//! - [`monitors`]: the record of the user's monitors the guest display is sized from.
 //! - [`power`]: the computer's power, which each guest's battery state follows.
 //! - [`host_memory`]: the host's memory for each user's Android: its VM and its window
 //!   processes (the measuring part on Windows only).
@@ -67,6 +68,7 @@ pub mod host_memory;
 pub mod https;
 #[cfg(windows)]
 pub mod hvsocket;
+pub mod monitors;
 #[cfg(windows)]
 pub mod pipe;
 pub mod power;

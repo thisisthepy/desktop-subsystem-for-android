@@ -1,11 +1,11 @@
-//! How a task window's buffers are sized, so that resizing the window does not remake them.
+//! How a task window's buffers are sized, so that most steps of a resize do not remake them.
 //!
 //! Every buffer on a task's frame path (the guest's ColorBuffers, the window manager's shared
-//! texture and the window host's swapchain) is made once at the largest size the task can
-//! have, and each frame fills only its top-left region. A frame carries its content size
-//! next to the buffer, and the window shows only that region. Making a buffer is the slow
-//! part of a resize (tens of milliseconds for a swapchain's `ResizeBuffers` alone), so a size
-//! step that fits the buffers makes none.
+//! texture and the window host's swapchain) follows the size the guest gives its ColorBuffers,
+//! which is the task's size rounded up in steps, and each frame fills only its top-left
+//! region. A frame carries its content size next to the buffer, and the window shows only that
+//! region. Making a buffer is the slow part of a resize (tens of milliseconds for a
+//! swapchain's `ResizeBuffers` alone), so a size step that fits the buffers makes none.
 
 /// The part of a buffer of `buffer` pixels that a frame of `content` pixels fills: the
 /// content clipped to the buffer. A content size of 0 in either direction comes from a
@@ -49,7 +49,7 @@ pub fn swapchain_change(current: Option<(u32, u32)>, texture: (u32, u32)) -> Swa
 
 /// Whether a shared texture of `current` pixels can take the frames of a ColorBuffer of
 /// `wanted` pixels. The texture is remade only when the ColorBuffer itself changes size,
-/// which the guest does only when its display does.
+/// which the guest does only when the task passes a step of its size.
 pub fn texture_fits(current: (u32, u32), wanted: (u32, u32)) -> bool {
     current == wanted
 }
@@ -69,9 +69,55 @@ pub fn visual_scale(buffers: (u32, u32), view: (u32, u32)) -> (f32, f32) {
     (scale(buffers.0, view.0), scale(buffers.1, view.1))
 }
 
+/// How many pixels a side the resize trace samples of a frame to see if it is all one colour.
+pub const SAMPLE_GRID: u32 = 8;
+
+/// The pixels of a frame of `region` pixels the trace samples: the centres of an even grid,
+/// row by row, [`SAMPLE_GRID`] to a side.
+pub fn sample_points((width, height): (u32, u32)) -> Vec<(u32, u32)> {
+    let along = |size: u32, i: u32| {
+        ((2 * u64::from(i) + 1) * u64::from(size) / (2 * u64::from(SAMPLE_GRID))) as u32
+    };
+    (0..SAMPLE_GRID)
+        .flat_map(|row| {
+            (0..SAMPLE_GRID).map(move |column| (along(width, column), along(height, row)))
+        })
+        .collect()
+}
+
+/// The colour every one of `pixels` has, or `None` when they differ. An app's frame is hardly
+/// ever one colour across a whole grid, and a frame nothing was drawn into always is.
+pub fn uniform_colour(pixels: &[[u8; 4]]) -> Option<[u8; 4]> {
+    let first = *pixels.first()?;
+    pixels.iter().all(|pixel| *pixel == first).then_some(first)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fr4_the_samples_of_a_frame_spread_over_it_and_stay_inside() {
+        let points = sample_points((900, 747));
+        assert_eq!(points.len(), (SAMPLE_GRID * SAMPLE_GRID) as usize);
+        assert!(points.iter().all(|&(x, y)| x < 900 && y < 747));
+        assert!(points.iter().any(|&(x, _)| x < 100));
+        assert!(points.iter().any(|&(x, _)| x > 800));
+        assert!(points.iter().any(|&(_, y)| y < 100));
+        assert!(points.iter().any(|&(_, y)| y > 650));
+        // The smallest frame still names pixels it has.
+        assert!(sample_points((1, 1)).iter().all(|&point| point == (0, 0)));
+    }
+
+    #[test]
+    fn fr4_a_frame_all_one_colour_is_told_apart_from_a_drawn_one() {
+        let black = [0, 0, 0, 255];
+        assert_eq!(uniform_colour(&[black; 64]), Some(black));
+        let mut drawn = [black; 64];
+        drawn[63] = [255, 255, 255, 255];
+        assert_eq!(uniform_colour(&drawn), None);
+        assert_eq!(uniform_colour(&[]), None);
+    }
 
     #[test]
     fn fr5_a_frame_never_waits_for_the_buffer_the_desktop_is_showing() {

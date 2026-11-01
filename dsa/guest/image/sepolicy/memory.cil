@@ -37,3 +37,24 @@
 (allow system_app sysfs_zram (file (read open getattr)))
 (allow platform_app sysfs_zram (dir (search)))
 (allow platform_app sysfs_zram (file (read open getattr)))
+
+; Shared memory is a memfd. libcutils tries one in each process the first time it needs shared
+; memory: it sizes a test memfd and asks it the ashmem ioctls, and when any step is refused it
+; falls back to /dev/ashmem for the rest of that process's life, and DSA's kernel has no such
+; device. A memfd made by a domain with no tmpfs type of its own is plain tmpfs, which the
+; platform's policy gives only getattr, so the audio HAL and the software codecs fell back and
+; every message queue they made was invalid. No audio output ever opened, audio policy never
+; started, system_server asked for its audio ports ten times a second, and each click decoded
+; its sound effects again and failed.
+;
+; The other end of each queue maps the same memfd: audioserver and system_server the ones made
+; plain tmpfs, the HAL and the codecs those of audioserver and system_server.
+(allow hal_audio_server tmpfs (file (ioctl read write getattr map)))
+(allowx hal_audio_server tmpfs (ioctl file ((range 0x7701 0x770b))))
+(allow mediaswcodec tmpfs (file (ioctl read write getattr map)))
+(allowx mediaswcodec tmpfs (ioctl file ((range 0x7701 0x770b))))
+(allow audioserver tmpfs (file (read write getattr map)))
+(allow system_server tmpfs (file (read write getattr map)))
+(allow hal_audio_server audioserver_tmpfs (file (read write getattr map)))
+(allow hal_audio_server system_server_tmpfs (file (read write getattr map)))
+(allow mediaswcodec system_server_tmpfs (file (read write getattr map)))

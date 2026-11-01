@@ -19,6 +19,16 @@ std::string ms1(double millis) {
 
 }  // namespace
 
+std::string frameTraceLine(int32_t task, int64_t wallMs, double monoMs, double waitedMs,
+                           double composeMs, double postMs) {
+    char buf[192];
+    std::snprintf(buf, sizeof(buf),
+                  "input-trace stage=hwc.frame task=%d utc=%s mono=%.3f waited=%.1f compose=%.1f "
+                  "post=%.1f",
+                  task, ResizeTrace::utcStamp(wallMs).c_str(), monoMs, waitedMs, composeMs, postMs);
+    return buf;
+}
+
 std::string ResizeTrace::utcStamp(int64_t wallMs) {
     const time_t secs = static_cast<time_t>(wallMs / 1000);
     std::tm tm{};

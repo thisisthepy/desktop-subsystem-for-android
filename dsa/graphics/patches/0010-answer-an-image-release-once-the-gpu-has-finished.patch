@@ -1,0 +1,74 @@
+diff --git a/host/vulkan/VkAndroidNativeBuffer.cpp b/host/vulkan/VkAndroidNativeBuffer.cpp
+--- a/host/vulkan/VkAndroidNativeBuffer.cpp
++++ b/host/vulkan/VkAndroidNativeBuffer.cpp
+@@ -908,6 +908,13 @@ VkResult AndroidNativeBufferInfo::on_vkQueueSignalReleaseImageANDROID(
+     return VK_SUCCESS;
+ }
+ 
++std::optional<CancelableFuture> AndroidNativeBufferInfo::latestRelease() const {
++    if (mLastUsedQueueFamilyIndex >= mQueueStates.size()) {
++        return std::nullopt;
++    }
++    return mQueueStates[mLastUsedQueueFamilyIndex].latestUse;
++}
++
+ AsyncResult AndroidNativeBufferInfo::registerQsriCallback(VkImage image,
+                                                           VkQsriTimeline::Callback callback) {
+     if (!mDeviceDispatch) {
+diff --git a/host/vulkan/VkAndroidNativeBuffer.h b/host/vulkan/VkAndroidNativeBuffer.h
+--- a/host/vulkan/VkAndroidNativeBuffer.h
++++ b/host/vulkan/VkAndroidNativeBuffer.h
+@@ -63,6 +63,10 @@ class AndroidNativeBufferInfo {
+ 
+     bool isUsingNativeImage() const { return mUseVulkanNativeImage; }
+ 
++    // What completes when the GPU has finished the last release of this image, if one is still
++    // tracked. A release that copied the image back had finished before it returned.
++    std::optional<CancelableFuture> latestRelease() const;
++
+     uint32_t getColorBufferHandle() const { return mColorBufferHandle; }
+ 
+     VkResult on_vkAcquireImageANDROID(VkEmulation* emu, VulkanDispatch* vk, VkDevice device, VkQueue defaultQueue,
+diff --git a/host/vulkan/VkDecoderGlobalState.cpp b/host/vulkan/VkDecoderGlobalState.cpp
+--- a/host/vulkan/VkDecoderGlobalState.cpp
++++ b/host/vulkan/VkDecoderGlobalState.cpp
+@@ -5934,6 +5934,23 @@ class VkDecoderGlobalState::Impl {
+             waitSemaphoreCount, pWaitSemaphores, pNativeFenceFd);
+     }
+ 
++    // Waits for the GPU to finish the last release of `image`. The renderer composes on a
++    // device of its own, so no queue order puts the app's drawing before the composition, and
++    // a guest without fences from the host learns the image is ready only from this answer.
++    // Holds no lock while it waits, so one app's frame does not stop the others' commands.
++    void waitForImageRelease(VkImage image) {
++        std::optional<CancelableFuture> release;
++        {
++            std::lock_guard<std::mutex> lock(mMutex);
++            auto* imageInfo = android::base::find(mImageInfo, image);
++            if (imageInfo && imageInfo->anbInfo) {
++                release = imageInfo->anbInfo->latestRelease();
++            }
++        }
++        if (release) {
++            release->wait();
++        }
++    }
++
+     VkResult on_vkMapMemoryIntoAddressSpaceGOOGLE(android::base::BumpPool* pool,
+                                                   VkSnapshotApiCallInfo*, VkDevice boxed_device,
+                                                   VkDeviceMemory memory, uint64_t* pAddress) {
+@@ -9891,8 +9908,12 @@ VkResult VkDecoderGlobalState::on_vkQueueSignalReleaseImageANDROID(
+     android::base::BumpPool* pool, VkSnapshotApiCallInfo* snapshotInfo, VkQueue queue,
+     uint32_t waitSemaphoreCount, const VkSemaphore* pWaitSemaphores, VkImage image,
+     int* pNativeFenceFd) {
+-    return mImpl->on_vkQueueSignalReleaseImageANDROID(pool, snapshotInfo, queue, waitSemaphoreCount,
+-                                                      pWaitSemaphores, image, pNativeFenceFd);
++    const VkResult result = mImpl->on_vkQueueSignalReleaseImageANDROID(
++        pool, snapshotInfo, queue, waitSemaphoreCount, pWaitSemaphores, image, pNativeFenceFd);
++    if (result == VK_SUCCESS) {
++        mImpl->waitForImageRelease(image);
++    }
++    return result;
+ }
+ 
+ // VK_GOOGLE_gfxstream

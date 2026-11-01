@@ -1213,6 +1213,34 @@ class GuestMemoryTests(unittest.TestCase):
             # The agent reads zram's statistics for its memory report.
             self.assertIn("(allow platform_app sysfs_zram (file (read open getattr)))", policy)
 
+    def test_fr5_the_audio_hal_and_software_codecs_can_share_memory_through_memfds(self):
+        # Refused, libcutils falls back to an ashmem device DSA's kernel does not have: audio
+        # policy never starts, system_server retries ten times a second, and every click
+        # decodes its sound effects again and fails, at the moment the app has to respond.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+        for domain in ["hal_audio_server", "mediaswcodec"]:
+            # The test memfd libcutils sizes, and the ashmem ioctls it asks of it.
+            self.assertIn(f"(allow {domain} tmpfs (file (ioctl read write getattr map)))", policy)
+            self.assertIn(f"(allowx {domain} tmpfs (ioctl file ((range 0x7701 0x770b))))", policy)
+        for domain, memfd in [("audioserver", "tmpfs"), ("system_server", "tmpfs"),
+                              ("hal_audio_server", "audioserver_tmpfs"),
+                              ("hal_audio_server", "system_server_tmpfs"),
+                              ("mediaswcodec", "system_server_tmpfs")]:
+            self.assertIn(f"(allow {domain} {memfd} (file (read write getattr map)))", policy)
+
+    def test_fr5_uwb_is_not_advertised_without_its_hal(self):
+        # Declared, system_server's threads wait for the HAL for as long as the guest runs,
+        # and servicemanager tries to start it about twice a second.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            xml = archive.read("VENDOR/etc/permissions/dsa-unavailable-features.xml").decode()
+        self.assertIn('<unavailable-feature name="android.hardware.uwb" />', xml)
+
+    def test_fr5_the_logger_of_a_console_hyper_v_does_not_have_is_removed(self):
+        # It exits as soon as it starts, init starts it again every five seconds, and each
+        # exit runs flags_health_check too.
+        self.assertTrue(make_image.removed("VENDOR/etc/init/seriallogging.rc"))
+
     def test_nfr2_only_the_control_daemon_asks_init_to_reclaim(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
             contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()

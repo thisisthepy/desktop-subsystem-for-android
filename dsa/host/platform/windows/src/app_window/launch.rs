@@ -58,6 +58,11 @@ pub const WINDOW_MANAGER_NAME: &str = "dsa-wm.exe";
 /// stopped and waits until it runs. `waiting` is called once when it has to wait, to show
 /// that something is happening.
 pub fn ensure_android(api: &mut dyn Connector, mut waiting: impl FnMut()) -> Result<(), String> {
+    // The service sizes Android's display from this when it starts it. It can still start
+    // without: the last record, or the image's size, serves.
+    if let Err(why) = crate::monitors::record_current() {
+        eprintln!("{BUILD}: {why}");
+    }
     let mut client = HostApiClient::connect(api, BUILD, Duration::from_secs(5))
         .map_err(|e| format!("Android cannot be started: {e}"))?;
     let mut told = false;

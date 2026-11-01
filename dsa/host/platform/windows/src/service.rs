@@ -28,6 +28,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_host_core::guest_display::with_display_size;
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{HostApiService, PerUser, ServiceFacts, UserAndroid, UserAndroids};
 use dsa_host_core::memory::{summary_lines, HostMemory, LOG_INTERVAL};
@@ -47,14 +48,16 @@ use dsa_transport::Listener;
 use crate::android_vm::AndroidVmLauncher;
 use crate::guest_communication_services::register_graphics_service_guids;
 use crate::guid::Guid;
-use crate::host_config::HostConfig;
+use crate::host_config::{local_app_data, HostConfig};
 use crate::host_memory::WindowsHostMemory;
 use crate::https::{UrlFetch, WinHttpFetch};
 use crate::hvsocket::HvSocketListener;
+use crate::monitors::recorded_display;
 use crate::pipe::{NamedPipeListener, DEFAULT_PIPE_SDDL};
 use crate::render_gpu::previous_render_gpu;
 use crate::setup::SetupInstaller;
 use crate::user_disk::{bring_disk_to, prepare_user_data_disk, prepare_user_disk_folder};
+use crate::vm::AndroidVmConfig;
 use crate::vm_listener::VmBoundListener;
 use crate::window_manager::UserWindowManager;
 
@@ -65,6 +68,17 @@ pub struct Updates {
     pub notices: Arc<UpdateNotices>,
     pub boot_timeout: Duration,
     pub trial_running: Arc<AtomicBool>,
+}
+
+/// Sizes the guest's display for the monitors the user's session recorded. This process runs
+/// in session 0 and cannot see them itself.
+fn follow_monitors(vm: &mut AndroidVmConfig, sid: &str) {
+    let display = local_app_data(sid)
+        .ok()
+        .and_then(|dir| recorded_display(&dir));
+    if let Some(size) = display {
+        vm.kernel_cmdline = with_display_size(&vm.kernel_cmdline, size);
+    }
 }
 
 /// The user's Android: their data disk, VM and session, created on their first request.
@@ -85,8 +99,19 @@ pub fn create_user_android(
     }
     let disk_size_gb = user.data_disk_size_gb;
     let console_log = user.console_log.clone();
+    let owner = sid.to_string();
     let launcher = match updates {
-        None => AndroidVmLauncher::new(&user.vm_name, user.config),
+        None => {
+            let base = user.config;
+            AndroidVmLauncher::with_source(
+                &user.vm_name,
+                Box::new(move || {
+                    let mut vm = base.clone();
+                    follow_monitors(&mut vm, &owner);
+                    Ok(vm)
+                }),
+            )
+        }
         Some(updates) => {
             let store = Arc::clone(&updates.store);
             let base = user.config;
@@ -108,6 +133,7 @@ pub fn create_user_android(
                     vm.kernel_cmdline = files.kernel_cmdline;
                     vm.system_image = files.system_image;
                     vm.image_version = Some(current.version.clone());
+                    follow_monitors(&mut vm, &owner);
                     Ok(vm)
                 }),
             )

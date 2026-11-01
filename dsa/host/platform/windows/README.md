@@ -149,10 +149,15 @@ after two minutes. `"keep_window_manager": false` turns this off.
   live resize only the latest size is sent, not every size the edge passed through. The
   window shows its last frame stretched over the new size until a frame of that size
   arrives, then shows that frame 1:1. A window cannot grow past what Android's display
-  can hold (by default 1920x1080 pixels), because a larger window could only show its
-  frames stretched; maximising stops at that size too, and on a larger monitor the
-  maximised window is centred on the screen. If Android gives the task another size than
-  the window asked for, the window takes the task's size within 2 seconds.
+  can hold, because a larger window could only show its frames stretched. That display is
+  chosen when Android starts: a square as long as the longest monitor, from 1920 to 3840
+  pixels on a side, so a window fills any monitor in either orientation. The service cannot
+  see the user's monitors from session 0, so the window manager and the app windows record
+  them in `%LOCALAPPDATA%\DSA\monitors.txt`. A monitor longer than the display, or one
+  attached after Android started, caps its windows at the display's size, and a maximised
+  window is centred on the screen, until the next start of Android. If Android gives the
+  task another size than the window asked for, the window takes the task's size within 2
+  seconds.
 - Every size is first given to the task live: the app lays itself out again in the new
   size without being recreated, which takes a frame or two rather than the half second or
   more that recreating an app can take. The task is then reconfigured for its new size

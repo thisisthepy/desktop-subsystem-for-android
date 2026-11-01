@@ -186,12 +186,67 @@ impl ResizeSync {
     }
 }
 
+/// What a window does with a frame that just arrived.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameAction {
+    /// Show it now.
+    Show,
+    /// Keep it out of sight until the window takes its size.
+    Stage,
+    /// Leave it out: the back buffer holds a frame the window is about to show.
+    Drop,
+}
+
+/// What to do with a frame of `frame` pixels, given the size a window is holding for, if any,
+/// and whether a frame of that size is already kept for it.
+///
+/// A kept frame lives in the back buffer, the only copy of it. Another frame written there
+/// would lose it, and an app that draws once per size sends no second one, so the window would
+/// take the size with an older frame stretched and stay that way.
+pub fn frame_action(hold: Option<((u32, u32), bool)>, frame: (u32, u32)) -> FrameAction {
+    match hold {
+        Some((view, _)) if view == frame => FrameAction::Stage,
+        Some((_, true)) => FrameAction::Drop,
+        _ => FrameAction::Show,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn ms(n: u64) -> Duration {
         Duration::from_millis(n)
+    }
+
+    #[test]
+    fn fr4_a_frame_of_the_held_size_waits_for_the_window() {
+        assert_eq!(
+            frame_action(Some(((800, 600), false)), (800, 600)),
+            FrameAction::Stage
+        );
+        // A newer frame of that size replaces the one kept.
+        assert_eq!(
+            frame_action(Some(((800, 600), true)), (800, 600)),
+            FrameAction::Stage
+        );
+    }
+
+    #[test]
+    fn fr4_a_frame_of_another_size_does_not_overwrite_a_kept_frame() {
+        assert_eq!(
+            frame_action(Some(((800, 600), true)), (780, 600)),
+            FrameAction::Drop
+        );
+    }
+
+    #[test]
+    fn fr4_with_nothing_kept_a_frame_of_another_size_is_shown() {
+        assert_eq!(
+            frame_action(Some(((800, 600), false)), (780, 600)),
+            FrameAction::Show
+        );
+        assert_eq!(frame_action(None, (780, 600)), FrameAction::Show);
     }
 
     /// A drag whose steps ran out of time until it gave up.

@@ -59,11 +59,6 @@ bool inputTraceRequested() {
     return requested;
 }
 
-// One line per frame sent to the host: how long the host took to compose it and to take it.
-void logInputTrace(int32_t task, double composeMs, double postMs, int64_t wallMs) {
-    HWC_LOGI("input-trace stage=hwc.frame task=%d utc=%s mono=%.3f compose=%.1f post=%.1f", task,
-             ResizeTrace::utcStamp(wallMs).c_str(), traceMonoMs(), composeMs, postMs);
-}
 
 void logTrace(const std::vector<std::string>& lines) {
     for (const std::string& line : lines) {
@@ -177,6 +172,7 @@ void TaskComposer::releaseOutputLocked(Output& output) {
     output.buffers = BufferSize{};
     mHost.destroyDisplay(output.display);
     output.onHost = false;
+    output.posted = false;
 }
 
 void TaskComposer::syncGenerationLocked() {
@@ -190,6 +186,7 @@ void TaskComposer::syncGenerationLocked() {
     mResizeGate.clear();
     for (auto& [_, output] : mOutputs) {
         output.onHost = false;
+        output.posted = false;
         output.announced = false;
         output.targets[0] = output.targets[1] = 0;
         output.buffers = BufferSize{};
@@ -216,12 +213,13 @@ void TaskComposer::present(Frame& frame) {
     // The frame (its acquire fences among it) moves to the pipeline: SurfaceFlinger's next
     // commands change the display's layers, not this frame.
     auto owned = std::make_shared<Frame>(std::move(frame));
-    mPipeline.submit([this, owned] { compose(*owned); });
+    const double presentedMs = traceMonoMs();
+    mPipeline.submit([this, owned, presentedMs] { compose(*owned, presentedMs); });
 }
 
 void TaskComposer::drain() { mPipeline.drain(); }
 
-void TaskComposer::compose(Frame& frame) {
+void TaskComposer::compose(Frame& frame, double presentedMs) {
     std::vector<std::vector<uint8_t>> outbox;
     std::optional<int64_t> refreshAt;
     {
@@ -312,7 +310,7 @@ void TaskComposer::compose(Frame& frame) {
             }
             const BufferSize buffers = taskBufferSize(output.buffers, frame.display, width, height);
             if (buffers != output.buffers) {
-                // The first frame, a task larger than its buffers, or a larger display.
+                // The first frame, a task past its buffers, or one far smaller than them.
                 for (uint32_t& target : output.targets) {
                     mHost.closeColorBuffer(target);
                     target = 0;
@@ -337,6 +335,7 @@ void TaskComposer::compose(Frame& frame) {
             std::vector<ComposeInput> inputs;
             Rect clientArea;
             int clientSlot = -1;
+            bool layerMissing = false;
             for (int64_t id : task.layers) {
                 FrameLayer& layer = *byId[id];
                 if (layer.client) {
@@ -364,6 +363,7 @@ void TaskComposer::compose(Frame& frame) {
                     }
                     in.colorBuffer = sharedHandleLocked(layer.buffer);
                     if (in.colorBuffer == 0) {
+                        layerMissing = true;
                         continue;
                     }
                 }
@@ -390,9 +390,13 @@ void TaskComposer::compose(Frame& frame) {
                                    static_cast<float>(clientArea.right),
                                    static_cast<float>(clientArea.bottom)};
                 slice.blendMode = kBlendPremultiplied;
+                layerMissing = layerMissing || slice.colorBuffer == 0;
                 if (slice.colorBuffer == 0 || clientArea.empty()) {
                     inputs.erase(inputs.begin() + clientSlot);
                 }
+            }
+            if (leavesLastFrame(layerMissing, output.posted)) {
+                continue;
             }
 
             // Composed for display 0, which names no task window: given the task's display,
@@ -405,9 +409,13 @@ void TaskComposer::compose(Frame& frame) {
             if (mHost.compose(request)) {
                 const double postStart = traceMonoMs();
                 mHost.post(output.display, target);
+                output.posted = true;
                 if (inputTraceRequested()) {
-                    logInputTrace(task.task, postStart - composeStart, traceMonoMs() - postStart,
-                                  traceWallMs());
+                    const double posted = traceMonoMs();
+                    HWC_LOGI("%s", frameTraceLine(task.task, traceWallMs(), posted,
+                                                  composeStart - presentedMs,
+                                                  postStart - composeStart, posted - postStart)
+                                       .c_str());
                 }
                 output.next ^= 1;
                 logTrace(mTrace.posted(task.task, width, height,

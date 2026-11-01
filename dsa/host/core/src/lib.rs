@@ -22,6 +22,7 @@
 
 pub mod bootconfig;
 pub mod compositor;
+pub mod guest_display;
 pub mod handshake;
 pub mod host_api;
 #[cfg(feature = "conformance")]
