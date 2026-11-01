@@ -216,6 +216,65 @@ public sealed class DsaService
         }
     }
 
+    private static int Int(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number &&
+        value.TryGetInt32(out var number)
+            ? number
+            : 0;
+
+    private static byte[] Base64(JsonElement element, string name)
+    {
+        try
+        {
+            return Convert.FromBase64String(String(element, name));
+        }
+        catch (FormatException)
+        {
+            return Array.Empty<byte>();
+        }
+    }
+
+    private static PlacedWidget ReadPlaced(JsonElement json)
+    {
+        var placement = json.TryGetProperty("placement", out var p) && p.ValueKind == JsonValueKind.Object
+            ? p
+            : default;
+        return new PlacedWidget(Int(json, "id"), String(json, "provider"), String(json, "label"),
+            placement.ValueKind == JsonValueKind.Object ? Int(placement, "x") : 0,
+            placement.ValueKind == JsonValueKind.Object ? Int(placement, "y") : 0,
+            placement.ValueKind == JsonValueKind.Object ? Int(placement, "width_dp") : 0,
+            placement.ValueKind == JsonValueKind.Object ? Int(placement, "height_dp") : 0);
+    }
+
+    private static IEnumerable<JsonElement> Items(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Array
+            ? value.EnumerateArray()
+            : Enumerable.Empty<JsonElement>();
+
+    /// <summary>The widgets the apps in Android offer and the ones placed on the desktop,
+    /// starting Android first when it is not running.</summary>
+    public async Task<WidgetList> WidgetsAsync()
+    {
+        var json = await RunJsonAsync("widgets", "list").ConfigureAwait(true);
+        var offers = Items(json, "providers")
+            .Select(p => new WidgetOffer(String(p, "provider"), String(p, "package"), String(p, "label"),
+                Base64(p, "preview_png"), Int(p, "default_width_dp"), Int(p, "default_height_dp"),
+                Bool(p, "needs_configuration")))
+            .ToList();
+        var placed = Items(json, "widgets").Select(ReadPlaced).ToList();
+        return new WidgetList(offers, placed);
+    }
+
+    /// <summary>Places a widget of <paramref name="provider"/> on the desktop. When its app asks
+    /// for a setup, this waits for the user to finish it.</summary>
+    public async Task<PlacedWidget> AddWidgetAsync(string provider) =>
+        ReadPlaced(await RunJsonAsync("widgets", "add", provider).ConfigureAwait(true));
+
+    /// <summary>Removes the widget <paramref name="id"/> from the desktop.</summary>
+    public async Task RemoveWidgetAsync(int id) =>
+        await RunJsonAsync("widgets", "remove", id.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .ConfigureAwait(true);
+
     /// <summary>Installs the newest version of DSA now. Returns what the service said.</summary>
     public async Task<string> UpdateNowAsync()
     {

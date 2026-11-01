@@ -1,0 +1,70 @@
+<Page
+    x:Class="Dsa.Settings.Pages.WidgetsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:l="clr-namespace:Dsa.Settings">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="36,8,36,24" MaxWidth="1000">
+            <Grid>
+                <TextBlock Text="{l:Text WidgetsTitle.Text}" Style="{StaticResource PageTitle}" />
+                <ui:Button Content="{l:Text WidgetsRefreshButton.Content}" HorizontalAlignment="Right" VerticalAlignment="Top"
+                           Icon="{ui:SymbolIcon ArrowClockwise24}" Click="OnRefresh"
+                           IsEnabled="{Binding IsIdle, Mode=OneWay}" />
+            </Grid>
+            <TextBlock Text="{l:Text WidgetsIntro.Text}" Style="{StaticResource Note}" />
+
+            <ProgressBar IsIndeterminate="True" Margin="0,8,0,0"
+                         Visibility="{Binding IsBusy, Converter={StaticResource Visible}}" />
+            <ui:InfoBar Title="{l:Text WidgetsErrorBar.Title}" Severity="Error" IsClosable="False"
+                        IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
+            <ui:InfoBar Title="{l:Text WidgetsDoneBar.Title}" Severity="Success" IsClosable="False"
+                        IsOpen="{Binding HasMessage, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}" />
+
+            <TextBlock Text="{l:Text WidgetsPlacedHeader.Text}" Style="{StaticResource SectionHeader}" />
+            <TextBlock Text="{l:Text WidgetsPlacedNone.Text}" Style="{StaticResource Note}"
+                       Visibility="{Binding HasNoPlaced, Converter={StaticResource Visible}}" />
+            <ItemsControl ItemsSource="{Binding Placed, Mode=OneWay}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Apps24}">
+                            <ui:CardControl.Header>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Label}" Style="{StaticResource CardTitle}" />
+                                    <TextBlock Text="{Binding Detail}" Style="{StaticResource CardDescription}" />
+                                </StackPanel>
+                            </ui:CardControl.Header>
+                            <ui:Button Content="{l:Text WidgetsRemoveButton.Content}" Tag="{Binding Id}" Click="OnRemove"
+                                       Icon="{ui:SymbolIcon Delete24}" />
+                        </ui:CardControl>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock Text="{l:Text WidgetsGalleryHeader.Text}" Style="{StaticResource SectionHeader}" />
+            <TextBlock Text="{l:Text WidgetsGalleryNone.Text}" Style="{StaticResource Note}"
+                       Visibility="{Binding HasNoOffers, Converter={StaticResource Visible}}" />
+            <ItemsControl ItemsSource="{Binding Offers, Mode=OneWay}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <ui:CardControl Margin="0,0,0,4">
+                            <ui:CardControl.Header>
+                                <StackPanel Orientation="Horizontal">
+                                    <Border Width="64" Height="64" Margin="0,0,12,0">
+                                        <Image Source="{Binding Preview, TargetNullValue={x:Null}}" Stretch="Uniform" />
+                                    </Border>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Label}" Style="{StaticResource CardTitle}" />
+                                        <TextBlock Text="{Binding Detail}" Style="{StaticResource CardDescription}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </ui:CardControl.Header>
+                            <ui:Button Content="{l:Text WidgetsAddButton.Content}" Tag="{Binding Provider}" Click="OnAdd"
+                                       Appearance="Primary" Icon="{ui:SymbolIcon Add24}" />
+                        </ui:CardControl>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

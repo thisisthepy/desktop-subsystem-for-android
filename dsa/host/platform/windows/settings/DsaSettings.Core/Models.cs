@@ -85,3 +85,15 @@ public sealed record GpuInfo(string Name, string Luid, bool PrimaryDisplay);
 /// <c>invalid-apk</c>, <c>insufficient-storage</c>, <c>downgrade</c>, <c>blocked</c> or
 /// <c>other</c>). <see cref="Detail"/> is what dsa said, in English.</summary>
 public sealed record InstallReport(bool Installed, string Status, string? Package, string Detail);
+
+/// <summary>A widget an app in Android offers: <see cref="Provider"/> names it to dsa, and the
+/// sizes are in device-independent pixels.</summary>
+public sealed record WidgetOffer(string Provider, string Package, string Label, byte[] PreviewPng,
+    int DefaultWidthDp, int DefaultHeightDp, bool NeedsConfiguration);
+
+/// <summary>A widget placed on the desktop, where its window is and how large, in
+/// device-independent pixels.</summary>
+public sealed record PlacedWidget(int Id, string Provider, string Label, int X, int Y, int WidthDp, int HeightDp);
+
+/// <summary>The widgets on offer and the ones placed.</summary>
+public sealed record WidgetList(IReadOnlyList<WidgetOffer> Offers, IReadOnlyList<PlacedWidget> Placed);

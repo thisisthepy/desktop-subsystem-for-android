@@ -442,4 +442,55 @@
   <data name="Install_Reason_other" xml:space="preserve">
     <value>Android가 앱을 설치하지 않았습니다.</value>
   </data>
+  <data name="NavWidgets.Content" xml:space="preserve">
+    <value>위젯</value>
+  </data>
+  <data name="WidgetsTitle.Text" xml:space="preserve">
+    <value>위젯</value>
+  </data>
+  <data name="WidgetsRefreshButton.Content" xml:space="preserve">
+    <value>새로 고침</value>
+  </data>
+  <data name="WidgetsIntro.Text" xml:space="preserve">
+    <value>Android 앱이 제공하는 위젯을 바탕 화면에 놓습니다. 위젯마다 다른 창 아래에 자기 창이 생깁니다. 위쪽 띠를 끌어 옮기고, 가장자리를 끌어 크기를 바꿉니다. 이 페이지를 열면 Android가 시작됩니다.</value>
+  </data>
+  <data name="WidgetsErrorBar.Title" xml:space="preserve">
+    <value>위젯을 읽거나 바꾸지 못했습니다</value>
+  </data>
+  <data name="WidgetsDoneBar.Title" xml:space="preserve">
+    <value>완료</value>
+  </data>
+  <data name="WidgetsPlacedHeader.Text" xml:space="preserve">
+    <value>바탕 화면에 있는 위젯</value>
+  </data>
+  <data name="WidgetsPlacedNone.Text" xml:space="preserve">
+    <value>아직 바탕 화면에 위젯이 없습니다.</value>
+  </data>
+  <data name="WidgetsGalleryHeader.Text" xml:space="preserve">
+    <value>앱이 제공하는 위젯</value>
+  </data>
+  <data name="WidgetsGalleryNone.Text" xml:space="preserve">
+    <value>위젯을 제공하는 Android 앱이 없습니다.</value>
+  </data>
+  <data name="WidgetsAddButton.Content" xml:space="preserve">
+    <value>바탕 화면에 추가</value>
+  </data>
+  <data name="WidgetsRemoveButton.Content" xml:space="preserve">
+    <value>제거</value>
+  </data>
+  <data name="Widgets_Size" xml:space="preserve">
+    <value>{0} × {1}</value>
+  </data>
+  <data name="Widgets_Setup" xml:space="preserve">
+    <value>놓을 때 설정을 묻습니다</value>
+  </data>
+  <data name="Widgets_At" xml:space="preserve">
+    <value>위치 {0}, {1}, 크기 {2} × {3}</value>
+  </data>
+  <data name="Widgets_Placed" xml:space="preserve">
+    <value>{0}을(를) 바탕 화면에 놓았습니다.</value>
+  </data>
+  <data name="Widgets_Removed" xml:space="preserve">
+    <value>{0}을(를) 바탕 화면에서 제거했습니다.</value>
+  </data>
 </root>

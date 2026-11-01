@@ -43,8 +43,8 @@
 //! removes one, with its window. Android is started first when it is not running. With
 //! `--json`, `list` prints `providers` (each with `provider`, `package`, `label`,
 //! `preview_png` in base64, its sizes in dp, `resize_mode` and `needs_configuration`) and
-//! `widgets` (each with `id`, `provider`, `label` and its `placement`), and `add` prints the
-//! placed widget.
+//! `widgets` (each with `id`, `provider`, `label` and its `placement`), `add` prints the
+//! placed widget, and `remove` prints `removed` with the widget's ID.
 //!
 //! `dsa freeze` stops every process of the Android until one of its windows is shown
 //! again. Its notifications, alarms and widgets stop with it.
@@ -547,7 +547,11 @@ fn widgets(
         }
         WidgetAction::Remove(id) => {
             client.remove_widget(id).map_err(|e| e.to_string())?;
-            Ok(format!("Removed widget {id}"))
+            Ok(if invocation.json {
+                json!({ "removed": id }).to_string()
+            } else {
+                format!("Removed widget {id}")
+            })
         }
     }
 }

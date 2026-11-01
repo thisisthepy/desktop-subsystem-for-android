@@ -49,6 +49,8 @@
                                        Icon="{ui:SymbolIcon Home24}" />
                 <ui:NavigationViewItem Content="{l:Text NavMemory.Content}" TargetPageType="{x:Type pages:MemoryPage}"
                                        Icon="{ui:SymbolIcon DataUsage24}" />
+                <ui:NavigationViewItem Content="{l:Text NavWidgets.Content}" TargetPageType="{x:Type pages:WidgetsPage}"
+                                       Icon="{ui:SymbolIcon Apps24}" />
                 <ui:NavigationViewItem Content="{l:Text NavDisplay.Content}" TargetPageType="{x:Type pages:DisplayPage}"
                                        Icon="{ui:SymbolIcon Desktop24}" />
                 <ui:NavigationViewItem Content="{l:Text NavUpdates.Content}" TargetPageType="{x:Type pages:UpdatesPage}"

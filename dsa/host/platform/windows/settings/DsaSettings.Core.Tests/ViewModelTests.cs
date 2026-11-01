@@ -43,6 +43,10 @@ internal sealed class KeyText : ITextSource
         "Install_NotSent" => "not sent {0}: {1}",
         "Install_NotApk" => "not an APK: {0}",
         "Install_Busy" => "installing {0}",
+        "Widgets_Size" => "{0}x{1}",
+        "Widgets_At" => "{0},{1} {2}x{3}",
+        "Widgets_Placed" => "placed {0}",
+        "Widgets_Removed" => "removed {0}",
         _ => key,
     };
 }
@@ -377,5 +381,80 @@ public class ViewModelTests
         await vm.DropAsync(new[] { @"C:\notes.apk" });
         Assert.Equal(InstallSeverity.Error, vm.Severity);
         Assert.Equal("not sent notes.apk: Problem_ServiceUnreachable (cannot reach the DSA service (no pipe))", vm.Message);
+    }
+
+    private const string ClockOffer =
+        "{\"provider\":\"com.example.clock/.ClockWidget\",\"package\":\"com.example.clock\",\"label\":\"Clock\"," +
+        "\"preview_png\":\"iVBORw==\",\"default_width_dp\":180,\"default_height_dp\":110,\"needs_configuration\":false}";
+
+    private const string NotesOffer =
+        "{\"provider\":\"com.example.notes/.NoteWidget\",\"package\":\"com.example.notes\",\"label\":\"\"," +
+        "\"preview_png\":\"\",\"default_width_dp\":250,\"default_height_dp\":250,\"needs_configuration\":true}";
+
+    private const string PlacedClock =
+        "{\"id\":3,\"provider\":\"com.example.clock/.ClockWidget\",\"label\":\"Clock\"," +
+        "\"placement\":{\"x\":64,\"y\":64,\"width_dp\":180,\"height_dp\":110}}";
+
+    [Fact]
+    public async Task Fr12_widgets_page_lists_the_widgets_on_offer_and_the_ones_placed()
+    {
+        var cli = new FakeCli().Answer("widgets list --json",
+            "{\"providers\":[" + ClockOffer + "," + NotesOffer + "],\"widgets\":[" + PlacedClock + "]}");
+        var vm = new WidgetsViewModel(new DsaService(cli), new KeyText());
+        await vm.RefreshAsync();
+        Assert.False(vm.HasError);
+        Assert.Equal(2, vm.Offers.Count);
+        Assert.Equal("Clock", vm.Offers[0].Label);
+        Assert.Equal("180x110", vm.Offers[0].Detail);
+        Assert.Equal(new byte[] { 0x89, (byte)'P', (byte)'N', (byte)'G' }, vm.Offers[0].Preview);
+        // A widget without a name shows its provider, one without a preview none, and one that
+        // asks to be set up says so.
+        Assert.Equal("com.example.notes/.NoteWidget", vm.Offers[1].Label);
+        Assert.Null(vm.Offers[1].Preview);
+        Assert.Equal("250x250 · Widgets_Setup", vm.Offers[1].Detail);
+        Assert.Equal(new PlacedWidgetRow(3, "Clock", "64,64 180x110"), Assert.Single(vm.Placed));
+        Assert.False(vm.HasNoOffers);
+        Assert.False(vm.HasNoPlaced);
+    }
+
+    [Fact]
+    public async Task Fr12_widgets_page_places_and_removes_a_widget_and_shows_the_list_after()
+    {
+        var cli = new FakeCli()
+            .Answer("widgets add com.example.clock/.ClockWidget --json", PlacedClock)
+            .Answer("widgets remove 3 --json", "{\"removed\":3}")
+            .Answer("widgets list --json", "{\"providers\":[" + ClockOffer + "],\"widgets\":[" + PlacedClock + "]}");
+        var vm = new WidgetsViewModel(new DsaService(cli), new KeyText());
+        await vm.AddAsync("com.example.clock/.ClockWidget");
+        Assert.Equal("placed Clock", vm.Message);
+        Assert.Single(vm.Placed);
+        await vm.RemoveAsync(3);
+        Assert.Equal("removed Clock", vm.Message);
+        Assert.Equal(
+            new[]
+            {
+                "widgets add com.example.clock/.ClockWidget --json", "widgets list --json",
+                "widgets remove 3 --json", "widgets list --json",
+            },
+            cli.Calls);
+        Assert.False(vm.IsBusy);
+    }
+
+    [Fact]
+    public async Task Fr12_widgets_page_says_why_a_widget_was_not_placed()
+    {
+        var cli = new FakeCli()
+            .Fail("widgets add com.example.clock/.ClockWidget --json",
+                "dsa: the widget was not placed: the user canceled the widget's setup")
+            .Answer("widgets list --json", "{\"providers\":[],\"widgets\":[]}");
+        var vm = new WidgetsViewModel(new DsaService(cli), new KeyText());
+        await vm.AddAsync("com.example.clock/.ClockWidget");
+        Assert.True(vm.HasError);
+        Assert.Contains("the user canceled the widget's setup", vm.Error);
+        Assert.False(vm.HasMessage);
+        await vm.RefreshAsync();
+        Assert.False(vm.HasError);
+        Assert.True(vm.HasNoOffers);
+        Assert.True(vm.HasNoPlaced);
     }
 }
