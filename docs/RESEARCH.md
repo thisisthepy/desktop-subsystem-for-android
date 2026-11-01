@@ -315,3 +315,52 @@ starting a second VM, for any project that wants it.
 구간은 `app.pointer`, `agent.inject`, `driver.flush`, `hwc.frame`, `wm.frame`, `app.present` 순이다. 호스트와 게스트의 시계 차이는 합친 간격에 포함된다.
 
 **결정**: 위 원인을 고친다(PR 참조). 수치 예산은 실측 뒤에 정한다.
+
+## 터치 지연의 구간별 실측 (FR-5)
+
+**확인 대상**: develop 7a20614, Windows 11, Intel Arc, Settings 앱, 새 데이터 디스크, 추적 켬. 게스트 로그(02:09~02:26)와 호스트 로그(02:35까지), 외부 화면 캡처 20회. 빌드 입력은 `aosp_cf_x86_64_only_phone-target_files-15581820`이다.
+
+**방법**: `input-trace`, Davey, 서비스 로그를 시간순으로 합쳤다. 게스트 `mono`, HWUI 타임스탬프는 같은 `CLOCK_MONOTONIC`이므로 게스트 안에서는 직접 비교한다. 호스트와 게스트의 UTC 차이는 버튼을 뗀 이벤트(호스트에서 에이전트까지 3~4 ms)와 프레임(게스트에서 호스트까지 1 ms)으로 보아 수 ms 이내다. systrace가 없으므로 앱 내부의 대기 원인은 아래에서 추론이라고 표시한다.
+
+**구간별 측정값**
+
+| 구간 | 값 | 근거 |
+| --- | --- | --- |
+| 누름에서 첫 표시 (호스트 안) | 최소 23.7, 중앙 43.8, p95 54, 최대 56 ms | 20회, `app.pointer`에서 `app.present`까지. 누르기 전 350 ms쯤 프레임이 없었으므로 누름에 대한 반응이다 |
+| 누름에서 화면의 첫 변화 (외부) | 최소 95, 중앙 136, p95 165 ms, 캡처 지연 10~20 ms 포함 | 같은 20회 |
+| 첫 표시 뒤 프레임 간격 (400 ms 안) | 중앙 16.7, p90 28.7, p99 53.5, 최대 231 ms. 33 ms 이상 7%, 50 ms 이상 1.3% | 378개 |
+| hwcomposer compose | 중앙 5.1, p90 13, p99 28.6, 최대 47.8 ms | 338개 |
+| hwcomposer post, `app.present` | post 0.1~1.2 ms, present 중앙 0.8, p95 4.3 ms | 호스트 복사는 대기의 원인이 아니다 |
+| 호스트 왕복 `wm.frame` | 중앙 0.8, p95 4, p99 8.6, 최대 510 ms | 3146개. 큰 값은 첫 프레임과 창 크기 변경 중에만 나온다 |
+| 호스트에서 주입까지 | 누름 2회 29, 40 ms. 뗌 2회 3, 4 ms | 표본이 2개뿐이고, 20회 묶음의 첫 표시 44 ms와 맞지 않는다. 그 묶음의 게스트 로그는 없다 |
+| `inject` | 16.1 ms 1회, 나머지 0.4~1.0 ms | 16.1 ms는 3분 넘게 쉰 뒤의 첫 누름이다 |
+| 드라이버 스캔 | 제출마다 4~5 MB, 1.4~3.3 ms | 전송은 제출마다 8~25 KB, 0.3~0.5 ms |
+
+**찾은 것 (증거 순)**
+
+1. **오디오 스택 전체가 SELinux 거부 하나로 죽어 있었다.** `hal_audio_default`와 `mediaswcodec`가 만든 memfd는 `tcontext=tmpfs`이고 플랫폼 정책은 그 파일에 `getattr`만 준다. libcutils의 시험 `ftruncate`가 `Permission denied`로 실패하면("no memfd support") 그 프로세스는 ashmem으로 돌아가는데, DSA 커널에는 그 장치가 없다. 그 결과 FMQ가 무효(`mmap failed: 9`, `command FMQ is invalid`)가 되고, `openOutputStream`이 실패하며, 오디오 정책이 시작하지 못한다. 여기서 두 가지 낭비가 나온다.
+   - `system_server`가 `listAudioPorts`를 초당 10번 재시도한다. 02:15 이후 직렬 로그 바이트의 77%가 이 줄이다.
+   - 클릭할 때마다 `AS.SfxHelper`가 효과음을 다시 디코드하다 실패한다. 뗀 직후 여러 스레드가 코덱을 만들고 없애는 일이 55~160 ms 이어진다(02:24:52.26~52.42, 02:24:54.63~54.69). 앱이 클릭에 답해야 하는 바로 그때다.
+2. **UWB.** `android.hardware.uwb` 기능은 선언되어 있는데 HAL APEX는 제거되어 있다. `system_server`의 스레드 2개가 부팅 내내 HAL을 기다리고, `servicemanager`는 초당 2번쯤 HAL을 시작하려고 스레드를 만든다. 직렬 로그의 16%다.
+3. **`seriallogging`.** 없는 콘솔에 쓰므로 바로 끝나고 init이 5초마다 다시 시작한다. 194번 끝났고, 끝날 때마다 `flags_health_check`도 돈다.
+
+**원인이 아니라고 본 것**
+
+- 프레임 게시가 호스트 복사를 기다리는 시간: post는 1 ms 안팎이다.
+- 호스트 복사와 표시 쪽 Present: `Present(0, 0)`이고 `took`이 작다.
+- acquire fence: 이 드라이버는 fence 없이 렌더링이 끝난 뒤 돌아오므로 fence가 -1이다(패치 0008). 다만 hwc 추적에 대기 시간이 없어 코드로만 판단했다. `waited` 칸을 추가해 다음 측정에서 확인한다.
+- 오디오 재시도의 CPU 자체: 초당 10번의 binder 호출은 작다. 낭비의 주된 부분은 직렬 포트 바이트인데, 바이트당 비용은 아직 측정하지 않았다.
+- `SIGABRT`로 죽는 `main`: 이 로그에는 없다. 시그널로 끝난 서비스도 없다.
+
+**1초 멈춤 (Davey 2건)**
+
+Davey는 이 로그에 2건뿐이고 둘 다 액티비티 전환이다. 리플만 있는 20회에서는 최대 간격이 231 ms다.
+
+- `duration=1093ms`: `SubSettings` 시작(52.186)부터 첫 순회(53.19)까지 메인 스레드가 페이지를 만든다. `Displayed +1s218ms`. Settings의 dexopt는 `verify`이므로 프로파일 없는 새 디스크에서 인터프리터와 JIT로 도는 첫 실행이다. 이 로그에는 두 번째 실행이 없어 첫 실행 비용을 빼 낼 수 없다.
+- `DequeueBufferDuration=835ms`: 뒤로 가기 뒤 54.627부터 55.859까지 `hwc.frame`, `wm.frame`이 하나도 없다. 그 앞 compose는 1~5 ms이므로 호스트가 버퍼를 잡은 것이 아니다. `SurfaceFlinger`가 새 버퍼를 올리지 않은 것이다. AOSP의 BLAST 동기화는 전환이 끝날 때까지 참가 창의 버퍼를 묶어 두므로, 돌아갈 액티비티가 그릴 때까지 앱의 버퍼 3개가 소진되는 것으로 추론한다. 같은 때 `PendingStartActivityUids delay:1044ms`도 나온다. 추론이므로 다음 측정의 `waited`와 systrace로 확인한다.
+
+**결정**: 위 1~3을 고치고, 소리가 호스트로 가는 경로가 없으므로 클릭 소리를 끈다(PR 참조). 드라이버 스캔은 고치지 않는다. 제출마다 2~3 ms이고, 앱이 언제 쓰는지 알릴 수단이 없어 건너뛰면 화면이 깨진다. 실측에서 다음 항목을 확인한다.
+
+- 호스트 첫 표시 44 ms와 외부 첫 변화 약 120 ms 사이의 약 75 ms. `app.present` 뒤 DWM은 많아야 두 프레임이다. 나머지는 첫 프레임들에 눈에 띄는 변화가 없어서로 보인다. 마우스를 누를 때의 호버 해제와, 스크롤 안의 뷰가 누름 표시를 `ViewConfiguration.getTapTimeout()`(100 ms)만큼 미루는 것이 후보다. 스크롤 없는 버튼과 목록 행의 첫 변화 시간을 비교하면 갈린다.
+- 앱이 쓰는 시간이 재지 않은 채로 남아 있으므로 `debug.sf.late.app.duration`을 줄이는 것은 보류한다. 놓치는 프레임이 늘 수 있다.
+- 작업이 열린 동안의 `MostlyCache` 회수(02:21:53)는 익명 메모리 1 GiB를 zram으로 보내고 캐시를 버린다. 3분 뒤 첫 누름의 `inject=16.1`과 첫 페이지의 비용에 얼마나 기여하는지 재지 않았다.
