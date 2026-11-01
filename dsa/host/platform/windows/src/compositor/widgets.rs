@@ -517,8 +517,8 @@ mod win {
         IDC_ARROW, MA_NOACTIVATE, MINMAXINFO, MSG, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
         SWP_NOZORDER, SW_SHOWNOACTIVATE, ULW_ALPHA, WINDOWPOS, WM_APP, WM_CAPTURECHANGED, WM_CLOSE,
         WM_DESTROY, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
-        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSELEAVE, WM_MOUSEMOVE, WM_NCHITTEST,
-        WM_SIZE, WM_WINDOWPOSCHANGING, WNDCLASSEXW,
+        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NCHITTEST, WM_SIZE,
+        WM_WINDOWPOSCHANGING, WNDCLASSEXW,
     };
 
     use super::{
@@ -529,6 +529,10 @@ mod win {
 
     /// The message that tells the controller window commands are waiting.
     const WM_COMMANDS: u32 = WM_APP + 1;
+
+    /// The pointer left the window (`WM_MOUSELEAVE`, which windows-sys keeps with the common
+    /// controls).
+    const WM_MOUSELEAVE: u32 = 0x02A3;
 
     struct Window {
         widget: Widget,
