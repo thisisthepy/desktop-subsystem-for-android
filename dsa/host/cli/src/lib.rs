@@ -14,6 +14,7 @@
 //! dsa settings [set <name> <value>]
 //! dsa memory
 //! dsa gpus
+//! dsa widgets [list | add <provider> | remove <id>]
 //! ```
 //!
 //! It acts on the Android of the user who runs it: the service learns that user from the
@@ -34,6 +35,16 @@
 //! `dsa open` sends a file from this computer to Android, which asks which app opens it; that
 //! app shows in a window of its own. `dsa share` does the same for sharing the file with an
 //! app. Android is started first when it is not running. Files up to 64 MiB can be sent.
+//!
+//! `dsa widgets list` (or `dsa widgets`) lists the widgets the apps in Android offer, each by
+//! its provider (`package/class`), and the widgets placed on the desktop, each by its ID.
+//! `dsa widgets add <provider>` places one; when its app asks the user to set it up first, its
+//! setup shows in a window and the command waits for the user. `dsa widgets remove <id>`
+//! removes one, with its window. Android is started first when it is not running. With
+//! `--json`, `list` prints `providers` (each with `provider`, `package`, `label`,
+//! `preview_png` in base64, its sizes in dp, `resize_mode` and `needs_configuration`) and
+//! `widgets` (each with `id`, `provider`, `label` and its `placement`), and `add` prints the
+//! placed widget.
 //!
 //! `dsa freeze` stops every process of the Android until one of its windows is shown
 //! again. Its notifications, alarms and widgets stop with it.
@@ -76,12 +87,14 @@ use dsa_host_core::files::{FileAction, FileTransfer};
 use dsa_host_core::host_api::{ClientError, HostApiClient, SettingsReport, Status, TaskList};
 use dsa_host_core::memory::MemorySnapshot;
 use dsa_host_core::session::SessionState;
+use dsa_host_core::widgets::{Widget, WidgetProvider};
 use dsa_transport::Connector;
 use serde_json::{json, Value};
 
 pub const USAGE: &str = "usage: dsa <status | start | stop | freeze | update | launch <package> | \
      install <file.apk> | open <file> | share <file> | \
-     tasks | settings [set <name> <value>] | memory | gpus> [--wait] [--timeout <seconds>] \
+     tasks | settings [set <name> <value>] | memory | gpus | \
+     widgets [list | add <provider> | remove <id>]> [--wait] [--timeout <seconds>] \
      [--json] [--pipe <name> | --socket <path>]";
 
 /// What to ask the service.
@@ -109,6 +122,19 @@ pub enum Command {
     Memory,
     /// List this machine's GPUs.
     Gpus,
+    /// List, place or remove widgets ([`Invocation::widgets`]).
+    Widgets,
+}
+
+/// What `dsa widgets` does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WidgetAction {
+    /// List the widgets on offer and the ones placed.
+    List,
+    /// Place a widget of this provider.
+    Add(String),
+    /// Remove the widget with this ID.
+    Remove(i32),
 }
 
 /// A setting `dsa settings set` changes.
@@ -202,6 +228,8 @@ pub struct Invocation {
     pub file: Option<std::path::PathBuf>,
     /// The setting to change, for `dsa settings set`.
     pub change: Option<Change>,
+    /// What to do with widgets, for `dsa widgets`.
+    pub widgets: Option<WidgetAction>,
     /// Print the answer as JSON.
     pub json: bool,
 }
@@ -224,12 +252,13 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut package = None;
     let mut file = None;
     let mut change = None;
+    let mut widgets = None;
     let mut json = false;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "status" | "start" | "stop" | "freeze" | "update" | "launch" | "install" | "open"
-            | "share" | "tasks" | "settings" | "memory" | "gpus"
+            | "share" | "tasks" | "settings" | "memory" | "gpus" | "widgets"
                 if command.is_none() =>
             {
                 command = Some(match arg.as_str() {
@@ -245,6 +274,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                     "settings" => Command::Settings,
                     "memory" => Command::Memory,
                     "gpus" => Command::Gpus,
+                    "widgets" => Command::Widgets,
                     _ => Command::Stop,
                 });
             }
@@ -256,6 +286,32 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                     .next()
                     .ok_or_else(|| format!("dsa settings set {name} needs a value"))?;
                 change = Some(Change::parse(name, value)?);
+            }
+            "list" if command == Some(Command::Widgets) && widgets.is_none() => {
+                widgets = Some(WidgetAction::List);
+            }
+            "add" if command == Some(Command::Widgets) && widgets.is_none() => {
+                let provider = args.next().ok_or(
+                    "dsa widgets add needs the widget's provider; dsa widgets list shows them",
+                )?;
+                if !dsa_host_core::widgets::valid_provider_name(provider) {
+                    return Err(format!(
+                        "{provider:?} is not a widget's provider; dsa widgets list shows them, \
+                         such as com.example.clock/.ClockWidget"
+                    ));
+                }
+                widgets = Some(WidgetAction::Add(provider.clone()));
+            }
+            "remove" if command == Some(Command::Widgets) && widgets.is_none() => {
+                let id = args.next().ok_or(
+                    "dsa widgets remove needs the widget's ID; dsa widgets list shows them",
+                )?;
+                let id: i32 = id
+                    .parse()
+                    .ok()
+                    .filter(|id: &i32| *id > 0)
+                    .ok_or_else(|| format!("a widget's ID is a number above 0, not {id:?}"))?;
+                widgets = Some(WidgetAction::Remove(id));
             }
             "--json" => json = true,
             name if command == Some(Command::Launch)
@@ -298,6 +354,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         }
     }
     let command = command.ok_or(USAGE)?;
+    let widgets = (command == Command::Widgets).then(|| widgets.unwrap_or(WidgetAction::List));
     if command == Command::Install && file.is_none() {
         return Err(format!(
             "dsa install needs the APK file to install\n{USAGE}"
@@ -331,8 +388,168 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         package,
         file,
         change,
+        widgets,
         json,
     })
+}
+
+/// Encodes `data` in standard base64, for the previews `dsa widgets list --json` prints.
+pub fn base64(data: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [
+            chunk[0],
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// A widget on offer as one JSON object.
+pub fn provider_json(provider: &WidgetProvider) -> Value {
+    json!({
+        "provider": provider.provider,
+        "package": provider.package_name,
+        "label": provider.label,
+        "preview_png": base64(&provider.preview_png),
+        "min_width_dp": provider.min_width_dp,
+        "min_height_dp": provider.min_height_dp,
+        "default_width_dp": provider.default_width_dp,
+        "default_height_dp": provider.default_height_dp,
+        "max_width_dp": provider.max_width_dp,
+        "max_height_dp": provider.max_height_dp,
+        "resize_mode": provider.resize_mode,
+        "needs_configuration": provider.needs_configuration,
+    })
+}
+
+/// A placed widget as one JSON object.
+pub fn widget_json(widget: &Widget) -> Value {
+    json!({
+        "id": widget.widget_id,
+        "provider": widget.provider.provider,
+        "package": widget.provider.package_name,
+        "label": widget.provider.label,
+        "placement": {
+            "x": widget.placement.x,
+            "y": widget.placement.y,
+            "width_dp": widget.placement.width_dp,
+            "height_dp": widget.placement.height_dp,
+        },
+    })
+}
+
+/// What `dsa widgets list` prints: the widgets on offer, then the ones placed.
+pub fn describe_widgets(providers: &[WidgetProvider], placed: &[Widget]) -> String {
+    let mut out = String::new();
+    if providers.is_empty() {
+        out.push_str("No app in Android offers a widget.\n");
+    } else {
+        out.push_str("Widgets on offer (dsa widgets add <provider>):\n");
+        for provider in providers {
+            let _ = writeln!(
+                out,
+                "  {}  {} ({}x{} dp){}",
+                provider.provider,
+                provider.label,
+                provider.default_width_dp,
+                provider.default_height_dp,
+                if provider.needs_configuration {
+                    ", set up when placed"
+                } else {
+                    ""
+                }
+            );
+        }
+    }
+    if placed.is_empty() {
+        out.push_str("No widget is placed.");
+    } else {
+        out.push_str("Placed widgets (dsa widgets remove <id>):");
+        for widget in placed {
+            let _ = write!(
+                out,
+                "\n  {}  {} ({}) at {},{} {}x{} dp",
+                widget.widget_id,
+                widget.provider.label,
+                widget.provider.provider,
+                widget.placement.x,
+                widget.placement.y,
+                widget.placement.width_dp,
+                widget.placement.height_dp
+            );
+        }
+    }
+    out
+}
+
+/// `dsa widgets`: makes sure Android runs (and, on Windows, the window manager that shows the
+/// widgets), then lists, places or removes widgets.
+fn widgets(
+    invocation: &Invocation,
+    mut client: HostApiClient,
+    connector: &mut dyn Connector,
+) -> Result<String, String> {
+    let action = invocation.widgets.clone().unwrap_or(WidgetAction::List);
+    #[cfg(windows)]
+    if invocation.endpoint.is_none() && action != WidgetAction::List {
+        ensure_window_manager()?;
+    }
+    client
+        .ensure_running(OPEN_START_TIMEOUT, Duration::from_millis(250), |_| {})
+        .map_err(|e| format!("Android did not start: {e}"))?;
+    drop(client);
+    let mut client = connect(connector, None, false, Duration::from_secs(10))?;
+    match action {
+        WidgetAction::List => {
+            let providers = client.widget_providers().map_err(|e| e.to_string())?;
+            let (placed, _) = client.widgets().map_err(|e| e.to_string())?;
+            Ok(if invocation.json {
+                json!({
+                    "providers": providers.iter().map(provider_json).collect::<Vec<_>>(),
+                    "widgets": placed.iter().map(widget_json).collect::<Vec<_>>(),
+                })
+                .to_string()
+            } else {
+                describe_widgets(&providers, &placed)
+            })
+        }
+        WidgetAction::Add(provider) => {
+            let widget = client
+                .add_widget(
+                    &provider,
+                    dsa_host_core::host_api::WIDGET_ADD_WAIT + Duration::from_secs(10),
+                )
+                .map_err(|e| format!("the widget was not placed: {e}"))?;
+            Ok(if invocation.json {
+                widget_json(&widget).to_string()
+            } else {
+                format!(
+                    "Placed {} (widget {})",
+                    if widget.provider.label.is_empty() {
+                        &widget.provider.provider
+                    } else {
+                        &widget.provider.label
+                    },
+                    widget.widget_id
+                )
+            })
+        }
+        WidgetAction::Remove(id) => {
+            client.remove_widget(id).map_err(|e| e.to_string())?;
+            Ok(format!("Removed widget {id}"))
+        }
+    }
 }
 
 /// `status` as one JSON object.
@@ -831,6 +1048,7 @@ pub fn run_with_starter(
             return Ok(format!("Launching {package}"));
         }
         Command::Install => return install(invocation, client, connector),
+        Command::Widgets => return widgets(invocation, client, connector),
         Command::Open | Command::Share => {
             return open_file(invocation, client, connector);
         }

@@ -17,6 +17,7 @@ use dsa_host_core::session::{
     SessionState, StopReason,
 };
 use dsa_host_core::tasks::{Bounds, Task, TaskEvent, TaskRequest};
+use dsa_host_core::widgets::{self, Placement, Widget, WidgetEvent, WidgetSize};
 use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{envelope::Body, Envelope, RejectReason, Role};
 use dsa_protocol::encode;
@@ -2829,4 +2830,331 @@ fn nfr5_word_on_an_install_that_is_not_under_way_is_dropped() {
             package_name: "com.example.clock".into(),
         })
         .expect("the session goes on");
+}
+
+fn clock_widget() -> dsa_protocol::control::WidgetProvider {
+    dsa_protocol::control::WidgetProvider {
+        provider: "com.example.clock/.ClockWidget".into(),
+        package_name: "com.example.clock".into(),
+        label: "Clock".into(),
+        preview_png: vec![0x89, b'P', b'N', b'G'],
+        min_width_dp: 110,
+        min_height_dp: 40,
+        default_width_dp: 180,
+        default_height_dp: 110,
+        max_width_dp: 0,
+        max_height_dp: 0,
+        resize_mode: 3,
+        needs_configuration: false,
+    }
+}
+
+fn widget_updated(widget_id: i32) -> Body {
+    Body::WidgetUpdated(dsa_protocol::control::WidgetUpdated {
+        widget_id,
+        provider: Some(clock_widget()),
+    })
+}
+
+fn widget_frame(widget_id: i32, png: &[u8]) -> Body {
+    Body::WidgetFrame(dsa_protocol::control::WidgetFrame {
+        widget_id,
+        width: 2,
+        height: 1,
+        png: png.to_vec(),
+    })
+}
+
+fn placed(widget_id: i32) -> WidgetEvent {
+    WidgetEvent::Placed(Widget {
+        widget_id,
+        provider: widgets::checked_provider(clock_widget()).unwrap(),
+        placement: Placement::default(),
+    })
+}
+
+#[test]
+fn fr12_widgets_the_agent_hosts_reach_a_watcher_with_what_they_show() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_widgets();
+    assert!(watch.current.is_empty());
+    send_body(&mut agent, widget_updated(12));
+    assert_eq!(watch.events.recv_timeout(WAIT).unwrap(), placed(12));
+    send_body(&mut agent, widget_frame(12, b"\x89PNG1"));
+    match watch.events.recv_timeout(WAIT).unwrap() {
+        WidgetEvent::Frame(frame) => assert_eq!(frame.png, b"\x89PNG1"),
+        other => panic!("expected a frame, got {other:?}"),
+    }
+    // A late watcher starts from the widget and what it shows now.
+    let late = session.watch_widgets();
+    assert_eq!(late.current.len(), 2);
+    assert_eq!(late.current[0], placed(12));
+    // The list the agent sends on each connection removes the widgets it no longer has.
+    send_body(&mut agent, widget_updated(15));
+    assert_eq!(watch.events.recv_timeout(WAIT).unwrap(), placed(15));
+    send_body(
+        &mut agent,
+        Body::WidgetList(dsa_protocol::control::WidgetList {
+            widget_ids: vec![15],
+        }),
+    );
+    assert_eq!(
+        watch.events.recv_timeout(WAIT).unwrap(),
+        WidgetEvent::Removed { widget_id: 12 }
+    );
+    assert_eq!(
+        watch.events.recv_timeout(WAIT).unwrap(),
+        WidgetEvent::Listed(vec![15])
+    );
+    assert_eq!(
+        session
+            .widgets()
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>(),
+        vec![15]
+    );
+}
+
+#[test]
+fn fr12_the_gallery_gathers_every_part_of_the_agents_answer() {
+    let (session, mut agent, _launcher) = active_session();
+    let session = Arc::new(session);
+    let asking = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.widget_providers(WAIT))
+    };
+    let request_id = match next_body(&mut agent) {
+        Body::ListWidgetProviders(list) => list.request_id,
+        other => panic!("expected the gallery request, got {other:?}"),
+    };
+    let notes = dsa_protocol::control::WidgetProvider {
+        provider: "com.example.notes/.NoteWidget".into(),
+        label: "a note".into(),
+        ..clock_widget()
+    };
+    let broken = dsa_protocol::control::WidgetProvider {
+        provider: "not a component".into(),
+        ..clock_widget()
+    };
+    send_body(
+        &mut agent,
+        Body::WidgetProviders(dsa_protocol::control::WidgetProviders {
+            request_id,
+            providers: vec![notes, broken],
+            complete: false,
+        }),
+    );
+    send_body(
+        &mut agent,
+        Body::WidgetProviders(dsa_protocol::control::WidgetProviders {
+            request_id,
+            providers: vec![clock_widget()],
+            complete: true,
+        }),
+    );
+    let providers = asking.join().unwrap().expect("the gallery");
+    // In label order; the broken one is left out.
+    assert_eq!(
+        providers
+            .iter()
+            .map(|p| p.provider.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "com.example.notes/.NoteWidget",
+            "com.example.clock/.ClockWidget"
+        ]
+    );
+}
+
+#[test]
+fn fr12_placing_a_widget_waits_for_the_agent_and_a_refusal_says_why() {
+    let (session, mut agent, _launcher) = active_session();
+    let session = Arc::new(session);
+    let adding = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.add_widget("com.example.clock/.ClockWidget", WAIT))
+    };
+    let request_id = match next_body(&mut agent) {
+        Body::AddWidget(add) => {
+            assert_eq!(add.provider, "com.example.clock/.ClockWidget");
+            add.request_id
+        }
+        other => panic!("expected the request to place a widget, got {other:?}"),
+    };
+    send_body(&mut agent, widget_updated(12));
+    send_body(
+        &mut agent,
+        Body::WidgetAdded(dsa_protocol::control::WidgetAdded {
+            request_id,
+            widget_id: 12,
+            error: String::new(),
+        }),
+    );
+    assert_eq!(adding.join().unwrap(), Ok(12));
+    assert_eq!(session.widgets().len(), 1);
+
+    let refused = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.add_widget("com.example.clock/.ClockWidget", WAIT))
+    };
+    let request_id = match next_body(&mut agent) {
+        Body::AddWidget(add) => add.request_id,
+        other => panic!("expected the request to place a widget, got {other:?}"),
+    };
+    send_body(
+        &mut agent,
+        Body::WidgetAdded(dsa_protocol::control::WidgetAdded {
+            request_id,
+            widget_id: 0,
+            error: "the user canceled the widget's setup".into(),
+        }),
+    );
+    assert_eq!(
+        refused.join().unwrap(),
+        Err(SessionError::WidgetRefused(
+            "the user canceled the widget's setup".into()
+        ))
+    );
+    assert!(matches!(
+        session.add_widget("../etc", WAIT),
+        Err(SessionError::WidgetRefused(_))
+    ));
+}
+
+#[test]
+fn fr12_a_widget_window_size_reaches_the_agent_in_pixels_and_dp() {
+    let (session, mut agent, _launcher) = active_session();
+    send_body(&mut agent, widget_updated(12));
+    session
+        .resize_widget(12, WidgetSize::of_pixels(360, 220, 240))
+        .unwrap();
+    assert_eq!(
+        next_body(&mut agent),
+        Body::ResizeWidget(dsa_protocol::control::ResizeWidget {
+            widget_id: 12,
+            width: 360,
+            height: 220,
+            density_dpi: 240,
+            width_dp: 240,
+            height_dp: 147,
+        })
+    );
+}
+
+#[test]
+fn fr12_removing_a_widget_reaches_the_agent_and_closes_its_window() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_widgets();
+    send_body(&mut agent, widget_updated(12));
+    assert_eq!(watch.events.recv_timeout(WAIT).unwrap(), placed(12));
+    session.remove_widget(12).unwrap();
+    assert_eq!(
+        next_body(&mut agent),
+        Body::RemoveWidget(dsa_protocol::control::RemoveWidget { widget_id: 12 })
+    );
+    assert_eq!(
+        watch.events.recv_timeout(WAIT).unwrap(),
+        WidgetEvent::Removed { widget_id: 12 }
+    );
+    assert!(session.widgets().is_empty());
+}
+
+#[test]
+fn fr12_a_widget_keeps_showing_while_dozing_and_a_press_wakes_the_guest_first() {
+    let (session, mut agent, _launcher) = lifecycle_session(None);
+    let watch = session.watch_widgets();
+    send_body(&mut agent, widget_updated(12));
+    assert_eq!(watch.events.recv_timeout(WAIT).unwrap(), placed(12));
+    dozing(&session, &mut agent);
+    // The clock ticks in Doze: its frames still reach the watcher, and the guest dozes on.
+    for second in 0..3u8 {
+        send_body(
+            &mut agent,
+            widget_frame(12, &[0x89, b'P', b'N', b'G', second]),
+        );
+        match watch.events.recv_timeout(WAIT).unwrap() {
+            WidgetEvent::Frame(frame) => assert_eq!(frame.png[4], second),
+            other => panic!("expected a frame, got {other:?}"),
+        }
+    }
+    assert_eq!(session.state(), SessionState::Dozing);
+    let press =
+        |action: dsa_protocol::control::PointerAction| dsa_protocol::control::WidgetPointer {
+            widget_id: 12,
+            action: action as i32,
+            pointer_id: 0,
+            x: 10.0,
+            y: 20.0,
+        };
+    session
+        .widget_pointer(press(dsa_protocol::control::PointerAction::Down))
+        .unwrap();
+    assert_eq!(next_body(&mut agent), screen(true));
+    assert_eq!(
+        next_body(&mut agent),
+        Body::WidgetPointer(press(dsa_protocol::control::PointerAction::Down))
+    );
+    assert_eq!(session.state(), SessionState::Active);
+}
+
+#[test]
+fn fr12_widgets_stay_while_the_guest_is_stopped() {
+    let (session, mut agent, _launcher) = active_session();
+    send_body(&mut agent, widget_updated(12));
+    wait_until("the widget is placed", || session.widgets().len() == 1);
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(session.widgets().len(), 1);
+    assert_eq!(session.watch_widgets().current, vec![placed(12)]);
+}
+
+#[test]
+fn nfr5_malformed_widget_messages_are_dropped_and_the_session_stays_active() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_widgets();
+    // No provider, a bad provider, no ID, a frame of a widget not placed, a frame that is no
+    // PNG, and an answer nobody asked for.
+    send_body(
+        &mut agent,
+        Body::WidgetUpdated(dsa_protocol::control::WidgetUpdated {
+            widget_id: 3,
+            provider: None,
+        }),
+    );
+    send_body(
+        &mut agent,
+        Body::WidgetUpdated(dsa_protocol::control::WidgetUpdated {
+            widget_id: 3,
+            provider: Some(dsa_protocol::control::WidgetProvider {
+                provider: "x".into(),
+                ..clock_widget()
+            }),
+        }),
+    );
+    send_body(&mut agent, widget_updated(0));
+    send_body(&mut agent, widget_frame(99, b"\x89PNG"));
+    send_body(&mut agent, widget_updated(12));
+    assert_eq!(watch.events.recv_timeout(WAIT).unwrap(), placed(12));
+    send_body(&mut agent, widget_frame(12, b"GIF89a"));
+    send_body(
+        &mut agent,
+        Body::WidgetAdded(dsa_protocol::control::WidgetAdded {
+            request_id: 4242,
+            widget_id: 1,
+            error: String::new(),
+        }),
+    );
+    // A request only the host sends is dropped too.
+    send_body(
+        &mut agent,
+        Body::RemoveWidget(dsa_protocol::control::RemoveWidget { widget_id: 12 }),
+    );
+    send_body(&mut agent, widget_frame(12, b"\x89PNG"));
+    match watch.events.recv_timeout(WAIT).unwrap() {
+        WidgetEvent::Frame(frame) => assert_eq!(frame.png, b"\x89PNG"),
+        other => panic!("only the good frame arrives, got {other:?}"),
+    }
+    assert_eq!(session.state(), SessionState::Active);
+    assert_eq!(session.widgets().len(), 1);
 }

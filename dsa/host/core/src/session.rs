@@ -64,6 +64,14 @@
 //! screen that is on, and a dismissal waits for a frozen guest to be thawed.
 //! APKs from the host go to the guest with [`Session::install_apk`], streamed in chunks paced
 //! by the agent's progress reports, one install at a time; a second waits for the first.
+//!
+//! The widgets the agent hosts go to every [`Session::watch_widgets`] watcher, with what each
+//! one shows ([`crate::widgets`]). They are kept while the guest is stopped, so their windows
+//! stay, and the list the agent sends on each connection says which are still there. The
+//! gallery ([`Session::widget_providers`]) and placing a widget ([`Session::add_widget`]) ask
+//! the agent and wait for its answer. A widget's frames come while the guest is in Doze too:
+//! the agent draws them at a low rate without waking the guest. A press in a widget's window
+//! wakes a guest in Doze, as a click on a notification does, since it may open an app.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -90,6 +98,9 @@ use crate::memory::{GuestMemory, GuestMemoryReport};
 use crate::notifications::{self, Notification, NotificationAction, NotificationEvent, RateLimit};
 use crate::power::PowerState;
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskTable, TaskWatch};
+use crate::widgets::{
+    self, Placement, Widget, WidgetEvent, WidgetFrame, WidgetProvider, WidgetSize,
+};
 
 /// Where the session is in its life.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -432,6 +443,9 @@ pub enum SessionError {
     InstallRefused(String),
     /// A file was not sent, or the guest did not take it; the detail says why.
     FileRefused(String),
+    /// A widget was not placed, or the agent did not answer about widgets; the detail says
+    /// why.
+    WidgetRefused(String),
 }
 
 impl fmt::Display for SessionError {
@@ -443,6 +457,7 @@ impl fmt::Display for SessionError {
             SessionError::FreezeFailed(why) => write!(f, "the guest was not frozen: {why}"),
             SessionError::InstallRefused(why) => f.write_str(why),
             SessionError::FileRefused(why) => f.write_str(why),
+            SessionError::WidgetRefused(why) => f.write_str(why),
         }
     }
 }
@@ -470,6 +485,9 @@ enum Command {
     ShareClipboard(bool),
     /// The user did something with a notification on the host.
     Notification(NotificationAction, Sender<Result<(), SessionError>>),
+    /// The user pressed in a widget's window: a guest in Doze wakes, as the press may open
+    /// an app.
+    WidgetPressed(Sender<()>),
 }
 
 struct Shared {
@@ -505,6 +523,56 @@ struct Shared {
     last_install: AtomicU32,
     /// Held for the length of an install, so a second one waits for the first.
     install_turn: Mutex<()>,
+    /// The widgets the agent hosts and who is watching them.
+    widgets: Mutex<WidgetHub>,
+    /// The requests about widgets waiting for the agent's answer, by request ID.
+    widget_requests: Mutex<HashMap<u32, Sender<WidgetAnswer>>>,
+    /// The ID of the last request about widgets.
+    last_widget_request: AtomicU32,
+}
+
+/// What the agent answers about widgets.
+enum WidgetAnswer {
+    Providers(Vec<WidgetProvider>, bool),
+    Added(Result<i32, String>),
+}
+
+/// The widgets the agent hosts, each with what it last showed, and who is watching them,
+/// under one lock, so a new watcher's starting point and the changes it receives afterwards
+/// never overlap or leave a gap.
+#[derive(Default)]
+struct WidgetHub {
+    widgets: std::collections::BTreeMap<i32, (WidgetProvider, Option<WidgetFrame>)>,
+    watchers: Vec<Sender<WidgetEvent>>,
+}
+
+impl WidgetHub {
+    fn publish(&mut self, event: WidgetEvent) {
+        self.watchers
+            .retain(|watcher| watcher.send(event.clone()).is_ok());
+    }
+
+    fn snapshot(&self) -> Vec<WidgetEvent> {
+        let mut events = Vec::new();
+        for (widget_id, (provider, frame)) in &self.widgets {
+            events.push(WidgetEvent::Placed(Widget {
+                widget_id: *widget_id,
+                provider: provider.clone(),
+                placement: Placement::default(),
+            }));
+            if let Some(frame) = frame {
+                events.push(WidgetEvent::Frame(frame.clone()));
+            }
+        }
+        events
+    }
+}
+
+/// The widgets the agent hosts now, and every change to them from then on. A placed
+/// widget's placement is left at its default: the service keeps where its window is.
+pub struct WidgetWatch {
+    pub current: Vec<WidgetEvent>,
+    pub events: Receiver<WidgetEvent>,
 }
 
 /// What the agent says about an install under way.
@@ -647,6 +715,23 @@ impl Shared {
             .retain(|watcher| watcher.send(text.to_string()).is_ok());
     }
 
+    /// Hands the agent's answer about widgets to whoever asked. An answer nobody waits for
+    /// is dropped and logged.
+    fn widget_answer(&self, request_id: u32, answer: WidgetAnswer) {
+        let requests = self
+            .widget_requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        match requests.get(&request_id) {
+            Some(waiting) => {
+                let _ = waiting.send(answer);
+            }
+            None => eprintln!(
+                "widgets: dropped the agent's answer to request {request_id}, which nobody waits for"
+            ),
+        }
+    }
+
     /// Hands a change to the guest's notifications to every watcher still listening.
     fn publish_notification(&self, event: NotificationEvent) {
         self.notification_watchers
@@ -703,6 +788,9 @@ impl Session {
             installs: Mutex::new(HashMap::new()),
             last_install: AtomicU32::new(0),
             install_turn: Mutex::new(()),
+            widgets: Mutex::new(WidgetHub::default()),
+            widget_requests: Mutex::new(HashMap::new()),
+            last_widget_request: AtomicU32::new(0),
         });
         let freeze_delay = config.freeze_after.unwrap_or(DEFAULT_FREEZE_AFTER);
         let (commands, command_rx) = mpsc::channel();
@@ -1296,6 +1384,189 @@ impl Session {
         }))
     }
 
+    /// The widgets the agent hosts now, and every change to them from now on. The watch lasts
+    /// across restarts of the guest.
+    pub fn watch_widgets(&self) -> WidgetWatch {
+        let (tx, events) = mpsc::channel();
+        let mut hub = self
+            .shared
+            .widgets
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let current = hub.snapshot();
+        hub.watchers.push(tx);
+        WidgetWatch { current, events }
+    }
+
+    /// The widgets the agent hosts now, in ID order.
+    pub fn widgets(&self) -> Vec<(i32, WidgetProvider)> {
+        self.shared
+            .widgets
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .widgets
+            .iter()
+            .map(|(id, (provider, _))| (*id, provider.clone()))
+            .collect()
+    }
+
+    /// Registers a request about widgets and returns its ID and where its answer arrives.
+    fn widget_request(&self) -> (u32, Receiver<WidgetAnswer>) {
+        let request_id = self
+            .shared
+            .last_widget_request
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_add(1);
+        let (tx, rx) = mpsc::channel();
+        self.shared
+            .widget_requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(request_id, tx);
+        (request_id, rx)
+    }
+
+    fn forget_widget_request(&self, request_id: u32) {
+        self.shared
+            .widget_requests
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&request_id);
+    }
+
+    /// The widgets the apps in the guest offer, in label order, asking the agent and waiting
+    /// up to `timeout` for its whole answer. Needs an active session.
+    pub fn widget_providers(&self, timeout: Duration) -> Result<Vec<WidgetProvider>, SessionError> {
+        let (request_id, answers) = self.widget_request();
+        let result = (|| {
+            self.send(dsa_protocol::encode(&control::Envelope {
+                body: Some(Body::ListWidgetProviders(control::ListWidgetProviders {
+                    request_id,
+                })),
+            }))?;
+            let deadline = Instant::now() + timeout;
+            let mut providers: Vec<WidgetProvider> = Vec::new();
+            loop {
+                let left = deadline.saturating_duration_since(Instant::now());
+                match answers.recv_timeout(left) {
+                    Ok(WidgetAnswer::Providers(part, complete)) => {
+                        for provider in part {
+                            if providers.len() >= widgets::MAX_PROVIDERS {
+                                break;
+                            }
+                            if !providers.iter().any(|p| p.provider == provider.provider) {
+                                providers.push(provider);
+                            }
+                        }
+                        if complete {
+                            break;
+                        }
+                    }
+                    Ok(WidgetAnswer::Added(_)) => {}
+                    Err(_) => {
+                        return Err(SessionError::WidgetRefused(format!(
+                            "Android did not list its widgets within {} seconds",
+                            timeout.as_secs()
+                        )))
+                    }
+                }
+            }
+            providers.sort_by(|a, b| {
+                a.label
+                    .to_lowercase()
+                    .cmp(&b.label.to_lowercase())
+                    .then_with(|| a.provider.cmp(&b.provider))
+            });
+            Ok(providers)
+        })();
+        self.forget_widget_request(request_id);
+        result
+    }
+
+    /// Places a new widget of `provider`, waiting up to `timeout` for the agent, and for the
+    /// user when the widget's app asks them to set it up first. Needs an active session.
+    pub fn add_widget(&self, provider: &str, timeout: Duration) -> Result<i32, SessionError> {
+        if !widgets::valid_provider_name(provider) {
+            return Err(SessionError::WidgetRefused(format!(
+                "{provider:?} is not a widget's name; `dsa widgets list` shows them"
+            )));
+        }
+        if self.widgets().len() >= widgets::MAX_WIDGETS {
+            return Err(SessionError::WidgetRefused(format!(
+                "{} widgets are placed already; remove one first",
+                widgets::MAX_WIDGETS
+            )));
+        }
+        let (request_id, answers) = self.widget_request();
+        let result = (|| {
+            self.send(dsa_protocol::encode(&control::Envelope {
+                body: Some(Body::AddWidget(control::AddWidget {
+                    request_id,
+                    provider: provider.to_string(),
+                })),
+            }))?;
+            let deadline = Instant::now() + timeout;
+            loop {
+                let left = deadline.saturating_duration_since(Instant::now());
+                match answers.recv_timeout(left) {
+                    Ok(WidgetAnswer::Added(Ok(widget_id))) => return Ok(widget_id),
+                    Ok(WidgetAnswer::Added(Err(why))) => {
+                        return Err(SessionError::WidgetRefused(why))
+                    }
+                    Ok(WidgetAnswer::Providers(..)) => {}
+                    Err(_) => {
+                        return Err(SessionError::WidgetRefused(format!(
+                            "Android did not place the widget within {} seconds",
+                            timeout.as_secs()
+                        )))
+                    }
+                }
+            }
+        })();
+        self.forget_widget_request(request_id);
+        result
+    }
+
+    /// Removes a widget: the agent deletes it, and the watchers hear it is gone once it says
+    /// so. A widget the guest does not have is removed from the host's list at once. Needs an
+    /// active session to reach the guest.
+    pub fn remove_widget(&self, widget_id: i32) -> Result<(), SessionError> {
+        let result = self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::RemoveWidget(control::RemoveWidget { widget_id })),
+        }));
+        // The window goes at once; the agent's list confirms it.
+        let mut hub = self
+            .shared
+            .widgets
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if hub.widgets.remove(&widget_id).is_some() {
+            hub.publish(WidgetEvent::Removed { widget_id });
+        }
+        result
+    }
+
+    /// Tells the agent the size of a widget's window. Needs an active session.
+    pub fn resize_widget(&self, widget_id: i32, size: WidgetSize) -> Result<(), SessionError> {
+        self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::ResizeWidget(size.to_control(widget_id))),
+        }))
+    }
+
+    /// Passes pointer input in a widget's window to the agent. A press wakes a guest in Doze
+    /// first. Needs an active session.
+    pub fn widget_pointer(&self, pointer: control::WidgetPointer) -> Result<(), SessionError> {
+        if pointer.action == control::PointerAction::Down as i32 {
+            let (reply_tx, reply_rx) = mpsc::channel();
+            if self.commands.send(Command::WidgetPressed(reply_tx)).is_ok() {
+                let _ = reply_rx.recv();
+            }
+        }
+        self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::WidgetPointer(pointer)),
+        }))
+    }
+
     /// Passes pointer input in a task's window to the guest. Needs an active session.
     pub fn pointer(&self, event: &PointerEvent) -> Result<(), SessionError> {
         self.send(dsa_protocol::encode(&control::Envelope {
@@ -1456,6 +1727,9 @@ impl Worker {
                         Ok(Command::LinksInAndroid(on)) => self.set_links_in_android(on),
                         Ok(Command::HostClipboard(text)) => self.host_clipboard(text),
                         Ok(Command::ShareClipboard(on)) => self.share_clipboard(on),
+                        Ok(Command::WidgetPressed(reply)) => {
+                            let _ = reply.send(());
+                        }
                         Ok(Command::Shutdown) | Err(_) => return,
                     }
                 }
@@ -1479,6 +1753,9 @@ impl Worker {
                         Ok(Command::LinksInAndroid(on)) => self.set_links_in_android(on),
                         Ok(Command::HostClipboard(text)) => self.host_clipboard(text),
                         Ok(Command::ShareClipboard(on)) => self.share_clipboard(on),
+                        Ok(Command::WidgetPressed(reply)) => {
+                            let _ = reply.send(());
+                        }
                         Ok(Command::Shutdown) | Err(_) => return,
                     }
                 }
@@ -1557,6 +1834,16 @@ impl Worker {
                 let _ = reply.send(self.act_on_notification(action));
                 self.running()
             }
+            Command::WidgetPressed(reply) => {
+                if matches!(self.state(), SessionState::Dozing | SessionState::Frozen) {
+                    // The press may open an app, which opens on a screen that is on; the
+                    // screen's word reaches the agent before the press does.
+                    self.hidden_since = Instant::now();
+                    self.wake();
+                }
+                let _ = reply.send(());
+                self.running()
+            }
         }
     }
 
@@ -1611,6 +1898,117 @@ impl Worker {
             self.shared
                 .publish_notification(NotificationEvent::Removed { key });
         }
+    }
+
+    /// Hands part of the agent's widget gallery to whoever asked for it. Entries that do not
+    /// pass the checks are dropped and logged.
+    fn guest_widget_providers(&mut self, list: control::WidgetProviders) {
+        let mut providers = Vec::new();
+        for provider in list.providers.into_iter().take(widgets::MAX_PROVIDERS) {
+            match widgets::checked_provider(provider) {
+                Ok(provider) => providers.push(provider),
+                Err(why) => eprintln!("widgets: dropped one from the gallery: {why}"),
+            }
+        }
+        self.shared.widget_answer(
+            list.request_id,
+            WidgetAnswer::Providers(providers, list.complete),
+        );
+    }
+
+    /// The agent describes a placed widget.
+    fn guest_widget(&mut self, updated: control::WidgetUpdated) {
+        if updated.widget_id <= 0 {
+            eprintln!("widgets: dropped a widget without an ID");
+            return;
+        }
+        let provider = match updated
+            .provider
+            .ok_or_else(|| "it names no provider".to_string())
+            .and_then(widgets::checked_provider)
+        {
+            Ok(provider) => provider,
+            Err(why) => {
+                eprintln!("widgets: dropped widget {}: {why}", updated.widget_id);
+                return;
+            }
+        };
+        let mut hub = self
+            .shared
+            .widgets
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let known = hub.widgets.get(&updated.widget_id).map(|(p, _)| p.clone());
+        if known.is_none() && hub.widgets.len() >= widgets::MAX_WIDGETS {
+            eprintln!(
+                "widgets: dropped widget {}: {} are placed already",
+                updated.widget_id,
+                widgets::MAX_WIDGETS
+            );
+            return;
+        }
+        let frame = hub
+            .widgets
+            .remove(&updated.widget_id)
+            .and_then(|(_, frame)| frame);
+        hub.widgets
+            .insert(updated.widget_id, (provider.clone(), frame));
+        // Described again on each connection, so the window manager sizes it again.
+        hub.publish(WidgetEvent::Placed(Widget {
+            widget_id: updated.widget_id,
+            provider,
+            placement: Placement::default(),
+        }));
+    }
+
+    /// The agent says which widgets are placed; any other is gone.
+    fn guest_widget_list(&mut self, ids: Vec<i32>) {
+        let mut hub = self
+            .shared
+            .widgets
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let gone: Vec<i32> = hub
+            .widgets
+            .keys()
+            .copied()
+            .filter(|id| !ids.contains(id))
+            .collect();
+        for widget_id in gone {
+            hub.widgets.remove(&widget_id);
+            hub.publish(WidgetEvent::Removed { widget_id });
+        }
+        let mut listed = ids;
+        listed.sort_unstable();
+        listed.dedup();
+        hub.publish(WidgetEvent::Listed(listed));
+    }
+
+    /// What a widget shows now. A frame of a widget the host does not know is dropped.
+    fn guest_widget_frame(&mut self, frame: control::WidgetFrame) {
+        let frame = match widgets::checked_frame(frame) {
+            Ok(frame) => frame,
+            Err(why) => {
+                eprintln!("widgets: dropped a frame: {why}");
+                return;
+            }
+        };
+        let mut hub = self
+            .shared
+            .widgets
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        match hub.widgets.get_mut(&frame.widget_id) {
+            Some((_, last)) => *last = Some(frame.clone()),
+            None => {
+                eprintln!(
+                    "widgets: dropped a frame of widget {}, which is not placed",
+                    frame.widget_id
+                );
+                return;
+            }
+        }
+        hub.publish(WidgetEvent::Frame(frame));
     }
 
     /// Passes what the user did with a notification to the guest.
@@ -2317,6 +2715,10 @@ impl Worker {
                 self.share_clipboard(on);
                 true
             }
+            Command::WidgetPressed(reply) => {
+                let _ = reply.send(());
+                true
+            }
             Command::Stop => {
                 self.stop(StopReason::Requested);
                 false
@@ -2511,6 +2913,20 @@ impl Worker {
                 result.transfer_id,
                 InstallEvent::Done(InstallOutcome::from_control(&result)),
             ),
+            Some(Body::WidgetProviders(list)) => self.guest_widget_providers(list),
+            Some(Body::WidgetAdded(added)) => self.shared.widget_answer(
+                added.request_id,
+                WidgetAnswer::Added(if added.widget_id > 0 {
+                    Ok(added.widget_id)
+                } else if added.error.trim().is_empty() {
+                    Err("Android did not place the widget".into())
+                } else {
+                    Err(added.error.chars().take(512).collect())
+                }),
+            ),
+            Some(Body::WidgetUpdated(updated)) => self.guest_widget(updated),
+            Some(Body::WidgetList(list)) => self.guest_widget_list(list.widget_ids),
+            Some(Body::WidgetFrame(frame)) => self.guest_widget_frame(frame),
             Some(Body::GuestBoot(boot)) => self.guest_boot(boot),
             Some(Body::ClockAnswer(answer)) => self.clock_answered(answer),
             Some(Body::AgentConnected(_)) => {
@@ -2536,6 +2952,11 @@ impl Worker {
             | Some(Body::ApkChunk(_))
             | Some(Body::CancelInstall(_))
             | Some(Body::RequestGuestMemory(_))
+            | Some(Body::ListWidgetProviders(_))
+            | Some(Body::AddWidget(_))
+            | Some(Body::RemoveWidget(_))
+            | Some(Body::ResizeWidget(_))
+            | Some(Body::WidgetPointer(_))
             | Some(Body::ClockProbe(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
             }

@@ -1071,3 +1071,111 @@ fn fr9_dsa_settings_turns_links_in_android_on_and_off() {
     let changed = json_of(&dsa(&endpoint, "settings set links-in-android off --json"));
     assert_eq!(changed["links_in_android"], false);
 }
+
+#[test]
+fn fr12_dsa_widgets_is_parsed() {
+    use dsa_cli::WidgetAction;
+    assert_eq!(
+        parse(&args("widgets")).unwrap().widgets,
+        Some(WidgetAction::List)
+    );
+    assert_eq!(
+        parse(&args("widgets list --json")).unwrap().widgets,
+        Some(WidgetAction::List)
+    );
+    assert_eq!(
+        parse(&args("widgets add com.example.clock/.ClockWidget"))
+            .unwrap()
+            .widgets,
+        Some(WidgetAction::Add("com.example.clock/.ClockWidget".into()))
+    );
+    assert_eq!(
+        parse(&args("widgets remove 12")).unwrap().widgets,
+        Some(WidgetAction::Remove(12))
+    );
+    assert!(parse(&args("widgets add")).is_err());
+    assert!(parse(&args("widgets add clock")).is_err());
+    assert!(parse(&args("widgets remove twelve")).is_err());
+    assert!(parse(&args("widgets remove -1")).is_err());
+    assert_eq!(parse(&args("status")).unwrap().widgets, None);
+}
+
+#[test]
+fn fr12_previews_are_printed_in_base64() {
+    assert_eq!(dsa_cli::base64(b""), "");
+    assert_eq!(dsa_cli::base64(b"f"), "Zg==");
+    assert_eq!(dsa_cli::base64(b"fo"), "Zm8=");
+    assert_eq!(dsa_cli::base64(b"foobar"), "Zm9vYmFy");
+    assert_eq!(dsa_cli::base64(&[0x89, b'P', b'N', b'G']), "iVBORw==");
+}
+
+fn offer_clock(androids: &FakeAndroids, user: &str) {
+    use dsa_host_core::host_api::UserAndroids;
+    let _ = androids.android(user).unwrap();
+    androids
+        .of(user)
+        .unwrap()
+        .widget_offer
+        .lock()
+        .unwrap()
+        .push(dsa_host_core::host_api_conformance::sample_widget_provider());
+}
+
+#[test]
+fn fr12_dsa_widgets_lists_adds_and_removes_widgets() {
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    offer_clock(&androids, &user);
+
+    let output = dsa(&endpoint, "widgets list");
+    assert!(output.status.success(), "{}", stderr(&output));
+    let listed = stdout(&output);
+    assert!(
+        listed.contains("com.example.clock/.ClockWidget"),
+        "{listed}"
+    );
+    assert!(listed.contains("No widget is placed."), "{listed}");
+    assert_eq!(
+        androids.of(&user).unwrap().state(),
+        SessionState::Active,
+        "Android was started first"
+    );
+
+    let output = dsa(&endpoint, "widgets add com.example.clock/.ClockWidget");
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Placed Clock (widget 1)");
+
+    let json = json_of(&dsa(&endpoint, "widgets list --json"));
+    assert_eq!(
+        json["providers"][0]["provider"],
+        "com.example.clock/.ClockWidget"
+    );
+    assert_eq!(json["providers"][0]["preview_png"], "iVBORw==");
+    assert_eq!(json["providers"][0]["default_width_dp"], 180);
+    assert_eq!(json["widgets"][0]["id"], 1);
+    assert_eq!(json["widgets"][0]["placement"]["width_dp"], 180);
+
+    let output = dsa(&endpoint, "widgets remove 1");
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout(&output), "Removed widget 1");
+    let json = json_of(&dsa(&endpoint, "widgets list --json"));
+    assert_eq!(json["widgets"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn fr12_dsa_widgets_says_why_a_widget_was_not_placed() {
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    offer_clock(&androids, &user);
+    let output = dsa(&endpoint, "widgets add com.example.other/.Nothing");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("the widget was not placed"),
+        "{}",
+        stderr(&output)
+    );
+    let output = dsa(&endpoint, "widgets remove 77");
+    assert_eq!(output.status.code(), Some(1));
+}

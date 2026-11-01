@@ -30,6 +30,9 @@ use crate::notifications::{Notification, NotificationAction, NotificationEvent};
 use crate::session::SessionState;
 use crate::settings::{MemorySettings, Settings, SettingsStore};
 use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskTable, TaskWatch};
+use crate::widgets::{
+    Placement, Widget, WidgetError, WidgetEvent, WidgetFrame, WidgetProvider, WidgetSize,
+};
 
 /// A fresh listener, a connector that reaches it, and the user it reports for this process.
 pub type LocalPair = (Box<dyn LocalListener>, Box<dyn Connector>, String);
@@ -76,6 +79,17 @@ pub struct FakeAndroid {
     /// How long each install takes once its content is in.
     pub install_time: Mutex<Duration>,
     install_turn: Mutex<()>,
+    /// The widgets its apps offer.
+    pub widget_offer: Mutex<Vec<WidgetProvider>>,
+    /// The widgets placed in it, by ID, and who watches them.
+    widgets: Mutex<(
+        std::collections::BTreeMap<i32, WidgetProvider>,
+        Vec<Sender<WidgetEvent>>,
+    )>,
+    /// The sizes its widgets were given, in order.
+    pub widget_sizes: Mutex<Vec<(i32, WidgetSize)>>,
+    /// The pointer input its widgets were given, in order.
+    pub widget_pointers: Mutex<Vec<dsa_protocol::control::WidgetPointer>>,
 }
 
 /// What the fake Android says of an APK: one whose content starts with [`BAD_APK`] is not an APK
@@ -108,6 +122,38 @@ impl FakeAndroid {
             install_steps: Mutex::new(Vec::new()),
             install_time: Mutex::new(Duration::ZERO),
             install_turn: Mutex::new(()),
+            widget_offer: Mutex::new(Vec::new()),
+            widgets: Mutex::new((std::collections::BTreeMap::new(), Vec::new())),
+            widget_sizes: Mutex::new(Vec::new()),
+            widget_pointers: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Changes its widgets as its agent would, and tells the watchers.
+    pub fn widget_event(&self, event: WidgetEvent) {
+        let mut widgets = self.widgets.lock().unwrap();
+        match &event {
+            WidgetEvent::Placed(widget) => {
+                widgets.0.insert(widget.widget_id, widget.provider.clone());
+            }
+            WidgetEvent::Removed { widget_id } => {
+                widgets.0.remove(widget_id);
+            }
+            WidgetEvent::Frame(_) | WidgetEvent::Listed(_) => {}
+        }
+        widgets
+            .1
+            .retain(|watcher| watcher.send(event.clone()).is_ok());
+    }
+
+    fn running_or(&self) -> Result<(), String> {
+        if matches!(
+            self.state(),
+            SessionState::Active | SessionState::Dozing | SessionState::Frozen
+        ) {
+            Ok(())
+        } else {
+            Err(format!("Android is {}, not running", self.state()))
         }
     }
 
@@ -230,6 +276,79 @@ impl UserAndroid for FakeAndroid {
             )));
         }
         self.notification_actions.lock().unwrap().push(action);
+        Ok(())
+    }
+    fn watch_widgets(&self) -> Option<crate::session::WidgetWatch> {
+        let (tx, events) = mpsc::channel();
+        let mut widgets = self.widgets.lock().unwrap();
+        let current = widgets
+            .0
+            .iter()
+            .map(|(id, provider)| {
+                WidgetEvent::Placed(Widget {
+                    widget_id: *id,
+                    provider: provider.clone(),
+                    placement: Placement::default(),
+                })
+            })
+            .collect();
+        widgets.1.push(tx);
+        Some(crate::session::WidgetWatch { current, events })
+    }
+    fn widgets(&self) -> Vec<(i32, WidgetProvider)> {
+        self.widgets
+            .lock()
+            .unwrap()
+            .0
+            .iter()
+            .map(|(id, provider)| (*id, provider.clone()))
+            .collect()
+    }
+    fn widget_providers(&self) -> Result<Vec<WidgetProvider>, WidgetError> {
+        self.running_or().map_err(WidgetError::NotRunning)?;
+        Ok(self.widget_offer.lock().unwrap().clone())
+    }
+    fn add_widget(&self, provider: &str) -> Result<i32, WidgetError> {
+        self.running_or().map_err(WidgetError::NotRunning)?;
+        let offered = self
+            .widget_offer
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|offered| offered.provider == provider)
+            .cloned()
+            .ok_or_else(|| WidgetError::Refused(format!("no app offers {provider}")))?;
+        let widget_id = self
+            .widgets
+            .lock()
+            .unwrap()
+            .0
+            .keys()
+            .last()
+            .map_or(1, |last| last + 1);
+        self.widget_event(WidgetEvent::Placed(Widget {
+            widget_id,
+            provider: offered,
+            placement: Placement::default(),
+        }));
+        Ok(widget_id)
+    }
+    fn remove_widget(&self, widget_id: i32) -> Result<(), TaskRequestError> {
+        self.running_or().map_err(TaskRequestError::NotRunning)?;
+        self.widget_event(WidgetEvent::Removed { widget_id });
+        Ok(())
+    }
+    fn resize_widget(&self, widget_id: i32, size: WidgetSize) -> Result<(), TaskRequestError> {
+        self.running_or().map_err(TaskRequestError::NotRunning)?;
+        self.widget_sizes.lock().unwrap().push((widget_id, size));
+        Ok(())
+    }
+    fn widget_pointer(
+        &self,
+        pointer: dsa_protocol::control::WidgetPointer,
+    ) -> Result<(), TaskRequestError> {
+        self.running_or().map_err(TaskRequestError::NotRunning)?;
+        self.widget_pointers.lock().unwrap().push(pointer);
         Ok(())
     }
     fn install_apk(
@@ -647,6 +766,30 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::notification_watcher_that_sends_is_disconnected(
                 &mut || $make,
             );
+        }
+        #[test]
+        fn fr12_the_gallery_lists_the_widgets_the_callers_android_offers() {
+            $crate::host_api_conformance::widget_gallery_lists_the_offer(&mut || $make);
+        }
+        #[test]
+        fn fr12_adding_a_widget_places_it_and_the_service_keeps_its_place() {
+            $crate::host_api_conformance::added_widget_is_placed_and_kept(&mut || $make);
+        }
+        #[test]
+        fn fr12_a_widget_watcher_receives_widgets_frames_and_removals() {
+            $crate::host_api_conformance::widget_watcher_receives_changes(&mut || $make);
+        }
+        #[test]
+        fn fr12_moving_or_resizing_a_widget_window_tells_android_its_size_in_dp() {
+            $crate::host_api_conformance::placed_widget_size_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr12_pointer_input_in_a_widget_window_reaches_the_callers_android() {
+            $crate::host_api_conformance::widget_pointer_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn nfr5_malformed_widget_requests_are_refused_and_the_service_goes_on() {
+            $crate::host_api_conformance::malformed_widget_requests_are_refused(&mut || $make);
         }
         #[test]
         fn fr17_settings_are_read_and_changed_through_the_service() {
@@ -2157,4 +2300,249 @@ pub fn invalid_setting_is_refused(make: MakeLocal<'_>) {
         other => panic!("expected the service to refuse, got {other:?}"),
     }
     assert_eq!(client.settings().unwrap().settings, Settings::default());
+}
+
+/// The clock widget of the widget checks.
+pub fn sample_widget_provider() -> WidgetProvider {
+    WidgetProvider {
+        provider: "com.example.clock/.ClockWidget".into(),
+        package_name: "com.example.clock".into(),
+        label: "Clock".into(),
+        preview_png: vec![0x89, b'P', b'N', b'G'],
+        min_width_dp: 110,
+        min_height_dp: 40,
+        default_width_dp: 180,
+        default_height_dp: 110,
+        max_width_dp: 0,
+        max_height_dp: 0,
+        resize_mode: 3,
+        needs_configuration: false,
+    }
+}
+
+/// A started Android that offers the clock widget, and a client of it.
+fn widget_android(
+    make: MakeLocal<'_>,
+) -> (
+    RunningService,
+    Arc<FakeAndroids>,
+    Box<dyn Connector>,
+    String,
+    HostApiClient,
+) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let service = RunningService::start(listener, androids.clone());
+    let mut client = connect(&mut *connector);
+    client.start().unwrap();
+    androids
+        .of(&user)
+        .unwrap()
+        .widget_offer
+        .lock()
+        .unwrap()
+        .push(sample_widget_provider());
+    (service, androids, connector, user, client)
+}
+
+pub fn widget_gallery_lists_the_offer(make: MakeLocal<'_>) {
+    let (_service, _androids, _connector, _user, mut client) = widget_android(make);
+    assert_eq!(
+        client.widget_providers().unwrap(),
+        vec![sample_widget_provider()]
+    );
+    client.stop().unwrap();
+    match client.widget_providers() {
+        Err(ClientError::Service { code, .. }) => assert_eq!(code, ErrorCode::NotRunning),
+        other => panic!("expected the Android not to be running, got {other:?}"),
+    }
+}
+
+pub fn added_widget_is_placed_and_kept(make: MakeLocal<'_>) {
+    let (_service, _androids, _connector, _user, mut client) = widget_android(make);
+    let widget = client
+        .add_widget("com.example.clock/.ClockWidget", WAIT)
+        .unwrap();
+    assert_eq!(widget.provider, sample_widget_provider());
+    assert_eq!(
+        widget.placement,
+        Placement {
+            x: 64,
+            y: 64,
+            width_dp: 180,
+            height_dp: 110
+        }
+    );
+    let second = client
+        .add_widget("com.example.clock/.ClockWidget", WAIT)
+        .unwrap();
+    assert_ne!(
+        second.placement, widget.placement,
+        "a new widget hides none"
+    );
+    let (placed, remembered) = client.widgets().unwrap();
+    assert_eq!(placed, vec![widget, second]);
+    assert_eq!(remembered, 2);
+    match client.add_widget("com.example.other/.Nothing", WAIT) {
+        Err(ClientError::Service { code, detail }) => {
+            assert_eq!(code, ErrorCode::WidgetRefused, "{detail}")
+        }
+        other => panic!("expected the widget to be refused, got {other:?}"),
+    }
+}
+
+pub fn widget_watcher_receives_changes(make: MakeLocal<'_>) {
+    let (_service, androids, mut connector, user, mut client) = widget_android(make);
+    let first = client
+        .add_widget("com.example.clock/.ClockWidget", WAIT)
+        .unwrap();
+    let mut watch = connect(&mut *connector).watch_widgets().unwrap();
+    assert_eq!(watch.current(), &[first.clone()]);
+    assert_eq!(watch.remembered(), 1);
+    let android = androids.of(&user).unwrap();
+    let frame = WidgetFrame {
+        widget_id: first.widget_id,
+        width: 2,
+        height: 1,
+        png: vec![0x89, b'P', b'N', b'G'],
+    };
+    android.widget_event(WidgetEvent::Frame(frame.clone()));
+    assert_eq!(watch.next(WAIT).unwrap(), Some(WidgetEvent::Frame(frame)));
+    // Described again, as when Android starts: the same place.
+    android.widget_event(WidgetEvent::Placed(Widget {
+        placement: Placement::default(),
+        ..first.clone()
+    }));
+    assert_eq!(
+        watch.next(WAIT).unwrap(),
+        Some(WidgetEvent::Placed(first.clone()))
+    );
+    client.remove_widget(first.widget_id).unwrap();
+    assert_eq!(
+        watch.next(WAIT).unwrap(),
+        Some(WidgetEvent::Removed {
+            widget_id: first.widget_id
+        })
+    );
+    assert_eq!(client.widgets().unwrap(), (Vec::new(), 0));
+    match client.remove_widget(first.widget_id) {
+        Err(ClientError::Service { code, .. }) => assert_eq!(code, ErrorCode::UnknownRequest),
+        other => panic!("expected an unknown widget, got {other:?}"),
+    }
+}
+
+pub fn placed_widget_size_reaches_the_caller(make: MakeLocal<'_>) {
+    let (_service, androids, _connector, user, mut client) = widget_android(make);
+    let widget = client
+        .add_widget("com.example.clock/.ClockWidget", WAIT)
+        .unwrap();
+    let moved = Placement {
+        x: -300,
+        y: 20,
+        width_dp: 240,
+        height_dp: 147,
+    };
+    client
+        .place_widget(widget.widget_id, moved, 360, 220, 240)
+        .unwrap();
+    let sizes = androids
+        .of(&user)
+        .unwrap()
+        .widget_sizes
+        .lock()
+        .unwrap()
+        .clone();
+    assert_eq!(
+        sizes,
+        vec![(
+            widget.widget_id,
+            WidgetSize {
+                width: 360,
+                height: 220,
+                density_dpi: 240,
+                width_dp: 240,
+                height_dp: 147
+            }
+        )]
+    );
+    assert_eq!(client.widgets().unwrap().0[0].placement, moved);
+    // A size the widget does not allow is kept within its limits.
+    client
+        .place_widget(
+            widget.widget_id,
+            Placement {
+                width_dp: 1,
+                height_dp: 1,
+                ..moved
+            },
+            0,
+            0,
+            0,
+        )
+        .unwrap();
+    let kept = client.widgets().unwrap().0[0].placement;
+    assert_eq!((kept.width_dp, kept.height_dp), (110, 40));
+}
+
+pub fn widget_pointer_reaches_the_caller(make: MakeLocal<'_>) {
+    let (_service, androids, _connector, user, mut client) = widget_android(make);
+    let widget = client
+        .add_widget("com.example.clock/.ClockWidget", WAIT)
+        .unwrap();
+    client
+        .widget_pointer(widget.widget_id, types::PointerAction::Down, 0, 10.5, 20.25)
+        .unwrap();
+    client
+        .widget_pointer(widget.widget_id, types::PointerAction::Up, 0, 10.5, 20.25)
+        .unwrap();
+    let given = androids
+        .of(&user)
+        .unwrap()
+        .widget_pointers
+        .lock()
+        .unwrap()
+        .clone();
+    assert_eq!(given.len(), 2);
+    assert_eq!(
+        given[0].action,
+        dsa_protocol::control::PointerAction::Down as i32
+    );
+    assert_eq!((given[1].x, given[1].y), (10.5, 20.25));
+}
+
+pub fn malformed_widget_requests_are_refused(make: MakeLocal<'_>) {
+    let (_service, androids, mut connector, user, mut client) = widget_android(make);
+    let widget = client
+        .add_widget("com.example.clock/.ClockWidget", WAIT)
+        .unwrap();
+    let refused = |result: Result<(), ClientError>| match result {
+        Err(ClientError::Service { code, .. }) => assert_eq!(code, ErrorCode::UnknownRequest),
+        other => panic!("expected a refusal, got {other:?}"),
+    };
+    refused(client.widget_pointer(
+        widget.widget_id,
+        types::PointerAction::Down,
+        0,
+        f32::NAN,
+        1.0,
+    ));
+    refused(client.widget_pointer(widget.widget_id, types::PointerAction::Down, 0, 1e9, 1.0));
+    refused(client.widget_pointer(widget.widget_id, types::PointerAction::Scroll, 0, 1.0, 1.0));
+    refused(client.widget_pointer(999, types::PointerAction::Down, 0, 1.0, 1.0));
+    refused(client.place_widget(999, Placement::default(), 10, 10, 160));
+    match client.add_widget("../../etc", WAIT) {
+        Err(ClientError::Service { code, .. }) => assert_eq!(code, ErrorCode::UnknownRequest),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert!(androids
+        .of(&user)
+        .unwrap()
+        .widget_pointers
+        .lock()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        connect(&mut *connector).status().unwrap().state,
+        SessionState::Active
+    );
 }

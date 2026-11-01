@@ -135,6 +135,22 @@ pub fn normalise_render_gpu(value: &str) -> Result<String, String> {
     })
 }
 
+/// The name a user's files in the service's folder start with. The identity becomes a file
+/// name, so only the characters SIDs and Unix user IDs use are accepted.
+pub(crate) fn user_file_stem(user: &str) -> Result<String, String> {
+    if user.is_empty()
+        || user.len() > 200
+        || !user
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == ':' || c == '_')
+    {
+        return Err(format!(
+            "{user:?} is not a user identity the service keeps settings for"
+        ));
+    }
+    Ok(user.replace(':', "_"))
+}
+
 /// Where the service keeps the settings.
 pub trait SettingsStore: Send + Sync {
     /// The settings of `user`, an identity as the transport reports it.
@@ -176,22 +192,10 @@ impl FileSettings {
     }
 
     fn user_file(&self, user: &str) -> Result<PathBuf, String> {
-        // The identity becomes a file name, so only the characters SIDs and Unix user IDs
-        // use are accepted.
-        if user.is_empty()
-            || user.len() > 200
-            || !user
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == ':' || c == '_')
-        {
-            return Err(format!(
-                "{user:?} is not a user identity the service keeps settings for"
-            ));
-        }
         Ok(self
             .dir
             .join("users")
-            .join(format!("{}.json", user.replace(':', "_"))))
+            .join(format!("{}.json", user_file_stem(user)?)))
     }
 
     fn read_machine(&self) -> Result<MachineSettings, String> {
@@ -216,7 +220,7 @@ impl FileSettings {
     }
 }
 
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Option<T>, String> {
+pub(crate) fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Option<T>, String> {
     match std::fs::read_to_string(path) {
         Ok(text) => serde_json::from_str(&text)
             .map(Some)
@@ -227,7 +231,7 @@ fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Option<T>, Str
 }
 
 /// Writes `value` to `path` through a file beside it, so a reader never sees half a file.
-fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+pub(crate) fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
     }

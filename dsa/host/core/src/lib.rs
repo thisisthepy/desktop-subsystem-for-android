@@ -17,6 +17,7 @@
 //! - [`files`]: host files the user opens or shares in an app in the guest.
 //! - [`clipboard`]: the text clipboard the host and the guest share.
 //! - [`notifications`]: the notifications of the guest, which the host shows.
+//! - [`widgets`]: the widgets of the guest, which the host places on its desktop.
 //! - [`ime`]: text input through the host's input method in a task's window.
 //! - [`settings`]: the settings a user changes from the settings app, kept by the service.
 //! - [`memory`]: how much memory a user's Android takes, in the guest and on the host.
@@ -48,4 +49,5 @@ pub mod session;
 pub mod settings;
 pub mod tasks;
 pub mod update;
+pub mod widgets;
 pub mod window_manager;

@@ -30,6 +30,11 @@
 //! notifications of the caller's Android as they are posted, changed and removed. What the user
 //! does with one on the host goes back with [`HostApiClient::act_on_notification`], on any
 //! connection.
+//!
+//! A client that watches widgets ([`HostApiClient::watch_widgets`]) receives the widgets placed
+//! on the caller's desktop, each with where its window goes, then every frame and change. The
+//! service remembers where each window is ([`HostApiClient::place_widget`]) in a
+//! [`WidgetPlacements`] store, and forgets it when the widget is removed.
 
 use std::collections::HashMap;
 use std::io::{self, Read};
@@ -61,6 +66,18 @@ use crate::resize_trace::{self, detail_requested, ResizeTrace, DETAIL_ENV};
 use crate::session::{Session, SessionError, SessionState};
 use crate::settings::{Settings, SettingsStore};
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskWatch};
+use crate::widgets::{
+    self, MemoryWidgetPlacements, Placement, Widget, WidgetError, WidgetEvent, WidgetFrame,
+    WidgetPlacements, WidgetProvider, WidgetSize,
+};
+use dsa_protocol::control;
+
+/// How long the service waits for Android to list its widgets.
+const WIDGET_LIST_WAIT: Duration = Duration::from_secs(20);
+
+/// How long the service waits for Android to place a widget, which includes the user
+/// setting it up when its app asks them to.
+pub const WIDGET_ADD_WAIT: Duration = Duration::from_secs(600);
 
 /// One user's Android, as the service drives it.
 pub trait UserAndroid: Send + Sync {
@@ -151,6 +168,48 @@ pub trait UserAndroid: Send + Sync {
     /// The notifications of this Android from now on. `None` when it does not report them.
     fn watch_notifications(&self) -> Option<Receiver<NotificationEvent>> {
         None
+    }
+    /// The widgets this Android hosts now and every change to them. `None` when it hosts none.
+    fn watch_widgets(&self) -> Option<crate::session::WidgetWatch> {
+        None
+    }
+    /// The widgets this Android hosts now, in ID order.
+    fn widgets(&self) -> Vec<(i32, WidgetProvider)> {
+        Vec::new()
+    }
+    /// The widgets the apps in this Android offer.
+    fn widget_providers(&self) -> Result<Vec<WidgetProvider>, WidgetError> {
+        Err(WidgetError::Refused(
+            "this Android does not host widgets".into(),
+        ))
+    }
+    /// Places a new widget of `provider` and returns its ID.
+    fn add_widget(&self, provider: &str) -> Result<i32, WidgetError> {
+        let _ = provider;
+        Err(WidgetError::Refused(
+            "this Android does not host widgets".into(),
+        ))
+    }
+    /// Removes a widget.
+    fn remove_widget(&self, widget_id: i32) -> Result<(), TaskRequestError> {
+        let _ = widget_id;
+        Err(TaskRequestError::Failed(
+            "this Android does not host widgets".into(),
+        ))
+    }
+    /// Tells this Android the size of a widget's window.
+    fn resize_widget(&self, widget_id: i32, size: WidgetSize) -> Result<(), TaskRequestError> {
+        let _ = (widget_id, size);
+        Err(TaskRequestError::Failed(
+            "this Android does not host widgets".into(),
+        ))
+    }
+    /// Passes pointer input in a widget's window to this Android.
+    fn widget_pointer(&self, pointer: control::WidgetPointer) -> Result<(), TaskRequestError> {
+        let _ = pointer;
+        Err(TaskRequestError::Failed(
+            "this Android does not host widgets".into(),
+        ))
     }
     /// Passes what the user did with a notification on the host to this Android.
     fn notification_action(&self, action: NotificationAction) -> Result<(), TaskRequestError> {
@@ -260,6 +319,27 @@ impl UserAndroid for Session {
     fn notification_action(&self, action: NotificationAction) -> Result<(), TaskRequestError> {
         Session::notification_action(self, action).map_err(request_error)
     }
+    fn watch_widgets(&self) -> Option<crate::session::WidgetWatch> {
+        Some(Session::watch_widgets(self))
+    }
+    fn widgets(&self) -> Vec<(i32, WidgetProvider)> {
+        Session::widgets(self)
+    }
+    fn widget_providers(&self) -> Result<Vec<WidgetProvider>, WidgetError> {
+        Session::widget_providers(self, WIDGET_LIST_WAIT).map_err(widget_error)
+    }
+    fn add_widget(&self, provider: &str) -> Result<i32, WidgetError> {
+        Session::add_widget(self, provider, WIDGET_ADD_WAIT).map_err(widget_error)
+    }
+    fn remove_widget(&self, widget_id: i32) -> Result<(), TaskRequestError> {
+        Session::remove_widget(self, widget_id).map_err(request_error)
+    }
+    fn resize_widget(&self, widget_id: i32, size: WidgetSize) -> Result<(), TaskRequestError> {
+        Session::resize_widget(self, widget_id, size).map_err(request_error)
+    }
+    fn widget_pointer(&self, pointer: control::WidgetPointer) -> Result<(), TaskRequestError> {
+        Session::widget_pointer(self, pointer).map_err(request_error)
+    }
     fn install_apk(
         &self,
         name: &str,
@@ -273,6 +353,16 @@ impl UserAndroid for Session {
             SessionError::InstallRefused(why) => InstallError::Refused(why),
             other => InstallError::Refused(format!("the APK did not reach Android: {other}")),
         })
+    }
+}
+
+fn widget_error(error: SessionError) -> WidgetError {
+    match error {
+        SessionError::WidgetRefused(why) => WidgetError::Refused(why),
+        other => match request_error(other) {
+            TaskRequestError::NotRunning(why) => WidgetError::NotRunning(why),
+            TaskRequestError::Failed(why) => WidgetError::Refused(why),
+        },
     }
 }
 
@@ -659,6 +749,8 @@ pub struct HostApiService {
     host_memory: Option<Arc<dyn HostMemory>>,
     /// How long `dsa memory` waits for the fresh report it asks Android for.
     memory_wait: Duration,
+    /// Where each user's widget windows are.
+    placements: Arc<dyn WidgetPlacements>,
 }
 
 impl HostApiService {
@@ -675,7 +767,18 @@ impl HostApiService {
             )),
             host_memory: None,
             memory_wait: MEMORY_WAIT,
+            placements: Arc::new(MemoryWidgetPlacements::default()),
         }
+    }
+
+    /// Keeps where each user's widget windows are in `placements`, which outlives the
+    /// service; without it they are kept in memory.
+    pub fn with_widget_placements(
+        mut self,
+        placements: Arc<dyn WidgetPlacements>,
+    ) -> HostApiService {
+        self.placements = placements;
+        self
     }
 
     /// Measures the host processes of each user's Android with `host_memory`, for
@@ -791,6 +894,9 @@ impl HostApiService {
             }
             if let Some(request::Body::WatchNotifications(_)) = request.body {
                 return self.watch_notifications(connection, &peer, request.id);
+            }
+            if let Some(request::Body::WatchWidgets(_)) = request.body {
+                return self.watch_widgets(connection, &peer, request.id);
             }
             if let Some(request::Body::InstallApk(install)) = &request.body {
                 return self.install_apk(connection, &peer, request.id, install.clone());
@@ -1316,6 +1422,358 @@ impl HostApiService {
         }
     }
 
+    /// The placements the service keeps for `user`. A broken store is logged and read as
+    /// empty, so widgets still show, at default places.
+    fn placements_of(&self, user: &str) -> std::collections::BTreeMap<i32, Placement> {
+        self.placements.all(user).unwrap_or_else(|why| {
+            eprintln!("widgets: {why}; placing the widgets of {user} afresh");
+            Default::default()
+        })
+    }
+
+    /// The widget with its placement: the one kept for it, else a new one, which is kept.
+    fn placed(
+        &self,
+        user: &str,
+        widget_id: i32,
+        provider: WidgetProvider,
+        kept: &mut std::collections::BTreeMap<i32, Placement>,
+    ) -> Widget {
+        let placement = match kept.get(&widget_id) {
+            Some(placement) => *placement,
+            None => {
+                let others: Vec<Placement> = kept.values().copied().collect();
+                let placement = widgets::default_placement(&provider, &others);
+                if let Err(why) = self.placements.set(user, widget_id, placement) {
+                    eprintln!("widgets: the place of widget {widget_id} is not kept: {why}");
+                }
+                kept.insert(widget_id, placement);
+                placement
+            }
+        };
+        Widget {
+            widget_id,
+            provider,
+            placement,
+        }
+    }
+
+    /// The widgets of the caller's Android with their placements.
+    fn list_widgets(&self, peer: &Peer) -> response::Body {
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        let mut kept = self.placements_of(&peer.user);
+        let remembered = kept.len() as u32;
+        let widgets = android
+            .widgets()
+            .into_iter()
+            .map(|(id, provider)| widget_to_wire(self.placed(&peer.user, id, provider, &mut kept)))
+            .collect();
+        response::Body::Widgets(types::Widgets {
+            widgets,
+            remembered,
+        })
+    }
+
+    /// Answers a WatchWidgets request with the widgets there are now, then passes every change
+    /// to them until the client goes away. The client sends nothing more.
+    fn watch_widgets(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
+        let watched = match self.androids.android(&peer.user) {
+            Err(why) => Err(error(ErrorCode::Unavailable, why)),
+            Ok(android) => android.watch_widgets().ok_or_else(|| {
+                error(
+                    ErrorCode::Unavailable,
+                    "this Android does not host widgets".into(),
+                )
+            }),
+        };
+        let watch = match watched {
+            Ok(watch) => watch,
+            Err(body) => {
+                let _ = send(
+                    &mut *connection,
+                    Body::Response(Response {
+                        id,
+                        body: Some(body),
+                    }),
+                );
+                return;
+            }
+        };
+        let mut kept = self.placements_of(&peer.user);
+        let remembered = kept.len() as u32;
+        let mut current = Vec::new();
+        let mut frames = Vec::new();
+        for event in watch.current {
+            match event {
+                WidgetEvent::Placed(widget) => current.push(widget_to_wire(self.placed(
+                    &peer.user,
+                    widget.widget_id,
+                    widget.provider,
+                    &mut kept,
+                ))),
+                WidgetEvent::Frame(frame) => frames.push(frame),
+                WidgetEvent::Removed { .. } | WidgetEvent::Listed(_) => {}
+            }
+        }
+        let answer = Response {
+            id,
+            body: Some(response::Body::Widgets(types::Widgets {
+                widgets: current,
+                remembered,
+            })),
+        };
+        if send(&mut *connection, Body::Response(answer)).is_err() {
+            return;
+        }
+        for frame in frames {
+            if send(&mut *connection, frame_to_wire(frame)).is_err() {
+                return;
+            }
+        }
+        loop {
+            loop {
+                let event = match watch.events.try_recv() {
+                    Ok(event) => event,
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        connection.close();
+                        return;
+                    }
+                };
+                let body = match event {
+                    WidgetEvent::Placed(widget) => {
+                        let mut kept = self.placements_of(&peer.user);
+                        Body::WidgetEvent(types::WidgetEvent {
+                            body: Some(types::widget_event::Body::Placed(widget_to_wire(
+                                self.placed(
+                                    &peer.user,
+                                    widget.widget_id,
+                                    widget.provider,
+                                    &mut kept,
+                                ),
+                            ))),
+                        })
+                    }
+                    WidgetEvent::Frame(frame) => frame_to_wire(frame),
+                    WidgetEvent::Removed { widget_id } => {
+                        if let Err(why) = self.placements.remove(&peer.user, widget_id) {
+                            eprintln!("widgets: the place of removed widget {widget_id} stays kept: {why}");
+                        }
+                        Body::WidgetEvent(types::WidgetEvent {
+                            body: Some(types::widget_event::Body::Removed(types::WidgetRemoved {
+                                widget_id,
+                            })),
+                        })
+                    }
+                    WidgetEvent::Listed(ids) => {
+                        for widget_id in self.placements_of(&peer.user).into_keys() {
+                            if !ids.contains(&widget_id) {
+                                let _ = self.placements.remove(&peer.user, widget_id);
+                            }
+                        }
+                        continue;
+                    }
+                };
+                if send(&mut *connection, body).is_err() {
+                    return;
+                }
+            }
+            let frame = match connection.recv(Some(CLIPBOARD_POLL)) {
+                Ok(frame) => frame,
+                Err(TransportError::Timeout) => continue,
+                Err(_) => return,
+            };
+            match decode(&frame) {
+                Ok(_) => {
+                    eprintln!(
+                        "local API: a client of {} sent something on a connection that watches \
+                         widgets; closing its connection",
+                        peer.user
+                    );
+                    connection.close();
+                    return;
+                }
+                Err(error) => eprintln!(
+                    "local API: a client of {} sent an unreadable frame on a connection that \
+                     watches widgets ({error}); dropping it",
+                    peer.user
+                ),
+            }
+        }
+    }
+
+    fn widget_providers(&self, peer: &Peer) -> response::Body {
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        match android.widget_providers() {
+            Ok(providers) => response::Body::WidgetProviders(types::WidgetProviders {
+                providers: providers.iter().map(provider_to_wire).collect(),
+            }),
+            Err(WidgetError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(WidgetError::Refused(why)) => error(ErrorCode::WidgetRefused, why),
+        }
+    }
+
+    fn add_widget(&self, peer: &Peer, add: types::AddWidget) -> response::Body {
+        if !widgets::valid_provider_name(&add.provider) {
+            return error(
+                ErrorCode::UnknownRequest,
+                format!(
+                    "{:?} is not a widget's name; list the widgets to see them",
+                    add.provider.chars().take(80).collect::<String>()
+                ),
+            );
+        }
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        let widget_id = match android.add_widget(&add.provider) {
+            Ok(widget_id) => widget_id,
+            Err(WidgetError::NotRunning(why)) => return error(ErrorCode::NotRunning, why),
+            Err(WidgetError::Refused(why)) => return error(ErrorCode::WidgetRefused, why),
+        };
+        let provider = android
+            .widgets()
+            .into_iter()
+            .find(|(id, _)| *id == widget_id)
+            .map(|(_, provider)| provider)
+            .unwrap_or_else(|| WidgetProvider {
+                provider: add.provider.clone(),
+                ..WidgetProvider::default()
+            });
+        let mut kept = self.placements_of(&peer.user);
+        eprintln!(
+            "widgets: {} placed widget {widget_id} ({})",
+            peer.user, add.provider
+        );
+        response::Body::Widget(widget_to_wire(
+            self.placed(&peer.user, widget_id, provider, &mut kept),
+        ))
+    }
+
+    fn remove_widget(&self, peer: &Peer, widget_id: i32) -> response::Body {
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        let known = android.widgets().iter().any(|(id, _)| *id == widget_id);
+        let kept = self.placements_of(&peer.user).contains_key(&widget_id);
+        if !known && !kept {
+            return error(
+                ErrorCode::UnknownRequest,
+                format!("there is no widget {widget_id}"),
+            );
+        }
+        if let Err(why) = self.placements.remove(&peer.user, widget_id) {
+            eprintln!("widgets: the place of removed widget {widget_id} stays kept: {why}");
+        }
+        if !known {
+            return response::Body::Done(types::Done {});
+        }
+        match android.remove_widget(widget_id) {
+            Ok(()) => response::Body::Done(types::Done {}),
+            Err(TaskRequestError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(TaskRequestError::Failed(why)) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
+    fn place_widget(&self, peer: &Peer, place: types::PlaceWidget) -> response::Body {
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        let Some(provider) = android
+            .widgets()
+            .into_iter()
+            .find(|(id, _)| *id == place.widget_id)
+            .map(|(_, provider)| provider)
+        else {
+            return error(
+                ErrorCode::UnknownRequest,
+                format!("there is no widget {}", place.widget_id),
+            );
+        };
+        let asked = place.placement.unwrap_or_default();
+        let (width_dp, height_dp) = widgets::clamp_size(&provider, asked.width_dp, asked.height_dp);
+        let placement = Placement {
+            x: asked.x,
+            y: asked.y,
+            width_dp,
+            height_dp,
+        };
+        if let Err(why) = self.placements.set(&peer.user, place.widget_id, placement) {
+            eprintln!(
+                "widgets: the place of widget {} is not kept: {why}",
+                place.widget_id
+            );
+        }
+        if place.width == 0 || place.height == 0 {
+            return response::Body::Done(types::Done {});
+        }
+        let size = WidgetSize::of_pixels(place.width, place.height, place.density_dpi);
+        match android.resize_widget(place.widget_id, size) {
+            Ok(()) => response::Body::Done(types::Done {}),
+            Err(TaskRequestError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(TaskRequestError::Failed(why)) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
+    fn widget_pointer(&self, peer: &Peer, pointer: types::WidgetPointer) -> response::Body {
+        if !pointer.x.is_finite()
+            || !pointer.y.is_finite()
+            || pointer.x.abs() > widgets::MAX_SIDE as f32 * 2.0
+            || pointer.y.abs() > widgets::MAX_SIDE as f32 * 2.0
+        {
+            return error(
+                ErrorCode::UnknownRequest,
+                "a widget's pointer position is outside its window".into(),
+            );
+        }
+        let action = match types::PointerAction::try_from(pointer.action) {
+            Ok(types::PointerAction::Down) => control::PointerAction::Down,
+            Ok(types::PointerAction::Move) => control::PointerAction::Move,
+            Ok(types::PointerAction::Up) => control::PointerAction::Up,
+            Ok(types::PointerAction::Cancel) => control::PointerAction::Cancel,
+            _ => {
+                return error(
+                    ErrorCode::UnknownRequest,
+                    "a widget takes presses, moves, releases and cancels".into(),
+                )
+            }
+        };
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        if !android
+            .widgets()
+            .iter()
+            .any(|(id, _)| *id == pointer.widget_id)
+        {
+            return error(
+                ErrorCode::UnknownRequest,
+                format!("there is no widget {}", pointer.widget_id),
+            );
+        }
+        match android.widget_pointer(control::WidgetPointer {
+            widget_id: pointer.widget_id,
+            action: action as i32,
+            pointer_id: pointer.pointer_id.min(31),
+            x: pointer.x,
+            y: pointer.y,
+        }) {
+            Ok(()) => response::Body::Done(types::Done {}),
+            Err(TaskRequestError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(TaskRequestError::Failed(why)) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
     /// Passes what the user did with a notification to the caller's Android.
     fn act_on_notification(&self, peer: &Peer, act: types::ActOnNotification) -> response::Body {
         if !notifications::valid_key(&act.key) {
@@ -1497,6 +1955,12 @@ impl HostApiService {
                 self.request(peer, TaskRequest::WindowsShown { shown: shown.shown })
             }
             Some(request::Body::ActOnNotification(act)) => self.act_on_notification(peer, act),
+            Some(request::Body::ListWidgetProviders(_)) => self.widget_providers(peer),
+            Some(request::Body::AddWidget(add)) => self.add_widget(peer, add),
+            Some(request::Body::RemoveWidget(remove)) => self.remove_widget(peer, remove.widget_id),
+            Some(request::Body::ListWidgets(_)) => self.list_widgets(peer),
+            Some(request::Body::PlaceWidget(place)) => self.place_widget(peer, place),
+            Some(request::Body::WidgetPointer(pointer)) => self.widget_pointer(peer, pointer),
             Some(request::Body::FreezeSession(_)) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => match android.freeze() {
@@ -1532,7 +1996,14 @@ impl HostApiService {
                         | request::Body::WatchLinks(_)
                         | request::Body::OpenFile(_)
                         | request::Body::WatchNotifications(_)
-                        | request::Body::ActOnNotification(_) => unreachable!("answered above"),
+                        | request::Body::ActOnNotification(_)
+                        | request::Body::ListWidgetProviders(_)
+                        | request::Body::AddWidget(_)
+                        | request::Body::RemoveWidget(_)
+                        | request::Body::ListWidgets(_)
+                        | request::Body::WatchWidgets(_)
+                        | request::Body::PlaceWidget(_)
+                        | request::Body::WidgetPointer(_) => unreachable!("answered above"),
                     }
                     status(android.as_ref())
                 }
@@ -2298,6 +2769,112 @@ impl HostApiClient {
         }))
     }
 
+    /// The widgets the apps in the caller's Android offer, in label order.
+    pub fn widget_providers(&mut self) -> Result<Vec<WidgetProvider>, ClientError> {
+        match self.exchange(
+            request::Body::ListWidgetProviders(types::ListWidgetProviders {}),
+            self.timeout.max(WIDGET_LIST_WAIT + Duration::from_secs(5)),
+        )? {
+            response::Body::WidgetProviders(list) => {
+                Ok(list.providers.into_iter().map(provider_from_wire).collect())
+            }
+            _ => Err(ClientError::Malformed(
+                "expected the widgets on offer".into(),
+            )),
+        }
+    }
+
+    /// Places a new widget of `provider` and returns it, waiting at most `timeout`, which
+    /// includes the user setting the widget up when its app asks them to.
+    pub fn add_widget(&mut self, provider: &str, timeout: Duration) -> Result<Widget, ClientError> {
+        match self.exchange(
+            request::Body::AddWidget(types::AddWidget {
+                provider: provider.to_string(),
+            }),
+            timeout,
+        )? {
+            response::Body::Widget(widget) => Ok(widget_from_wire(widget)),
+            _ => Err(ClientError::Malformed("expected the placed widget".into())),
+        }
+    }
+
+    /// Removes a widget.
+    pub fn remove_widget(&mut self, widget_id: i32) -> Result<(), ClientError> {
+        self.done(request::Body::RemoveWidget(types::RemoveWidget {
+            widget_id,
+        }))
+    }
+
+    /// The widgets placed on the caller's desktop, and how many places the service keeps.
+    pub fn widgets(&mut self) -> Result<(Vec<Widget>, u32), ClientError> {
+        match self.exchange(
+            request::Body::ListWidgets(types::ListWidgets {}),
+            self.timeout,
+        )? {
+            response::Body::Widgets(list) => Ok((
+                list.widgets.into_iter().map(widget_from_wire).collect(),
+                list.remembered,
+            )),
+            _ => Err(ClientError::Malformed("expected the placed widgets".into())),
+        }
+    }
+
+    /// Remembers where a widget's window is and tells Android its size: `width` by `height`
+    /// pixels on a monitor of `density_dpi`. A size of 0 only moves it.
+    pub fn place_widget(
+        &mut self,
+        widget_id: i32,
+        placement: Placement,
+        width: u32,
+        height: u32,
+        density_dpi: u32,
+    ) -> Result<(), ClientError> {
+        self.done(request::Body::PlaceWidget(types::PlaceWidget {
+            widget_id,
+            placement: Some(placement_to_wire(placement)),
+            width,
+            height,
+            density_dpi,
+        }))
+    }
+
+    /// Passes pointer input in a widget's window to the caller's Android. `action` is one of
+    /// press, move, release and cancel.
+    pub fn widget_pointer(
+        &mut self,
+        widget_id: i32,
+        action: types::PointerAction,
+        pointer_id: u32,
+        x: f32,
+        y: f32,
+    ) -> Result<(), ClientError> {
+        self.done(request::Body::WidgetPointer(types::WidgetPointer {
+            widget_id,
+            action: action as i32,
+            pointer_id,
+            x,
+            y,
+        }))
+    }
+
+    /// Watches the widgets of the caller's Android. The connection carries nothing else from
+    /// here on, so the client is used up.
+    pub fn watch_widgets(mut self) -> Result<WidgetStream, ClientError> {
+        match self.exchange(
+            request::Body::WatchWidgets(types::WatchWidgets {}),
+            self.timeout,
+        )? {
+            response::Body::Widgets(list) => Ok(WidgetStream {
+                connection: self.connection,
+                current: list.widgets.into_iter().map(widget_from_wire).collect(),
+                remembered: list.remembered,
+            }),
+            _ => Err(ClientError::Malformed(
+                "expected the widgets there are now".into(),
+            )),
+        }
+    }
+
     fn done(&mut self, body: request::Body) -> Result<(), ClientError> {
         match self.exchange(body, self.timeout)? {
             response::Body::Done(_) => Ok(()),
@@ -2575,6 +3152,136 @@ impl NotificationStream {
             Err(error) => Err(ClientError::Malformed(error.to_string())),
         }
     }
+}
+
+/// The widgets of the caller's Android and every change to them, from
+/// [`HostApiClient::watch_widgets`].
+pub struct WidgetStream {
+    connection: Box<dyn Connection>,
+    current: Vec<Widget>,
+    remembered: u32,
+}
+
+impl WidgetStream {
+    /// The widgets there were when the watch began, with their placements.
+    pub fn current(&self) -> &[Widget] {
+        &self.current
+    }
+
+    /// How many widgets the service remembered a place for when the watch began.
+    pub fn remembered(&self) -> u32 {
+        self.remembered
+    }
+
+    /// The next change, waiting at most `timeout`. `Ok(None)` means none came in time; an
+    /// error means the watch has ended.
+    pub fn next(&mut self, timeout: Duration) -> Result<Option<WidgetEvent>, ClientError> {
+        let frame = match self.connection.recv(Some(timeout)) {
+            Ok(frame) => frame,
+            Err(TransportError::Timeout) => return Ok(None),
+            Err(error) => return Err(ClientError::Transport(error)),
+        };
+        let event = match decode(&frame) {
+            Ok(Envelope {
+                body: Some(Body::WidgetEvent(event)),
+            }) => event,
+            Ok(_) => return Err(ClientError::Malformed("expected a widget event".into())),
+            Err(error) => return Err(ClientError::Malformed(error.to_string())),
+        };
+        match event.body {
+            Some(types::widget_event::Body::Placed(widget)) => {
+                Ok(Some(WidgetEvent::Placed(widget_from_wire(widget))))
+            }
+            Some(types::widget_event::Body::Frame(frame)) => {
+                Ok(Some(WidgetEvent::Frame(WidgetFrame {
+                    widget_id: frame.widget_id,
+                    width: frame.width,
+                    height: frame.height,
+                    png: frame.png,
+                })))
+            }
+            Some(types::widget_event::Body::Removed(removed)) => Ok(Some(WidgetEvent::Removed {
+                widget_id: removed.widget_id,
+            })),
+            None => Err(ClientError::Malformed("an empty widget event".into())),
+        }
+    }
+}
+
+fn provider_to_wire(provider: &WidgetProvider) -> types::WidgetProvider {
+    types::WidgetProvider {
+        provider: provider.provider.clone(),
+        package_name: provider.package_name.clone(),
+        label: provider.label.clone(),
+        preview_png: provider.preview_png.clone(),
+        min_width_dp: provider.min_width_dp,
+        min_height_dp: provider.min_height_dp,
+        default_width_dp: provider.default_width_dp,
+        default_height_dp: provider.default_height_dp,
+        max_width_dp: provider.max_width_dp,
+        max_height_dp: provider.max_height_dp,
+        resize_mode: provider.resize_mode,
+        needs_configuration: provider.needs_configuration,
+    }
+}
+
+fn provider_from_wire(provider: types::WidgetProvider) -> WidgetProvider {
+    WidgetProvider {
+        provider: provider.provider,
+        package_name: provider.package_name,
+        label: provider.label,
+        preview_png: provider.preview_png,
+        min_width_dp: provider.min_width_dp,
+        min_height_dp: provider.min_height_dp,
+        default_width_dp: provider.default_width_dp,
+        default_height_dp: provider.default_height_dp,
+        max_width_dp: provider.max_width_dp,
+        max_height_dp: provider.max_height_dp,
+        resize_mode: provider.resize_mode,
+        needs_configuration: provider.needs_configuration,
+    }
+}
+
+fn placement_to_wire(placement: Placement) -> types::WidgetPlacement {
+    types::WidgetPlacement {
+        x: placement.x,
+        y: placement.y,
+        width_dp: placement.width_dp,
+        height_dp: placement.height_dp,
+    }
+}
+
+fn widget_to_wire(widget: Widget) -> types::Widget {
+    types::Widget {
+        widget_id: widget.widget_id,
+        provider: Some(provider_to_wire(&widget.provider)),
+        placement: Some(placement_to_wire(widget.placement)),
+    }
+}
+
+fn widget_from_wire(widget: types::Widget) -> Widget {
+    let placement = widget.placement.unwrap_or_default();
+    Widget {
+        widget_id: widget.widget_id,
+        provider: widget.provider.map(provider_from_wire).unwrap_or_default(),
+        placement: Placement {
+            x: placement.x,
+            y: placement.y,
+            width_dp: placement.width_dp,
+            height_dp: placement.height_dp,
+        },
+    }
+}
+
+fn frame_to_wire(frame: WidgetFrame) -> Body {
+    Body::WidgetEvent(types::WidgetEvent {
+        body: Some(types::widget_event::Body::Frame(types::WidgetFrame {
+            widget_id: frame.widget_id,
+            width: frame.width,
+            height: frame.height,
+            png: frame.png,
+        })),
+    })
 }
 
 fn notification_to_wire(event: NotificationEvent) -> Body {
