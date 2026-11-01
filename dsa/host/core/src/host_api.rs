@@ -17,6 +17,11 @@
 //! A client that carries the clipboard ([`HostApiClient::watch_clipboard`]) sends the text the
 //! user copies on the host, and receives the text the caller's Android copies, on the same
 //! connection, unanswered in both directions.
+//!
+//! A client that watches notifications ([`HostApiClient::watch_notifications`]) receives the
+//! notifications of the caller's Android as they are posted, changed and removed. What the user
+//! does with one on the host goes back with [`HostApiClient::act_on_notification`], on any
+//! connection.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,6 +45,7 @@ use crate::keys::KeyEvent;
 use crate::memory::{
     snapshot_from_wire, snapshot_to_wire, GuestMemoryReport, HostMemory, MemorySnapshot,
 };
+use crate::notifications::{self, Notification, NotificationAction, NotificationEvent};
 use crate::resize_trace::{self, detail_requested, ResizeTrace, DETAIL_ENV};
 use crate::session::{Session, SessionError, SessionState};
 use crate::settings::{Settings, SettingsStore};
@@ -114,6 +120,17 @@ pub trait UserAndroid: Send + Sync {
     /// The text this Android copies from now on, while the clipboard is shared. `None` when
     /// this Android does not share its clipboard at all.
     fn watch_clipboard(&self) -> Option<Receiver<String>>;
+    /// The notifications of this Android from now on. `None` when it does not report them.
+    fn watch_notifications(&self) -> Option<Receiver<NotificationEvent>> {
+        None
+    }
+    /// Passes what the user did with a notification on the host to this Android.
+    fn notification_action(&self, action: NotificationAction) -> Result<(), TaskRequestError> {
+        let _ = action;
+        Err(TaskRequestError::Failed(
+            "this Android does not show its notifications on the host".into(),
+        ))
+    }
 }
 
 impl UserAndroid for Session {
@@ -177,6 +194,12 @@ impl UserAndroid for Session {
     }
     fn watch_clipboard(&self) -> Option<Receiver<String>> {
         Some(Session::watch_clipboard(self))
+    }
+    fn watch_notifications(&self) -> Option<Receiver<NotificationEvent>> {
+        Some(Session::watch_notifications(self))
+    }
+    fn notification_action(&self, action: NotificationAction) -> Result<(), TaskRequestError> {
+        Session::notification_action(self, action).map_err(request_error)
     }
 }
 
@@ -673,6 +696,9 @@ impl HostApiService {
             if let Some(request::Body::WatchClipboard(_)) = request.body {
                 return self.watch_clipboard(connection, &peer, request.id);
             }
+            if let Some(request::Body::WatchNotifications(_)) = request.body {
+                return self.watch_notifications(connection, &peer, request.id);
+            }
             let response = self.answer(&peer, request);
             if send(&mut *connection, Body::Response(response)).is_err() {
                 return;
@@ -919,6 +945,113 @@ impl HostApiService {
         }
     }
 
+    /// Answers a WatchNotifications request, then passes the notifications of the client's
+    /// Android to it until the client goes away. The client sends nothing more: anything it
+    /// sends closes the connection, except a frame that cannot be read, which is dropped.
+    fn watch_notifications(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
+        let watched = match self.androids.android(&peer.user) {
+            Err(why) => Err(error(ErrorCode::Unavailable, why)),
+            Ok(android) => android.watch_notifications().ok_or_else(|| {
+                error(
+                    ErrorCode::Unavailable,
+                    "this Android does not show its notifications on the host".into(),
+                )
+            }),
+        };
+        let watch = match watched {
+            Ok(watch) => watch,
+            Err(body) => {
+                let _ = send(
+                    &mut *connection,
+                    Body::Response(Response {
+                        id,
+                        body: Some(body),
+                    }),
+                );
+                return;
+            }
+        };
+        let answer = Response {
+            id,
+            body: Some(response::Body::Done(types::Done {})),
+        };
+        if send(&mut *connection, Body::Response(answer)).is_err() {
+            return;
+        }
+        loop {
+            loop {
+                match watch.try_recv() {
+                    Ok(event) => {
+                        if send(&mut *connection, notification_to_wire(event)).is_err() {
+                            return;
+                        }
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        connection.close();
+                        return;
+                    }
+                }
+            }
+            let frame = match connection.recv(Some(CLIPBOARD_POLL)) {
+                Ok(frame) => frame,
+                Err(TransportError::Timeout) => continue,
+                Err(_) => return,
+            };
+            match decode(&frame) {
+                Ok(_) => {
+                    eprintln!(
+                        "local API: a client of {} sent something on a connection that watches \
+                         notifications; closing its connection",
+                        peer.user
+                    );
+                    connection.close();
+                    return;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "local API: a client of {} sent an unreadable frame on a connection \
+                         that watches notifications ({error}); dropping it",
+                        peer.user
+                    );
+                }
+            }
+        }
+    }
+
+    /// Passes what the user did with a notification to the caller's Android.
+    fn act_on_notification(&self, peer: &Peer, act: types::ActOnNotification) -> response::Body {
+        if !notifications::valid_key(&act.key) {
+            return error(
+                ErrorCode::UnknownRequest,
+                format!(
+                    "a notification key is 1 to {} bytes, not {}",
+                    notifications::MAX_KEY_BYTES,
+                    act.key.len()
+                ),
+            );
+        }
+        let action = match types::NotificationAction::try_from(act.action) {
+            Ok(types::NotificationAction::Open) => NotificationAction::Open { key: act.key },
+            Ok(types::NotificationAction::Dismiss) => NotificationAction::Dismiss { key: act.key },
+            _ => {
+                return error(
+                    ErrorCode::UnknownRequest,
+                    "the action on a notification is to open it or to dismiss it".into(),
+                )
+            }
+        };
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        match android.notification_action(action) {
+            Ok(()) => response::Body::Done(types::Done {}),
+            Err(TaskRequestError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(TaskRequestError::Failed(why)) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
     fn answer(&self, peer: &Peer, request: Request) -> Response {
         let body = match request.body {
             None => error(
@@ -996,6 +1129,7 @@ impl HostApiService {
             Some(request::Body::SetWindowsShown(shown)) => {
                 self.request(peer, TaskRequest::WindowsShown { shown: shown.shown })
             }
+            Some(request::Body::ActOnNotification(act)) => self.act_on_notification(peer, act),
             Some(request::Body::FreezeSession(_)) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => match android.freeze() {
@@ -1026,7 +1160,9 @@ impl HostApiService {
                         | request::Body::SetSettings(_)
                         | request::Body::GetMemory(_)
                         | request::Body::StreamInput(_)
-                        | request::Body::WatchClipboard(_) => unreachable!("answered above"),
+                        | request::Body::WatchClipboard(_)
+                        | request::Body::WatchNotifications(_)
+                        | request::Body::ActOnNotification(_) => unreachable!("answered above"),
                     }
                     status(android.as_ref())
                 }
@@ -1640,6 +1776,34 @@ impl HostApiClient {
         }
     }
 
+    /// Watches the notifications of the caller's Android. The connection carries nothing
+    /// else from here on, so the client is used up.
+    pub fn watch_notifications(mut self) -> Result<NotificationStream, ClientError> {
+        match self.exchange(
+            request::Body::WatchNotifications(types::WatchNotifications {}),
+            self.timeout,
+        )? {
+            response::Body::Done(_) => Ok(NotificationStream {
+                connection: self.connection,
+            }),
+            _ => Err(ClientError::Malformed(
+                "expected the answer that notifications are watched".into(),
+            )),
+        }
+    }
+
+    /// Passes what the user did with a notification on the host to the caller's Android.
+    pub fn act_on_notification(&mut self, action: &NotificationAction) -> Result<(), ClientError> {
+        let (key, kind) = match action {
+            NotificationAction::Open { key } => (key, types::NotificationAction::Open),
+            NotificationAction::Dismiss { key } => (key, types::NotificationAction::Dismiss),
+        };
+        self.done(request::Body::ActOnNotification(types::ActOnNotification {
+            key: key.clone(),
+            action: kind as i32,
+        }))
+    }
+
     fn done(&mut self, body: request::Body) -> Result<(), ClientError> {
         match self.exchange(body, self.timeout)? {
             response::Body::Done(_) => Ok(()),
@@ -1780,6 +1944,65 @@ impl ClipboardStream {
             }) => Ok(Some(clip.text)),
             Ok(_) => Err(ClientError::Malformed("expected clipboard text".into())),
             Err(error) => Err(ClientError::Malformed(error.to_string())),
+        }
+    }
+}
+
+/// A connection that watches the notifications of the caller's Android, from
+/// [`HostApiClient::watch_notifications`].
+pub struct NotificationStream {
+    connection: Box<dyn Connection>,
+}
+
+impl NotificationStream {
+    /// The next change to the notifications, waiting at most `timeout`. `Ok(None)` means none
+    /// came in time; an error means the connection has ended.
+    pub fn next(&mut self, timeout: Duration) -> Result<Option<NotificationEvent>, ClientError> {
+        let frame = match self.connection.recv(Some(timeout)) {
+            Ok(frame) => frame,
+            Err(TransportError::Timeout) => return Ok(None),
+            Err(error) => return Err(ClientError::Transport(error)),
+        };
+        match decode(&frame) {
+            Ok(Envelope {
+                body: Some(Body::Notification(n)),
+            }) => Ok(Some(NotificationEvent::Posted(Notification {
+                key: n.key,
+                package_name: n.package_name,
+                app_label: n.app_label,
+                title: n.title,
+                text: n.text,
+                icon_png: n.icon_png,
+                importance: n.importance,
+                high_priority: n.high_priority,
+                clearable: n.clearable,
+                when_millis: n.when_millis,
+            }))),
+            Ok(Envelope {
+                body: Some(Body::NotificationRemoved(removed)),
+            }) => Ok(Some(NotificationEvent::Removed { key: removed.key })),
+            Ok(_) => Err(ClientError::Malformed("expected a notification".into())),
+            Err(error) => Err(ClientError::Malformed(error.to_string())),
+        }
+    }
+}
+
+fn notification_to_wire(event: NotificationEvent) -> Body {
+    match event {
+        NotificationEvent::Posted(n) => Body::Notification(types::Notification {
+            key: n.key,
+            package_name: n.package_name,
+            app_label: n.app_label,
+            title: n.title,
+            text: n.text,
+            icon_png: n.icon_png,
+            importance: n.importance,
+            high_priority: n.high_priority,
+            clearable: n.clearable,
+            when_millis: n.when_millis,
+        }),
+        NotificationEvent::Removed { key } => {
+            Body::NotificationRemoved(types::NotificationRemoved { key })
         }
     }
 }

@@ -772,4 +772,15 @@ impl UserAndroid for WithProgramStatus {
     fn watch_clipboard(&self) -> Option<std::sync::mpsc::Receiver<String>> {
         self.android.watch_clipboard()
     }
+    fn watch_notifications(
+        &self,
+    ) -> Option<std::sync::mpsc::Receiver<crate::notifications::NotificationEvent>> {
+        self.android.watch_notifications()
+    }
+    fn notification_action(
+        &self,
+        action: crate::notifications::NotificationAction,
+    ) -> Result<(), TaskRequestError> {
+        self.android.notification_action(action)
+    }
 }

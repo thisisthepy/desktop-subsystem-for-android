@@ -289,6 +289,17 @@ impl UserAndroid for UpdatingAndroid {
     fn watch_clipboard(&self) -> Option<std::sync::mpsc::Receiver<String>> {
         UserAndroid::watch_clipboard(&*self.session)
     }
+    fn watch_notifications(
+        &self,
+    ) -> Option<std::sync::mpsc::Receiver<crate::notifications::NotificationEvent>> {
+        UserAndroid::watch_notifications(&*self.session)
+    }
+    fn notification_action(
+        &self,
+        action: crate::notifications::NotificationAction,
+    ) -> Result<(), TaskRequestError> {
+        UserAndroid::notification_action(&*self.session, action)
+    }
 
     fn start(&self) {
         if self.no_image_yet() {

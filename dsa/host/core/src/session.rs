@@ -47,7 +47,14 @@
 //! the guest copies goes to every [`Session::watch_clipboard`] watcher. Text that came from one
 //! side is never sent back to it, and text longer than
 //! [`MAX_CLIPBOARD_BYTES`](crate::clipboard::MAX_CLIPBOARD_BYTES) does not cross.
+//!
+//! The guest's notifications go to every [`Session::watch_notifications`] watcher, checked
+//! and limited in rate ([`crate::notifications`]); when the guest stops, each one shown is
+//! removed. What the user does with one ([`Session::notification_action`]) goes back to the
+//! guest: a click first wakes a guest in Doze, as a shown window does, so the app opens on a
+//! screen that is on, and a dismissal waits for a frozen guest to be thawed.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex};
@@ -59,6 +66,7 @@ use dsa_protocol::control::{self, envelope::Body};
 use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 
 use crate::clipboard;
+use crate::notifications::{self, Notification, NotificationAction, NotificationEvent, RateLimit};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::PointerEvent;
 use crate::keys::KeyEvent;
@@ -435,6 +443,8 @@ enum Command {
     HostClipboard(String),
     /// Whether the clipboards are shared.
     ShareClipboard(bool),
+    /// The user did something with a notification on the host.
+    Notification(NotificationAction, Sender<Result<(), SessionError>>),
 }
 
 struct Shared {
@@ -454,6 +464,8 @@ struct Shared {
     problem: Mutex<Option<BootProblem>>,
     /// Who hears of the text the guest copies.
     clipboard_watchers: Mutex<Vec<Sender<String>>>,
+    /// Who hears of the guest's notifications.
+    notification_watchers: Mutex<Vec<Sender<NotificationEvent>>>,
 }
 
 /// The guest's tasks and who is watching them, under one lock, so a new watcher's starting
@@ -554,6 +566,14 @@ impl Shared {
             .retain(|watcher| watcher.send(text.to_string()).is_ok());
     }
 
+    /// Hands a change to the guest's notifications to every watcher still listening.
+    fn publish_notification(&self, event: NotificationEvent) {
+        self.notification_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|watcher| watcher.send(event.clone()).is_ok());
+    }
+
     /// Removes every task, as when the guest has gone away.
     fn clear_tasks(&self) {
         let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
@@ -594,6 +614,7 @@ impl Session {
             guest_memory: Mutex::new(None),
             problem: Mutex::new(None),
             clipboard_watchers: Mutex::new(Vec::new()),
+            notification_watchers: Mutex::new(Vec::new()),
         });
         let freeze_delay = config.freeze_after.unwrap_or(DEFAULT_FREEZE_AFTER);
         let (commands, command_rx) = mpsc::channel();
@@ -628,6 +649,9 @@ impl Session {
             clipboard_sharing: true,
             host_clipboard: None,
             clipboard_last: None,
+            notifications: HashMap::new(),
+            notification_limit: RateLimit::new(Instant::now()),
+            dismissals: Vec::new(),
         };
         let worker = thread::Builder::new()
             .name("dsa-session".into())
@@ -825,6 +849,29 @@ impl Session {
         rx
     }
 
+    /// The guest's notifications from now on: each one posted or changed, and each one gone.
+    /// The watch lasts across restarts of the guest.
+    pub fn watch_notifications(&self) -> Receiver<NotificationEvent> {
+        let (tx, rx) = mpsc::channel();
+        self.shared
+            .notification_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(tx);
+        rx
+    }
+
+    /// Passes what the user did with a notification to the guest. Opening one wakes a guest
+    /// in Doze or frozen first. Needs a running guest that has the notification; one the
+    /// guest has not shown is ignored.
+    pub fn notification_action(&self, action: NotificationAction) -> Result<(), SessionError> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.commands
+            .send(Command::Notification(action, reply_tx))
+            .map_err(|_| SessionError::Gone)?;
+        reply_rx.recv().map_err(|_| SessionError::Gone)?
+    }
+
     /// Freezes the guest now, as when the user chooses it. It stays frozen until a task
     /// window is shown or it is stopped. Needs a running guest.
     pub fn freeze(&self) -> Result<(), SessionError> {
@@ -963,6 +1010,12 @@ struct Worker {
     /// The last text that crossed, either way, since the agent connected. Text equal to it is
     /// not sent, so what one side was given never comes back to it.
     clipboard_last: Option<String>,
+    /// The guest's notifications the watchers were given, by key.
+    notifications: HashMap<String, Notification>,
+    /// How many notifications reach the watchers.
+    notification_limit: RateLimit,
+    /// Dismissals for a frozen guest, sent once it is thawed.
+    dismissals: Vec<String>,
 }
 
 impl Worker {
@@ -984,7 +1037,9 @@ impl Worker {
                     match self.commands.recv() {
                         Ok(Command::Start) => self.start(),
                         Ok(Command::Stop) => {}
-                        Ok(Command::Send(_, reply)) | Ok(Command::Freeze(reply)) => {
+                        Ok(Command::Send(_, reply))
+                        | Ok(Command::Freeze(reply))
+                        | Ok(Command::Notification(_, reply)) => {
                             let _ = reply.send(Err(SessionError::NotActive(SessionState::Stopped)));
                         }
                         Ok(Command::WindowsShown(shown)) => self.set_shown(shown),
@@ -1003,7 +1058,9 @@ impl Worker {
                     match self.commands.recv() {
                         Ok(Command::Stop) => self.stop(StopReason::Requested),
                         Ok(Command::Start) => {}
-                        Ok(Command::Send(_, reply)) | Ok(Command::Freeze(reply)) => {
+                        Ok(Command::Send(_, reply))
+                        | Ok(Command::Freeze(reply))
+                        | Ok(Command::Notification(_, reply)) => {
                             let _ =
                                 reply.send(Err(SessionError::NotActive(SessionState::Stopping)));
                         }
@@ -1082,6 +1139,125 @@ impl Worker {
                 self.share_clipboard(on);
                 true
             }
+            Command::Notification(action, reply) => {
+                let _ = reply.send(self.act_on_notification(action));
+                self.running()
+            }
+        }
+    }
+
+    /// Takes a notification the guest posted or changed, and hands it to the watchers when its
+    /// turn comes. One the same as what the watchers have is not handed again.
+    fn guest_notification(&mut self, message: control::GuestNotification) {
+        let notification = match notifications::checked(message) {
+            Ok(notification) => notification,
+            Err(why) => {
+                eprintln!("notifications: dropped one from the guest: {why}");
+                return;
+            }
+        };
+        if self.notifications.get(&notification.key) == Some(&notification) {
+            self.notification_limit.remove(&notification.key);
+            return;
+        }
+        if let Some(due) = self
+            .notification_limit
+            .offer(notification, Instant::now())
+        {
+            self.deliver_notification(due);
+        }
+    }
+
+    fn deliver_notification(&mut self, notification: Notification) {
+        self.notifications
+            .insert(notification.key.clone(), notification.clone());
+        self.shared
+            .publish_notification(NotificationEvent::Posted(notification));
+    }
+
+    /// Hands on the notifications whose turn has come.
+    fn tick_notifications(&mut self) {
+        for due in self.notification_limit.due(Instant::now()) {
+            self.deliver_notification(due);
+        }
+    }
+
+    /// The guest says a notification is gone.
+    fn guest_notification_removed(&mut self, key: String) {
+        self.notification_limit.remove(&key);
+        if self.notifications.remove(&key).is_some() {
+            self.shared
+                .publish_notification(NotificationEvent::Removed { key });
+        }
+    }
+
+    /// Removes every notification the watchers have, as when the guest stops.
+    fn clear_notifications(&mut self) {
+        self.notification_limit.clear();
+        self.dismissals.clear();
+        let keys: Vec<String> = self.notifications.drain().map(|(key, _)| key).collect();
+        for key in keys {
+            self.shared
+                .publish_notification(NotificationEvent::Removed { key });
+        }
+    }
+
+    /// Passes what the user did with a notification to the guest.
+    fn act_on_notification(&mut self, action: NotificationAction) -> Result<(), SessionError> {
+        let state = self.state();
+        if !matches!(
+            state,
+            SessionState::Active | SessionState::Dozing | SessionState::Frozen
+        ) || !self.agent_connected
+        {
+            return Err(SessionError::NotActive(state));
+        }
+        let Some(clearable) = self
+            .notifications
+            .get(action.key())
+            .map(|shown| shown.clearable)
+        else {
+            eprintln!("notifications: the host acted on one the guest does not have; ignored");
+            return Ok(());
+        };
+        match action {
+            NotificationAction::Open { key } => {
+                // The app opens on a screen that is on: the guest leaves Doze before the
+                // click, which it reads after the screen's word on the same channel. The
+                // screen stays on for the doze delay while the app's window comes.
+                self.hidden_since = Instant::now();
+                self.wake();
+                if !self.running() {
+                    return Err(SessionError::NotActive(self.state()));
+                }
+                self.send_body(Body::NotificationClicked(control::NotificationClicked { key }));
+            }
+            NotificationAction::Dismiss { key } => {
+                if !clearable {
+                    eprintln!(
+                        "notifications: the host dismissed one its app keeps; it stays in the guest"
+                    );
+                    return Ok(());
+                }
+                if state == SessionState::Frozen {
+                    // Not worth waking the guest for; it hears of it when it is thawed.
+                    self.dismissals.push(key);
+                } else {
+                    self.send_body(Body::NotificationDismissed(
+                        control::NotificationDismissed { key },
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Sends the dismissals that waited for the guest to be thawed.
+    fn send_dismissals(&mut self) {
+        for key in std::mem::take(&mut self.dismissals) {
+            self.send_body(Body::NotificationDismissed(control::NotificationDismissed {
+                key,
+            }));
         }
     }
 
@@ -1228,6 +1404,7 @@ impl Worker {
         if matches!(self.state(), SessionState::Dozing | SessionState::Frozen) {
             self.shared.set(SessionState::Active, None);
         }
+        self.send_dismissals();
     }
 
     /// Moves what the boot timers count from past a freeze of length `frozen`, so a thawed guest
@@ -1651,7 +1828,7 @@ impl Worker {
     fn handle_starting(&mut self, command: Command) -> bool {
         match command {
             Command::Start => true,
-            Command::Send(_, reply) | Command::Freeze(reply) => {
+            Command::Send(_, reply) | Command::Freeze(reply) | Command::Notification(_, reply) => {
                 let _ = reply.send(Err(SessionError::NotActive(SessionState::Starting)));
                 true
             }
@@ -1709,6 +1886,7 @@ impl Worker {
             }
             self.tick_lifecycle();
             self.offer_host_clipboard();
+            self.tick_notifications();
             let Some(connection) = self.connection.as_mut() else {
                 self.stop(StopReason::ChannelLost("no connection".into()));
                 return;
@@ -1816,6 +1994,10 @@ impl Worker {
             }
             Some(Body::DeviceIdle(idle)) => self.guest_idle(idle.idle),
             Some(Body::ClipboardText(clip)) => self.guest_clipboard(clip.text),
+            Some(Body::Notification(notification)) => self.guest_notification(notification),
+            Some(Body::NotificationRemoved(removed)) => {
+                self.guest_notification_removed(removed.key)
+            }
             Some(Body::GuestBoot(boot)) => self.guest_boot(boot),
             Some(Body::AgentConnected(_)) => {
                 eprintln!("control channel: dropping a message that stops at the guest's daemon");
@@ -1831,6 +2013,8 @@ impl Worker {
             | Some(Body::ImeComposition(_))
             | Some(Body::ImeCommit(_))
             | Some(Body::ClipboardSharing(_))
+            | Some(Body::NotificationClicked(_))
+            | Some(Body::NotificationDismissed(_))
             | Some(Body::RequestGuestMemory(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
             }
@@ -1867,6 +2051,8 @@ impl Worker {
         }
         // The guest's tasks end with it, so their windows close even when it died.
         self.shared.clear_tasks();
+        // So do its notifications.
+        self.clear_notifications();
         self.shared.set_guest_memory(None);
         match self.launcher.stop(self.config.stop_timeout) {
             Ok(()) => {
