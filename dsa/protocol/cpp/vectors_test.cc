@@ -322,6 +322,58 @@ std::map<std::string, v1::Envelope> Cases() {
     progress->set_received(1000);
     progress->set_error("storage is full");
   }
+  {
+    const std::string provider = "com.example.clock/.ClockWidget";
+    auto clock = [&](v1::WidgetProvider* p) {
+      p->set_provider(provider);
+      p->set_package_name("com.example.clock");
+      p->set_label("Clock");
+      p->set_preview_png(std::string("\x89PNG", 4));
+      p->set_min_width_dp(110);
+      p->set_min_height_dp(40);
+      p->set_default_width_dp(180);
+      p->set_default_height_dp(110);
+      p->set_resize_mode(3);
+    };
+    cases["list_widget_providers"].mutable_list_widget_providers()->set_request_id(7);
+    v1::WidgetProviders* providers = cases["widget_providers"].mutable_widget_providers();
+    providers->set_request_id(7);
+    clock(providers->add_providers());
+    providers->set_complete(true);
+    v1::AddWidget* add = cases["add_widget"].mutable_add_widget();
+    add->set_request_id(8);
+    add->set_provider(provider);
+    v1::WidgetAdded* added = cases["widget_added"].mutable_widget_added();
+    added->set_request_id(8);
+    added->set_widget_id(12);
+    v1::WidgetAdded* refused = cases["widget_added_refused"].mutable_widget_added();
+    refused->set_request_id(9);
+    refused->set_error("the user canceled the widget's setup");
+    v1::WidgetUpdated* updated = cases["widget_updated"].mutable_widget_updated();
+    updated->set_widget_id(12);
+    clock(updated->mutable_provider());
+    v1::WidgetList* list = cases["widget_list"].mutable_widget_list();
+    list->add_widget_ids(12);
+    list->add_widget_ids(15);
+    cases["remove_widget"].mutable_remove_widget()->set_widget_id(12);
+    v1::ResizeWidget* resize = cases["resize_widget"].mutable_resize_widget();
+    resize->set_widget_id(12);
+    resize->set_width(360);
+    resize->set_height(220);
+    resize->set_density_dpi(240);
+    resize->set_width_dp(240);
+    resize->set_height_dp(146);
+    v1::WidgetFrame* frame = cases["widget_frame"].mutable_widget_frame();
+    frame->set_widget_id(12);
+    frame->set_width(2);
+    frame->set_height(1);
+    frame->set_png(std::string("\x89PNG", 4));
+    v1::WidgetPointer* pointer = cases["widget_pointer"].mutable_widget_pointer();
+    pointer->set_widget_id(12);
+    pointer->set_action(v1::POINTER_ACTION_DOWN);
+    pointer->set_x(10.5f);
+    pointer->set_y(20.25f);
+  }
   return cases;
 }
 

@@ -337,6 +337,71 @@ public final class VectorsTest {
                         .setReceived(1000)
                         .setError("storage is full"))
                 .build());
+        WidgetProvider clock = WidgetProvider.newBuilder()
+                .setProvider("com.example.clock/.ClockWidget")
+                .setPackageName("com.example.clock")
+                .setLabel("Clock")
+                .setPreviewPng(ByteString.copyFrom(new byte[] {(byte) 0x89, 'P', 'N', 'G'}))
+                .setMinWidthDp(110)
+                .setMinHeightDp(40)
+                .setDefaultWidthDp(180)
+                .setDefaultHeightDp(110)
+                .setResizeMode(3)
+                .build();
+        cases.put("list_widget_providers", Envelope.newBuilder()
+                .setListWidgetProviders(ListWidgetProviders.newBuilder().setRequestId(7))
+                .build());
+        cases.put("widget_providers", Envelope.newBuilder()
+                .setWidgetProviders(WidgetProviders.newBuilder()
+                        .setRequestId(7)
+                        .addProviders(clock)
+                        .setComplete(true))
+                .build());
+        cases.put("add_widget", Envelope.newBuilder()
+                .setAddWidget(AddWidget.newBuilder()
+                        .setRequestId(8)
+                        .setProvider("com.example.clock/.ClockWidget"))
+                .build());
+        cases.put("widget_added", Envelope.newBuilder()
+                .setWidgetAdded(WidgetAdded.newBuilder().setRequestId(8).setWidgetId(12))
+                .build());
+        cases.put("widget_added_refused", Envelope.newBuilder()
+                .setWidgetAdded(WidgetAdded.newBuilder()
+                        .setRequestId(9)
+                        .setError("the user canceled the widget's setup"))
+                .build());
+        cases.put("widget_updated", Envelope.newBuilder()
+                .setWidgetUpdated(WidgetUpdated.newBuilder().setWidgetId(12).setProvider(clock))
+                .build());
+        cases.put("widget_list", Envelope.newBuilder()
+                .setWidgetList(WidgetList.newBuilder().addWidgetIds(12).addWidgetIds(15))
+                .build());
+        cases.put("remove_widget", Envelope.newBuilder()
+                .setRemoveWidget(RemoveWidget.newBuilder().setWidgetId(12))
+                .build());
+        cases.put("resize_widget", Envelope.newBuilder()
+                .setResizeWidget(ResizeWidget.newBuilder()
+                        .setWidgetId(12)
+                        .setWidth(360)
+                        .setHeight(220)
+                        .setDensityDpi(240)
+                        .setWidthDp(240)
+                        .setHeightDp(146))
+                .build());
+        cases.put("widget_frame", Envelope.newBuilder()
+                .setWidgetFrame(WidgetFrame.newBuilder()
+                        .setWidgetId(12)
+                        .setWidth(2)
+                        .setHeight(1)
+                        .setPng(ByteString.copyFrom(new byte[] {(byte) 0x89, 'P', 'N', 'G'})))
+                .build());
+        cases.put("widget_pointer", Envelope.newBuilder()
+                .setWidgetPointer(WidgetPointer.newBuilder()
+                        .setWidgetId(12)
+                        .setAction(PointerAction.POINTER_ACTION_DOWN)
+                        .setX(10.5f)
+                        .setY(20.25f))
+                .build());
         return cases;
     }
 

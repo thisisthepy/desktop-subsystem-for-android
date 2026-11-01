@@ -19,6 +19,10 @@ use dsa_protocol::control::{
     RequestGuestMemory, ResizeTask, Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved,
     TaskUpdated,
 };
+use dsa_protocol::control::{
+    AddWidget, ListWidgetProviders, RemoveWidget, ResizeWidget, WidgetAdded, WidgetFrame,
+    WidgetList, WidgetPointer, WidgetProvider, WidgetProviders, WidgetUpdated,
+};
 use dsa_protocol::{decode, encode};
 
 /// The key of the notification in the notification cases.
@@ -47,6 +51,24 @@ fn host_hello() -> Hello {
 }
 
 /// Every case, by name. The other languages' tests mirror this list exactly.
+/// The clock widget of the widget cases.
+fn clock_provider() -> WidgetProvider {
+    WidgetProvider {
+        provider: "com.example.clock/.ClockWidget".into(),
+        package_name: "com.example.clock".into(),
+        label: "Clock".into(),
+        preview_png: vec![0x89, b'P', b'N', b'G'],
+        min_width_dp: 110,
+        min_height_dp: 40,
+        default_width_dp: 180,
+        default_height_dp: 110,
+        max_width_dp: 0,
+        max_height_dp: 0,
+        resize_mode: 3,
+        needs_configuration: false,
+    }
+}
+
 fn cases() -> BTreeMap<&'static str, Envelope> {
     let wrap = |body| Envelope { body: Some(body) };
     BTreeMap::from([
@@ -494,6 +516,90 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                 transfer_id: 3,
                 received: 1000,
                 error: "storage is full".into(),
+            })),
+        ),
+        (
+            "list_widget_providers",
+            wrap(Body::ListWidgetProviders(ListWidgetProviders {
+                request_id: 7,
+            })),
+        ),
+        (
+            "widget_providers",
+            wrap(Body::WidgetProviders(WidgetProviders {
+                request_id: 7,
+                providers: vec![clock_provider()],
+                complete: true,
+            })),
+        ),
+        (
+            "add_widget",
+            wrap(Body::AddWidget(AddWidget {
+                request_id: 8,
+                provider: "com.example.clock/.ClockWidget".into(),
+            })),
+        ),
+        (
+            "widget_added",
+            wrap(Body::WidgetAdded(WidgetAdded {
+                request_id: 8,
+                widget_id: 12,
+                error: String::new(),
+            })),
+        ),
+        (
+            "widget_added_refused",
+            wrap(Body::WidgetAdded(WidgetAdded {
+                request_id: 9,
+                widget_id: 0,
+                error: "the user canceled the widget's setup".into(),
+            })),
+        ),
+        (
+            "widget_updated",
+            wrap(Body::WidgetUpdated(WidgetUpdated {
+                widget_id: 12,
+                provider: Some(clock_provider()),
+            })),
+        ),
+        (
+            "widget_list",
+            wrap(Body::WidgetList(WidgetList {
+                widget_ids: vec![12, 15],
+            })),
+        ),
+        (
+            "remove_widget",
+            wrap(Body::RemoveWidget(RemoveWidget { widget_id: 12 })),
+        ),
+        (
+            "resize_widget",
+            wrap(Body::ResizeWidget(ResizeWidget {
+                widget_id: 12,
+                width: 360,
+                height: 220,
+                density_dpi: 240,
+                width_dp: 240,
+                height_dp: 146,
+            })),
+        ),
+        (
+            "widget_frame",
+            wrap(Body::WidgetFrame(WidgetFrame {
+                widget_id: 12,
+                width: 2,
+                height: 1,
+                png: vec![0x89, b'P', b'N', b'G'],
+            })),
+        ),
+        (
+            "widget_pointer",
+            wrap(Body::WidgetPointer(WidgetPointer {
+                widget_id: 12,
+                action: PointerAction::Down as i32,
+                pointer_id: 0,
+                x: 10.5,
+                y: 20.25,
             })),
         ),
     ])

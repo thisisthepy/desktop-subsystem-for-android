@@ -265,6 +265,126 @@ message ActOnNotification {
   NotificationAction action = 2;
 }
 
+// Asks for the widgets the apps in the caller's Android offer. The answer is WidgetProviders.
+// Needs the caller's Android to be running.
+message ListWidgetProviders {}
+
+// One widget an app in the caller's Android offers.
+message WidgetProvider {
+  // The provider's component, as `package/class`. AddWidget names it.
+  string provider = 1;
+  string package_name = 2;
+  string label = 3;
+  // A PNG image of at most 160 pixels on a side; empty for none.
+  bytes preview_png = 4;
+  // Sizes in density-independent pixels (dp), which are the host's device-independent
+  // pixels: a dp is one pixel at a scale of 100%. A maximum of 0 means no limit.
+  uint32 min_width_dp = 5;
+  uint32 min_height_dp = 6;
+  uint32 default_width_dp = 7;
+  uint32 default_height_dp = 8;
+  uint32 max_width_dp = 9;
+  uint32 max_height_dp = 10;
+  // 1 horizontally, 2 vertically, 3 both, 0 not at all.
+  uint32 resize_mode = 11;
+  // Whether the app asks the user to set the widget up when it is placed.
+  bool needs_configuration = 12;
+}
+
+// The answer to ListWidgetProviders, in label order.
+message WidgetProviders {
+  repeated WidgetProvider providers = 1;
+}
+
+// Places a new widget of `provider` on the caller's desktop. When the app asks the user to set
+// it up, its setup shows as a window first, and the answer waits for the user. The answer is
+// the new Widget, or ERROR_CODE_WIDGET_REFUSED with the reason.
+message AddWidget {
+  string provider = 1;
+}
+
+// Removes a widget: Android forgets it, its window closes, and its place is forgotten.
+message RemoveWidget {
+  int32 widget_id = 1;
+}
+
+// Where a widget's window is on the caller's desktop. The position is in the host's
+// physical screen pixels; the size is in dp, so it stays the same on a monitor of another
+// scale.
+message WidgetPlacement {
+  int32 x = 1;
+  int32 y = 2;
+  uint32 width_dp = 3;
+  uint32 height_dp = 4;
+}
+
+// One widget placed on the caller's desktop.
+message Widget {
+  int32 widget_id = 1;
+  WidgetProvider provider = 2;
+  // Where its window goes: where the user left it, else a place the service picked.
+  WidgetPlacement placement = 3;
+}
+
+// Asks for the widgets placed on the caller's desktop. The answer is Widgets.
+message ListWidgets {}
+
+// The answer to ListWidgets: the widgets Android has placed, in ID order.
+message Widgets {
+  repeated Widget widgets = 1;
+  // How many widgets the service remembers a place for. Above 0 while Android is stopped,
+  // its widgets come back once it runs.
+  uint32 remembered = 2;
+}
+
+// Watches the caller's widgets. The answer is Widgets, and the connection then carries a
+// WidgetEvent for each change. The client sends nothing more on it.
+message WatchWidgets {}
+
+// What a widget shows now: a PNG image of `width` by `height` pixels with an alpha channel.
+message WidgetFrame {
+  int32 widget_id = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  bytes png = 4;
+}
+
+// A widget was removed.
+message WidgetRemoved {
+  int32 widget_id = 1;
+}
+
+// A change to the caller's widgets, on a connection that watches them.
+message WidgetEvent {
+  oneof body {
+    // A widget was placed, or Android described it again, as when it starts.
+    Widget placed = 1;
+    WidgetFrame frame = 2;
+    WidgetRemoved removed = 3;
+  }
+}
+
+// The user moved or resized a widget's window. The service remembers the placement and
+// tells Android the window's size, which the widget then draws at.
+message PlaceWidget {
+  int32 widget_id = 1;
+  WidgetPlacement placement = 2;
+  // The window's size in its monitor's pixels, and the monitor's density (160 at a scale of
+  // 100%).
+  uint32 width = 3;
+  uint32 height = 4;
+  uint32 density_dpi = 5;
+}
+
+// Pointer input in a widget's window, in the pixels the widget is drawn at.
+message WidgetPointer {
+  int32 widget_id = 1;
+  PointerAction action = 2;
+  uint32 pointer_id = 3;
+  float x = 4;
+  float y = 5;
+}
+
 // Installs an APK in the caller's Android. The service answers at once: Done when it takes an
 // APK of this name and size, or an error. After Done the client sends the APK's `size` bytes
 // in ApkChunk frames, which are not answered, and the service answers the same request id once
@@ -658,6 +778,9 @@ enum ErrorCode {
   // An APK was not taken: it is too large, its name is not an APK's, or it did not arrive
   // whole. The detail says which. An APK Android refused is answered with InstallResult.
   ERROR_CODE_INSTALL_REFUSED = 8;
+  // A widget was not placed: its app offers no such widget, Android did not allow it, or the
+  // user canceled its setup. The detail says which.
+  ERROR_CODE_WIDGET_REFUSED = 9;
 }
 
 message Error {
@@ -694,6 +817,13 @@ message Request {
     WatchNotifications watch_notifications = 23;
     ActOnNotification act_on_notification = 24;
     InstallApk install_apk = 27;
+    ListWidgetProviders list_widget_providers = 28;
+    AddWidget add_widget = 29;
+    RemoveWidget remove_widget = 30;
+    ListWidgets list_widgets = 31;
+    WatchWidgets watch_widgets = 32;
+    PlaceWidget place_widget = 33;
+    WidgetPointer widget_pointer = 34;
   }
 }
 
@@ -710,6 +840,9 @@ message Response {
     InstalledApps installed_apps = 9;
     Settings settings = 10;
     InstallResult install_result = 11;
+    WidgetProviders widget_providers = 12;
+    Widget widget = 13;
+    Widgets widgets = 14;
   }
 }
 
@@ -732,5 +865,6 @@ message Envelope {
     Notification notification = 15;
     NotificationRemoved notification_removed = 16;
     ApkChunk apk_chunk = 14;
+    WidgetEvent widget_event = 17;
   }
 }

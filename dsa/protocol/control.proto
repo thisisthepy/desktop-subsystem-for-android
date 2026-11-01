@@ -624,6 +624,116 @@ message ClockAnswer {
   uint64 guest_mono_ns = 2;
 }
 
+// Host to guest: asks the agent for the widgets the apps in the guest offer. The agent
+// answers with one or more WidgetProviders of the same `request_id`, the last one marked
+// `complete`.
+message ListWidgetProviders {
+  uint32 request_id = 1;
+}
+
+// One widget an app in the guest offers, as a gallery shows it.
+message WidgetProvider {
+  // The provider's component, as `package/class` (ComponentName.flattenToString).
+  string provider = 1;
+  string package_name = 2;
+  // The widget's name, as the app labels it.
+  string label = 3;
+  // The widget's preview, else the app's icon, as a PNG image of at most 160 pixels on a
+  // side and 48 KiB. Empty when there is none, or it is larger.
+  bytes preview_png = 4;
+  // Sizes in density-independent pixels (dp). The minimum is the smallest the widget may be
+  // made; the default is the size it is placed at; a maximum of 0 means no limit.
+  uint32 min_width_dp = 5;
+  uint32 min_height_dp = 6;
+  uint32 default_width_dp = 7;
+  uint32 default_height_dp = 8;
+  uint32 max_width_dp = 9;
+  uint32 max_height_dp = 10;
+  // How the widget may be resized: 1 horizontally, 2 vertically, 3 both, 0 not at all.
+  uint32 resize_mode = 11;
+  // Whether the app asks the user to set the widget up when it is placed.
+  bool needs_configuration = 12;
+}
+
+// Guest to host, from the agent: part of the answer to ListWidgetProviders. Each message is
+// kept under 256 KiB, so a long list comes in several; `complete` marks the last.
+message WidgetProviders {
+  uint32 request_id = 1;
+  repeated WidgetProvider providers = 2;
+  bool complete = 3;
+}
+
+// Host to guest: place a new widget of `provider`. The agent allocates a widget ID, binds it
+// to the provider, runs the provider's configuration activity when it has one (which shows
+// as a task window), and answers with WidgetAdded.
+message AddWidget {
+  uint32 request_id = 1;
+  string provider = 2;
+}
+
+// Guest to host, from the agent: the answer to AddWidget. A `widget_id` above 0 is the new
+// widget, which a WidgetUpdated describes before this; else `error` says, in words a person
+// can act on, why it was not placed.
+message WidgetAdded {
+  uint32 request_id = 1;
+  int32 widget_id = 2;
+  string error = 3;
+}
+
+// Guest to host, from the agent: a placed widget, sent when it is placed and for each one on
+// every connection. Every field is sent each time.
+message WidgetUpdated {
+  int32 widget_id = 1;
+  WidgetProvider provider = 2;
+}
+
+// Guest to host, from the agent: every placed widget, in ID order. Sent on each connection
+// after the WidgetUpdated of each, and whenever one is removed; a widget it no longer names
+// is gone, as when its app was uninstalled.
+message WidgetList {
+  repeated int32 widget_ids = 1;
+}
+
+// Host to guest: the user removed the widget. The agent deletes its widget ID and answers
+// with WidgetList.
+message RemoveWidget {
+  int32 widget_id = 1;
+}
+
+// Host to guest: the size of the widget's host window. The agent draws the widget at `width`
+// by `height` pixels at `density_dpi` (160 at a scale of 100%), and tells the widget's app
+// its size in dp, so a widget with layouts for several sizes picks the one that fits.
+message ResizeWidget {
+  int32 widget_id = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  uint32 density_dpi = 4;
+  uint32 width_dp = 5;
+  uint32 height_dp = 6;
+}
+
+// Guest to host, from the agent: what the widget shows now, as a PNG image of `width` by
+// `height` pixels with an alpha channel. Sent only when it changed, at most a few times a
+// second, and at most once a second while the guest is in Doze. At most 512 KiB: a larger
+// image is not sent.
+message WidgetFrame {
+  int32 widget_id = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  bytes png = 4;
+}
+
+// Host to guest: pointer input in the widget's host window. The agent hands it to the
+// widget's view, so its click actions and lists work as they do on a phone.
+message WidgetPointer {
+  int32 widget_id = 1;
+  PointerAction action = 2;
+  uint32 pointer_id = 3;
+  // The position from the widget's top left corner, in the pixels it is drawn at.
+  float x = 4;
+  float y = 5;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -672,5 +782,15 @@ message Envelope {
     NotificationRemoved notification_removed = 71;
     NotificationClicked notification_clicked = 72;
     NotificationDismissed notification_dismissed = 73;
+    ListWidgetProviders list_widget_providers = 90;
+    WidgetProviders widget_providers = 91;
+    AddWidget add_widget = 92;
+    WidgetAdded widget_added = 93;
+    WidgetUpdated widget_updated = 94;
+    WidgetList widget_list = 95;
+    RemoveWidget remove_widget = 96;
+    ResizeWidget resize_widget = 97;
+    WidgetFrame widget_frame = 98;
+    WidgetPointer widget_pointer = 99;
   }
 }
