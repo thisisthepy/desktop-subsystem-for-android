@@ -53,14 +53,15 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     IDC_ARROW, MINMAXINFO, MSG, SIZE_MINIMIZED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     SWP_NOZORDER, SW_SHOW, SW_SHOWNOACTIVATE, WA_INACTIVE, WINDOWPOS, WINDOW_EX_STYLE,
     WINDOW_STYLE, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND,
-    WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SIZE, WM_TIMER,
-    WM_WINDOWPOSCHANGED, WM_WINDOWPOSCHANGING, WNDCLASSEXW, WS_EX_APPWINDOW,
+    WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_GETOBJECT, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SIZE,
+    WM_TIMER, WM_WINDOWPOSCHANGED, WM_WINDOWPOSCHANGING, WNDCLASSEXW, WS_EX_APPWINDOW,
     WS_EX_NOREDIRECTIONBITMAP, WS_OVERLAPPEDWINDOW,
 };
 
 use crate::compositor::log::{note, CompositorLogger};
 use crate::compositor::present::{Gpu, WindowPresenter};
 
+use super::accessibility::{AccessibilityWindow, ApiConnect, WM_APP_ACCESSIBILITY};
 use super::ime::ImeWindow;
 use super::keys::KeyWindow;
 use super::pointer::PointerWindow;
@@ -157,6 +158,9 @@ pub struct UiSetup {
     pub logger: Option<Arc<CompositorLogger>>,
     /// Where the UI thread lists the windows that are open, in task ID order.
     pub listing: Arc<Mutex<Vec<OpenWindow>>>,
+    /// Dials the service's local API to watch a task's accessibility tree, while a UI
+    /// Automation client reads its window. `None` answers clients with an empty tree.
+    pub accessibility: Option<ApiConnect>,
 }
 
 /// Starts the UI thread. Returns once its message window exists.
@@ -192,6 +196,8 @@ struct WindowData {
     pointer: PointerWindow,
     keys: KeyWindow,
     ime: ImeWindow,
+    /// The task's UI Automation tree, for screen readers and other accessibility clients.
+    accessibility: RefCell<AccessibilityWindow>,
     /// The largest client area Android can draw for the task, as the window manager last
     /// said, for WM_GETMINMAXINFO.
     max_client: Cell<Option<(u32, u32)>>,
@@ -592,7 +598,31 @@ unsafe extern "system" fn task_window_proc(
             }
             0
         }
+        WM_GETOBJECT => {
+            let answered = window_data(hwnd).and_then(|data| {
+                let mut tree = data.accessibility.try_borrow_mut().ok()?;
+                tree.get_object(hwnd as isize, wparam, lparam)
+            });
+            match answered {
+                Some(result) => result,
+                None => DefWindowProcW(hwnd, message, wparam, lparam),
+            }
+        }
+        WM_APP_ACCESSIBILITY => {
+            // Taken out of the tree first: UI Automation may call back into the window.
+            let target =
+                window_data(hwnd).and_then(|data| data.accessibility.try_borrow().ok()?.events());
+            if let Some(target) = target {
+                target.raise(hwnd as isize);
+            }
+            0
+        }
         WM_NCDESTROY => {
+            if let Some(data) = window_data(hwnd) {
+                if let Ok(mut tree) = data.accessibility.try_borrow_mut() {
+                    tree.close(hwnd as isize);
+                }
+            }
             super::pointer::forget_contacts(hwnd);
             let data = SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) as *mut WindowData;
             if !data.is_null() {
@@ -689,6 +719,9 @@ impl Ui {
                         if let Some(hwnd) = self.open.get(&task_id) {
                             if let Some(data) = window_data(*hwnd) {
                                 data.pointer.task_resized((width, height));
+                                if let Ok(mut tree) = data.accessibility.try_borrow_mut() {
+                                    tree.task_resized((width, height));
+                                }
                             }
                             apply_size(*hwnd, (width, height));
                         }
@@ -705,6 +738,9 @@ impl Ui {
                             self.open.get(&task_id).and_then(|hwnd| window_data(*hwnd))
                         {
                             data.pointer.task_resized((width, height));
+                            if let Ok(mut tree) = data.accessibility.try_borrow_mut() {
+                                tree.task_resized((width, height));
+                            }
                             data.max_client.set(max);
                             data.min_client.set(min);
                         }
@@ -734,6 +770,15 @@ impl Ui {
             .collect();
         for presenter in presenters {
             presenter.tick();
+        }
+        // Each window's tree stops being watched once no client reads it.
+        for hwnd in self.open.values() {
+            // SAFETY: a window of this thread.
+            if let Some(data) = unsafe { window_data(*hwnd) } {
+                if let Ok(mut tree) = data.accessibility.try_borrow_mut() {
+                    tree.tick(*hwnd as isize);
+                }
+            }
         }
     }
 
@@ -780,6 +825,12 @@ impl Ui {
             pointer: PointerWindow::new(task_id, size, self.setup.input.clone()),
             keys: KeyWindow::new(task_id, self.setup.input.clone()),
             ime: ImeWindow::new(task_id, self.setup.input.clone()),
+            accessibility: RefCell::new(AccessibilityWindow::new(
+                task_id,
+                size,
+                self.setup.accessibility.clone(),
+                self.setup.logger.clone(),
+            )),
             max_client: Cell::new(None),
             min_client: Cell::new(None),
             reporting: Cell::new(false),

@@ -273,6 +273,40 @@ size end the transfer with the reason in `FileProgress`, and its folder is remov
 the last connection left unfinished is dropped when the agent connects again, and the folders
 of transfers older than an hour are removed whenever a new one begins.
 
+## Accessibility
+
+A screen reader on the host, or any other UI Automation client, reads a task window's
+contents through the agent (`accessibility/AccessibilityExport.kt`).
+
+- **Off unless asked.** The agent's accessibility service
+  (`platform/HostAccessibilityService.kt`) is off while the host watches no task. Android then
+  tells no app that accessibility is on, so no app builds accessibility events and nothing is
+  read: a user who uses no accessibility client pays nothing for it. At boot the agent turns
+  the service off, in case an agent that died left it on.
+- **Turned on without the user.** The first `AccessibilityWatch` with `on` adds the service to
+  the `enabled_accessibility_services` secure setting (the agent holds
+  `WRITE_SECURE_SETTINGS`), keeping any other service there, and sets `accessibility_enabled`.
+  The last watch turned off, or a new connection to the host, removes it again, and
+  `accessibility_enabled` is cleared only when no other service is left. The agent's input
+  method and home activity are other components and are not touched.
+- **Only the watched task.** The service asks for every interactive window, and the agent
+  takes the windows whose task is the watched one (`AccessibilityWindowInfo.getTaskId()`,
+  hidden in the SDK and called by reflection, which a platform app may do). Bounds are sent
+  relative to the task, which are the pixels of its host window.
+- **A full tree, then changes.** Each node gets an ID that lasts for the tree's epoch. A watch
+  starts a new epoch with a full tree; after that a change carries only the nodes that are new
+  or changed, and the IDs of those that are gone. A change waits 100 ms for the rest of its
+  burst, and two trees of a task are never less than 250 ms apart, so at most four go out a
+  second, and a host client still hears of a change well within a second.
+- **Bounded.** A tree holds at most 2000 nodes and about 400 KB, nearest the top first,
+  because one frame reaches the daemon in a binder call of at most 1 MiB. Text is cut at 2000
+  characters, and a password's characters never leave the guest, only how many there are.
+- **Actions.** `AccessibilityAction` names a node by its ID and epoch and asks for a click,
+  long click, new text, a scroll forward or backward, the input focus, the accessibility focus
+  or a selection. The agent performs it as the node's accessibility action, which does not
+  move the pointer, and answers with `AccessibilityActionResult`. An action for an earlier
+  epoch is refused: its ID may name another node now.
+
 ## The home activity
 
 Android always keeps a home activity at the bottom of the display, and gives it input focus

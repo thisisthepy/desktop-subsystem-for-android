@@ -12,6 +12,7 @@
 //! when the window manager closes the connection, which it does when the app's last window
 //! closes.
 
+pub mod accessibility;
 pub mod host_file;
 pub mod ime;
 pub mod keys;
@@ -134,6 +135,10 @@ pub struct HostSetup {
     pub logger: Option<Arc<CompositorLogger>>,
     /// Where the windows that are open are listed, for tests.
     pub listing: Arc<Mutex<Vec<OpenWindow>>>,
+    /// Dials the service's local API to watch a task's accessibility tree while a UI Automation
+    /// client reads its window (see [`accessibility`]). `None` answers clients with an empty
+    /// tree.
+    pub accessibility: Option<accessibility::ApiConnect>,
 }
 
 /// Each task's texture, as the window manager last announced it.
@@ -202,6 +207,7 @@ pub fn run(mut setup: HostSetup) -> Result<(), String> {
         presenters: Arc::clone(&presenters),
         logger: log.clone(),
         listing: Arc::clone(&setup.listing),
+        accessibility: setup.accessibility.clone(),
     })?;
 
     // This thread shows each frame, and the renderer waits for it.
