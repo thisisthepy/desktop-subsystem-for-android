@@ -354,6 +354,22 @@ message DeviceIdle {
   bool idle = 1;
 }
 
+// Text on a clipboard, in either direction. Host to guest: the user's host clipboard got new
+// text, which becomes the guest's primary clip. Guest to host: the guest's primary clip changed
+// to text, which becomes the user's host clipboard. Neither side sends back what it was just
+// given. A sender drops text longer than 256 KiB of UTF-8 instead of cutting it, so a paste is
+// either the whole text or nothing.
+message ClipboardText {
+  string text = 1;
+}
+
+// Host to guest: whether the clipboards are shared. The agent takes them to be shared when it
+// connects; the host says so when they are not, and on every change after that. While they
+// are not, the agent sends no ClipboardText and ignores the host's.
+message ClipboardSharing {
+  bool on = 1;
+}
+
 // Host to guest: asks the agent for a GuestMemory report now, instead of at its next
 // periodic one.
 message RequestGuestMemory {}
@@ -440,6 +456,8 @@ message Envelope {
     InstalledApps installed_apps = 23;
     AgentConnected agent_connected = 24;
     GuestBoot guest_boot = 25;
+    ClipboardText clipboard_text = 26;
+    ClipboardSharing clipboard_sharing = 27;
     ScreenState screen_state = 40;
     PowerState power_state = 41;
     DeviceIdle device_idle = 42;

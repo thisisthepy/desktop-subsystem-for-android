@@ -225,6 +225,12 @@ public final class VectorsTest {
         cases.put("device_idle", Envelope.newBuilder()
                 .setDeviceIdle(DeviceIdle.newBuilder().setIdle(true))
                 .build());
+        cases.put("clipboard_text", Envelope.newBuilder()
+                .setClipboardText(ClipboardText.newBuilder().setText("hello \uc548\ub155"))
+                .build());
+        cases.put("clipboard_sharing_off", Envelope.newBuilder()
+                .setClipboardSharing(ClipboardSharing.newBuilder().setOn(false))
+                .build());
         cases.put("agent_connected", Envelope.newBuilder()
                 .setAgentConnected(AgentConnected.getDefaultInstance())
                 .build());

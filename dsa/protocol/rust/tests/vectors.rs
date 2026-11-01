@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use dsa_protocol::control::{
-    envelope::Body, AgentConnected, AppInfo, AuthChallenge, AuthProof, CloseTask, DeviceIdle,
+    envelope::Body, AgentConnected, AppInfo, AuthChallenge, AuthProof, ClipboardSharing,
+    ClipboardText, CloseTask, DeviceIdle,
     Envelope, GuestBoot, GuestMemory, Hello, HelloAccepted, HelloRejected, ImeCommit,
     ImeComposition, ImeCursor, KeyAction, KeyEvent, LaunchApp, PointerAction, PointerEvent,
     PointerTool, PowerState, ProcessMemory, Rect, RejectReason, RequestGuestMemory, ResizeTask,
@@ -313,6 +314,16 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
         (
             "device_idle",
             wrap(Body::DeviceIdle(DeviceIdle { idle: true })),
+        ),
+        (
+            "clipboard_text",
+            wrap(Body::ClipboardText(ClipboardText {
+                text: "hello \u{c548}\u{b155}".into(),
+            })),
+        ),
+        (
+            "clipboard_sharing_off",
+            wrap(Body::ClipboardSharing(ClipboardSharing { on: false })),
         ),
         (
             "agent_connected",
