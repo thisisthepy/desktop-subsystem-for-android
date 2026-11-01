@@ -7,6 +7,8 @@
 //! dsa freeze
 //! dsa update [--wait]
 //! dsa launch <package>
+//! dsa open <file>
+//! dsa share <file>
 //! dsa tasks
 //! dsa settings [set <name> <value>]
 //! dsa memory
@@ -19,12 +21,18 @@
 //! `dsa launch` starts an app in a window of its own, named by its package (such as
 //! `com.android.settings`). `dsa tasks` lists the app tasks Android shows as windows.
 //!
+//! `dsa open` sends a file from this computer to Android, which asks which app opens it; that
+//! app shows in a window of its own. `dsa share` does the same for sharing the file with an
+//! app. Android is started first when it is not running. Files up to 64 MiB can be sent.
+//!
 //! `dsa freeze` stops every process of the Android until one of its windows is shown
 //! again. Its notifications, alarms and widgets stop with it.
 //!
 //! `dsa settings` shows the settings the service keeps: the GPU the window manager renders on
 //! (`render-gpu`: `display`, `integrated`, `discrete` or part of a GPU's name), whether
-//! Android may be frozen when idle (`freeze`), and whether DSA (`program-updates`) and the
+//! Android may be frozen when idle (`freeze`), whether web links apps in Android open go to
+//! apps in Android instead of the default browser (`links-in-android`, off by default), and
+//! whether DSA (`program-updates`) and the
 //! Android image (`image-updates`) are updated. `dsa settings set <name> <value>` changes one;
 //! the switches take `on` or `off`. `dsa memory` shows how much memory the user's Android
 //! takes, on the host and inside Android. `dsa gpus` lists the GPUs of this machine, for
@@ -52,6 +60,7 @@ use std::fmt::Write as _;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_host_core::files::{FileAction, FileTransfer};
 use dsa_host_core::host_api::{ClientError, HostApiClient, SettingsReport, Status, TaskList};
 use dsa_host_core::memory::MemorySnapshot;
 use dsa_host_core::session::SessionState;
@@ -59,6 +68,7 @@ use dsa_transport::Connector;
 use serde_json::{json, Value};
 
 pub const USAGE: &str = "usage: dsa <status | start | stop | freeze | update | launch <package> | \
+     open <file> | share <file> | \
      tasks | settings [set <name> <value>] | memory | gpus> [--wait] [--timeout <seconds>] \
      [--json] [--pipe <name> | --socket <path>]";
 
@@ -73,6 +83,10 @@ pub enum Command {
     Update,
     /// Start an app in a window of its own; the package is in [`Invocation::package`].
     Launch,
+    /// Open a file in an app in Android; the file is in [`Invocation::file`].
+    Open,
+    /// Share a file with an app in Android; the file is in [`Invocation::file`].
+    Share,
     /// List the app tasks Android shows as windows.
     Tasks,
     /// Show the settings, or change one ([`Invocation::change`]).
@@ -88,6 +102,7 @@ pub enum Command {
 pub enum Change {
     RenderGpu(String),
     Freeze(bool),
+    LinksInAndroid(bool),
     ProgramUpdates(bool),
     ImageUpdates(bool),
 }
@@ -101,12 +116,14 @@ impl Change {
         };
         match name {
             "render-gpu" => Ok(Change::RenderGpu(value.to_string())),
-            "freeze" => switch().map(Change::Freeze),
+           "status" | "start" | "stop" | "freeze" | "update" | "launch" | "open" | "share"
+            | "tasks" | "settings"=> switch().map(Change::Freeze),
+            "links-in-android" => switch().map(Change::LinksInAndroid),
             "program-updates" => switch().map(Change::ProgramUpdates),
             "image-updates" => switch().map(Change::ImageUpdates),
             _ => Err(format!(
                 "there is no setting {name:?}; the settings are render-gpu, freeze, \
-                 program-updates and image-updates"
+                 links-in-android, program-updates and image-updates"
             )),
         }
     }
@@ -166,6 +183,8 @@ pub struct Invocation {
     pub endpoint: Option<String>,
     /// The app to launch, for `dsa launch`.
     pub package: Option<String>,
+    /// The file to open or share, for `dsa open` and `dsa share`.
+    pub file: Option<std::path::PathBuf>,
     /// The setting to change, for `dsa settings set`.
     pub change: Option<Change>,
     /// Print the answer as JSON.
@@ -188,13 +207,14 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut timeout = None;
     let mut endpoint = None;
     let mut package = None;
+    let mut file = None;
     let mut change = None;
     let mut json = false;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "status" | "start" | "stop" | "freeze" | "update" | "launch" | "tasks" | "settings"
-            | "memory" | "gpus"
+            "status" | "start" | "stop" | "freeze" | "update" | "launch" | "open" | "share"
+            | "tasks" | "settings" | "memory" | "gpus"
                 if command.is_none() =>
             {
                 command = Some(match arg.as_str() {
@@ -203,6 +223,8 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                     "freeze" => Command::Freeze,
                     "update" => Command::Update,
                     "launch" => Command::Launch,
+                    "open" => Command::Open,
+                    "share" => Command::Share,
                     "tasks" => Command::Tasks,
                     "settings" => Command::Settings,
                     "memory" => Command::Memory,
@@ -232,6 +254,12 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                 }
                 package = Some(name.to_string());
             }
+            name if matches!(command, Some(Command::Open | Command::Share))
+                && file.is_none()
+                && !name.starts_with('-') =>
+            {
+                file = Some(std::path::PathBuf::from(name));
+            }
             "--wait" => wait = true,
             "--timeout" => {
                 let value = args.next().ok_or("--timeout needs a number of seconds")?;
@@ -248,6 +276,12 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         }
     }
     let command = command.ok_or(USAGE)?;
+    if matches!(command, Command::Open | Command::Share) && file.is_none() {
+        return Err(format!(
+            "dsa {} needs the file to send to Android\n{USAGE}",
+            if command == Command::Open { "open" } else { "share" }
+        ));
+    }
     if command == Command::Launch && package.is_none() {
         return Err(format!(
             "dsa launch needs the package of the app to start, such as com.android.settings\n\
@@ -264,6 +298,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         }),
         endpoint,
         package,
+        file,
         change,
         json,
     })
@@ -284,6 +319,7 @@ pub fn settings_json(report: &SettingsReport) -> Value {
     json!({
         "render_gpu": report.settings.render_gpu,
         "freeze": report.settings.freeze,
+        "links_in_android": report.settings.links_in_android,
         "program_updates": report.settings.program_updates,
         "image_updates": report.settings.image_updates,
         "program_updates_available": report.facts.program_updates_available,
@@ -315,6 +351,14 @@ pub fn describe_settings(report: &SettingsReport) -> String {
     let mut lines = vec![
         format!("Render GPU: {}", settings.render_gpu),
         format!("Freeze when idle: {}", on_off(settings.freeze)),
+        format!(
+            "Web links open in: {}",
+            if settings.links_in_android {
+                "Android apps"
+            } else {
+                "the default browser"
+            }
+        ),
         format!(
             "Program updates: {}",
             available(settings.program_updates, facts.program_updates_available)
@@ -423,6 +467,7 @@ fn settings(invocation: &Invocation, client: &mut HostApiClient) -> Result<Strin
         match change {
             Change::RenderGpu(value) => wanted.render_gpu = value.clone(),
             Change::Freeze(on) => wanted.freeze = *on,
+            Change::LinksInAndroid(on) => wanted.links_in_android = *on,
             Change::ProgramUpdates(on) => wanted.program_updates = *on,
             Change::ImageUpdates(on) => wanted.image_updates = *on,
         }
@@ -586,6 +631,68 @@ fn update(
     }
 }
 
+/// How long `dsa open` and `dsa share` wait for Android to start when it is not running:
+/// as long as `dsa start --wait`.
+const OPEN_START_TIMEOUT: Duration = START_TIMEOUT;
+
+/// `dsa open` and `dsa share`: reads the file, makes sure Android runs (and, on Windows, the
+/// window manager that shows the app Android opens it in), then sends the file.
+fn open_file(
+    invocation: &Invocation,
+    mut client: HostApiClient,
+    connector: &mut dyn Connector,
+) -> Result<String, String> {
+    let path = invocation.file.as_deref().unwrap_or(std::path::Path::new(""));
+    let action = if invocation.command == Command::Share {
+        FileAction::Send
+    } else {
+        FileAction::View
+    };
+    // A file that cannot be sent is refused before Android is started for it.
+    let file = FileTransfer::read(path, action)?;
+    #[cfg(windows)]
+    if invocation.endpoint.is_none() {
+        ensure_window_manager()?;
+    }
+    client
+        .ensure_running(OPEN_START_TIMEOUT, Duration::from_millis(250), |_| {})
+        .map_err(|e| format!("Android did not start: {e}"))?;
+    drop(client);
+    connect(connector, None, false, Duration::from_secs(10))?
+        .open_file(&file)
+        .map_err(|e| e.to_string())?;
+    Ok(format!(
+        "Android asks which app to {} {} with",
+        if action == FileAction::Send {
+            "share"
+        } else {
+            "open"
+        },
+        file.name
+    ))
+}
+
+/// Starts this session's window manager when it is not running, as opening an app does.
+#[cfg(windows)]
+fn ensure_window_manager() -> Result<(), String> {
+    use dsa_host_windows::app_window::launch::{
+        ensure_window_manager, pipe_exists, run_program, window_manager_path, POLL,
+        START_WINDOW_MANAGER,
+    };
+    use dsa_host_windows::compositor::{current_session, hosts::pipe_name};
+    let pipe = pipe_name(current_session());
+    let program = std::env::current_exe().ok();
+    ensure_window_manager(
+        || pipe_exists(&pipe),
+        || match window_manager_path(program.as_deref()) {
+            Some(window_manager) => run_program(&window_manager, ""),
+            None => Err("the DSA Window Manager is not installed".into()),
+        },
+        START_WINDOW_MANAGER,
+        POLL,
+    )
+}
+
 /// Runs `invocation` against the service `connector` reaches. Returns what to print.
 pub fn run(invocation: &Invocation, connector: &mut dyn Connector) -> Result<String, String> {
     let starter = default_starter(invocation.endpoint.as_deref());
@@ -627,6 +734,9 @@ pub fn run_with_starter(
             let package = invocation.package.as_deref().unwrap_or_default();
             client.launch_app(package).map_err(|e| e.to_string())?;
             return Ok(format!("Launching {package}"));
+        }
+        Command::Open | Command::Share => {
+            return open_file(invocation, client, connector);
         }
         Command::Tasks => {
             let list = client.tasks().map_err(|e| e.to_string())?;

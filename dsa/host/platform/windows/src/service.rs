@@ -440,12 +440,13 @@ where
         };
         match &android {
             // Freezing is the user's choice, kept with their settings; off unless they chose it.
-            Ok(android) => android.freeze_when_idle(
-                factory_store
-                    .get(sid)
-                    .map(|settings| settings.freeze)
-                    .unwrap_or(false),
-            ),
+            // So is opening web links in Android rather than the browser; off unless they chose
+            // it.
+            Ok(android) => {
+                let settings = factory_store.get(sid).ok();
+                android.freeze_when_idle(settings.as_ref().is_some_and(|s| s.freeze));
+                android.links_in_android(settings.as_ref().is_some_and(|s| s.links_in_android));
+            }
             Err(why) => eprintln!("{factory_build}: no Android for {sid}: {why}"),
         }
         // Tells about updates of DSA itself, and holds starts back while setup runs.

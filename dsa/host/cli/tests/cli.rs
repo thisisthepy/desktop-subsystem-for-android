@@ -798,3 +798,99 @@ fn nfr1_dsa_memory_says_what_it_knows_of_the_host_and_android() {
     );
     assert!(text.contains("Android: no report yet"), "{text}");
 }
+
+fn scratch_file(name: &str, content: &[u8]) -> std::path::PathBuf {
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("cli-files-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    std::fs::write(&path, content).unwrap();
+    path
+}
+
+#[test]
+fn fr9_dsa_open_and_dsa_share_are_parsed() {
+    use dsa_cli::Change;
+    let open = parse(&args("open C:\\Users\\me\\photo.jpg")).unwrap();
+    assert_eq!(open.command, Cmd::Open);
+    assert_eq!(
+        open.file.as_deref(),
+        Some(std::path::Path::new("C:\\Users\\me\\photo.jpg"))
+    );
+    assert_eq!(parse(&args("share notes.txt")).unwrap().command, Cmd::Share);
+    let missing = parse(&args("open")).unwrap_err();
+    assert!(missing.contains("file"), "{missing}");
+    assert!(parse(&args("share a.txt b.txt")).is_err(), "one file at a time");
+    assert_eq!(
+        parse(&args("settings set links-in-android on"))
+            .unwrap()
+            .change,
+        Some(Change::LinksInAndroid(true))
+    );
+}
+
+#[test]
+fn fr9_dsa_open_sends_the_file_to_the_users_android() {
+    use dsa_host_core::files::FileAction;
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let path = scratch_file("report.pdf", b"%PDF-1.7 hello");
+
+    // Android is started first when it is not running.
+    let output = dsa(&endpoint, &format!("open {}", path.display()));
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("report.pdf"), "{}", stdout(&output));
+    let output = dsa(&endpoint, &format!("share {}", path.display()));
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    let files = androids.of(&user).unwrap().files.lock().unwrap().clone();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0].name, "report.pdf");
+    assert_eq!(files[0].content, b"%PDF-1.7 hello");
+    assert_eq!(files[0].action, FileAction::View);
+    assert_eq!(files[1].action, FileAction::Send);
+}
+
+#[test]
+fn fr9_dsa_open_refuses_a_file_larger_than_the_limit() {
+    use dsa_host_core::files::MAX_FILE_BYTES;
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let path = scratch_file("movie.mkv", b"");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_len(MAX_FILE_BYTES + 1)
+        .unwrap();
+    let output = dsa(&endpoint, &format!("open {}", path.display()));
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stderr(&output).contains("64 MiB"), "{}", stderr(&output));
+    assert!(
+        androids
+            .of(&user)
+            .is_none_or(|android| android.files.lock().unwrap().is_empty()),
+        "nothing was sent"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn fr9_dsa_settings_turns_links_in_android_on_and_off() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let settings = json_of(&dsa(&endpoint, "settings --json"));
+    assert_eq!(settings["links_in_android"], false);
+    let changed = json_of(&dsa(&endpoint, "settings set links-in-android on --json"));
+    assert_eq!(changed["links_in_android"], true);
+    let text = dsa(&endpoint, "settings");
+    assert!(
+        stdout(&text).contains("Web links open in: Android apps"),
+        "{}",
+        stdout(&text)
+    );
+    let changed = json_of(&dsa(&endpoint, "settings set links-in-android off --json"));
+    assert_eq!(changed["links_in_android"], false);
+}

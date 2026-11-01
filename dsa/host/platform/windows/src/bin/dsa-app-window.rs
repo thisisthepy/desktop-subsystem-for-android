@@ -42,6 +42,72 @@ fn main() -> std::process::ExitCode {
     dsa_host_windows::compositor::log::input_trace_to(logger.clone());
     let args: Vec<String> = std::env::args().skip(1).collect();
     let program = std::env::current_exe().unwrap_or_default();
+    // Opened from a file's context menu in Explorer: the file goes to Android, which asks the
+    // user which app opens it.
+    if let Some((path, action)) = dsa_host_windows::app_window::host_file::file_request(&args) {
+        use dsa_host_windows::app_window::host_file;
+        const TITLE: &str = "Desktop Subsystem for Android";
+        let window_manager_pipe = pipe_name(current_session());
+        let api_pipe = dsa_host_windows::host_config::DEFAULT_PIPE_NAME;
+        let mut starting = None;
+        let sent = host_file::read(&path, action).and_then(|file| {
+            prepare_app(
+                || {
+                    ensure_window_manager(
+                        || pipe_exists(&window_manager_pipe),
+                        || match window_manager_path(Some(program.as_path())) {
+                            Some(window_manager) => run_program(&window_manager, ""),
+                            None => Err("the DSA Window Manager is not installed".into()),
+                        },
+                        START_WINDOW_MANAGER,
+                        POLL,
+                    )
+                },
+                || {
+                    ensure_android(
+                        &mut NamedPipeConnector {
+                            name: api_pipe.into(),
+                        },
+                        || starting = Some(StartingWindow::show(TITLE)),
+                    )
+                },
+            )?;
+            let sent = host_file::send(
+                &mut NamedPipeConnector {
+                    name: api_pipe.into(),
+                },
+                &file,
+            );
+            drop(starting.take());
+            sent
+        });
+        drop(starting);
+        return match sent {
+            Ok(()) => {
+                note(
+                    logger.as_deref(),
+                    &format!("asked Android to {action} {}", path.display()),
+                );
+                std::process::ExitCode::SUCCESS
+            }
+            Err(why) => {
+                note(
+                    logger.as_deref(),
+                    &format!("{}: not sent to Android: {why}", path.display()),
+                );
+                tell_user(
+                    TITLE,
+                    &format!(
+                        "{} could not be opened in Android. {why}.",
+                        path.file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.display().to_string())
+                    ),
+                );
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     let Some(package) = package_of(&program, &args) else {
         note(
             logger.as_deref(),
