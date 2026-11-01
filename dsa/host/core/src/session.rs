@@ -40,6 +40,8 @@
 //! - The host's power ([`Session::set_power`]) goes to the guest whenever it changes and
 //!   each time the agent connects.
 //!
+//! While the guest traces input ([`Session::set_clock_trace`]), the session also pairs the
+//! host's clock with the guest's once a second (see [`crate::clock_trace`]).
 //! The session also keeps the host's and the guest's text clipboards in step while sharing is
 //! on ([`Session::share_clipboard`], on by default). Text the host copies
 //! ([`Session::host_clipboard`]) goes to the guest while it is `Active` or `Dozing`, and the
@@ -66,6 +68,7 @@ use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 
 use crate::apk::{self, InstallOutcome};
 use crate::clipboard;
+use crate::clock_trace::ClockTrace;
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::PointerEvent;
 use crate::keys::KeyEvent;
@@ -462,6 +465,8 @@ struct Shared {
     guest_memory: Mutex<Option<(GuestMemory, Instant)>>,
     /// What keeps the guest from being ready, while something does.
     problem: Mutex<Option<BootProblem>>,
+    /// How to pair the host's clock with the guest's, when the platform traces input.
+    clock_trace: Mutex<Option<ClockTrace>>,
     /// Who hears of the text the guest copies.
     clipboard_watchers: Mutex<Vec<Sender<String>>>,
     /// The install under way, by its transfer ID, with who waits for the agent's word on it.
@@ -629,6 +634,7 @@ impl Session {
             sender: Mutex::new(None),
             guest_memory: Mutex::new(None),
             problem: Mutex::new(None),
+            clock_trace: Mutex::new(None),
             clipboard_watchers: Mutex::new(Vec::new()),
             installs: Mutex::new(HashMap::new()),
             last_install: AtomicU32::new(0),
@@ -664,6 +670,7 @@ impl Session {
             guest_is_idle: false,
             stall_doze: None,
             frozen_at: None,
+            next_clock_probe: Instant::now(),
             clipboard_sharing: true,
             host_clipboard: None,
             clipboard_last: None,
@@ -679,6 +686,17 @@ impl Session {
             worker: Some(worker),
             freeze_delay,
         }
+    }
+
+    /// Pairs the host's clock with the guest's while the guest runs and `trace` says the
+    /// input trace is on: a probe goes to the guest once a second, and each answer becomes a
+    /// `clock` line. `None` stops it.
+    pub fn set_clock_trace(&self, trace: Option<ClockTrace>) {
+        *self
+            .shared
+            .clock_trace
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = trace;
     }
 
     /// Freezes the guest after `after` in Doze from now on, or never with `None`, as when the
@@ -1164,6 +1182,8 @@ struct Worker {
     /// When the guest was frozen, while it is. Nothing runs in it then, so that time does not
     /// count against it.
     frozen_at: Option<Instant>,
+    /// When the next clock probe goes to the guest, while the input trace is on.
+    next_clock_probe: Instant,
     /// Whether the clipboards are shared, as the user last said.
     clipboard_sharing: bool,
     /// The host's latest clipboard text while sharing is on, for a guest that gets ready later.
@@ -1389,7 +1409,7 @@ impl Worker {
             },
         };
         if let Err(error) = result {
-            eprintln!("control channel: could not tell the guest of its screen or power: {error}");
+            eprintln!("control channel: a message to the guest did not go out: {error}");
         }
     }
 
@@ -1916,6 +1936,7 @@ impl Worker {
                 return;
             }
             self.tick_lifecycle();
+            self.tick_clock();
             self.offer_host_clipboard();
             let Some(connection) = self.connection.as_mut() else {
                 self.stop(StopReason::ChannelLost("no connection".into()));
@@ -1942,6 +1963,43 @@ impl Worker {
                     return;
                 }
             }
+        }
+    }
+
+    /// Sends the guest's daemon a clock probe when one is due and the input trace is on. A
+    /// frozen guest cannot answer, so it is not asked.
+    fn tick_clock(&mut self) {
+        let trace = self
+            .shared
+            .clock_trace
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let Some(trace) = trace else {
+            return;
+        };
+        let now = Instant::now();
+        if !trace.is_on() || now < self.next_clock_probe || self.state() == SessionState::Frozen {
+            return;
+        }
+        self.next_clock_probe = now + trace.interval;
+        let host_sent_ns = trace.clock.now().as_nanos() as u64;
+        self.send_body(Body::ClockProbe(control::ClockProbe { host_sent_ns }));
+    }
+
+    /// The guest's daemon answered a clock probe: logs the pairing.
+    fn clock_answered(&mut self, answer: control::ClockAnswer) {
+        let trace = self
+            .shared
+            .clock_trace
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(trace) = trace {
+            trace.answered(
+                Duration::from_nanos(answer.host_sent_ns),
+                Duration::from_nanos(answer.guest_mono_ns),
+            );
         }
     }
 
@@ -2033,6 +2091,7 @@ impl Worker {
                 InstallEvent::Done(InstallOutcome::from_control(&result)),
             ),
             Some(Body::GuestBoot(boot)) => self.guest_boot(boot),
+            Some(Body::ClockAnswer(answer)) => self.clock_answered(answer),
             Some(Body::AgentConnected(_)) => {
                 eprintln!("control channel: dropping a message that stops at the guest's daemon");
             }
@@ -2050,7 +2109,8 @@ impl Worker {
             | Some(Body::InstallApk(_))
             | Some(Body::ApkChunk(_))
             | Some(Body::CancelInstall(_))
-            | Some(Body::RequestGuestMemory(_)) => {
+            | Some(Body::RequestGuestMemory(_))
+            | Some(Body::ClockProbe(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
             }
             None => {

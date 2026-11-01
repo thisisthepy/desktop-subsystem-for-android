@@ -294,6 +294,28 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.ClipboardSharing getClipboardSharing();
 
   /**
+   * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+   * @return Whether the clockProbe field is set.
+   */
+  boolean hasClockProbe();
+  /**
+   * <code>.dsa.control.v1.ClockProbe clock_probe = 28;</code>
+   * @return The clockProbe.
+   */
+  io.github.thisisthepy.dsa.control.v1.ClockProbe getClockProbe();
+
+  /**
+   * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+   * @return Whether the clockAnswer field is set.
+   */
+  boolean hasClockAnswer();
+  /**
+   * <code>.dsa.control.v1.ClockAnswer clock_answer = 29;</code>
+   * @return The clockAnswer.
+   */
+  io.github.thisisthepy.dsa.control.v1.ClockAnswer getClockAnswer();
+
+  /**
    * <code>.dsa.control.v1.ScreenState screen_state = 40;</code>
    * @return Whether the screenState field is set.
    */

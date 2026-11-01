@@ -46,6 +46,7 @@ use dsa_host_core::window_manager::WindowManagerKeeper;
 use dsa_transport::Listener;
 
 use crate::android_vm::AndroidVmLauncher;
+use crate::compositor::log::PerformanceCounterClock;
 use crate::guest_communication_services::register_graphics_service_guids;
 use crate::guid::Guid;
 use crate::host_config::{local_app_data, HostConfig};
@@ -60,6 +61,7 @@ use crate::user_disk::{bring_disk_to, prepare_user_data_disk, prepare_user_disk_
 use crate::vm::AndroidVmConfig;
 use crate::vm_listener::VmBoundListener;
 use crate::window_manager::UserWindowManager;
+use dsa_host_core::clock_trace::ClockTrace;
 
 /// What the service shares between users when it updates the image.
 #[derive(Clone)]
@@ -81,6 +83,16 @@ fn follow_monitors(vm: &mut AndroidVmConfig, sid: &str) {
     }
 }
 
+/// The kernel command line setting that turns the guest's input trace on.
+pub const GUEST_INPUT_TRACE: &str = "androidboot.hardware.dsa_input_trace=1";
+
+/// Whether a guest booted with `cmdline` writes the input trace.
+pub fn guest_traces_input(cmdline: &str) -> bool {
+    cmdline
+        .split_whitespace()
+        .any(|word| word == GUEST_INPUT_TRACE)
+}
+
 /// The user's Android: their data disk, VM and session, created on their first request.
 /// With `power`, the session hears the computer's power from it.
 pub fn create_user_android(
@@ -100,6 +112,9 @@ pub fn create_user_android(
     let disk_size_gb = user.data_disk_size_gb;
     let console_log = user.console_log.clone();
     let owner = sid.to_string();
+    // Set each time the guest's configuration is built, from the command line it boots with.
+    let trace_on = Arc::new(AtomicBool::new(false));
+    let traced = Arc::clone(&trace_on);
     let launcher = match updates {
         None => {
             let base = user.config;
@@ -108,6 +123,10 @@ pub fn create_user_android(
                 Box::new(move || {
                     let mut vm = base.clone();
                     follow_monitors(&mut vm, &owner);
+                    traced.store(
+                        guest_traces_input(&vm.full_kernel_cmdline()),
+                        Ordering::Relaxed,
+                    );
                     Ok(vm)
                 }),
             )
@@ -134,6 +153,10 @@ pub fn create_user_android(
                     vm.system_image = files.system_image;
                     vm.image_version = Some(current.version.clone());
                     follow_monitors(&mut vm, &owner);
+                    traced.store(
+                        guest_traces_input(&vm.full_kernel_cmdline()),
+                        Ordering::Relaxed,
+                    );
                     Ok(vm)
                 }),
             )
@@ -156,6 +179,13 @@ pub fn create_user_android(
     let session_config = config.session_config();
     let handshake = ControlHandshake::new(build, session_config.connect_timeout);
     let session = Session::new(launcher, Box::new(listener), handshake, session_config);
+    // The clock lines go to the service's log, beside the guest's console log.
+    let user_name = sid.to_string();
+    session.set_clock_trace(Some(ClockTrace::new(
+        trace_on,
+        Arc::new(PerformanceCounterClock),
+        Arc::new(move |line: &str| eprintln!("{user_name}: {line}")),
+    )));
     let session = Arc::new(session);
     if let Some(power) = power {
         power.attach(&session);
@@ -532,5 +562,21 @@ where
                 .collect::<Vec<_>>()
                 .join(", ")
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fr5_the_clock_is_paired_only_for_a_guest_booted_with_the_input_trace() {
+        assert!(guest_traces_input(
+            "androidboot.hardware=dsa androidboot.hardware.dsa_input_trace=1"
+        ));
+        assert!(!guest_traces_input("androidboot.hardware=dsa"));
+        assert!(!guest_traces_input(
+            "androidboot.hardware.dsa_input_trace=0"
+        ));
     }
 }

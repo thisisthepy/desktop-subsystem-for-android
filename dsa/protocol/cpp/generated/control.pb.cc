@@ -487,79 +487,33 @@ struct GuestBootDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GuestBootDefaultTypeInternal _GuestBoot_default_instance_;
-PROTOBUF_CONSTEXPR InstallApk::InstallApk(
+PROTOBUF_CONSTEXPR ClockProbe::ClockProbe(
     ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_.name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.size_)*/uint64_t{0u}
-  , /*decltype(_impl_.transfer_id_)*/0u
+    /*decltype(_impl_.host_sent_ns_)*/uint64_t{0u}
   , /*decltype(_impl_._cached_size_)*/{}} {}
-struct InstallApkDefaultTypeInternal {
-  PROTOBUF_CONSTEXPR InstallApkDefaultTypeInternal()
+struct ClockProbeDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ClockProbeDefaultTypeInternal()
       : _instance(::_pbi::ConstantInitialized{}) {}
-  ~InstallApkDefaultTypeInternal() {}
+  ~ClockProbeDefaultTypeInternal() {}
   union {
-    InstallApk _instance;
+    ClockProbe _instance;
   };
 };
-PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 InstallApkDefaultTypeInternal _InstallApk_default_instance_;
-PROTOBUF_CONSTEXPR ApkChunk::ApkChunk(
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ClockProbeDefaultTypeInternal _ClockProbe_default_instance_;
+PROTOBUF_CONSTEXPR ClockAnswer::ClockAnswer(
     ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_.data_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.offset_)*/uint64_t{0u}
-  , /*decltype(_impl_.transfer_id_)*/0u
+    /*decltype(_impl_.host_sent_ns_)*/uint64_t{0u}
+  , /*decltype(_impl_.guest_mono_ns_)*/uint64_t{0u}
   , /*decltype(_impl_._cached_size_)*/{}} {}
-struct ApkChunkDefaultTypeInternal {
-  PROTOBUF_CONSTEXPR ApkChunkDefaultTypeInternal()
+struct ClockAnswerDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ClockAnswerDefaultTypeInternal()
       : _instance(::_pbi::ConstantInitialized{}) {}
-  ~ApkChunkDefaultTypeInternal() {}
+  ~ClockAnswerDefaultTypeInternal() {}
   union {
-    ApkChunk _instance;
+    ClockAnswer _instance;
   };
 };
-PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ApkChunkDefaultTypeInternal _ApkChunk_default_instance_;
-PROTOBUF_CONSTEXPR CancelInstall::CancelInstall(
-    ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_.transfer_id_)*/0u
-  , /*decltype(_impl_._cached_size_)*/{}} {}
-struct CancelInstallDefaultTypeInternal {
-  PROTOBUF_CONSTEXPR CancelInstallDefaultTypeInternal()
-      : _instance(::_pbi::ConstantInitialized{}) {}
-  ~CancelInstallDefaultTypeInternal() {}
-  union {
-    CancelInstall _instance;
-  };
-};
-PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 CancelInstallDefaultTypeInternal _CancelInstall_default_instance_;
-PROTOBUF_CONSTEXPR InstallProgress::InstallProgress(
-    ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_.received_)*/uint64_t{0u}
-  , /*decltype(_impl_.transfer_id_)*/0u
-  , /*decltype(_impl_._cached_size_)*/{}} {}
-struct InstallProgressDefaultTypeInternal {
-  PROTOBUF_CONSTEXPR InstallProgressDefaultTypeInternal()
-      : _instance(::_pbi::ConstantInitialized{}) {}
-  ~InstallProgressDefaultTypeInternal() {}
-  union {
-    InstallProgress _instance;
-  };
-};
-PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 InstallProgressDefaultTypeInternal _InstallProgress_default_instance_;
-PROTOBUF_CONSTEXPR InstallResult::InstallResult(
-    ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_.package_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.message_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.transfer_id_)*/0u
-  , /*decltype(_impl_.status_)*/0
-  , /*decltype(_impl_._cached_size_)*/{}} {}
-struct InstallResultDefaultTypeInternal {
-  PROTOBUF_CONSTEXPR InstallResultDefaultTypeInternal()
-      : _instance(::_pbi::ConstantInitialized{}) {}
-  ~InstallResultDefaultTypeInternal() {}
-  union {
-    InstallResult _instance;
-  };
-};
-PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 InstallResultDefaultTypeInternal _InstallResult_default_instance_;
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ClockAnswerDefaultTypeInternal _ClockAnswer_default_instance_;
 PROTOBUF_CONSTEXPR Envelope::Envelope(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.body_)*/{}
@@ -943,85 +897,6 @@ bool KeyAction_Parse(
       KeyAction_entries, 3, name, &int_value);
   if (success) {
     *value = static_cast<KeyAction>(int_value);
-  }
-  return success;
-}
-bool InstallStatus_IsValid(int value) {
-  switch (value) {
-    case 0:
-    case 1:
-    case 2:
-    case 3:
-    case 4:
-    case 5:
-    case 6:
-    case 7:
-    case 8:
-      return true;
-    default:
-      return false;
-  }
-}
-
-static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> InstallStatus_strings[9] = {};
-
-static const char InstallStatus_names[] =
-  "INSTALL_STATUS_BLOCKED"
-  "INSTALL_STATUS_CONFLICTING_SIGNATURE"
-  "INSTALL_STATUS_DOWNGRADE"
-  "INSTALL_STATUS_INCOMPATIBLE"
-  "INSTALL_STATUS_INSUFFICIENT_STORAGE"
-  "INSTALL_STATUS_INVALID_APK"
-  "INSTALL_STATUS_OTHER"
-  "INSTALL_STATUS_SUCCESS"
-  "INSTALL_STATUS_UNSPECIFIED";
-
-static const ::PROTOBUF_NAMESPACE_ID::internal::EnumEntry InstallStatus_entries[] = {
-  { {InstallStatus_names + 0, 22}, 7 },
-  { {InstallStatus_names + 22, 36}, 3 },
-  { {InstallStatus_names + 58, 24}, 6 },
-  { {InstallStatus_names + 82, 27}, 2 },
-  { {InstallStatus_names + 109, 35}, 5 },
-  { {InstallStatus_names + 144, 26}, 4 },
-  { {InstallStatus_names + 170, 20}, 8 },
-  { {InstallStatus_names + 190, 22}, 1 },
-  { {InstallStatus_names + 212, 26}, 0 },
-};
-
-static const int InstallStatus_entries_by_number[] = {
-  8, // 0 -> INSTALL_STATUS_UNSPECIFIED
-  7, // 1 -> INSTALL_STATUS_SUCCESS
-  3, // 2 -> INSTALL_STATUS_INCOMPATIBLE
-  1, // 3 -> INSTALL_STATUS_CONFLICTING_SIGNATURE
-  5, // 4 -> INSTALL_STATUS_INVALID_APK
-  4, // 5 -> INSTALL_STATUS_INSUFFICIENT_STORAGE
-  2, // 6 -> INSTALL_STATUS_DOWNGRADE
-  0, // 7 -> INSTALL_STATUS_BLOCKED
-  6, // 8 -> INSTALL_STATUS_OTHER
-};
-
-const std::string& InstallStatus_Name(
-    InstallStatus value) {
-  static const bool dummy =
-      ::PROTOBUF_NAMESPACE_ID::internal::InitializeEnumStrings(
-          InstallStatus_entries,
-          InstallStatus_entries_by_number,
-          9, InstallStatus_strings);
-  (void) dummy;
-  int idx = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumName(
-      InstallStatus_entries,
-      InstallStatus_entries_by_number,
-      9, value);
-  return idx == -1 ? ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString() :
-                     InstallStatus_strings[idx].get();
-}
-bool InstallStatus_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, InstallStatus* value) {
-  int int_value;
-  bool success = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumValue(
-      InstallStatus_entries, 9, name, &int_value);
-  if (success) {
-    *value = static_cast<InstallStatus>(int_value);
   }
   return success;
 }
@@ -8867,58 +8742,40 @@ std::string GuestBoot::GetTypeName() const {
 
 // ===================================================================
 
-class InstallApk::_Internal {
+class ClockProbe::_Internal {
  public:
 };
 
-InstallApk::InstallApk(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+ClockProbe::ClockProbe(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
   SharedCtor(arena, is_message_owned);
-  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.InstallApk)
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ClockProbe)
 }
-InstallApk::InstallApk(const InstallApk& from)
+ClockProbe::ClockProbe(const ClockProbe& from)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
-  InstallApk* const _this = this; (void)_this;
+  ClockProbe* const _this = this; (void)_this;
   new (&_impl_) Impl_{
-      decltype(_impl_.name_){}
-    , decltype(_impl_.size_){}
-    , decltype(_impl_.transfer_id_){}
+      decltype(_impl_.host_sent_ns_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  _impl_.name_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.name_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (!from._internal_name().empty()) {
-    _this->_impl_.name_.Set(from._internal_name(), 
-      _this->GetArenaForAllocation());
-  }
-  ::memcpy(&_impl_.size_, &from._impl_.size_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.transfer_id_) -
-    reinterpret_cast<char*>(&_impl_.size_)) + sizeof(_impl_.transfer_id_));
-  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.InstallApk)
+  _this->_impl_.host_sent_ns_ = from._impl_.host_sent_ns_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ClockProbe)
 }
 
-inline void InstallApk::SharedCtor(
+inline void ClockProbe::SharedCtor(
     ::_pb::Arena* arena, bool is_message_owned) {
   (void)arena;
   (void)is_message_owned;
   new (&_impl_) Impl_{
-      decltype(_impl_.name_){}
-    , decltype(_impl_.size_){uint64_t{0u}}
-    , decltype(_impl_.transfer_id_){0u}
+      decltype(_impl_.host_sent_ns_){uint64_t{0u}}
     , /*decltype(_impl_._cached_size_)*/{}
   };
-  _impl_.name_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.name_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
 }
 
-InstallApk::~InstallApk() {
-  // @@protoc_insertion_point(destructor:dsa.control.v1.InstallApk)
+ClockProbe::~ClockProbe() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ClockProbe)
   if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
   (void)arena;
     return;
@@ -8926,56 +8783,34 @@ InstallApk::~InstallApk() {
   SharedDtor();
 }
 
-inline void InstallApk::SharedDtor() {
+inline void ClockProbe::SharedDtor() {
   GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
-  _impl_.name_.Destroy();
 }
 
-void InstallApk::SetCachedSize(int size) const {
+void ClockProbe::SetCachedSize(int size) const {
   _impl_._cached_size_.Set(size);
 }
 
-void InstallApk::Clear() {
-// @@protoc_insertion_point(message_clear_start:dsa.control.v1.InstallApk)
+void ClockProbe::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ClockProbe)
   uint32_t cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  _impl_.name_.ClearToEmpty();
-  ::memset(&_impl_.size_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.transfer_id_) -
-      reinterpret_cast<char*>(&_impl_.size_)) + sizeof(_impl_.transfer_id_));
+  _impl_.host_sent_ns_ = uint64_t{0u};
   _internal_metadata_.Clear<std::string>();
 }
 
-const char* InstallApk::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+const char* ClockProbe::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
 #define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
   while (!ctx->Done(&ptr)) {
     uint32_t tag;
     ptr = ::_pbi::ReadTag(ptr, &tag);
     switch (tag >> 3) {
-      // uint32 transfer_id = 1;
+      // uint64 host_sent_ns = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
-          _impl_.transfer_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // string name = 2;
-      case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
-          auto str = _internal_mutable_name();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-          CHK_(::_pbi::VerifyUTF8(str, nullptr));
-        } else
-          goto handle_unusual;
-        continue;
-      // uint64 size = 3;
-      case 3:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
-          _impl_.size_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          _impl_.host_sent_ns_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -9003,65 +8838,37 @@ failure:
 #undef CHK_
 }
 
-uint8_t* InstallApk::_InternalSerialize(
+uint8_t* ClockProbe::_InternalSerialize(
     uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
-  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.InstallApk)
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ClockProbe)
   uint32_t cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // uint32 transfer_id = 1;
-  if (this->_internal_transfer_id() != 0) {
+  // uint64 host_sent_ns = 1;
+  if (this->_internal_host_sent_ns() != 0) {
     target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_transfer_id(), target);
-  }
-
-  // string name = 2;
-  if (!this->_internal_name().empty()) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->_internal_name().data(), static_cast<int>(this->_internal_name().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "dsa.control.v1.InstallApk.name");
-    target = stream->WriteStringMaybeAliased(
-        2, this->_internal_name(), target);
-  }
-
-  // uint64 size = 3;
-  if (this->_internal_size() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(3, this->_internal_size(), target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(1, this->_internal_host_sent_ns(), target);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
   }
-  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.InstallApk)
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ClockProbe)
   return target;
 }
 
-size_t InstallApk::ByteSizeLong() const {
-// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.InstallApk)
+size_t ClockProbe::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ClockProbe)
   size_t total_size = 0;
 
   uint32_t cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // string name = 2;
-  if (!this->_internal_name().empty()) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-        this->_internal_name());
-  }
-
-  // uint64 size = 3;
-  if (this->_internal_size() != 0) {
-    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_size());
-  }
-
-  // uint32 transfer_id = 1;
-  if (this->_internal_transfer_id() != 0) {
-    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_transfer_id());
+  // uint64 host_sent_ns = 1;
+  if (this->_internal_host_sent_ns() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_host_sent_ns());
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -9072,118 +8879,87 @@ size_t InstallApk::ByteSizeLong() const {
   return total_size;
 }
 
-void InstallApk::CheckTypeAndMergeFrom(
+void ClockProbe::CheckTypeAndMergeFrom(
     const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
-  MergeFrom(*::_pbi::DownCast<const InstallApk*>(
+  MergeFrom(*::_pbi::DownCast<const ClockProbe*>(
       &from));
 }
 
-void InstallApk::MergeFrom(const InstallApk& from) {
-  InstallApk* const _this = this;
-  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.InstallApk)
+void ClockProbe::MergeFrom(const ClockProbe& from) {
+  ClockProbe* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ClockProbe)
   GOOGLE_DCHECK_NE(&from, _this);
   uint32_t cached_has_bits = 0;
   (void) cached_has_bits;
 
-  if (!from._internal_name().empty()) {
-    _this->_internal_set_name(from._internal_name());
-  }
-  if (from._internal_size() != 0) {
-    _this->_internal_set_size(from._internal_size());
-  }
-  if (from._internal_transfer_id() != 0) {
-    _this->_internal_set_transfer_id(from._internal_transfer_id());
+  if (from._internal_host_sent_ns() != 0) {
+    _this->_internal_set_host_sent_ns(from._internal_host_sent_ns());
   }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
-void InstallApk::CopyFrom(const InstallApk& from) {
-// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.InstallApk)
+void ClockProbe::CopyFrom(const ClockProbe& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ClockProbe)
   if (&from == this) return;
   Clear();
   MergeFrom(from);
 }
 
-bool InstallApk::IsInitialized() const {
+bool ClockProbe::IsInitialized() const {
   return true;
 }
 
-void InstallApk::InternalSwap(InstallApk* other) {
+void ClockProbe::InternalSwap(ClockProbe* other) {
   using std::swap;
-  auto* lhs_arena = GetArenaForAllocation();
-  auto* rhs_arena = other->GetArenaForAllocation();
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.name_, lhs_arena,
-      &other->_impl_.name_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(InstallApk, _impl_.transfer_id_)
-      + sizeof(InstallApk::_impl_.transfer_id_)
-      - PROTOBUF_FIELD_OFFSET(InstallApk, _impl_.size_)>(
-          reinterpret_cast<char*>(&_impl_.size_),
-          reinterpret_cast<char*>(&other->_impl_.size_));
+  swap(_impl_.host_sent_ns_, other->_impl_.host_sent_ns_);
 }
 
-std::string InstallApk::GetTypeName() const {
-  return "dsa.control.v1.InstallApk";
+std::string ClockProbe::GetTypeName() const {
+  return "dsa.control.v1.ClockProbe";
 }
 
 
 // ===================================================================
 
-class ApkChunk::_Internal {
+class ClockAnswer::_Internal {
  public:
 };
 
-ApkChunk::ApkChunk(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+ClockAnswer::ClockAnswer(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
   SharedCtor(arena, is_message_owned);
-  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ApkChunk)
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ClockAnswer)
 }
-ApkChunk::ApkChunk(const ApkChunk& from)
+ClockAnswer::ClockAnswer(const ClockAnswer& from)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
-  ApkChunk* const _this = this; (void)_this;
+  ClockAnswer* const _this = this; (void)_this;
   new (&_impl_) Impl_{
-      decltype(_impl_.data_){}
-    , decltype(_impl_.offset_){}
-    , decltype(_impl_.transfer_id_){}
+      decltype(_impl_.host_sent_ns_){}
+    , decltype(_impl_.guest_mono_ns_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  _impl_.data_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.data_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (!from._internal_data().empty()) {
-    _this->_impl_.data_.Set(from._internal_data(), 
-      _this->GetArenaForAllocation());
-  }
-  ::memcpy(&_impl_.offset_, &from._impl_.offset_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.transfer_id_) -
-    reinterpret_cast<char*>(&_impl_.offset_)) + sizeof(_impl_.transfer_id_));
-  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ApkChunk)
+  ::memcpy(&_impl_.host_sent_ns_, &from._impl_.host_sent_ns_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.guest_mono_ns_) -
+    reinterpret_cast<char*>(&_impl_.host_sent_ns_)) + sizeof(_impl_.guest_mono_ns_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ClockAnswer)
 }
 
-inline void ApkChunk::SharedCtor(
+inline void ClockAnswer::SharedCtor(
     ::_pb::Arena* arena, bool is_message_owned) {
   (void)arena;
   (void)is_message_owned;
   new (&_impl_) Impl_{
-      decltype(_impl_.data_){}
-    , decltype(_impl_.offset_){uint64_t{0u}}
-    , decltype(_impl_.transfer_id_){0u}
+      decltype(_impl_.host_sent_ns_){uint64_t{0u}}
+    , decltype(_impl_.guest_mono_ns_){uint64_t{0u}}
     , /*decltype(_impl_._cached_size_)*/{}
   };
-  _impl_.data_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.data_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
 }
 
-ApkChunk::~ApkChunk() {
-  // @@protoc_insertion_point(destructor:dsa.control.v1.ApkChunk)
+ClockAnswer::~ClockAnswer() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ClockAnswer)
   if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
   (void)arena;
     return;
@@ -9191,55 +8967,44 @@ ApkChunk::~ApkChunk() {
   SharedDtor();
 }
 
-inline void ApkChunk::SharedDtor() {
+inline void ClockAnswer::SharedDtor() {
   GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
-  _impl_.data_.Destroy();
 }
 
-void ApkChunk::SetCachedSize(int size) const {
+void ClockAnswer::SetCachedSize(int size) const {
   _impl_._cached_size_.Set(size);
 }
 
-void ApkChunk::Clear() {
-// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ApkChunk)
+void ClockAnswer::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ClockAnswer)
   uint32_t cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  _impl_.data_.ClearToEmpty();
-  ::memset(&_impl_.offset_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.transfer_id_) -
-      reinterpret_cast<char*>(&_impl_.offset_)) + sizeof(_impl_.transfer_id_));
+  ::memset(&_impl_.host_sent_ns_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.guest_mono_ns_) -
+      reinterpret_cast<char*>(&_impl_.host_sent_ns_)) + sizeof(_impl_.guest_mono_ns_));
   _internal_metadata_.Clear<std::string>();
 }
 
-const char* ApkChunk::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+const char* ClockAnswer::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
 #define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
   while (!ctx->Done(&ptr)) {
     uint32_t tag;
     ptr = ::_pbi::ReadTag(ptr, &tag);
     switch (tag >> 3) {
-      // uint32 transfer_id = 1;
+      // uint64 host_sent_ns = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
-          _impl_.transfer_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          _impl_.host_sent_ns_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
         continue;
-      // uint64 offset = 2;
+      // uint64 guest_mono_ns = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
-          _impl_.offset_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // bytes data = 3;
-      case 3:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
-          auto str = _internal_mutable_data();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          _impl_.guest_mono_ns_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -9267,61 +9032,48 @@ failure:
 #undef CHK_
 }
 
-uint8_t* ApkChunk::_InternalSerialize(
+uint8_t* ClockAnswer::_InternalSerialize(
     uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
-  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ApkChunk)
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ClockAnswer)
   uint32_t cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // uint32 transfer_id = 1;
-  if (this->_internal_transfer_id() != 0) {
+  // uint64 host_sent_ns = 1;
+  if (this->_internal_host_sent_ns() != 0) {
     target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_transfer_id(), target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(1, this->_internal_host_sent_ns(), target);
   }
 
-  // uint64 offset = 2;
-  if (this->_internal_offset() != 0) {
+  // uint64 guest_mono_ns = 2;
+  if (this->_internal_guest_mono_ns() != 0) {
     target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_offset(), target);
-  }
-
-  // bytes data = 3;
-  if (!this->_internal_data().empty()) {
-    target = stream->WriteBytesMaybeAliased(
-        3, this->_internal_data(), target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_guest_mono_ns(), target);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
   }
-  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ApkChunk)
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ClockAnswer)
   return target;
 }
 
-size_t ApkChunk::ByteSizeLong() const {
-// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ApkChunk)
+size_t ClockAnswer::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ClockAnswer)
   size_t total_size = 0;
 
   uint32_t cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // bytes data = 3;
-  if (!this->_internal_data().empty()) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-        this->_internal_data());
+  // uint64 host_sent_ns = 1;
+  if (this->_internal_host_sent_ns() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_host_sent_ns());
   }
 
-  // uint64 offset = 2;
-  if (this->_internal_offset() != 0) {
-    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_offset());
-  }
-
-  // uint32 transfer_id = 1;
-  if (this->_internal_transfer_id() != 0) {
-    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_transfer_id());
+  // uint64 guest_mono_ns = 2;
+  if (this->_internal_guest_mono_ns() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_guest_mono_ns());
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -9332,772 +9084,52 @@ size_t ApkChunk::ByteSizeLong() const {
   return total_size;
 }
 
-void ApkChunk::CheckTypeAndMergeFrom(
+void ClockAnswer::CheckTypeAndMergeFrom(
     const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
-  MergeFrom(*::_pbi::DownCast<const ApkChunk*>(
+  MergeFrom(*::_pbi::DownCast<const ClockAnswer*>(
       &from));
 }
 
-void ApkChunk::MergeFrom(const ApkChunk& from) {
-  ApkChunk* const _this = this;
-  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ApkChunk)
+void ClockAnswer::MergeFrom(const ClockAnswer& from) {
+  ClockAnswer* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ClockAnswer)
   GOOGLE_DCHECK_NE(&from, _this);
   uint32_t cached_has_bits = 0;
   (void) cached_has_bits;
 
-  if (!from._internal_data().empty()) {
-    _this->_internal_set_data(from._internal_data());
+  if (from._internal_host_sent_ns() != 0) {
+    _this->_internal_set_host_sent_ns(from._internal_host_sent_ns());
   }
-  if (from._internal_offset() != 0) {
-    _this->_internal_set_offset(from._internal_offset());
-  }
-  if (from._internal_transfer_id() != 0) {
-    _this->_internal_set_transfer_id(from._internal_transfer_id());
+  if (from._internal_guest_mono_ns() != 0) {
+    _this->_internal_set_guest_mono_ns(from._internal_guest_mono_ns());
   }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
-void ApkChunk::CopyFrom(const ApkChunk& from) {
-// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ApkChunk)
+void ClockAnswer::CopyFrom(const ClockAnswer& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ClockAnswer)
   if (&from == this) return;
   Clear();
   MergeFrom(from);
 }
 
-bool ApkChunk::IsInitialized() const {
+bool ClockAnswer::IsInitialized() const {
   return true;
 }
 
-void ApkChunk::InternalSwap(ApkChunk* other) {
-  using std::swap;
-  auto* lhs_arena = GetArenaForAllocation();
-  auto* rhs_arena = other->GetArenaForAllocation();
-  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.data_, lhs_arena,
-      &other->_impl_.data_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(ApkChunk, _impl_.transfer_id_)
-      + sizeof(ApkChunk::_impl_.transfer_id_)
-      - PROTOBUF_FIELD_OFFSET(ApkChunk, _impl_.offset_)>(
-          reinterpret_cast<char*>(&_impl_.offset_),
-          reinterpret_cast<char*>(&other->_impl_.offset_));
-}
-
-std::string ApkChunk::GetTypeName() const {
-  return "dsa.control.v1.ApkChunk";
-}
-
-
-// ===================================================================
-
-class CancelInstall::_Internal {
- public:
-};
-
-CancelInstall::CancelInstall(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                         bool is_message_owned)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
-  SharedCtor(arena, is_message_owned);
-  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.CancelInstall)
-}
-CancelInstall::CancelInstall(const CancelInstall& from)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
-  CancelInstall* const _this = this; (void)_this;
-  new (&_impl_) Impl_{
-      decltype(_impl_.transfer_id_){}
-    , /*decltype(_impl_._cached_size_)*/{}};
-
-  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  _this->_impl_.transfer_id_ = from._impl_.transfer_id_;
-  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.CancelInstall)
-}
-
-inline void CancelInstall::SharedCtor(
-    ::_pb::Arena* arena, bool is_message_owned) {
-  (void)arena;
-  (void)is_message_owned;
-  new (&_impl_) Impl_{
-      decltype(_impl_.transfer_id_){0u}
-    , /*decltype(_impl_._cached_size_)*/{}
-  };
-}
-
-CancelInstall::~CancelInstall() {
-  // @@protoc_insertion_point(destructor:dsa.control.v1.CancelInstall)
-  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
-  (void)arena;
-    return;
-  }
-  SharedDtor();
-}
-
-inline void CancelInstall::SharedDtor() {
-  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
-}
-
-void CancelInstall::SetCachedSize(int size) const {
-  _impl_._cached_size_.Set(size);
-}
-
-void CancelInstall::Clear() {
-// @@protoc_insertion_point(message_clear_start:dsa.control.v1.CancelInstall)
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  _impl_.transfer_id_ = 0u;
-  _internal_metadata_.Clear<std::string>();
-}
-
-const char* CancelInstall::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
-#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
-  while (!ctx->Done(&ptr)) {
-    uint32_t tag;
-    ptr = ::_pbi::ReadTag(ptr, &tag);
-    switch (tag >> 3) {
-      // uint32 transfer_id = 1;
-      case 1:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
-          _impl_.transfer_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      default:
-        goto handle_unusual;
-    }  // switch
-  handle_unusual:
-    if ((tag == 0) || ((tag & 7) == 4)) {
-      CHK_(ptr);
-      ctx->SetLastTag(tag);
-      goto message_done;
-    }
-    ptr = UnknownFieldParse(
-        tag,
-        _internal_metadata_.mutable_unknown_fields<std::string>(),
-        ptr, ctx);
-    CHK_(ptr != nullptr);
-  }  // while
-message_done:
-  return ptr;
-failure:
-  ptr = nullptr;
-  goto message_done;
-#undef CHK_
-}
-
-uint8_t* CancelInstall::_InternalSerialize(
-    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
-  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.CancelInstall)
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  // uint32 transfer_id = 1;
-  if (this->_internal_transfer_id() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_transfer_id(), target);
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
-        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
-  }
-  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.CancelInstall)
-  return target;
-}
-
-size_t CancelInstall::ByteSizeLong() const {
-// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.CancelInstall)
-  size_t total_size = 0;
-
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  // uint32 transfer_id = 1;
-  if (this->_internal_transfer_id() != 0) {
-    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_transfer_id());
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
-  }
-  int cached_size = ::_pbi::ToCachedSize(total_size);
-  SetCachedSize(cached_size);
-  return total_size;
-}
-
-void CancelInstall::CheckTypeAndMergeFrom(
-    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
-  MergeFrom(*::_pbi::DownCast<const CancelInstall*>(
-      &from));
-}
-
-void CancelInstall::MergeFrom(const CancelInstall& from) {
-  CancelInstall* const _this = this;
-  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.CancelInstall)
-  GOOGLE_DCHECK_NE(&from, _this);
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  if (from._internal_transfer_id() != 0) {
-    _this->_internal_set_transfer_id(from._internal_transfer_id());
-  }
-  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-}
-
-void CancelInstall::CopyFrom(const CancelInstall& from) {
-// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.CancelInstall)
-  if (&from == this) return;
-  Clear();
-  MergeFrom(from);
-}
-
-bool CancelInstall::IsInitialized() const {
-  return true;
-}
-
-void CancelInstall::InternalSwap(CancelInstall* other) {
-  using std::swap;
-  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
-  swap(_impl_.transfer_id_, other->_impl_.transfer_id_);
-}
-
-std::string CancelInstall::GetTypeName() const {
-  return "dsa.control.v1.CancelInstall";
-}
-
-
-// ===================================================================
-
-class InstallProgress::_Internal {
- public:
-};
-
-InstallProgress::InstallProgress(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                         bool is_message_owned)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
-  SharedCtor(arena, is_message_owned);
-  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.InstallProgress)
-}
-InstallProgress::InstallProgress(const InstallProgress& from)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
-  InstallProgress* const _this = this; (void)_this;
-  new (&_impl_) Impl_{
-      decltype(_impl_.received_){}
-    , decltype(_impl_.transfer_id_){}
-    , /*decltype(_impl_._cached_size_)*/{}};
-
-  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  ::memcpy(&_impl_.received_, &from._impl_.received_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.transfer_id_) -
-    reinterpret_cast<char*>(&_impl_.received_)) + sizeof(_impl_.transfer_id_));
-  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.InstallProgress)
-}
-
-inline void InstallProgress::SharedCtor(
-    ::_pb::Arena* arena, bool is_message_owned) {
-  (void)arena;
-  (void)is_message_owned;
-  new (&_impl_) Impl_{
-      decltype(_impl_.received_){uint64_t{0u}}
-    , decltype(_impl_.transfer_id_){0u}
-    , /*decltype(_impl_._cached_size_)*/{}
-  };
-}
-
-InstallProgress::~InstallProgress() {
-  // @@protoc_insertion_point(destructor:dsa.control.v1.InstallProgress)
-  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
-  (void)arena;
-    return;
-  }
-  SharedDtor();
-}
-
-inline void InstallProgress::SharedDtor() {
-  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
-}
-
-void InstallProgress::SetCachedSize(int size) const {
-  _impl_._cached_size_.Set(size);
-}
-
-void InstallProgress::Clear() {
-// @@protoc_insertion_point(message_clear_start:dsa.control.v1.InstallProgress)
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  ::memset(&_impl_.received_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.transfer_id_) -
-      reinterpret_cast<char*>(&_impl_.received_)) + sizeof(_impl_.transfer_id_));
-  _internal_metadata_.Clear<std::string>();
-}
-
-const char* InstallProgress::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
-#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
-  while (!ctx->Done(&ptr)) {
-    uint32_t tag;
-    ptr = ::_pbi::ReadTag(ptr, &tag);
-    switch (tag >> 3) {
-      // uint32 transfer_id = 1;
-      case 1:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
-          _impl_.transfer_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // uint64 received = 2;
-      case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
-          _impl_.received_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      default:
-        goto handle_unusual;
-    }  // switch
-  handle_unusual:
-    if ((tag == 0) || ((tag & 7) == 4)) {
-      CHK_(ptr);
-      ctx->SetLastTag(tag);
-      goto message_done;
-    }
-    ptr = UnknownFieldParse(
-        tag,
-        _internal_metadata_.mutable_unknown_fields<std::string>(),
-        ptr, ctx);
-    CHK_(ptr != nullptr);
-  }  // while
-message_done:
-  return ptr;
-failure:
-  ptr = nullptr;
-  goto message_done;
-#undef CHK_
-}
-
-uint8_t* InstallProgress::_InternalSerialize(
-    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
-  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.InstallProgress)
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  // uint32 transfer_id = 1;
-  if (this->_internal_transfer_id() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_transfer_id(), target);
-  }
-
-  // uint64 received = 2;
-  if (this->_internal_received() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_received(), target);
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
-        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
-  }
-  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.InstallProgress)
-  return target;
-}
-
-size_t InstallProgress::ByteSizeLong() const {
-// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.InstallProgress)
-  size_t total_size = 0;
-
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  // uint64 received = 2;
-  if (this->_internal_received() != 0) {
-    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_received());
-  }
-
-  // uint32 transfer_id = 1;
-  if (this->_internal_transfer_id() != 0) {
-    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_transfer_id());
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
-  }
-  int cached_size = ::_pbi::ToCachedSize(total_size);
-  SetCachedSize(cached_size);
-  return total_size;
-}
-
-void InstallProgress::CheckTypeAndMergeFrom(
-    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
-  MergeFrom(*::_pbi::DownCast<const InstallProgress*>(
-      &from));
-}
-
-void InstallProgress::MergeFrom(const InstallProgress& from) {
-  InstallProgress* const _this = this;
-  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.InstallProgress)
-  GOOGLE_DCHECK_NE(&from, _this);
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  if (from._internal_received() != 0) {
-    _this->_internal_set_received(from._internal_received());
-  }
-  if (from._internal_transfer_id() != 0) {
-    _this->_internal_set_transfer_id(from._internal_transfer_id());
-  }
-  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-}
-
-void InstallProgress::CopyFrom(const InstallProgress& from) {
-// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.InstallProgress)
-  if (&from == this) return;
-  Clear();
-  MergeFrom(from);
-}
-
-bool InstallProgress::IsInitialized() const {
-  return true;
-}
-
-void InstallProgress::InternalSwap(InstallProgress* other) {
+void ClockAnswer::InternalSwap(ClockAnswer* other) {
   using std::swap;
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(InstallProgress, _impl_.transfer_id_)
-      + sizeof(InstallProgress::_impl_.transfer_id_)
-      - PROTOBUF_FIELD_OFFSET(InstallProgress, _impl_.received_)>(
-          reinterpret_cast<char*>(&_impl_.received_),
-          reinterpret_cast<char*>(&other->_impl_.received_));
+      PROTOBUF_FIELD_OFFSET(ClockAnswer, _impl_.guest_mono_ns_)
+      + sizeof(ClockAnswer::_impl_.guest_mono_ns_)
+      - PROTOBUF_FIELD_OFFSET(ClockAnswer, _impl_.host_sent_ns_)>(
+          reinterpret_cast<char*>(&_impl_.host_sent_ns_),
+          reinterpret_cast<char*>(&other->_impl_.host_sent_ns_));
 }
 
-std::string InstallProgress::GetTypeName() const {
-  return "dsa.control.v1.InstallProgress";
-}
-
-
-// ===================================================================
-
-class InstallResult::_Internal {
- public:
-};
-
-InstallResult::InstallResult(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                         bool is_message_owned)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
-  SharedCtor(arena, is_message_owned);
-  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.InstallResult)
-}
-InstallResult::InstallResult(const InstallResult& from)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
-  InstallResult* const _this = this; (void)_this;
-  new (&_impl_) Impl_{
-      decltype(_impl_.package_name_){}
-    , decltype(_impl_.message_){}
-    , decltype(_impl_.transfer_id_){}
-    , decltype(_impl_.status_){}
-    , /*decltype(_impl_._cached_size_)*/{}};
-
-  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  _impl_.package_name_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.package_name_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (!from._internal_package_name().empty()) {
-    _this->_impl_.package_name_.Set(from._internal_package_name(), 
-      _this->GetArenaForAllocation());
-  }
-  _impl_.message_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.message_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (!from._internal_message().empty()) {
-    _this->_impl_.message_.Set(from._internal_message(), 
-      _this->GetArenaForAllocation());
-  }
-  ::memcpy(&_impl_.transfer_id_, &from._impl_.transfer_id_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.status_) -
-    reinterpret_cast<char*>(&_impl_.transfer_id_)) + sizeof(_impl_.status_));
-  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.InstallResult)
-}
-
-inline void InstallResult::SharedCtor(
-    ::_pb::Arena* arena, bool is_message_owned) {
-  (void)arena;
-  (void)is_message_owned;
-  new (&_impl_) Impl_{
-      decltype(_impl_.package_name_){}
-    , decltype(_impl_.message_){}
-    , decltype(_impl_.transfer_id_){0u}
-    , decltype(_impl_.status_){0}
-    , /*decltype(_impl_._cached_size_)*/{}
-  };
-  _impl_.package_name_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.package_name_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  _impl_.message_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.message_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-}
-
-InstallResult::~InstallResult() {
-  // @@protoc_insertion_point(destructor:dsa.control.v1.InstallResult)
-  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
-  (void)arena;
-    return;
-  }
-  SharedDtor();
-}
-
-inline void InstallResult::SharedDtor() {
-  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
-  _impl_.package_name_.Destroy();
-  _impl_.message_.Destroy();
-}
-
-void InstallResult::SetCachedSize(int size) const {
-  _impl_._cached_size_.Set(size);
-}
-
-void InstallResult::Clear() {
-// @@protoc_insertion_point(message_clear_start:dsa.control.v1.InstallResult)
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  _impl_.package_name_.ClearToEmpty();
-  _impl_.message_.ClearToEmpty();
-  ::memset(&_impl_.transfer_id_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.status_) -
-      reinterpret_cast<char*>(&_impl_.transfer_id_)) + sizeof(_impl_.status_));
-  _internal_metadata_.Clear<std::string>();
-}
-
-const char* InstallResult::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
-#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
-  while (!ctx->Done(&ptr)) {
-    uint32_t tag;
-    ptr = ::_pbi::ReadTag(ptr, &tag);
-    switch (tag >> 3) {
-      // uint32 transfer_id = 1;
-      case 1:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
-          _impl_.transfer_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // .dsa.control.v1.InstallStatus status = 2;
-      case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
-          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-          _internal_set_status(static_cast<::dsa::control::v1::InstallStatus>(val));
-        } else
-          goto handle_unusual;
-        continue;
-      // string package_name = 3;
-      case 3:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
-          auto str = _internal_mutable_package_name();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-          CHK_(::_pbi::VerifyUTF8(str, nullptr));
-        } else
-          goto handle_unusual;
-        continue;
-      // string message = 4;
-      case 4:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
-          auto str = _internal_mutable_message();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-          CHK_(::_pbi::VerifyUTF8(str, nullptr));
-        } else
-          goto handle_unusual;
-        continue;
-      default:
-        goto handle_unusual;
-    }  // switch
-  handle_unusual:
-    if ((tag == 0) || ((tag & 7) == 4)) {
-      CHK_(ptr);
-      ctx->SetLastTag(tag);
-      goto message_done;
-    }
-    ptr = UnknownFieldParse(
-        tag,
-        _internal_metadata_.mutable_unknown_fields<std::string>(),
-        ptr, ctx);
-    CHK_(ptr != nullptr);
-  }  // while
-message_done:
-  return ptr;
-failure:
-  ptr = nullptr;
-  goto message_done;
-#undef CHK_
-}
-
-uint8_t* InstallResult::_InternalSerialize(
-    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
-  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.InstallResult)
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  // uint32 transfer_id = 1;
-  if (this->_internal_transfer_id() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_transfer_id(), target);
-  }
-
-  // .dsa.control.v1.InstallStatus status = 2;
-  if (this->_internal_status() != 0) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteEnumToArray(
-      2, this->_internal_status(), target);
-  }
-
-  // string package_name = 3;
-  if (!this->_internal_package_name().empty()) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->_internal_package_name().data(), static_cast<int>(this->_internal_package_name().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "dsa.control.v1.InstallResult.package_name");
-    target = stream->WriteStringMaybeAliased(
-        3, this->_internal_package_name(), target);
-  }
-
-  // string message = 4;
-  if (!this->_internal_message().empty()) {
-    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
-      this->_internal_message().data(), static_cast<int>(this->_internal_message().length()),
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
-      "dsa.control.v1.InstallResult.message");
-    target = stream->WriteStringMaybeAliased(
-        4, this->_internal_message(), target);
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
-        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
-  }
-  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.InstallResult)
-  return target;
-}
-
-size_t InstallResult::ByteSizeLong() const {
-// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.InstallResult)
-  size_t total_size = 0;
-
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  // string package_name = 3;
-  if (!this->_internal_package_name().empty()) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-        this->_internal_package_name());
-  }
-
-  // string message = 4;
-  if (!this->_internal_message().empty()) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-        this->_internal_message());
-  }
-
-  // uint32 transfer_id = 1;
-  if (this->_internal_transfer_id() != 0) {
-    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_transfer_id());
-  }
-
-  // .dsa.control.v1.InstallStatus status = 2;
-  if (this->_internal_status() != 0) {
-    total_size += 1 +
-      ::_pbi::WireFormatLite::EnumSize(this->_internal_status());
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
-  }
-  int cached_size = ::_pbi::ToCachedSize(total_size);
-  SetCachedSize(cached_size);
-  return total_size;
-}
-
-void InstallResult::CheckTypeAndMergeFrom(
-    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
-  MergeFrom(*::_pbi::DownCast<const InstallResult*>(
-      &from));
-}
-
-void InstallResult::MergeFrom(const InstallResult& from) {
-  InstallResult* const _this = this;
-  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.InstallResult)
-  GOOGLE_DCHECK_NE(&from, _this);
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  if (!from._internal_package_name().empty()) {
-    _this->_internal_set_package_name(from._internal_package_name());
-  }
-  if (!from._internal_message().empty()) {
-    _this->_internal_set_message(from._internal_message());
-  }
-  if (from._internal_transfer_id() != 0) {
-    _this->_internal_set_transfer_id(from._internal_transfer_id());
-  }
-  if (from._internal_status() != 0) {
-    _this->_internal_set_status(from._internal_status());
-  }
-  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-}
-
-void InstallResult::CopyFrom(const InstallResult& from) {
-// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.InstallResult)
-  if (&from == this) return;
-  Clear();
-  MergeFrom(from);
-}
-
-bool InstallResult::IsInitialized() const {
-  return true;
-}
-
-void InstallResult::InternalSwap(InstallResult* other) {
-  using std::swap;
-  auto* lhs_arena = GetArenaForAllocation();
-  auto* rhs_arena = other->GetArenaForAllocation();
-  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.package_name_, lhs_arena,
-      &other->_impl_.package_name_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.message_, lhs_arena,
-      &other->_impl_.message_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(InstallResult, _impl_.status_)
-      + sizeof(InstallResult::_impl_.status_)
-      - PROTOBUF_FIELD_OFFSET(InstallResult, _impl_.transfer_id_)>(
-          reinterpret_cast<char*>(&_impl_.transfer_id_),
-          reinterpret_cast<char*>(&other->_impl_.transfer_id_));
-}
-
-std::string InstallResult::GetTypeName() const {
-  return "dsa.control.v1.InstallResult";
+std::string ClockAnswer::GetTypeName() const {
+  return "dsa.control.v1.ClockAnswer";
 }
 
 
@@ -10131,14 +9163,11 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::GuestBoot& guest_boot(const Envelope* msg);
   static const ::dsa::control::v1::ClipboardText& clipboard_text(const Envelope* msg);
   static const ::dsa::control::v1::ClipboardSharing& clipboard_sharing(const Envelope* msg);
+  static const ::dsa::control::v1::ClockProbe& clock_probe(const Envelope* msg);
+  static const ::dsa::control::v1::ClockAnswer& clock_answer(const Envelope* msg);
   static const ::dsa::control::v1::ScreenState& screen_state(const Envelope* msg);
   static const ::dsa::control::v1::PowerState& power_state(const Envelope* msg);
   static const ::dsa::control::v1::DeviceIdle& device_idle(const Envelope* msg);
-  static const ::dsa::control::v1::InstallApk& install_apk(const Envelope* msg);
-  static const ::dsa::control::v1::ApkChunk& apk_chunk(const Envelope* msg);
-  static const ::dsa::control::v1::CancelInstall& cancel_install(const Envelope* msg);
-  static const ::dsa::control::v1::InstallProgress& install_progress(const Envelope* msg);
-  static const ::dsa::control::v1::InstallResult& install_result(const Envelope* msg);
 };
 
 const ::dsa::control::v1::Hello&
@@ -10245,6 +9274,14 @@ const ::dsa::control::v1::ClipboardSharing&
 Envelope::_Internal::clipboard_sharing(const Envelope* msg) {
   return *msg->_impl_.body_.clipboard_sharing_;
 }
+const ::dsa::control::v1::ClockProbe&
+Envelope::_Internal::clock_probe(const Envelope* msg) {
+  return *msg->_impl_.body_.clock_probe_;
+}
+const ::dsa::control::v1::ClockAnswer&
+Envelope::_Internal::clock_answer(const Envelope* msg) {
+  return *msg->_impl_.body_.clock_answer_;
+}
 const ::dsa::control::v1::ScreenState&
 Envelope::_Internal::screen_state(const Envelope* msg) {
   return *msg->_impl_.body_.screen_state_;
@@ -10256,26 +9293,6 @@ Envelope::_Internal::power_state(const Envelope* msg) {
 const ::dsa::control::v1::DeviceIdle&
 Envelope::_Internal::device_idle(const Envelope* msg) {
   return *msg->_impl_.body_.device_idle_;
-}
-const ::dsa::control::v1::InstallApk&
-Envelope::_Internal::install_apk(const Envelope* msg) {
-  return *msg->_impl_.body_.install_apk_;
-}
-const ::dsa::control::v1::ApkChunk&
-Envelope::_Internal::apk_chunk(const Envelope* msg) {
-  return *msg->_impl_.body_.apk_chunk_;
-}
-const ::dsa::control::v1::CancelInstall&
-Envelope::_Internal::cancel_install(const Envelope* msg) {
-  return *msg->_impl_.body_.cancel_install_;
-}
-const ::dsa::control::v1::InstallProgress&
-Envelope::_Internal::install_progress(const Envelope* msg) {
-  return *msg->_impl_.body_.install_progress_;
-}
-const ::dsa::control::v1::InstallResult&
-Envelope::_Internal::install_result(const Envelope* msg) {
-  return *msg->_impl_.body_.install_result_;
 }
 void Envelope::set_allocated_hello(::dsa::control::v1::Hello* hello) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -10667,6 +9684,36 @@ void Envelope::set_allocated_clipboard_sharing(::dsa::control::v1::ClipboardShar
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.clipboard_sharing)
 }
+void Envelope::set_allocated_clock_probe(::dsa::control::v1::ClockProbe* clock_probe) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (clock_probe) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(clock_probe);
+    if (message_arena != submessage_arena) {
+      clock_probe = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, clock_probe, submessage_arena);
+    }
+    set_has_clock_probe();
+    _impl_.body_.clock_probe_ = clock_probe;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.clock_probe)
+}
+void Envelope::set_allocated_clock_answer(::dsa::control::v1::ClockAnswer* clock_answer) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (clock_answer) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(clock_answer);
+    if (message_arena != submessage_arena) {
+      clock_answer = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, clock_answer, submessage_arena);
+    }
+    set_has_clock_answer();
+    _impl_.body_.clock_answer_ = clock_answer;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.clock_answer)
+}
 void Envelope::set_allocated_screen_state(::dsa::control::v1::ScreenState* screen_state) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
   clear_body();
@@ -10711,81 +9758,6 @@ void Envelope::set_allocated_device_idle(::dsa::control::v1::DeviceIdle* device_
     _impl_.body_.device_idle_ = device_idle;
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.device_idle)
-}
-void Envelope::set_allocated_install_apk(::dsa::control::v1::InstallApk* install_apk) {
-  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
-  clear_body();
-  if (install_apk) {
-    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
-      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(install_apk);
-    if (message_arena != submessage_arena) {
-      install_apk = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, install_apk, submessage_arena);
-    }
-    set_has_install_apk();
-    _impl_.body_.install_apk_ = install_apk;
-  }
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.install_apk)
-}
-void Envelope::set_allocated_apk_chunk(::dsa::control::v1::ApkChunk* apk_chunk) {
-  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
-  clear_body();
-  if (apk_chunk) {
-    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
-      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(apk_chunk);
-    if (message_arena != submessage_arena) {
-      apk_chunk = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, apk_chunk, submessage_arena);
-    }
-    set_has_apk_chunk();
-    _impl_.body_.apk_chunk_ = apk_chunk;
-  }
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.apk_chunk)
-}
-void Envelope::set_allocated_cancel_install(::dsa::control::v1::CancelInstall* cancel_install) {
-  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
-  clear_body();
-  if (cancel_install) {
-    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
-      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(cancel_install);
-    if (message_arena != submessage_arena) {
-      cancel_install = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, cancel_install, submessage_arena);
-    }
-    set_has_cancel_install();
-    _impl_.body_.cancel_install_ = cancel_install;
-  }
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.cancel_install)
-}
-void Envelope::set_allocated_install_progress(::dsa::control::v1::InstallProgress* install_progress) {
-  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
-  clear_body();
-  if (install_progress) {
-    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
-      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(install_progress);
-    if (message_arena != submessage_arena) {
-      install_progress = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, install_progress, submessage_arena);
-    }
-    set_has_install_progress();
-    _impl_.body_.install_progress_ = install_progress;
-  }
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.install_progress)
-}
-void Envelope::set_allocated_install_result(::dsa::control::v1::InstallResult* install_result) {
-  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
-  clear_body();
-  if (install_result) {
-    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
-      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(install_result);
-    if (message_arena != submessage_arena) {
-      install_result = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, install_result, submessage_arena);
-    }
-    set_has_install_result();
-    _impl_.body_.install_result_ = install_result;
-  }
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.install_result)
 }
 Envelope::Envelope(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
@@ -10934,6 +9906,16 @@ Envelope::Envelope(const Envelope& from)
           from._internal_clipboard_sharing());
       break;
     }
+    case kClockProbe: {
+      _this->_internal_mutable_clock_probe()->::dsa::control::v1::ClockProbe::MergeFrom(
+          from._internal_clock_probe());
+      break;
+    }
+    case kClockAnswer: {
+      _this->_internal_mutable_clock_answer()->::dsa::control::v1::ClockAnswer::MergeFrom(
+          from._internal_clock_answer());
+      break;
+    }
     case kScreenState: {
       _this->_internal_mutable_screen_state()->::dsa::control::v1::ScreenState::MergeFrom(
           from._internal_screen_state());
@@ -10947,31 +9929,6 @@ Envelope::Envelope(const Envelope& from)
     case kDeviceIdle: {
       _this->_internal_mutable_device_idle()->::dsa::control::v1::DeviceIdle::MergeFrom(
           from._internal_device_idle());
-      break;
-    }
-    case kInstallApk: {
-      _this->_internal_mutable_install_apk()->::dsa::control::v1::InstallApk::MergeFrom(
-          from._internal_install_apk());
-      break;
-    }
-    case kApkChunk: {
-      _this->_internal_mutable_apk_chunk()->::dsa::control::v1::ApkChunk::MergeFrom(
-          from._internal_apk_chunk());
-      break;
-    }
-    case kCancelInstall: {
-      _this->_internal_mutable_cancel_install()->::dsa::control::v1::CancelInstall::MergeFrom(
-          from._internal_cancel_install());
-      break;
-    }
-    case kInstallProgress: {
-      _this->_internal_mutable_install_progress()->::dsa::control::v1::InstallProgress::MergeFrom(
-          from._internal_install_progress());
-      break;
-    }
-    case kInstallResult: {
-      _this->_internal_mutable_install_result()->::dsa::control::v1::InstallResult::MergeFrom(
-          from._internal_install_result());
       break;
     }
     case BODY_NOT_SET: {
@@ -11172,6 +10129,18 @@ void Envelope::clear_body() {
       }
       break;
     }
+    case kClockProbe: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.clock_probe_;
+      }
+      break;
+    }
+    case kClockAnswer: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.clock_answer_;
+      }
+      break;
+    }
     case kScreenState: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.screen_state_;
@@ -11187,36 +10156,6 @@ void Envelope::clear_body() {
     case kDeviceIdle: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.device_idle_;
-      }
-      break;
-    }
-    case kInstallApk: {
-      if (GetArenaForAllocation() == nullptr) {
-        delete _impl_.body_.install_apk_;
-      }
-      break;
-    }
-    case kApkChunk: {
-      if (GetArenaForAllocation() == nullptr) {
-        delete _impl_.body_.apk_chunk_;
-      }
-      break;
-    }
-    case kCancelInstall: {
-      if (GetArenaForAllocation() == nullptr) {
-        delete _impl_.body_.cancel_install_;
-      }
-      break;
-    }
-    case kInstallProgress: {
-      if (GetArenaForAllocation() == nullptr) {
-        delete _impl_.body_.install_progress_;
-      }
-      break;
-    }
-    case kInstallResult: {
-      if (GetArenaForAllocation() == nullptr) {
-        delete _impl_.body_.install_result_;
       }
       break;
     }
@@ -11452,6 +10391,22 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.ClockProbe clock_probe = 28;
+      case 28:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 226)) {
+          ptr = ctx->ParseMessage(_internal_mutable_clock_probe(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.ClockAnswer clock_answer = 29;
+      case 29:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 234)) {
+          ptr = ctx->ParseMessage(_internal_mutable_clock_answer(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       // .dsa.control.v1.ScreenState screen_state = 40;
       case 40:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 66)) {
@@ -11472,46 +10427,6 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
       case 42:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 82)) {
           ptr = ctx->ParseMessage(_internal_mutable_device_idle(), ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // .dsa.control.v1.InstallApk install_apk = 60;
-      case 60:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 226)) {
-          ptr = ctx->ParseMessage(_internal_mutable_install_apk(), ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // .dsa.control.v1.ApkChunk apk_chunk = 61;
-      case 61:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 234)) {
-          ptr = ctx->ParseMessage(_internal_mutable_apk_chunk(), ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // .dsa.control.v1.CancelInstall cancel_install = 62;
-      case 62:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 242)) {
-          ptr = ctx->ParseMessage(_internal_mutable_cancel_install(), ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // .dsa.control.v1.InstallProgress install_progress = 63;
-      case 63:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 250)) {
-          ptr = ctx->ParseMessage(_internal_mutable_install_progress(), ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // .dsa.control.v1.InstallResult install_result = 64;
-      case 64:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 2)) {
-          ptr = ctx->ParseMessage(_internal_mutable_install_result(), ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -11727,6 +10642,20 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::clipboard_sharing(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.ClockProbe clock_probe = 28;
+  if (_internal_has_clock_probe()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(28, _Internal::clock_probe(this),
+        _Internal::clock_probe(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.ClockAnswer clock_answer = 29;
+  if (_internal_has_clock_answer()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(29, _Internal::clock_answer(this),
+        _Internal::clock_answer(this).GetCachedSize(), target, stream);
+  }
+
   // .dsa.control.v1.ScreenState screen_state = 40;
   if (_internal_has_screen_state()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
@@ -11746,41 +10675,6 @@ uint8_t* Envelope::_InternalSerialize(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(42, _Internal::device_idle(this),
         _Internal::device_idle(this).GetCachedSize(), target, stream);
-  }
-
-  // .dsa.control.v1.InstallApk install_apk = 60;
-  if (_internal_has_install_apk()) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      InternalWriteMessage(60, _Internal::install_apk(this),
-        _Internal::install_apk(this).GetCachedSize(), target, stream);
-  }
-
-  // .dsa.control.v1.ApkChunk apk_chunk = 61;
-  if (_internal_has_apk_chunk()) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      InternalWriteMessage(61, _Internal::apk_chunk(this),
-        _Internal::apk_chunk(this).GetCachedSize(), target, stream);
-  }
-
-  // .dsa.control.v1.CancelInstall cancel_install = 62;
-  if (_internal_has_cancel_install()) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      InternalWriteMessage(62, _Internal::cancel_install(this),
-        _Internal::cancel_install(this).GetCachedSize(), target, stream);
-  }
-
-  // .dsa.control.v1.InstallProgress install_progress = 63;
-  if (_internal_has_install_progress()) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      InternalWriteMessage(63, _Internal::install_progress(this),
-        _Internal::install_progress(this).GetCachedSize(), target, stream);
-  }
-
-  // .dsa.control.v1.InstallResult install_result = 64;
-  if (_internal_has_install_result()) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      InternalWriteMessage(64, _Internal::install_result(this),
-        _Internal::install_result(this).GetCachedSize(), target, stream);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -11982,6 +10876,20 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.clipboard_sharing_);
       break;
     }
+    // .dsa.control.v1.ClockProbe clock_probe = 28;
+    case kClockProbe: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.clock_probe_);
+      break;
+    }
+    // .dsa.control.v1.ClockAnswer clock_answer = 29;
+    case kClockAnswer: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.clock_answer_);
+      break;
+    }
     // .dsa.control.v1.ScreenState screen_state = 40;
     case kScreenState: {
       total_size += 2 +
@@ -12001,41 +10909,6 @@ size_t Envelope::ByteSizeLong() const {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.body_.device_idle_);
-      break;
-    }
-    // .dsa.control.v1.InstallApk install_apk = 60;
-    case kInstallApk: {
-      total_size += 2 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-          *_impl_.body_.install_apk_);
-      break;
-    }
-    // .dsa.control.v1.ApkChunk apk_chunk = 61;
-    case kApkChunk: {
-      total_size += 2 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-          *_impl_.body_.apk_chunk_);
-      break;
-    }
-    // .dsa.control.v1.CancelInstall cancel_install = 62;
-    case kCancelInstall: {
-      total_size += 2 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-          *_impl_.body_.cancel_install_);
-      break;
-    }
-    // .dsa.control.v1.InstallProgress install_progress = 63;
-    case kInstallProgress: {
-      total_size += 2 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-          *_impl_.body_.install_progress_);
-      break;
-    }
-    // .dsa.control.v1.InstallResult install_result = 64;
-    case kInstallResult: {
-      total_size += 2 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-          *_impl_.body_.install_result_);
       break;
     }
     case BODY_NOT_SET: {
@@ -12194,6 +11067,16 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_clipboard_sharing());
       break;
     }
+    case kClockProbe: {
+      _this->_internal_mutable_clock_probe()->::dsa::control::v1::ClockProbe::MergeFrom(
+          from._internal_clock_probe());
+      break;
+    }
+    case kClockAnswer: {
+      _this->_internal_mutable_clock_answer()->::dsa::control::v1::ClockAnswer::MergeFrom(
+          from._internal_clock_answer());
+      break;
+    }
     case kScreenState: {
       _this->_internal_mutable_screen_state()->::dsa::control::v1::ScreenState::MergeFrom(
           from._internal_screen_state());
@@ -12207,31 +11090,6 @@ void Envelope::MergeFrom(const Envelope& from) {
     case kDeviceIdle: {
       _this->_internal_mutable_device_idle()->::dsa::control::v1::DeviceIdle::MergeFrom(
           from._internal_device_idle());
-      break;
-    }
-    case kInstallApk: {
-      _this->_internal_mutable_install_apk()->::dsa::control::v1::InstallApk::MergeFrom(
-          from._internal_install_apk());
-      break;
-    }
-    case kApkChunk: {
-      _this->_internal_mutable_apk_chunk()->::dsa::control::v1::ApkChunk::MergeFrom(
-          from._internal_apk_chunk());
-      break;
-    }
-    case kCancelInstall: {
-      _this->_internal_mutable_cancel_install()->::dsa::control::v1::CancelInstall::MergeFrom(
-          from._internal_cancel_install());
-      break;
-    }
-    case kInstallProgress: {
-      _this->_internal_mutable_install_progress()->::dsa::control::v1::InstallProgress::MergeFrom(
-          from._internal_install_progress());
-      break;
-    }
-    case kInstallResult: {
-      _this->_internal_mutable_install_result()->::dsa::control::v1::InstallResult::MergeFrom(
-          from._internal_install_result());
       break;
     }
     case BODY_NOT_SET: {
@@ -12393,25 +11251,13 @@ template<> PROTOBUF_NOINLINE ::dsa::control::v1::GuestBoot*
 Arena::CreateMaybeMessage< ::dsa::control::v1::GuestBoot >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::GuestBoot >(arena);
 }
-template<> PROTOBUF_NOINLINE ::dsa::control::v1::InstallApk*
-Arena::CreateMaybeMessage< ::dsa::control::v1::InstallApk >(Arena* arena) {
-  return Arena::CreateMessageInternal< ::dsa::control::v1::InstallApk >(arena);
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ClockProbe*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ClockProbe >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ClockProbe >(arena);
 }
-template<> PROTOBUF_NOINLINE ::dsa::control::v1::ApkChunk*
-Arena::CreateMaybeMessage< ::dsa::control::v1::ApkChunk >(Arena* arena) {
-  return Arena::CreateMessageInternal< ::dsa::control::v1::ApkChunk >(arena);
-}
-template<> PROTOBUF_NOINLINE ::dsa::control::v1::CancelInstall*
-Arena::CreateMaybeMessage< ::dsa::control::v1::CancelInstall >(Arena* arena) {
-  return Arena::CreateMessageInternal< ::dsa::control::v1::CancelInstall >(arena);
-}
-template<> PROTOBUF_NOINLINE ::dsa::control::v1::InstallProgress*
-Arena::CreateMaybeMessage< ::dsa::control::v1::InstallProgress >(Arena* arena) {
-  return Arena::CreateMessageInternal< ::dsa::control::v1::InstallProgress >(arena);
-}
-template<> PROTOBUF_NOINLINE ::dsa::control::v1::InstallResult*
-Arena::CreateMaybeMessage< ::dsa::control::v1::InstallResult >(Arena* arena) {
-  return Arena::CreateMessageInternal< ::dsa::control::v1::InstallResult >(arena);
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ClockAnswer*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ClockAnswer >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ClockAnswer >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::Envelope*
 Arena::CreateMaybeMessage< ::dsa::control::v1::Envelope >(Arena* arena) {

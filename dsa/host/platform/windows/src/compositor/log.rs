@@ -4,7 +4,7 @@ use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use dsa_host_core::input_trace as input_trace_line;
 use dsa_host_core::resize_trace::{self, ResizeTrace};
@@ -123,6 +123,43 @@ pub fn input_trace_on() -> bool {
     })
 }
 
+/// The host's monotonic clock: the performance counter, which every process on the computer
+/// shares, as time since its origin.
+pub fn host_clock() -> Duration {
+    use windows_sys::Win32::System::Performance::{
+        QueryPerformanceCounter, QueryPerformanceFrequency,
+    };
+    let (mut now, mut frequency) = (0i64, 0i64);
+    // SAFETY: both write one local integer.
+    unsafe {
+        QueryPerformanceCounter(&mut now);
+        QueryPerformanceFrequency(&mut frequency);
+    }
+    qpc_to_duration(now, frequency)
+}
+
+pub use dsa_host_core::compositor::present_watch::qpc_to_duration;
+
+/// The performance counter's ticks a second.
+pub fn qpc_frequency() -> i64 {
+    use windows_sys::Win32::System::Performance::QueryPerformanceFrequency;
+    let mut frequency = 0i64;
+    // SAFETY: writes one local integer.
+    unsafe {
+        QueryPerformanceFrequency(&mut frequency);
+    }
+    frequency
+}
+
+/// [`host_clock`] for the platform-neutral clock pairing.
+pub struct PerformanceCounterClock;
+
+impl dsa_host_core::clock_trace::HostClock for PerformanceCounterClock {
+    fn now(&self) -> Duration {
+        host_clock()
+    }
+}
+
 /// Writes one input trace line, when the trace is on.
 pub fn input_trace(stage: &str, task_id: i32, detail: &str) {
     if !input_trace_on() {
@@ -135,6 +172,7 @@ pub fn input_trace(stage: &str, task_id: i32, detail: &str) {
         detail,
         START.get_or_init(Instant::now).elapsed(),
         resize_trace::wall_now(),
+        host_clock(),
     );
     note(INPUT_TRACE_LOG.get().map(|logger| &**logger), &line);
 }

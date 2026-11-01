@@ -257,3 +257,70 @@ fn fr5_a_frame_for_the_host_does_not_wait_for_the_hosts_next_frame() {
     assert_eq!(frame.expect("the frame goes at once"), vec![1, 2, 3]);
     assert_eq!(pumping.join().unwrap(), TransportError::Closed);
 }
+
+#[test]
+fn fr5_the_daemon_answers_a_clock_probe_itself_with_the_guests_clock() {
+    use dsa_protocol::control::envelope::Body;
+    use dsa_protocol::control::{ClockProbe, Envelope};
+
+    let (mut listener, mut connector) = memory::pair();
+    let (to_guest_tx, to_guest_rx) = mpsc::channel();
+    // Nobody in the guest sends or reads anything: the answer waits on no one.
+    let (_from_guest_tx, from_guest_rx) = mpsc::channel::<Vec<u8>>();
+    let (events_tx, _events_rx) = mpsc::channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let daemon = {
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            run(
+                &mut connector,
+                &credentials(guest_hello()),
+                fast(),
+                &to_guest_tx,
+                &from_guest_rx,
+                &events_tx,
+                &stop,
+            )
+        })
+    };
+    let mut host = host_accepts(&mut listener);
+    let before = dsa_guest_channeld::guest_monotonic();
+    host.send(&dsa_protocol::encode(&Envelope {
+        body: Some(Body::ClockProbe(ClockProbe {
+            host_sent_ns: 1_234_567,
+        })),
+    }))
+    .unwrap();
+    let answer = dsa_protocol::decode(&host.recv(Some(WAIT)).unwrap()).unwrap();
+    let after = dsa_guest_channeld::guest_monotonic();
+    let Some(Body::ClockAnswer(answer)) = answer.body else {
+        panic!("the daemon did not answer the probe: {answer:?}");
+    };
+    assert_eq!(answer.host_sent_ns, 1_234_567);
+    assert!(answer.guest_mono_ns >= before.as_nanos() as u64);
+    assert!(answer.guest_mono_ns <= after.as_nanos() as u64);
+    // The probe is the daemon's own; the guest's clients never see it.
+    assert!(to_guest_rx
+        .recv_timeout(Duration::from_millis(200))
+        .is_err());
+
+    stop.store(true, Ordering::Relaxed);
+    assert_eq!(daemon.join().unwrap(), ChannelError::Stopped);
+}
+
+#[test]
+fn fr5_only_a_clock_probe_gets_an_answer() {
+    let frame = dsa_protocol::encode(&dsa_protocol::control::Envelope {
+        body: Some(dsa_protocol::control::envelope::Body::ScreenState(
+            dsa_protocol::control::ScreenState { on: true },
+        )),
+    });
+    assert_eq!(
+        dsa_guest_channeld::clock_answer(&frame, Duration::from_secs(1)),
+        None
+    );
+    assert_eq!(
+        dsa_guest_channeld::clock_answer(b"not a message", Duration::from_secs(1)),
+        None
+    );
+}

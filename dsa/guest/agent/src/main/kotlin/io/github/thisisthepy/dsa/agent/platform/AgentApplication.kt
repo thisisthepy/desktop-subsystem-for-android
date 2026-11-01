@@ -6,6 +6,7 @@ import android.os.Process
 import io.github.thisisthepy.dsa.agent.Agent
 import io.github.thisisthepy.dsa.agent.trace.FrameStatsTrace
 import io.github.thisisthepy.dsa.agent.trace.InputTrace
+import io.github.thisisthepy.dsa.agent.trace.SurfaceFlingerTrace
 
 /**
  * The agent's process. The activity manager starts it at boot because it is persistent, and
@@ -24,7 +25,18 @@ class AgentApplication : Application() {
         // so it has a thread of its own, made only when the trace is on.
         val frameTrace = if (traced) {
             val reads = HandlerThread("dsa-frame-trace").apply { start() }
-            FrameStatsTrace(log, enabled = true, scheduler = HandlerScheduler(reads.looper), dump = AndroidFrameStats::dump)
+            val surfaceFlinger = SurfaceFlingerTrace(
+                log,
+                list = AndroidFrameStats::surfaceFlingerLayers,
+                latency = AndroidFrameStats::surfaceFlingerLatency,
+            )
+            FrameStatsTrace(
+                log,
+                enabled = true,
+                scheduler = HandlerScheduler(reads.looper),
+                dump = AndroidFrameStats::dump,
+                surfaceFlinger = surfaceFlinger,
+            )
         } else {
             null
         }

@@ -19,3 +19,11 @@
 ; system_server takes the descriptors the agent hands it, and writes the command's output.
 (allow system_server platform_app (fd (use)))
 (allow system_server platform_app (fifo_file (write getattr)))
+
+; SurfaceFlinger, which the input trace reads the timings of apps' layers from
+; ("dumpsys SurfaceFlinger --list" and "--latency <layer>"). Every app may find its service
+; already; the rule is here so the trace does not depend on that. SurfaceFlinger writes the
+; dump into the agent's pipe, as system_server does above.
+(allow platform_app surfaceflinger_service (service_manager (find)))
+(allow surfaceflinger platform_app (fd (use)))
+(allow surfaceflinger platform_app (fifo_file (write getattr)))

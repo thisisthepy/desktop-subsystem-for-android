@@ -48,9 +48,6 @@ namespace v1 {
 class AgentConnected;
 struct AgentConnectedDefaultTypeInternal;
 extern AgentConnectedDefaultTypeInternal _AgentConnected_default_instance_;
-class ApkChunk;
-struct ApkChunkDefaultTypeInternal;
-extern ApkChunkDefaultTypeInternal _ApkChunk_default_instance_;
 class AppInfo;
 struct AppInfoDefaultTypeInternal;
 extern AppInfoDefaultTypeInternal _AppInfo_default_instance_;
@@ -60,15 +57,18 @@ extern AuthChallengeDefaultTypeInternal _AuthChallenge_default_instance_;
 class AuthProof;
 struct AuthProofDefaultTypeInternal;
 extern AuthProofDefaultTypeInternal _AuthProof_default_instance_;
-class CancelInstall;
-struct CancelInstallDefaultTypeInternal;
-extern CancelInstallDefaultTypeInternal _CancelInstall_default_instance_;
 class ClipboardSharing;
 struct ClipboardSharingDefaultTypeInternal;
 extern ClipboardSharingDefaultTypeInternal _ClipboardSharing_default_instance_;
 class ClipboardText;
 struct ClipboardTextDefaultTypeInternal;
 extern ClipboardTextDefaultTypeInternal _ClipboardText_default_instance_;
+class ClockAnswer;
+struct ClockAnswerDefaultTypeInternal;
+extern ClockAnswerDefaultTypeInternal _ClockAnswer_default_instance_;
+class ClockProbe;
+struct ClockProbeDefaultTypeInternal;
+extern ClockProbeDefaultTypeInternal _ClockProbe_default_instance_;
 class CloseTask;
 struct CloseTaskDefaultTypeInternal;
 extern CloseTaskDefaultTypeInternal _CloseTask_default_instance_;
@@ -102,15 +102,6 @@ extern ImeCompositionDefaultTypeInternal _ImeComposition_default_instance_;
 class ImeCursor;
 struct ImeCursorDefaultTypeInternal;
 extern ImeCursorDefaultTypeInternal _ImeCursor_default_instance_;
-class InstallApk;
-struct InstallApkDefaultTypeInternal;
-extern InstallApkDefaultTypeInternal _InstallApk_default_instance_;
-class InstallProgress;
-struct InstallProgressDefaultTypeInternal;
-extern InstallProgressDefaultTypeInternal _InstallProgress_default_instance_;
-class InstallResult;
-struct InstallResultDefaultTypeInternal;
-extern InstallResultDefaultTypeInternal _InstallResult_default_instance_;
 class InstalledApp;
 struct InstalledAppDefaultTypeInternal;
 extern InstalledAppDefaultTypeInternal _InstalledApp_default_instance_;
@@ -161,13 +152,13 @@ extern TaskUpdatedDefaultTypeInternal _TaskUpdated_default_instance_;
 }  // namespace dsa
 PROTOBUF_NAMESPACE_OPEN
 template<> ::dsa::control::v1::AgentConnected* Arena::CreateMaybeMessage<::dsa::control::v1::AgentConnected>(Arena*);
-template<> ::dsa::control::v1::ApkChunk* Arena::CreateMaybeMessage<::dsa::control::v1::ApkChunk>(Arena*);
 template<> ::dsa::control::v1::AppInfo* Arena::CreateMaybeMessage<::dsa::control::v1::AppInfo>(Arena*);
 template<> ::dsa::control::v1::AuthChallenge* Arena::CreateMaybeMessage<::dsa::control::v1::AuthChallenge>(Arena*);
 template<> ::dsa::control::v1::AuthProof* Arena::CreateMaybeMessage<::dsa::control::v1::AuthProof>(Arena*);
-template<> ::dsa::control::v1::CancelInstall* Arena::CreateMaybeMessage<::dsa::control::v1::CancelInstall>(Arena*);
 template<> ::dsa::control::v1::ClipboardSharing* Arena::CreateMaybeMessage<::dsa::control::v1::ClipboardSharing>(Arena*);
 template<> ::dsa::control::v1::ClipboardText* Arena::CreateMaybeMessage<::dsa::control::v1::ClipboardText>(Arena*);
+template<> ::dsa::control::v1::ClockAnswer* Arena::CreateMaybeMessage<::dsa::control::v1::ClockAnswer>(Arena*);
+template<> ::dsa::control::v1::ClockProbe* Arena::CreateMaybeMessage<::dsa::control::v1::ClockProbe>(Arena*);
 template<> ::dsa::control::v1::CloseTask* Arena::CreateMaybeMessage<::dsa::control::v1::CloseTask>(Arena*);
 template<> ::dsa::control::v1::DeviceIdle* Arena::CreateMaybeMessage<::dsa::control::v1::DeviceIdle>(Arena*);
 template<> ::dsa::control::v1::Envelope* Arena::CreateMaybeMessage<::dsa::control::v1::Envelope>(Arena*);
@@ -179,9 +170,6 @@ template<> ::dsa::control::v1::HelloRejected* Arena::CreateMaybeMessage<::dsa::c
 template<> ::dsa::control::v1::ImeCommit* Arena::CreateMaybeMessage<::dsa::control::v1::ImeCommit>(Arena*);
 template<> ::dsa::control::v1::ImeComposition* Arena::CreateMaybeMessage<::dsa::control::v1::ImeComposition>(Arena*);
 template<> ::dsa::control::v1::ImeCursor* Arena::CreateMaybeMessage<::dsa::control::v1::ImeCursor>(Arena*);
-template<> ::dsa::control::v1::InstallApk* Arena::CreateMaybeMessage<::dsa::control::v1::InstallApk>(Arena*);
-template<> ::dsa::control::v1::InstallProgress* Arena::CreateMaybeMessage<::dsa::control::v1::InstallProgress>(Arena*);
-template<> ::dsa::control::v1::InstallResult* Arena::CreateMaybeMessage<::dsa::control::v1::InstallResult>(Arena*);
 template<> ::dsa::control::v1::InstalledApp* Arena::CreateMaybeMessage<::dsa::control::v1::InstalledApp>(Arena*);
 template<> ::dsa::control::v1::InstalledApps* Arena::CreateMaybeMessage<::dsa::control::v1::InstalledApps>(Arena*);
 template<> ::dsa::control::v1::KeyEvent* Arena::CreateMaybeMessage<::dsa::control::v1::KeyEvent>(Arena*);
@@ -343,34 +331,6 @@ inline const std::string& KeyAction_Name(T enum_t_value) {
 }
 bool KeyAction_Parse(
     ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, KeyAction* value);
-enum InstallStatus : int {
-  INSTALL_STATUS_UNSPECIFIED = 0,
-  INSTALL_STATUS_SUCCESS = 1,
-  INSTALL_STATUS_INCOMPATIBLE = 2,
-  INSTALL_STATUS_CONFLICTING_SIGNATURE = 3,
-  INSTALL_STATUS_INVALID_APK = 4,
-  INSTALL_STATUS_INSUFFICIENT_STORAGE = 5,
-  INSTALL_STATUS_DOWNGRADE = 6,
-  INSTALL_STATUS_BLOCKED = 7,
-  INSTALL_STATUS_OTHER = 8,
-  InstallStatus_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
-  InstallStatus_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
-};
-bool InstallStatus_IsValid(int value);
-constexpr InstallStatus InstallStatus_MIN = INSTALL_STATUS_UNSPECIFIED;
-constexpr InstallStatus InstallStatus_MAX = INSTALL_STATUS_OTHER;
-constexpr int InstallStatus_ARRAYSIZE = InstallStatus_MAX + 1;
-
-const std::string& InstallStatus_Name(InstallStatus value);
-template<typename T>
-inline const std::string& InstallStatus_Name(T enum_t_value) {
-  static_assert(::std::is_same<T, InstallStatus>::value ||
-    ::std::is_integral<T>::value,
-    "Incorrect type passed to function InstallStatus_Name.");
-  return InstallStatus_Name(static_cast<InstallStatus>(enum_t_value));
-}
-bool InstallStatus_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, InstallStatus* value);
 // ===================================================================
 
 class Hello final :
@@ -5253,24 +5213,24 @@ class GuestBoot final :
 };
 // -------------------------------------------------------------------
 
-class InstallApk final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.InstallApk) */ {
+class ClockProbe final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.ClockProbe) */ {
  public:
-  inline InstallApk() : InstallApk(nullptr) {}
-  ~InstallApk() override;
-  explicit PROTOBUF_CONSTEXPR InstallApk(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+  inline ClockProbe() : ClockProbe(nullptr) {}
+  ~ClockProbe() override;
+  explicit PROTOBUF_CONSTEXPR ClockProbe(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
 
-  InstallApk(const InstallApk& from);
-  InstallApk(InstallApk&& from) noexcept
-    : InstallApk() {
+  ClockProbe(const ClockProbe& from);
+  ClockProbe(ClockProbe&& from) noexcept
+    : ClockProbe() {
     *this = ::std::move(from);
   }
 
-  inline InstallApk& operator=(const InstallApk& from) {
+  inline ClockProbe& operator=(const ClockProbe& from) {
     CopyFrom(from);
     return *this;
   }
-  inline InstallApk& operator=(InstallApk&& from) noexcept {
+  inline ClockProbe& operator=(ClockProbe&& from) noexcept {
     if (this == &from) return *this;
     if (GetOwningArena() == from.GetOwningArena()
   #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
@@ -5284,20 +5244,20 @@ class InstallApk final :
     return *this;
   }
 
-  static const InstallApk& default_instance() {
+  static const ClockProbe& default_instance() {
     return *internal_default_instance();
   }
-  static inline const InstallApk* internal_default_instance() {
-    return reinterpret_cast<const InstallApk*>(
-               &_InstallApk_default_instance_);
+  static inline const ClockProbe* internal_default_instance() {
+    return reinterpret_cast<const ClockProbe*>(
+               &_ClockProbe_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
     31;
 
-  friend void swap(InstallApk& a, InstallApk& b) {
+  friend void swap(ClockProbe& a, ClockProbe& b) {
     a.Swap(&b);
   }
-  inline void Swap(InstallApk* other) {
+  inline void Swap(ClockProbe* other) {
     if (other == this) return;
   #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
     if (GetOwningArena() != nullptr &&
@@ -5310,7 +5270,7 @@ class InstallApk final :
       ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
     }
   }
-  void UnsafeArenaSwap(InstallApk* other) {
+  void UnsafeArenaSwap(ClockProbe* other) {
     if (other == this) return;
     GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
     InternalSwap(other);
@@ -5318,12 +5278,12 @@ class InstallApk final :
 
   // implements Message ----------------------------------------------
 
-  InstallApk* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<InstallApk>(arena);
+  ClockProbe* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ClockProbe>(arena);
   }
   void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const InstallApk& from);
-  void MergeFrom(const InstallApk& from);
+  void CopyFrom(const ClockProbe& from);
+  void MergeFrom(const ClockProbe& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -5337,15 +5297,15 @@ class InstallApk final :
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
   void SetCachedSize(int size) const;
-  void InternalSwap(InstallApk* other);
+  void InternalSwap(ClockProbe* other);
 
   private:
   friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
   static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.InstallApk";
+    return "dsa.control.v1.ClockProbe";
   }
   protected:
-  explicit InstallApk(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+  explicit ClockProbe(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                        bool is_message_owned = false);
   public:
 
@@ -5356,43 +5316,18 @@ class InstallApk final :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kNameFieldNumber = 2,
-    kSizeFieldNumber = 3,
-    kTransferIdFieldNumber = 1,
+    kHostSentNsFieldNumber = 1,
   };
-  // string name = 2;
-  void clear_name();
-  const std::string& name() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_name(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_name();
-  PROTOBUF_NODISCARD std::string* release_name();
-  void set_allocated_name(std::string* name);
+  // uint64 host_sent_ns = 1;
+  void clear_host_sent_ns();
+  uint64_t host_sent_ns() const;
+  void set_host_sent_ns(uint64_t value);
   private:
-  const std::string& _internal_name() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_name(const std::string& value);
-  std::string* _internal_mutable_name();
+  uint64_t _internal_host_sent_ns() const;
+  void _internal_set_host_sent_ns(uint64_t value);
   public:
 
-  // uint64 size = 3;
-  void clear_size();
-  uint64_t size() const;
-  void set_size(uint64_t value);
-  private:
-  uint64_t _internal_size() const;
-  void _internal_set_size(uint64_t value);
-  public:
-
-  // uint32 transfer_id = 1;
-  void clear_transfer_id();
-  uint32_t transfer_id() const;
-  void set_transfer_id(uint32_t value);
-  private:
-  uint32_t _internal_transfer_id() const;
-  void _internal_set_transfer_id(uint32_t value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.InstallApk)
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.ClockProbe)
  private:
   class _Internal;
 
@@ -5400,9 +5335,7 @@ class InstallApk final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr name_;
-    uint64_t size_;
-    uint32_t transfer_id_;
+    uint64_t host_sent_ns_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -5410,24 +5343,24 @@ class InstallApk final :
 };
 // -------------------------------------------------------------------
 
-class ApkChunk final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.ApkChunk) */ {
+class ClockAnswer final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.ClockAnswer) */ {
  public:
-  inline ApkChunk() : ApkChunk(nullptr) {}
-  ~ApkChunk() override;
-  explicit PROTOBUF_CONSTEXPR ApkChunk(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+  inline ClockAnswer() : ClockAnswer(nullptr) {}
+  ~ClockAnswer() override;
+  explicit PROTOBUF_CONSTEXPR ClockAnswer(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
 
-  ApkChunk(const ApkChunk& from);
-  ApkChunk(ApkChunk&& from) noexcept
-    : ApkChunk() {
+  ClockAnswer(const ClockAnswer& from);
+  ClockAnswer(ClockAnswer&& from) noexcept
+    : ClockAnswer() {
     *this = ::std::move(from);
   }
 
-  inline ApkChunk& operator=(const ApkChunk& from) {
+  inline ClockAnswer& operator=(const ClockAnswer& from) {
     CopyFrom(from);
     return *this;
   }
-  inline ApkChunk& operator=(ApkChunk&& from) noexcept {
+  inline ClockAnswer& operator=(ClockAnswer&& from) noexcept {
     if (this == &from) return *this;
     if (GetOwningArena() == from.GetOwningArena()
   #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
@@ -5441,20 +5374,20 @@ class ApkChunk final :
     return *this;
   }
 
-  static const ApkChunk& default_instance() {
+  static const ClockAnswer& default_instance() {
     return *internal_default_instance();
   }
-  static inline const ApkChunk* internal_default_instance() {
-    return reinterpret_cast<const ApkChunk*>(
-               &_ApkChunk_default_instance_);
+  static inline const ClockAnswer* internal_default_instance() {
+    return reinterpret_cast<const ClockAnswer*>(
+               &_ClockAnswer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
     32;
 
-  friend void swap(ApkChunk& a, ApkChunk& b) {
+  friend void swap(ClockAnswer& a, ClockAnswer& b) {
     a.Swap(&b);
   }
-  inline void Swap(ApkChunk* other) {
+  inline void Swap(ClockAnswer* other) {
     if (other == this) return;
   #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
     if (GetOwningArena() != nullptr &&
@@ -5467,7 +5400,7 @@ class ApkChunk final :
       ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
     }
   }
-  void UnsafeArenaSwap(ApkChunk* other) {
+  void UnsafeArenaSwap(ClockAnswer* other) {
     if (other == this) return;
     GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
     InternalSwap(other);
@@ -5475,12 +5408,12 @@ class ApkChunk final :
 
   // implements Message ----------------------------------------------
 
-  ApkChunk* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<ApkChunk>(arena);
+  ClockAnswer* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ClockAnswer>(arena);
   }
   void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const ApkChunk& from);
-  void MergeFrom(const ApkChunk& from);
+  void CopyFrom(const ClockAnswer& from);
+  void MergeFrom(const ClockAnswer& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -5494,15 +5427,15 @@ class ApkChunk final :
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
   void SetCachedSize(int size) const;
-  void InternalSwap(ApkChunk* other);
+  void InternalSwap(ClockAnswer* other);
 
   private:
   friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
   static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.ApkChunk";
+    return "dsa.control.v1.ClockAnswer";
   }
   protected:
-  explicit ApkChunk(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+  explicit ClockAnswer(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                        bool is_message_owned = false);
   public:
 
@@ -5513,43 +5446,28 @@ class ApkChunk final :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kDataFieldNumber = 3,
-    kOffsetFieldNumber = 2,
-    kTransferIdFieldNumber = 1,
+    kHostSentNsFieldNumber = 1,
+    kGuestMonoNsFieldNumber = 2,
   };
-  // bytes data = 3;
-  void clear_data();
-  const std::string& data() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_data(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_data();
-  PROTOBUF_NODISCARD std::string* release_data();
-  void set_allocated_data(std::string* data);
+  // uint64 host_sent_ns = 1;
+  void clear_host_sent_ns();
+  uint64_t host_sent_ns() const;
+  void set_host_sent_ns(uint64_t value);
   private:
-  const std::string& _internal_data() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_data(const std::string& value);
-  std::string* _internal_mutable_data();
+  uint64_t _internal_host_sent_ns() const;
+  void _internal_set_host_sent_ns(uint64_t value);
   public:
 
-  // uint64 offset = 2;
-  void clear_offset();
-  uint64_t offset() const;
-  void set_offset(uint64_t value);
+  // uint64 guest_mono_ns = 2;
+  void clear_guest_mono_ns();
+  uint64_t guest_mono_ns() const;
+  void set_guest_mono_ns(uint64_t value);
   private:
-  uint64_t _internal_offset() const;
-  void _internal_set_offset(uint64_t value);
+  uint64_t _internal_guest_mono_ns() const;
+  void _internal_set_guest_mono_ns(uint64_t value);
   public:
 
-  // uint32 transfer_id = 1;
-  void clear_transfer_id();
-  uint32_t transfer_id() const;
-  void set_transfer_id(uint32_t value);
-  private:
-  uint32_t _internal_transfer_id() const;
-  void _internal_set_transfer_id(uint32_t value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.ApkChunk)
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.ClockAnswer)
  private:
   class _Internal;
 
@@ -5557,453 +5475,8 @@ class ApkChunk final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr data_;
-    uint64_t offset_;
-    uint32_t transfer_id_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class CancelInstall final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.CancelInstall) */ {
- public:
-  inline CancelInstall() : CancelInstall(nullptr) {}
-  ~CancelInstall() override;
-  explicit PROTOBUF_CONSTEXPR CancelInstall(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  CancelInstall(const CancelInstall& from);
-  CancelInstall(CancelInstall&& from) noexcept
-    : CancelInstall() {
-    *this = ::std::move(from);
-  }
-
-  inline CancelInstall& operator=(const CancelInstall& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline CancelInstall& operator=(CancelInstall&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const CancelInstall& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const CancelInstall* internal_default_instance() {
-    return reinterpret_cast<const CancelInstall*>(
-               &_CancelInstall_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    33;
-
-  friend void swap(CancelInstall& a, CancelInstall& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(CancelInstall* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(CancelInstall* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  CancelInstall* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<CancelInstall>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const CancelInstall& from);
-  void MergeFrom(const CancelInstall& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(CancelInstall* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.CancelInstall";
-  }
-  protected:
-  explicit CancelInstall(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kTransferIdFieldNumber = 1,
-  };
-  // uint32 transfer_id = 1;
-  void clear_transfer_id();
-  uint32_t transfer_id() const;
-  void set_transfer_id(uint32_t value);
-  private:
-  uint32_t _internal_transfer_id() const;
-  void _internal_set_transfer_id(uint32_t value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.CancelInstall)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    uint32_t transfer_id_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class InstallProgress final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.InstallProgress) */ {
- public:
-  inline InstallProgress() : InstallProgress(nullptr) {}
-  ~InstallProgress() override;
-  explicit PROTOBUF_CONSTEXPR InstallProgress(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  InstallProgress(const InstallProgress& from);
-  InstallProgress(InstallProgress&& from) noexcept
-    : InstallProgress() {
-    *this = ::std::move(from);
-  }
-
-  inline InstallProgress& operator=(const InstallProgress& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline InstallProgress& operator=(InstallProgress&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const InstallProgress& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const InstallProgress* internal_default_instance() {
-    return reinterpret_cast<const InstallProgress*>(
-               &_InstallProgress_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    34;
-
-  friend void swap(InstallProgress& a, InstallProgress& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(InstallProgress* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(InstallProgress* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  InstallProgress* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<InstallProgress>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const InstallProgress& from);
-  void MergeFrom(const InstallProgress& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(InstallProgress* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.InstallProgress";
-  }
-  protected:
-  explicit InstallProgress(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kReceivedFieldNumber = 2,
-    kTransferIdFieldNumber = 1,
-  };
-  // uint64 received = 2;
-  void clear_received();
-  uint64_t received() const;
-  void set_received(uint64_t value);
-  private:
-  uint64_t _internal_received() const;
-  void _internal_set_received(uint64_t value);
-  public:
-
-  // uint32 transfer_id = 1;
-  void clear_transfer_id();
-  uint32_t transfer_id() const;
-  void set_transfer_id(uint32_t value);
-  private:
-  uint32_t _internal_transfer_id() const;
-  void _internal_set_transfer_id(uint32_t value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.InstallProgress)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    uint64_t received_;
-    uint32_t transfer_id_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class InstallResult final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.InstallResult) */ {
- public:
-  inline InstallResult() : InstallResult(nullptr) {}
-  ~InstallResult() override;
-  explicit PROTOBUF_CONSTEXPR InstallResult(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  InstallResult(const InstallResult& from);
-  InstallResult(InstallResult&& from) noexcept
-    : InstallResult() {
-    *this = ::std::move(from);
-  }
-
-  inline InstallResult& operator=(const InstallResult& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline InstallResult& operator=(InstallResult&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const InstallResult& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const InstallResult* internal_default_instance() {
-    return reinterpret_cast<const InstallResult*>(
-               &_InstallResult_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    35;
-
-  friend void swap(InstallResult& a, InstallResult& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(InstallResult* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(InstallResult* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  InstallResult* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<InstallResult>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const InstallResult& from);
-  void MergeFrom(const InstallResult& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(InstallResult* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.InstallResult";
-  }
-  protected:
-  explicit InstallResult(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kPackageNameFieldNumber = 3,
-    kMessageFieldNumber = 4,
-    kTransferIdFieldNumber = 1,
-    kStatusFieldNumber = 2,
-  };
-  // string package_name = 3;
-  void clear_package_name();
-  const std::string& package_name() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_package_name(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_package_name();
-  PROTOBUF_NODISCARD std::string* release_package_name();
-  void set_allocated_package_name(std::string* package_name);
-  private:
-  const std::string& _internal_package_name() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_package_name(const std::string& value);
-  std::string* _internal_mutable_package_name();
-  public:
-
-  // string message = 4;
-  void clear_message();
-  const std::string& message() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_message(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_message();
-  PROTOBUF_NODISCARD std::string* release_message();
-  void set_allocated_message(std::string* message);
-  private:
-  const std::string& _internal_message() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_message(const std::string& value);
-  std::string* _internal_mutable_message();
-  public:
-
-  // uint32 transfer_id = 1;
-  void clear_transfer_id();
-  uint32_t transfer_id() const;
-  void set_transfer_id(uint32_t value);
-  private:
-  uint32_t _internal_transfer_id() const;
-  void _internal_set_transfer_id(uint32_t value);
-  public:
-
-  // .dsa.control.v1.InstallStatus status = 2;
-  void clear_status();
-  ::dsa::control::v1::InstallStatus status() const;
-  void set_status(::dsa::control::v1::InstallStatus value);
-  private:
-  ::dsa::control::v1::InstallStatus _internal_status() const;
-  void _internal_set_status(::dsa::control::v1::InstallStatus value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.InstallResult)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr package_name_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr message_;
-    uint32_t transfer_id_;
-    int status_;
+    uint64_t host_sent_ns_;
+    uint64_t guest_mono_ns_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -6072,14 +5545,11 @@ class Envelope final :
     kGuestBoot = 25,
     kClipboardText = 26,
     kClipboardSharing = 27,
+    kClockProbe = 28,
+    kClockAnswer = 29,
     kScreenState = 40,
     kPowerState = 41,
     kDeviceIdle = 42,
-    kInstallApk = 60,
-    kApkChunk = 61,
-    kCancelInstall = 62,
-    kInstallProgress = 63,
-    kInstallResult = 64,
     BODY_NOT_SET = 0,
   };
 
@@ -6088,7 +5558,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    36;
+    33;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -6178,14 +5648,11 @@ class Envelope final :
     kGuestBootFieldNumber = 25,
     kClipboardTextFieldNumber = 26,
     kClipboardSharingFieldNumber = 27,
+    kClockProbeFieldNumber = 28,
+    kClockAnswerFieldNumber = 29,
     kScreenStateFieldNumber = 40,
     kPowerStateFieldNumber = 41,
     kDeviceIdleFieldNumber = 42,
-    kInstallApkFieldNumber = 60,
-    kApkChunkFieldNumber = 61,
-    kCancelInstallFieldNumber = 62,
-    kInstallProgressFieldNumber = 63,
-    kInstallResultFieldNumber = 64,
   };
   // .dsa.control.v1.Hello hello = 1;
   bool has_hello() const;
@@ -6655,6 +6122,42 @@ class Envelope final :
       ::dsa::control::v1::ClipboardSharing* clipboard_sharing);
   ::dsa::control::v1::ClipboardSharing* unsafe_arena_release_clipboard_sharing();
 
+  // .dsa.control.v1.ClockProbe clock_probe = 28;
+  bool has_clock_probe() const;
+  private:
+  bool _internal_has_clock_probe() const;
+  public:
+  void clear_clock_probe();
+  const ::dsa::control::v1::ClockProbe& clock_probe() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::ClockProbe* release_clock_probe();
+  ::dsa::control::v1::ClockProbe* mutable_clock_probe();
+  void set_allocated_clock_probe(::dsa::control::v1::ClockProbe* clock_probe);
+  private:
+  const ::dsa::control::v1::ClockProbe& _internal_clock_probe() const;
+  ::dsa::control::v1::ClockProbe* _internal_mutable_clock_probe();
+  public:
+  void unsafe_arena_set_allocated_clock_probe(
+      ::dsa::control::v1::ClockProbe* clock_probe);
+  ::dsa::control::v1::ClockProbe* unsafe_arena_release_clock_probe();
+
+  // .dsa.control.v1.ClockAnswer clock_answer = 29;
+  bool has_clock_answer() const;
+  private:
+  bool _internal_has_clock_answer() const;
+  public:
+  void clear_clock_answer();
+  const ::dsa::control::v1::ClockAnswer& clock_answer() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::ClockAnswer* release_clock_answer();
+  ::dsa::control::v1::ClockAnswer* mutable_clock_answer();
+  void set_allocated_clock_answer(::dsa::control::v1::ClockAnswer* clock_answer);
+  private:
+  const ::dsa::control::v1::ClockAnswer& _internal_clock_answer() const;
+  ::dsa::control::v1::ClockAnswer* _internal_mutable_clock_answer();
+  public:
+  void unsafe_arena_set_allocated_clock_answer(
+      ::dsa::control::v1::ClockAnswer* clock_answer);
+  ::dsa::control::v1::ClockAnswer* unsafe_arena_release_clock_answer();
+
   // .dsa.control.v1.ScreenState screen_state = 40;
   bool has_screen_state() const;
   private:
@@ -6709,96 +6212,6 @@ class Envelope final :
       ::dsa::control::v1::DeviceIdle* device_idle);
   ::dsa::control::v1::DeviceIdle* unsafe_arena_release_device_idle();
 
-  // .dsa.control.v1.InstallApk install_apk = 60;
-  bool has_install_apk() const;
-  private:
-  bool _internal_has_install_apk() const;
-  public:
-  void clear_install_apk();
-  const ::dsa::control::v1::InstallApk& install_apk() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::InstallApk* release_install_apk();
-  ::dsa::control::v1::InstallApk* mutable_install_apk();
-  void set_allocated_install_apk(::dsa::control::v1::InstallApk* install_apk);
-  private:
-  const ::dsa::control::v1::InstallApk& _internal_install_apk() const;
-  ::dsa::control::v1::InstallApk* _internal_mutable_install_apk();
-  public:
-  void unsafe_arena_set_allocated_install_apk(
-      ::dsa::control::v1::InstallApk* install_apk);
-  ::dsa::control::v1::InstallApk* unsafe_arena_release_install_apk();
-
-  // .dsa.control.v1.ApkChunk apk_chunk = 61;
-  bool has_apk_chunk() const;
-  private:
-  bool _internal_has_apk_chunk() const;
-  public:
-  void clear_apk_chunk();
-  const ::dsa::control::v1::ApkChunk& apk_chunk() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::ApkChunk* release_apk_chunk();
-  ::dsa::control::v1::ApkChunk* mutable_apk_chunk();
-  void set_allocated_apk_chunk(::dsa::control::v1::ApkChunk* apk_chunk);
-  private:
-  const ::dsa::control::v1::ApkChunk& _internal_apk_chunk() const;
-  ::dsa::control::v1::ApkChunk* _internal_mutable_apk_chunk();
-  public:
-  void unsafe_arena_set_allocated_apk_chunk(
-      ::dsa::control::v1::ApkChunk* apk_chunk);
-  ::dsa::control::v1::ApkChunk* unsafe_arena_release_apk_chunk();
-
-  // .dsa.control.v1.CancelInstall cancel_install = 62;
-  bool has_cancel_install() const;
-  private:
-  bool _internal_has_cancel_install() const;
-  public:
-  void clear_cancel_install();
-  const ::dsa::control::v1::CancelInstall& cancel_install() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::CancelInstall* release_cancel_install();
-  ::dsa::control::v1::CancelInstall* mutable_cancel_install();
-  void set_allocated_cancel_install(::dsa::control::v1::CancelInstall* cancel_install);
-  private:
-  const ::dsa::control::v1::CancelInstall& _internal_cancel_install() const;
-  ::dsa::control::v1::CancelInstall* _internal_mutable_cancel_install();
-  public:
-  void unsafe_arena_set_allocated_cancel_install(
-      ::dsa::control::v1::CancelInstall* cancel_install);
-  ::dsa::control::v1::CancelInstall* unsafe_arena_release_cancel_install();
-
-  // .dsa.control.v1.InstallProgress install_progress = 63;
-  bool has_install_progress() const;
-  private:
-  bool _internal_has_install_progress() const;
-  public:
-  void clear_install_progress();
-  const ::dsa::control::v1::InstallProgress& install_progress() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::InstallProgress* release_install_progress();
-  ::dsa::control::v1::InstallProgress* mutable_install_progress();
-  void set_allocated_install_progress(::dsa::control::v1::InstallProgress* install_progress);
-  private:
-  const ::dsa::control::v1::InstallProgress& _internal_install_progress() const;
-  ::dsa::control::v1::InstallProgress* _internal_mutable_install_progress();
-  public:
-  void unsafe_arena_set_allocated_install_progress(
-      ::dsa::control::v1::InstallProgress* install_progress);
-  ::dsa::control::v1::InstallProgress* unsafe_arena_release_install_progress();
-
-  // .dsa.control.v1.InstallResult install_result = 64;
-  bool has_install_result() const;
-  private:
-  bool _internal_has_install_result() const;
-  public:
-  void clear_install_result();
-  const ::dsa::control::v1::InstallResult& install_result() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::InstallResult* release_install_result();
-  ::dsa::control::v1::InstallResult* mutable_install_result();
-  void set_allocated_install_result(::dsa::control::v1::InstallResult* install_result);
-  private:
-  const ::dsa::control::v1::InstallResult& _internal_install_result() const;
-  ::dsa::control::v1::InstallResult* _internal_mutable_install_result();
-  public:
-  void unsafe_arena_set_allocated_install_result(
-      ::dsa::control::v1::InstallResult* install_result);
-  ::dsa::control::v1::InstallResult* unsafe_arena_release_install_result();
-
   void clear_body();
   BodyCase body_case() const;
   // @@protoc_insertion_point(class_scope:dsa.control.v1.Envelope)
@@ -6830,14 +6243,11 @@ class Envelope final :
   void set_has_guest_boot();
   void set_has_clipboard_text();
   void set_has_clipboard_sharing();
+  void set_has_clock_probe();
+  void set_has_clock_answer();
   void set_has_screen_state();
   void set_has_power_state();
   void set_has_device_idle();
-  void set_has_install_apk();
-  void set_has_apk_chunk();
-  void set_has_cancel_install();
-  void set_has_install_progress();
-  void set_has_install_result();
 
   inline bool has_body() const;
   inline void clear_has_body();
@@ -6875,14 +6285,11 @@ class Envelope final :
       ::dsa::control::v1::GuestBoot* guest_boot_;
       ::dsa::control::v1::ClipboardText* clipboard_text_;
       ::dsa::control::v1::ClipboardSharing* clipboard_sharing_;
+      ::dsa::control::v1::ClockProbe* clock_probe_;
+      ::dsa::control::v1::ClockAnswer* clock_answer_;
       ::dsa::control::v1::ScreenState* screen_state_;
       ::dsa::control::v1::PowerState* power_state_;
       ::dsa::control::v1::DeviceIdle* device_idle_;
-      ::dsa::control::v1::InstallApk* install_apk_;
-      ::dsa::control::v1::ApkChunk* apk_chunk_;
-      ::dsa::control::v1::CancelInstall* cancel_install_;
-      ::dsa::control::v1::InstallProgress* install_progress_;
-      ::dsa::control::v1::InstallResult* install_result_;
     } body_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -9819,402 +9226,70 @@ inline void GuestBoot::set_agent_connected(bool value) {
 
 // -------------------------------------------------------------------
 
-// InstallApk
+// ClockProbe
 
-// uint32 transfer_id = 1;
-inline void InstallApk::clear_transfer_id() {
-  _impl_.transfer_id_ = 0u;
+// uint64 host_sent_ns = 1;
+inline void ClockProbe::clear_host_sent_ns() {
+  _impl_.host_sent_ns_ = uint64_t{0u};
 }
-inline uint32_t InstallApk::_internal_transfer_id() const {
-  return _impl_.transfer_id_;
+inline uint64_t ClockProbe::_internal_host_sent_ns() const {
+  return _impl_.host_sent_ns_;
 }
-inline uint32_t InstallApk::transfer_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallApk.transfer_id)
-  return _internal_transfer_id();
+inline uint64_t ClockProbe::host_sent_ns() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ClockProbe.host_sent_ns)
+  return _internal_host_sent_ns();
 }
-inline void InstallApk::_internal_set_transfer_id(uint32_t value) {
+inline void ClockProbe::_internal_set_host_sent_ns(uint64_t value) {
   
-  _impl_.transfer_id_ = value;
+  _impl_.host_sent_ns_ = value;
 }
-inline void InstallApk::set_transfer_id(uint32_t value) {
-  _internal_set_transfer_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallApk.transfer_id)
-}
-
-// string name = 2;
-inline void InstallApk::clear_name() {
-  _impl_.name_.ClearToEmpty();
-}
-inline const std::string& InstallApk::name() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallApk.name)
-  return _internal_name();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void InstallApk::set_name(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallApk.name)
-}
-inline std::string* InstallApk::mutable_name() {
-  std::string* _s = _internal_mutable_name();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.InstallApk.name)
-  return _s;
-}
-inline const std::string& InstallApk::_internal_name() const {
-  return _impl_.name_.Get();
-}
-inline void InstallApk::_internal_set_name(const std::string& value) {
-  
-  _impl_.name_.Set(value, GetArenaForAllocation());
-}
-inline std::string* InstallApk::_internal_mutable_name() {
-  
-  return _impl_.name_.Mutable(GetArenaForAllocation());
-}
-inline std::string* InstallApk::release_name() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.InstallApk.name)
-  return _impl_.name_.Release();
-}
-inline void InstallApk::set_allocated_name(std::string* name) {
-  if (name != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.name_.SetAllocated(name, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.name_.IsDefault()) {
-    _impl_.name_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.InstallApk.name)
-}
-
-// uint64 size = 3;
-inline void InstallApk::clear_size() {
-  _impl_.size_ = uint64_t{0u};
-}
-inline uint64_t InstallApk::_internal_size() const {
-  return _impl_.size_;
-}
-inline uint64_t InstallApk::size() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallApk.size)
-  return _internal_size();
-}
-inline void InstallApk::_internal_set_size(uint64_t value) {
-  
-  _impl_.size_ = value;
-}
-inline void InstallApk::set_size(uint64_t value) {
-  _internal_set_size(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallApk.size)
+inline void ClockProbe::set_host_sent_ns(uint64_t value) {
+  _internal_set_host_sent_ns(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ClockProbe.host_sent_ns)
 }
 
 // -------------------------------------------------------------------
 
-// ApkChunk
+// ClockAnswer
 
-// uint32 transfer_id = 1;
-inline void ApkChunk::clear_transfer_id() {
-  _impl_.transfer_id_ = 0u;
+// uint64 host_sent_ns = 1;
+inline void ClockAnswer::clear_host_sent_ns() {
+  _impl_.host_sent_ns_ = uint64_t{0u};
 }
-inline uint32_t ApkChunk::_internal_transfer_id() const {
-  return _impl_.transfer_id_;
+inline uint64_t ClockAnswer::_internal_host_sent_ns() const {
+  return _impl_.host_sent_ns_;
 }
-inline uint32_t ApkChunk::transfer_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.ApkChunk.transfer_id)
-  return _internal_transfer_id();
+inline uint64_t ClockAnswer::host_sent_ns() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ClockAnswer.host_sent_ns)
+  return _internal_host_sent_ns();
 }
-inline void ApkChunk::_internal_set_transfer_id(uint32_t value) {
+inline void ClockAnswer::_internal_set_host_sent_ns(uint64_t value) {
   
-  _impl_.transfer_id_ = value;
+  _impl_.host_sent_ns_ = value;
 }
-inline void ApkChunk::set_transfer_id(uint32_t value) {
-  _internal_set_transfer_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.ApkChunk.transfer_id)
+inline void ClockAnswer::set_host_sent_ns(uint64_t value) {
+  _internal_set_host_sent_ns(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ClockAnswer.host_sent_ns)
 }
 
-// uint64 offset = 2;
-inline void ApkChunk::clear_offset() {
-  _impl_.offset_ = uint64_t{0u};
+// uint64 guest_mono_ns = 2;
+inline void ClockAnswer::clear_guest_mono_ns() {
+  _impl_.guest_mono_ns_ = uint64_t{0u};
 }
-inline uint64_t ApkChunk::_internal_offset() const {
-  return _impl_.offset_;
+inline uint64_t ClockAnswer::_internal_guest_mono_ns() const {
+  return _impl_.guest_mono_ns_;
 }
-inline uint64_t ApkChunk::offset() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.ApkChunk.offset)
-  return _internal_offset();
+inline uint64_t ClockAnswer::guest_mono_ns() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ClockAnswer.guest_mono_ns)
+  return _internal_guest_mono_ns();
 }
-inline void ApkChunk::_internal_set_offset(uint64_t value) {
+inline void ClockAnswer::_internal_set_guest_mono_ns(uint64_t value) {
   
-  _impl_.offset_ = value;
+  _impl_.guest_mono_ns_ = value;
 }
-inline void ApkChunk::set_offset(uint64_t value) {
-  _internal_set_offset(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.ApkChunk.offset)
-}
-
-// bytes data = 3;
-inline void ApkChunk::clear_data() {
-  _impl_.data_.ClearToEmpty();
-}
-inline const std::string& ApkChunk::data() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.ApkChunk.data)
-  return _internal_data();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void ApkChunk::set_data(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.data_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.ApkChunk.data)
-}
-inline std::string* ApkChunk::mutable_data() {
-  std::string* _s = _internal_mutable_data();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.ApkChunk.data)
-  return _s;
-}
-inline const std::string& ApkChunk::_internal_data() const {
-  return _impl_.data_.Get();
-}
-inline void ApkChunk::_internal_set_data(const std::string& value) {
-  
-  _impl_.data_.Set(value, GetArenaForAllocation());
-}
-inline std::string* ApkChunk::_internal_mutable_data() {
-  
-  return _impl_.data_.Mutable(GetArenaForAllocation());
-}
-inline std::string* ApkChunk::release_data() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.ApkChunk.data)
-  return _impl_.data_.Release();
-}
-inline void ApkChunk::set_allocated_data(std::string* data) {
-  if (data != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.data_.SetAllocated(data, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.data_.IsDefault()) {
-    _impl_.data_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.ApkChunk.data)
-}
-
-// -------------------------------------------------------------------
-
-// CancelInstall
-
-// uint32 transfer_id = 1;
-inline void CancelInstall::clear_transfer_id() {
-  _impl_.transfer_id_ = 0u;
-}
-inline uint32_t CancelInstall::_internal_transfer_id() const {
-  return _impl_.transfer_id_;
-}
-inline uint32_t CancelInstall::transfer_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.CancelInstall.transfer_id)
-  return _internal_transfer_id();
-}
-inline void CancelInstall::_internal_set_transfer_id(uint32_t value) {
-  
-  _impl_.transfer_id_ = value;
-}
-inline void CancelInstall::set_transfer_id(uint32_t value) {
-  _internal_set_transfer_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.CancelInstall.transfer_id)
-}
-
-// -------------------------------------------------------------------
-
-// InstallProgress
-
-// uint32 transfer_id = 1;
-inline void InstallProgress::clear_transfer_id() {
-  _impl_.transfer_id_ = 0u;
-}
-inline uint32_t InstallProgress::_internal_transfer_id() const {
-  return _impl_.transfer_id_;
-}
-inline uint32_t InstallProgress::transfer_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallProgress.transfer_id)
-  return _internal_transfer_id();
-}
-inline void InstallProgress::_internal_set_transfer_id(uint32_t value) {
-  
-  _impl_.transfer_id_ = value;
-}
-inline void InstallProgress::set_transfer_id(uint32_t value) {
-  _internal_set_transfer_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallProgress.transfer_id)
-}
-
-// uint64 received = 2;
-inline void InstallProgress::clear_received() {
-  _impl_.received_ = uint64_t{0u};
-}
-inline uint64_t InstallProgress::_internal_received() const {
-  return _impl_.received_;
-}
-inline uint64_t InstallProgress::received() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallProgress.received)
-  return _internal_received();
-}
-inline void InstallProgress::_internal_set_received(uint64_t value) {
-  
-  _impl_.received_ = value;
-}
-inline void InstallProgress::set_received(uint64_t value) {
-  _internal_set_received(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallProgress.received)
-}
-
-// -------------------------------------------------------------------
-
-// InstallResult
-
-// uint32 transfer_id = 1;
-inline void InstallResult::clear_transfer_id() {
-  _impl_.transfer_id_ = 0u;
-}
-inline uint32_t InstallResult::_internal_transfer_id() const {
-  return _impl_.transfer_id_;
-}
-inline uint32_t InstallResult::transfer_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallResult.transfer_id)
-  return _internal_transfer_id();
-}
-inline void InstallResult::_internal_set_transfer_id(uint32_t value) {
-  
-  _impl_.transfer_id_ = value;
-}
-inline void InstallResult::set_transfer_id(uint32_t value) {
-  _internal_set_transfer_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallResult.transfer_id)
-}
-
-// .dsa.control.v1.InstallStatus status = 2;
-inline void InstallResult::clear_status() {
-  _impl_.status_ = 0;
-}
-inline ::dsa::control::v1::InstallStatus InstallResult::_internal_status() const {
-  return static_cast< ::dsa::control::v1::InstallStatus >(_impl_.status_);
-}
-inline ::dsa::control::v1::InstallStatus InstallResult::status() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallResult.status)
-  return _internal_status();
-}
-inline void InstallResult::_internal_set_status(::dsa::control::v1::InstallStatus value) {
-  
-  _impl_.status_ = value;
-}
-inline void InstallResult::set_status(::dsa::control::v1::InstallStatus value) {
-  _internal_set_status(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallResult.status)
-}
-
-// string package_name = 3;
-inline void InstallResult::clear_package_name() {
-  _impl_.package_name_.ClearToEmpty();
-}
-inline const std::string& InstallResult::package_name() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallResult.package_name)
-  return _internal_package_name();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void InstallResult::set_package_name(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.package_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallResult.package_name)
-}
-inline std::string* InstallResult::mutable_package_name() {
-  std::string* _s = _internal_mutable_package_name();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.InstallResult.package_name)
-  return _s;
-}
-inline const std::string& InstallResult::_internal_package_name() const {
-  return _impl_.package_name_.Get();
-}
-inline void InstallResult::_internal_set_package_name(const std::string& value) {
-  
-  _impl_.package_name_.Set(value, GetArenaForAllocation());
-}
-inline std::string* InstallResult::_internal_mutable_package_name() {
-  
-  return _impl_.package_name_.Mutable(GetArenaForAllocation());
-}
-inline std::string* InstallResult::release_package_name() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.InstallResult.package_name)
-  return _impl_.package_name_.Release();
-}
-inline void InstallResult::set_allocated_package_name(std::string* package_name) {
-  if (package_name != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.package_name_.SetAllocated(package_name, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.package_name_.IsDefault()) {
-    _impl_.package_name_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.InstallResult.package_name)
-}
-
-// string message = 4;
-inline void InstallResult::clear_message() {
-  _impl_.message_.ClearToEmpty();
-}
-inline const std::string& InstallResult::message() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallResult.message)
-  return _internal_message();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void InstallResult::set_message(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.message_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallResult.message)
-}
-inline std::string* InstallResult::mutable_message() {
-  std::string* _s = _internal_mutable_message();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.InstallResult.message)
-  return _s;
-}
-inline const std::string& InstallResult::_internal_message() const {
-  return _impl_.message_.Get();
-}
-inline void InstallResult::_internal_set_message(const std::string& value) {
-  
-  _impl_.message_.Set(value, GetArenaForAllocation());
-}
-inline std::string* InstallResult::_internal_mutable_message() {
-  
-  return _impl_.message_.Mutable(GetArenaForAllocation());
-}
-inline std::string* InstallResult::release_message() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.InstallResult.message)
-  return _impl_.message_.Release();
-}
-inline void InstallResult::set_allocated_message(std::string* message) {
-  if (message != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.message_.SetAllocated(message, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.message_.IsDefault()) {
-    _impl_.message_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.InstallResult.message)
+inline void ClockAnswer::set_guest_mono_ns(uint64_t value) {
+  _internal_set_guest_mono_ns(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ClockAnswer.guest_mono_ns)
 }
 
 // -------------------------------------------------------------------
@@ -12145,6 +11220,154 @@ inline ::dsa::control::v1::ClipboardSharing* Envelope::mutable_clipboard_sharing
   return _msg;
 }
 
+// .dsa.control.v1.ClockProbe clock_probe = 28;
+inline bool Envelope::_internal_has_clock_probe() const {
+  return body_case() == kClockProbe;
+}
+inline bool Envelope::has_clock_probe() const {
+  return _internal_has_clock_probe();
+}
+inline void Envelope::set_has_clock_probe() {
+  _impl_._oneof_case_[0] = kClockProbe;
+}
+inline void Envelope::clear_clock_probe() {
+  if (_internal_has_clock_probe()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.clock_probe_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::ClockProbe* Envelope::release_clock_probe() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.clock_probe)
+  if (_internal_has_clock_probe()) {
+    clear_has_body();
+    ::dsa::control::v1::ClockProbe* temp = _impl_.body_.clock_probe_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.clock_probe_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::ClockProbe& Envelope::_internal_clock_probe() const {
+  return _internal_has_clock_probe()
+      ? *_impl_.body_.clock_probe_
+      : reinterpret_cast< ::dsa::control::v1::ClockProbe&>(::dsa::control::v1::_ClockProbe_default_instance_);
+}
+inline const ::dsa::control::v1::ClockProbe& Envelope::clock_probe() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.clock_probe)
+  return _internal_clock_probe();
+}
+inline ::dsa::control::v1::ClockProbe* Envelope::unsafe_arena_release_clock_probe() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.clock_probe)
+  if (_internal_has_clock_probe()) {
+    clear_has_body();
+    ::dsa::control::v1::ClockProbe* temp = _impl_.body_.clock_probe_;
+    _impl_.body_.clock_probe_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_clock_probe(::dsa::control::v1::ClockProbe* clock_probe) {
+  clear_body();
+  if (clock_probe) {
+    set_has_clock_probe();
+    _impl_.body_.clock_probe_ = clock_probe;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.clock_probe)
+}
+inline ::dsa::control::v1::ClockProbe* Envelope::_internal_mutable_clock_probe() {
+  if (!_internal_has_clock_probe()) {
+    clear_body();
+    set_has_clock_probe();
+    _impl_.body_.clock_probe_ = CreateMaybeMessage< ::dsa::control::v1::ClockProbe >(GetArenaForAllocation());
+  }
+  return _impl_.body_.clock_probe_;
+}
+inline ::dsa::control::v1::ClockProbe* Envelope::mutable_clock_probe() {
+  ::dsa::control::v1::ClockProbe* _msg = _internal_mutable_clock_probe();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.clock_probe)
+  return _msg;
+}
+
+// .dsa.control.v1.ClockAnswer clock_answer = 29;
+inline bool Envelope::_internal_has_clock_answer() const {
+  return body_case() == kClockAnswer;
+}
+inline bool Envelope::has_clock_answer() const {
+  return _internal_has_clock_answer();
+}
+inline void Envelope::set_has_clock_answer() {
+  _impl_._oneof_case_[0] = kClockAnswer;
+}
+inline void Envelope::clear_clock_answer() {
+  if (_internal_has_clock_answer()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.clock_answer_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::ClockAnswer* Envelope::release_clock_answer() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.clock_answer)
+  if (_internal_has_clock_answer()) {
+    clear_has_body();
+    ::dsa::control::v1::ClockAnswer* temp = _impl_.body_.clock_answer_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.clock_answer_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::ClockAnswer& Envelope::_internal_clock_answer() const {
+  return _internal_has_clock_answer()
+      ? *_impl_.body_.clock_answer_
+      : reinterpret_cast< ::dsa::control::v1::ClockAnswer&>(::dsa::control::v1::_ClockAnswer_default_instance_);
+}
+inline const ::dsa::control::v1::ClockAnswer& Envelope::clock_answer() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.clock_answer)
+  return _internal_clock_answer();
+}
+inline ::dsa::control::v1::ClockAnswer* Envelope::unsafe_arena_release_clock_answer() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.clock_answer)
+  if (_internal_has_clock_answer()) {
+    clear_has_body();
+    ::dsa::control::v1::ClockAnswer* temp = _impl_.body_.clock_answer_;
+    _impl_.body_.clock_answer_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_clock_answer(::dsa::control::v1::ClockAnswer* clock_answer) {
+  clear_body();
+  if (clock_answer) {
+    set_has_clock_answer();
+    _impl_.body_.clock_answer_ = clock_answer;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.clock_answer)
+}
+inline ::dsa::control::v1::ClockAnswer* Envelope::_internal_mutable_clock_answer() {
+  if (!_internal_has_clock_answer()) {
+    clear_body();
+    set_has_clock_answer();
+    _impl_.body_.clock_answer_ = CreateMaybeMessage< ::dsa::control::v1::ClockAnswer >(GetArenaForAllocation());
+  }
+  return _impl_.body_.clock_answer_;
+}
+inline ::dsa::control::v1::ClockAnswer* Envelope::mutable_clock_answer() {
+  ::dsa::control::v1::ClockAnswer* _msg = _internal_mutable_clock_answer();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.clock_answer)
+  return _msg;
+}
+
 // .dsa.control.v1.ScreenState screen_state = 40;
 inline bool Envelope::_internal_has_screen_state() const {
   return body_case() == kScreenState;
@@ -12367,376 +11590,6 @@ inline ::dsa::control::v1::DeviceIdle* Envelope::mutable_device_idle() {
   return _msg;
 }
 
-// .dsa.control.v1.InstallApk install_apk = 60;
-inline bool Envelope::_internal_has_install_apk() const {
-  return body_case() == kInstallApk;
-}
-inline bool Envelope::has_install_apk() const {
-  return _internal_has_install_apk();
-}
-inline void Envelope::set_has_install_apk() {
-  _impl_._oneof_case_[0] = kInstallApk;
-}
-inline void Envelope::clear_install_apk() {
-  if (_internal_has_install_apk()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.install_apk_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::InstallApk* Envelope::release_install_apk() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.install_apk)
-  if (_internal_has_install_apk()) {
-    clear_has_body();
-    ::dsa::control::v1::InstallApk* temp = _impl_.body_.install_apk_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.install_apk_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::InstallApk& Envelope::_internal_install_apk() const {
-  return _internal_has_install_apk()
-      ? *_impl_.body_.install_apk_
-      : reinterpret_cast< ::dsa::control::v1::InstallApk&>(::dsa::control::v1::_InstallApk_default_instance_);
-}
-inline const ::dsa::control::v1::InstallApk& Envelope::install_apk() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.install_apk)
-  return _internal_install_apk();
-}
-inline ::dsa::control::v1::InstallApk* Envelope::unsafe_arena_release_install_apk() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.install_apk)
-  if (_internal_has_install_apk()) {
-    clear_has_body();
-    ::dsa::control::v1::InstallApk* temp = _impl_.body_.install_apk_;
-    _impl_.body_.install_apk_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_install_apk(::dsa::control::v1::InstallApk* install_apk) {
-  clear_body();
-  if (install_apk) {
-    set_has_install_apk();
-    _impl_.body_.install_apk_ = install_apk;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.install_apk)
-}
-inline ::dsa::control::v1::InstallApk* Envelope::_internal_mutable_install_apk() {
-  if (!_internal_has_install_apk()) {
-    clear_body();
-    set_has_install_apk();
-    _impl_.body_.install_apk_ = CreateMaybeMessage< ::dsa::control::v1::InstallApk >(GetArenaForAllocation());
-  }
-  return _impl_.body_.install_apk_;
-}
-inline ::dsa::control::v1::InstallApk* Envelope::mutable_install_apk() {
-  ::dsa::control::v1::InstallApk* _msg = _internal_mutable_install_apk();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.install_apk)
-  return _msg;
-}
-
-// .dsa.control.v1.ApkChunk apk_chunk = 61;
-inline bool Envelope::_internal_has_apk_chunk() const {
-  return body_case() == kApkChunk;
-}
-inline bool Envelope::has_apk_chunk() const {
-  return _internal_has_apk_chunk();
-}
-inline void Envelope::set_has_apk_chunk() {
-  _impl_._oneof_case_[0] = kApkChunk;
-}
-inline void Envelope::clear_apk_chunk() {
-  if (_internal_has_apk_chunk()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.apk_chunk_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::ApkChunk* Envelope::release_apk_chunk() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.apk_chunk)
-  if (_internal_has_apk_chunk()) {
-    clear_has_body();
-    ::dsa::control::v1::ApkChunk* temp = _impl_.body_.apk_chunk_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.apk_chunk_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::ApkChunk& Envelope::_internal_apk_chunk() const {
-  return _internal_has_apk_chunk()
-      ? *_impl_.body_.apk_chunk_
-      : reinterpret_cast< ::dsa::control::v1::ApkChunk&>(::dsa::control::v1::_ApkChunk_default_instance_);
-}
-inline const ::dsa::control::v1::ApkChunk& Envelope::apk_chunk() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.apk_chunk)
-  return _internal_apk_chunk();
-}
-inline ::dsa::control::v1::ApkChunk* Envelope::unsafe_arena_release_apk_chunk() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.apk_chunk)
-  if (_internal_has_apk_chunk()) {
-    clear_has_body();
-    ::dsa::control::v1::ApkChunk* temp = _impl_.body_.apk_chunk_;
-    _impl_.body_.apk_chunk_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_apk_chunk(::dsa::control::v1::ApkChunk* apk_chunk) {
-  clear_body();
-  if (apk_chunk) {
-    set_has_apk_chunk();
-    _impl_.body_.apk_chunk_ = apk_chunk;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.apk_chunk)
-}
-inline ::dsa::control::v1::ApkChunk* Envelope::_internal_mutable_apk_chunk() {
-  if (!_internal_has_apk_chunk()) {
-    clear_body();
-    set_has_apk_chunk();
-    _impl_.body_.apk_chunk_ = CreateMaybeMessage< ::dsa::control::v1::ApkChunk >(GetArenaForAllocation());
-  }
-  return _impl_.body_.apk_chunk_;
-}
-inline ::dsa::control::v1::ApkChunk* Envelope::mutable_apk_chunk() {
-  ::dsa::control::v1::ApkChunk* _msg = _internal_mutable_apk_chunk();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.apk_chunk)
-  return _msg;
-}
-
-// .dsa.control.v1.CancelInstall cancel_install = 62;
-inline bool Envelope::_internal_has_cancel_install() const {
-  return body_case() == kCancelInstall;
-}
-inline bool Envelope::has_cancel_install() const {
-  return _internal_has_cancel_install();
-}
-inline void Envelope::set_has_cancel_install() {
-  _impl_._oneof_case_[0] = kCancelInstall;
-}
-inline void Envelope::clear_cancel_install() {
-  if (_internal_has_cancel_install()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.cancel_install_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::CancelInstall* Envelope::release_cancel_install() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.cancel_install)
-  if (_internal_has_cancel_install()) {
-    clear_has_body();
-    ::dsa::control::v1::CancelInstall* temp = _impl_.body_.cancel_install_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.cancel_install_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::CancelInstall& Envelope::_internal_cancel_install() const {
-  return _internal_has_cancel_install()
-      ? *_impl_.body_.cancel_install_
-      : reinterpret_cast< ::dsa::control::v1::CancelInstall&>(::dsa::control::v1::_CancelInstall_default_instance_);
-}
-inline const ::dsa::control::v1::CancelInstall& Envelope::cancel_install() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.cancel_install)
-  return _internal_cancel_install();
-}
-inline ::dsa::control::v1::CancelInstall* Envelope::unsafe_arena_release_cancel_install() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.cancel_install)
-  if (_internal_has_cancel_install()) {
-    clear_has_body();
-    ::dsa::control::v1::CancelInstall* temp = _impl_.body_.cancel_install_;
-    _impl_.body_.cancel_install_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_cancel_install(::dsa::control::v1::CancelInstall* cancel_install) {
-  clear_body();
-  if (cancel_install) {
-    set_has_cancel_install();
-    _impl_.body_.cancel_install_ = cancel_install;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.cancel_install)
-}
-inline ::dsa::control::v1::CancelInstall* Envelope::_internal_mutable_cancel_install() {
-  if (!_internal_has_cancel_install()) {
-    clear_body();
-    set_has_cancel_install();
-    _impl_.body_.cancel_install_ = CreateMaybeMessage< ::dsa::control::v1::CancelInstall >(GetArenaForAllocation());
-  }
-  return _impl_.body_.cancel_install_;
-}
-inline ::dsa::control::v1::CancelInstall* Envelope::mutable_cancel_install() {
-  ::dsa::control::v1::CancelInstall* _msg = _internal_mutable_cancel_install();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.cancel_install)
-  return _msg;
-}
-
-// .dsa.control.v1.InstallProgress install_progress = 63;
-inline bool Envelope::_internal_has_install_progress() const {
-  return body_case() == kInstallProgress;
-}
-inline bool Envelope::has_install_progress() const {
-  return _internal_has_install_progress();
-}
-inline void Envelope::set_has_install_progress() {
-  _impl_._oneof_case_[0] = kInstallProgress;
-}
-inline void Envelope::clear_install_progress() {
-  if (_internal_has_install_progress()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.install_progress_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::InstallProgress* Envelope::release_install_progress() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.install_progress)
-  if (_internal_has_install_progress()) {
-    clear_has_body();
-    ::dsa::control::v1::InstallProgress* temp = _impl_.body_.install_progress_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.install_progress_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::InstallProgress& Envelope::_internal_install_progress() const {
-  return _internal_has_install_progress()
-      ? *_impl_.body_.install_progress_
-      : reinterpret_cast< ::dsa::control::v1::InstallProgress&>(::dsa::control::v1::_InstallProgress_default_instance_);
-}
-inline const ::dsa::control::v1::InstallProgress& Envelope::install_progress() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.install_progress)
-  return _internal_install_progress();
-}
-inline ::dsa::control::v1::InstallProgress* Envelope::unsafe_arena_release_install_progress() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.install_progress)
-  if (_internal_has_install_progress()) {
-    clear_has_body();
-    ::dsa::control::v1::InstallProgress* temp = _impl_.body_.install_progress_;
-    _impl_.body_.install_progress_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_install_progress(::dsa::control::v1::InstallProgress* install_progress) {
-  clear_body();
-  if (install_progress) {
-    set_has_install_progress();
-    _impl_.body_.install_progress_ = install_progress;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.install_progress)
-}
-inline ::dsa::control::v1::InstallProgress* Envelope::_internal_mutable_install_progress() {
-  if (!_internal_has_install_progress()) {
-    clear_body();
-    set_has_install_progress();
-    _impl_.body_.install_progress_ = CreateMaybeMessage< ::dsa::control::v1::InstallProgress >(GetArenaForAllocation());
-  }
-  return _impl_.body_.install_progress_;
-}
-inline ::dsa::control::v1::InstallProgress* Envelope::mutable_install_progress() {
-  ::dsa::control::v1::InstallProgress* _msg = _internal_mutable_install_progress();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.install_progress)
-  return _msg;
-}
-
-// .dsa.control.v1.InstallResult install_result = 64;
-inline bool Envelope::_internal_has_install_result() const {
-  return body_case() == kInstallResult;
-}
-inline bool Envelope::has_install_result() const {
-  return _internal_has_install_result();
-}
-inline void Envelope::set_has_install_result() {
-  _impl_._oneof_case_[0] = kInstallResult;
-}
-inline void Envelope::clear_install_result() {
-  if (_internal_has_install_result()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.install_result_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::InstallResult* Envelope::release_install_result() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.install_result)
-  if (_internal_has_install_result()) {
-    clear_has_body();
-    ::dsa::control::v1::InstallResult* temp = _impl_.body_.install_result_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.install_result_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::InstallResult& Envelope::_internal_install_result() const {
-  return _internal_has_install_result()
-      ? *_impl_.body_.install_result_
-      : reinterpret_cast< ::dsa::control::v1::InstallResult&>(::dsa::control::v1::_InstallResult_default_instance_);
-}
-inline const ::dsa::control::v1::InstallResult& Envelope::install_result() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.install_result)
-  return _internal_install_result();
-}
-inline ::dsa::control::v1::InstallResult* Envelope::unsafe_arena_release_install_result() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.install_result)
-  if (_internal_has_install_result()) {
-    clear_has_body();
-    ::dsa::control::v1::InstallResult* temp = _impl_.body_.install_result_;
-    _impl_.body_.install_result_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_install_result(::dsa::control::v1::InstallResult* install_result) {
-  clear_body();
-  if (install_result) {
-    set_has_install_result();
-    _impl_.body_.install_result_ = install_result;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.install_result)
-}
-inline ::dsa::control::v1::InstallResult* Envelope::_internal_mutable_install_result() {
-  if (!_internal_has_install_result()) {
-    clear_body();
-    set_has_install_result();
-    _impl_.body_.install_result_ = CreateMaybeMessage< ::dsa::control::v1::InstallResult >(GetArenaForAllocation());
-  }
-  return _impl_.body_.install_result_;
-}
-inline ::dsa::control::v1::InstallResult* Envelope::mutable_install_result() {
-  ::dsa::control::v1::InstallResult* _msg = _internal_mutable_install_result();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.install_result)
-  return _msg;
-}
-
 inline bool Envelope::has_body() const {
   return body_case() != BODY_NOT_SET;
 }
@@ -12749,12 +11602,6 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
-// -------------------------------------------------------------------
-
-// -------------------------------------------------------------------
-
-// -------------------------------------------------------------------
-
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
@@ -12836,7 +11683,6 @@ template <> struct is_proto_enum< ::dsa::control::v1::RejectReason> : ::std::tru
 template <> struct is_proto_enum< ::dsa::control::v1::PointerAction> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::PointerTool> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::KeyAction> : ::std::true_type {};
-template <> struct is_proto_enum< ::dsa::control::v1::InstallStatus> : ::std::true_type {};
 
 PROTOBUF_NAMESPACE_CLOSE
 
