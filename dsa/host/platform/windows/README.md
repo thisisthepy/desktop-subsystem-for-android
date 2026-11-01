@@ -307,6 +307,25 @@ why.
 `dsa launch <package>` starts an app in a window of its own, and `dsa tasks` lists the
 tasks that have one.
 
+## Installing APKs
+
+An APK file installs in Android three ways, which all end in the same local API request:
+
+- Opening it in Explorer. The installer associates `.apk` files with `dsa-app-window.exe
+  --install-apk "%1"`, which starts the window manager and Android when they are not running,
+  installs the APK, and says how it went in a message box.
+- `dsa install <file.apk>`, which prints the result and exits with code 1 when Android refused
+  the APK. Its line then starts with `not installed (<reason>):`.
+- Dropping APK files on the settings app's window. The bar at the top of the window says how
+  each install went, with the reason in the user's language.
+
+The APK streams to the service and on to the agent in chunks, without being held whole in
+memory, and the agent installs it through a `PackageInstaller` session. APKs up to 2 GiB are
+taken. One install runs at a time; a second waits for the first. A refusal carries a stable
+reason (`incompatible`, `conflicting-signature`, `invalid-apk`, `insufficient-storage`,
+`downgrade`, `blocked` or `other`) and Android's own message. An installed app appears in the
+Start menu like every other app Android reports.
+
 ## Sleep
 
 When every Android window is closed or minimized for `doze_delay_secs` (30 seconds by
