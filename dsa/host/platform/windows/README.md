@@ -302,6 +302,39 @@ why.
 `dsa launch <package>` starts an app in a window of its own, and `dsa tasks` lists the
 tasks that have one.
 
+### Web links
+
+A web link an app in Android opens goes to the user's default browser in Windows. The service
+receives it from Android and hands it to the window manager, which watches the user's links
+over the local API (`WatchLinks`) and opens each with `ShellExecuteW` and the `open` verb. It
+opens only http and https links it has checked itself (a scheme of `http` or `https`, a host,
+no spaces or control characters, at most 32000 characters) and logs and drops anything else,
+so an app in Android can never make Windows run a program. More than five links in ten
+seconds are dropped as well.
+
+A link that an installed app has verified as its own (an Android App Link) opens in that app.
+The user can keep every link in Android instead: `dsa settings set links-in-android on`, or
+"Open web links in Android apps" in DSA Settings. The change reaches a running Android at once.
+
+### Opening Windows files in Android apps
+
+`dsa open <file>` and `dsa share <file>` send a file to the user's Android, which asks which app
+opens it (or takes it, to share); that app then shows in a window of its own. The installer
+also adds "Open in an Android app" and "Share with an Android app" to the context menu of every
+file in Explorer (on Windows 11, under "Show more options"). They run the installed
+`dsa-app-window.exe` with `--open-file` or `--share-file`, which, like opening an app from the
+Start menu, starts the window manager and Android first when they are not running, and shows
+a message when the file cannot be sent. The entries are the machine's
+(`HKLM\SOFTWARE\Classes\*\shell`), so uninstalling removes them for every user; entries in each
+user's profile would outlive DSA there.
+
+The file goes to the service over the local API in 1 MiB pieces, and from the service to
+Android in 128 KiB chunks, at most two ahead of what Android says it has stored, because each
+chunk reaches the agent in a one-way binder call, and those share half of a 1 MiB buffer.
+Files up to 64 MiB can be sent: the service holds the whole file in memory while it sends it,
+and the limit keeps that bounded. A larger file is refused with a message before anything is
+sent.
+
 ## Sleep
 
 When every Android window is closed or minimized for `doze_delay_secs` (30 seconds by
@@ -365,7 +398,8 @@ What keeps the number small:
 library of Windows 11 style controls: a navigation view with the pages
 General (start and stop Android, its state and last error), Memory (the VM, the window
 manager and the app windows on the host, and Android's own breakdown), Display & GPU (the
-render GPU), Updates, Advanced (freeze when idle, off by default, and the log folders) and
+render GPU), Updates, Advanced (freeze when idle, off by default, opening web links in
+Android apps instead of the default browser, off by default, and the log folders) and
 About, built from cards, with Mica behind the window where Windows has it. It follows the
 system's theme, accent colour and language (English and Korean). The Windows App SDK and
 WinUI 3 are not used, because their runtime's licence is not open source.

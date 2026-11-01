@@ -234,6 +234,40 @@ so the manager selects it on its own too.
   the host where the cursor is in the focused task (`ImeCursor`), once for each place it
   moves to.
 
+## Web links
+
+While the agent is connected, web links go to the host, which opens them in the user's
+default browser. The agent makes itself the guest's browser through the role manager
+(`MANAGE_ROLE_HOLDERS`), so Android hands it every http and https link an app opens. Its
+`LinkActivity` shows nothing: it passes the link to the agent and finishes at once, and the
+agent sends it to the host as `OpenLink`. Anything but an http or https link with a host is
+dropped, because the host opens links with its shell.
+
+A link that an installed app has verified as its own (an Android App Link) still opens in that
+app: Android sends verified links straight to their app and never asks the browser.
+
+The host's `LinkHandling` says whether the user keeps links in Android instead. Then the agent
+gives the browser role back to a browser app in the guest and opens any link it still gets
+there. A link that cannot reach the host, because the agent is not connected, opens in the
+guest too, so a tap is never lost. The image keeps its stock browser for this, and because an
+app may start it by name.
+
+## Files from the host
+
+The host sends a file the user opens or shares from Windows as `OpenFile` and then
+`FileChunk` messages of 128 KiB. The agent stores each transfer in a folder of its own under
+`files/host-files/` (`<transfer>-<time>/<name>`) and answers each chunk with `FileProgress`,
+which is what lets the host send the next ones. Once the file is whole it starts the system
+chooser with `ACTION_VIEW` (open) or `ACTION_SEND` (share) and the MIME type of the file's
+extension, so the user picks the app, which then shows as a task window. The app reads the
+file through `HostFileProvider`, which is not exported and serves only with the read
+permission granted on that intent.
+
+A name with a folder in it, a file over 64 MiB, a chunk out of order or past the announced
+size end the transfer with the reason in `FileProgress`, and its folder is removed. A transfer
+the last connection left unfinished is dropped when the agent connects again, and the folders
+of transfers older than an hour are removed whenever a new one begins.
+
 ## The home activity
 
 Android always keeps a home activity at the bottom of the display, and gives it input focus
