@@ -44,8 +44,7 @@ fn main() {
         let mut connector = NamedPipeConnector {
             name: CompositorConfig::default().pipe_name,
         };
-        if let Err(why) =
-            dsa_host_windows::compositor::notifications::activate(uri, &mut connector)
+        if let Err(why) = dsa_host_windows::compositor::notifications::activate(uri, &mut connector)
         {
             if let Some(log) = &logger {
                 log.log(&format!("a clicked notification did not open: {why}"));

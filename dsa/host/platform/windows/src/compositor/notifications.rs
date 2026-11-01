@@ -293,8 +293,9 @@ fn dismissals(
     logger: Option<&CompositorLogger>,
 ) {
     while let Ok(key) = dismissed.try_recv() {
-        let result = HostApiClient::connect(connector, BUILD, ANSWER)
-            .and_then(|mut client| client.act_on_notification(&NotificationAction::Dismiss { key }));
+        let result = HostApiClient::connect(connector, BUILD, ANSWER).and_then(|mut client| {
+            client.act_on_notification(&NotificationAction::Dismiss { key })
+        });
         if let Err(error) = result {
             note(
                 logger,
@@ -354,7 +355,10 @@ fn apply(
                 return;
             };
             if let Err(why) = toasts.remove(&gone.app_id, &gone.tag) {
-                note(logger, &format!("a removed notification's toast stayed: {why}"));
+                note(
+                    logger,
+                    &format!("a removed notification's toast stayed: {why}"),
+                );
             }
             if let Some(icon) = gone.icon {
                 let _ = std::fs::remove_file(icon);
@@ -378,7 +382,8 @@ fn write_icon(dir: &Path, tag: &str, png: &[u8]) -> Option<PathBuf> {
 /// Handles `dsa-wm --notification <uri>`, which Windows runs when a toast is clicked: passes
 /// the click to the service through `connector`. Returns what went wrong, if anything.
 pub fn activate(uri: &str, connector: &mut dyn Connector) -> Result<(), String> {
-    let action = parse_activation(uri).ok_or_else(|| format!("{uri:?} is not a DSA notification"))?;
+    let action =
+        parse_activation(uri).ok_or_else(|| format!("{uri:?} is not a DSA notification"))?;
     // The app's window comes from the window manager, which may bring it to the front: the
     // click gave this process that right, which it passes on.
     #[cfg(windows)]
@@ -388,9 +393,11 @@ pub fn activate(uri: &str, connector: &mut dyn Connector) -> Result<(), String> 
             windows_sys::Win32::UI::WindowsAndMessaging::ASFW_ANY,
         );
     }
-    let mut client =
-        HostApiClient::connect(connector, "dsa-wm notification click", ANSWER).map_err(|e| e.to_string())?;
-    client.act_on_notification(&action).map_err(|e| e.to_string())
+    let mut client = HostApiClient::connect(connector, "dsa-wm notification click", ANSWER)
+        .map_err(|e| e.to_string())?;
+    client
+        .act_on_notification(&action)
+        .map_err(|e| e.to_string())
 }
 
 /// Registers the protocol a click on a toast launches, for the current user, to run
@@ -530,24 +537,25 @@ impl Toasts for WindowsToasts {
         }
         let key = key.clone();
         toast
-            .Dismissed(&TypedEventHandler::<ToastNotification, ToastDismissedEventArgs>::new(
-                move |_, args| {
-                    if let Some(args) = args.as_ref() {
-                        if args.Reason()? == ToastDismissalReason::UserCanceled {
-                            let _ = dismissed.send(key.clone());
-                        }
+            .Dismissed(&TypedEventHandler::<
+                ToastNotification,
+                ToastDismissedEventArgs,
+            >::new(move |_, args| {
+                if let Some(args) = args.as_ref() {
+                    if args.Reason()? == ToastDismissalReason::UserCanceled {
+                        let _ = dismissed.send(key.clone());
                     }
-                    Ok(())
-                },
-            ))
+                }
+                Ok(())
+            }))
             .map_err(|e| fail("following the toast", e))?;
-        let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id.as_str()))
-            .map_err(|e| fail("reaching the notification centre", e))?;
+        let notifier =
+            ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id.as_str()))
+                .map_err(|e| fail("reaching the notification centre", e))?;
         notifier
             .Show(&toast)
             .map_err(|e| fail("showing the toast", e))?;
-        self.live
-            .insert((app_id.clone(), tag.clone()), toast);
+        self.live.insert((app_id.clone(), tag.clone()), toast);
         Ok(())
     }
 
@@ -592,8 +600,14 @@ mod tests {
     fn fr8_a_toast_carries_the_title_body_icon_and_click() {
         let xml = toast_xml(&chat(KEY), Some(Path::new("C:\\Users\\Ann Lee\\a.png")));
         assert!(xml.contains("<text>Ann &amp; &lt;Bob&gt;</text>"), "{xml}");
-        assert!(xml.contains("<text>see you &quot;at&quot; noon</text>"), "{xml}");
-        assert!(xml.contains("src=\"file:///C:/Users/Ann%20Lee/a.png\""), "{xml}");
+        assert!(
+            xml.contains("<text>see you &quot;at&quot; noon</text>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("src=\"file:///C:/Users/Ann%20Lee/a.png\""),
+            "{xml}"
+        );
         assert!(xml.contains("activationType=\"protocol\""));
         assert!(xml.contains(&format!("launch=\"{}\"", xml_escape_uri(KEY))));
         assert!(!xml.contains("silent"));
@@ -636,9 +650,7 @@ mod tests {
         let korean = "0|com.example|1|\u{c548}\u{b155}|10100";
         assert_eq!(
             parse_activation(&activation_uri(korean)),
-            Some(NotificationAction::Open {
-                key: korean.into()
-            })
+            Some(NotificationAction::Open { key: korean.into() })
         );
     }
 
@@ -692,8 +704,22 @@ mod tests {
         let mut toasts = Recorded::default();
         let mut shown = HashMap::new();
         let (tx, _rx) = mpsc::channel();
-        apply(NotificationEvent::Posted(chat(KEY)), &mut toasts, &mut shown, Some(&dir), &tx, None);
-        apply(NotificationEvent::Posted(chat(KEY)), &mut toasts, &mut shown, Some(&dir), &tx, None);
+        apply(
+            NotificationEvent::Posted(chat(KEY)),
+            &mut toasts,
+            &mut shown,
+            Some(&dir),
+            &tx,
+            None,
+        );
+        apply(
+            NotificationEvent::Posted(chat(KEY)),
+            &mut toasts,
+            &mut shown,
+            Some(&dir),
+            &tx,
+            None,
+        );
         let id = app_user_model_id("com.example.chat");
         assert_eq!(toasts.shown, vec![(id.clone(), tag_of(KEY), false); 2]);
         assert!(dir.join(format!("{}.png", tag_of(KEY))).exists());
@@ -709,7 +735,9 @@ mod tests {
         assert!(!dir.join(format!("{}.png", tag_of(KEY))).exists());
         // A removal of one never shown does nothing.
         apply(
-            NotificationEvent::Removed { key: "other".into() },
+            NotificationEvent::Removed {
+                key: "other".into(),
+            },
             &mut toasts,
             &mut shown,
             Some(&dir),

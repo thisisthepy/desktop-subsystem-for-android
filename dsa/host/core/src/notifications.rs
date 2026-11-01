@@ -254,10 +254,7 @@ mod tests {
         limit.offer(note("progress", "1%"), start);
         limit.offer(note("progress", "50%"), start);
         limit.offer(note("progress", "99%"), start);
-        assert_eq!(
-            limit.due(start + REFILL * 3),
-            vec![note("progress", "99%")]
-        );
+        assert_eq!(limit.due(start + REFILL * 3), vec![note("progress", "99%")]);
     }
 
     #[test]

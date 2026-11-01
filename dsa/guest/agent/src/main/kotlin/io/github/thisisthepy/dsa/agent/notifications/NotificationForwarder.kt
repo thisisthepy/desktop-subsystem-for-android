@@ -99,10 +99,19 @@ class NotificationForwarder(
     /** Starts listening; [post] runs work on the agent's thread. */
     fun start(post: (() -> Unit) -> Unit) {
         try {
+            val forwarder = this
             source.listen(object : NoticeListener {
-                override fun connected() = post(::resend)
-                override fun posted(notice: GuestNotice) = post { posted(notice) }
-                override fun removed(key: String) = post { removed(key) }
+                override fun connected() {
+                    post { forwarder.resend() }
+                }
+
+                override fun posted(notice: GuestNotice) {
+                    post { forwarder.posted(notice) }
+                }
+
+                override fun removed(key: String) {
+                    post { forwarder.removed(key) }
+                }
             })
         } catch (e: Exception) {
             log.warn("cannot read Android's notifications; none reach the host", e)

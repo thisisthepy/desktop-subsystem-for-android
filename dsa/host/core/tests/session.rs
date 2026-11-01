@@ -2306,10 +2306,16 @@ fn nothing_for_the_watcher(watch: &Receiver<NotificationEvent>) {
 fn fr8_a_notification_posted_updated_and_removed_in_the_guest_reaches_the_watcher() {
     let (session, mut agent, _launcher) = active_session();
     let watch = session.watch_notifications();
-    send_body(&mut agent, Body::Notification(guest_notification(CHAT, "Ann")));
+    send_body(
+        &mut agent,
+        Body::Notification(guest_notification(CHAT, "Ann")),
+    );
     assert_eq!(watch.recv_timeout(WAIT).unwrap(), posted(CHAT, "Ann"));
     // The same again changes nothing; a new version replaces it.
-    send_body(&mut agent, Body::Notification(guest_notification(CHAT, "Ann")));
+    send_body(
+        &mut agent,
+        Body::Notification(guest_notification(CHAT, "Ann")),
+    );
     nothing_for_the_watcher(&watch);
     send_body(
         &mut agent,
@@ -2333,7 +2339,10 @@ fn fr8_a_notification_posted_updated_and_removed_in_the_guest_reaches_the_watche
 fn fr8_clicking_a_notification_while_active_reaches_the_guest() {
     let (session, mut agent, _launcher) = active_session();
     let watch = session.watch_notifications();
-    send_body(&mut agent, Body::Notification(guest_notification(CHAT, "Ann")));
+    send_body(
+        &mut agent,
+        Body::Notification(guest_notification(CHAT, "Ann")),
+    );
     watch.recv_timeout(WAIT).unwrap();
     session
         .notification_action(NotificationAction::Open { key: CHAT.into() })
@@ -2346,7 +2355,10 @@ fn fr8_a_high_priority_notification_while_dozing_shows_and_clicking_it_wakes_the
     let (session, mut agent, _launcher) = lifecycle_session(None);
     let watch = session.watch_notifications();
     dozing(&session, &mut agent);
-    send_body(&mut agent, Body::Notification(guest_notification(CHAT, "Ann")));
+    send_body(
+        &mut agent,
+        Body::Notification(guest_notification(CHAT, "Ann")),
+    );
     assert_eq!(watch.recv_timeout(WAIT).unwrap(), posted(CHAT, "Ann"));
     assert_eq!(session.state(), SessionState::Dozing);
 
@@ -2367,7 +2379,10 @@ fn fr8_a_high_priority_notification_while_dozing_shows_and_clicking_it_wakes_the
 fn fr8_clicking_a_notification_of_a_frozen_guest_thaws_it_first() {
     let (session, mut agent, launcher) = lifecycle_session(None);
     let watch = session.watch_notifications();
-    send_body(&mut agent, Body::Notification(guest_notification(CHAT, "Ann")));
+    send_body(
+        &mut agent,
+        Body::Notification(guest_notification(CHAT, "Ann")),
+    );
     watch.recv_timeout(WAIT).unwrap();
     session.freeze().expect("frozen");
     assert_eq!(next_body(&mut agent), screen(false));
@@ -2383,7 +2398,10 @@ fn fr8_clicking_a_notification_of_a_frozen_guest_thaws_it_first() {
 fn fr8_dismissing_a_notification_on_the_host_cancels_it_in_the_guest_unless_it_is_kept() {
     let (session, mut agent, _launcher) = active_session();
     let watch = session.watch_notifications();
-    send_body(&mut agent, Body::Notification(guest_notification(CHAT, "Ann")));
+    send_body(
+        &mut agent,
+        Body::Notification(guest_notification(CHAT, "Ann")),
+    );
     let kept = "0|com.example.music|1|null|10101";
     send_body(
         &mut agent,
@@ -2433,7 +2451,10 @@ fn fr8_acting_on_a_notification_of_a_stopped_guest_says_it_is_not_running() {
 fn fr8_the_notifications_of_a_guest_that_stops_are_removed() {
     let (session, mut agent, _launcher) = active_session();
     let watch = session.watch_notifications();
-    send_body(&mut agent, Body::Notification(guest_notification(CHAT, "Ann")));
+    send_body(
+        &mut agent,
+        Body::Notification(guest_notification(CHAT, "Ann")),
+    );
     watch.recv_timeout(WAIT).unwrap();
     session.stop();
     assert!(session.wait_for(SessionState::Stopped, WAIT));
@@ -2473,10 +2494,16 @@ fn fr8_a_flood_of_notifications_is_limited_and_the_rest_follow_in_their_latest_f
 fn nfr5_a_malformed_notification_from_the_guest_is_dropped() {
     let (session, mut agent, _launcher) = active_session();
     let watch = session.watch_notifications();
-    send_body(&mut agent, Body::Notification(guest_notification("", "no key")));
+    send_body(
+        &mut agent,
+        Body::Notification(guest_notification("", "no key")),
+    );
     send_body(&mut agent, clicked(CHAT));
     nothing_for_the_watcher(&watch);
     assert_eq!(session.state(), SessionState::Active);
-    send_body(&mut agent, Body::Notification(guest_notification(CHAT, "Ann")));
+    send_body(
+        &mut agent,
+        Body::Notification(guest_notification(CHAT, "Ann")),
+    );
     assert_eq!(watch.recv_timeout(WAIT).unwrap(), posted(CHAT, "Ann"));
 }

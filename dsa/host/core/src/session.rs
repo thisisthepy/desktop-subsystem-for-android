@@ -1369,10 +1369,7 @@ impl Worker {
             self.notification_limit.remove(&notification.key);
             return;
         }
-        if let Some(due) = self
-            .notification_limit
-            .offer(notification, Instant::now())
-        {
+        if let Some(due) = self.notification_limit.offer(notification, Instant::now()) {
             self.deliver_notification(due);
         }
     }
@@ -1439,7 +1436,9 @@ impl Worker {
                 if !self.running() {
                     return Err(SessionError::NotActive(self.state()));
                 }
-                self.send_body(Body::NotificationClicked(control::NotificationClicked { key }));
+                self.send_body(Body::NotificationClicked(control::NotificationClicked {
+                    key,
+                }));
             }
             NotificationAction::Dismiss { key } => {
                 if !clearable {
@@ -1464,9 +1463,9 @@ impl Worker {
     /// Sends the dismissals that waited for the guest to be thawed.
     fn send_dismissals(&mut self) {
         for key in std::mem::take(&mut self.dismissals) {
-            self.send_body(Body::NotificationDismissed(control::NotificationDismissed {
-                key,
-            }));
+            self.send_body(Body::NotificationDismissed(
+                control::NotificationDismissed { key },
+            ));
         }
     }
 

@@ -550,9 +550,9 @@ macro_rules! host_api_conformance {
         }
         #[test]
         fn fr8_acting_on_a_notification_of_a_stopped_android_says_it_is_not_running() {
-            $crate::host_api_conformance::notification_action_needs_a_running_android(
-                &mut || $make,
-            );
+            $crate::host_api_conformance::notification_action_needs_a_running_android(&mut || {
+                $make
+            });
         }
         #[test]
         fn nfr5_a_malformed_action_on_a_notification_is_refused() {
