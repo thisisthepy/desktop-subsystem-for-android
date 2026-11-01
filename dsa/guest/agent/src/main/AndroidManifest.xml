@@ -3,9 +3,10 @@
   The guest agent. coreApp makes it start in the core-only boot stages too; persistent makes
   the activity manager start it at boot and restart it if it dies. The host is the shell: the
   agent reports tasks and acts on the host's requests, and its one activity is the guest's
-  invisible home (platform/HomeActivity.kt), which Android requires and nobody sees. Its one
+  invisible home (platform/HomeActivity.kt), which Android requires and nobody sees. Its first
   service is the guest's input method (platform/HostInputMethod.kt), which shows nothing and
-  types what the host's input method composes.
+  types what the host's input method composes. Its other service is its notification listener
+  (platform/AndroidNotifications.kt), which hands the guest's notifications to the host.
   Every permission here is also in privapp-permissions-dsa-agent.xml.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -42,6 +43,11 @@
     -->
     <uses-permission android:name="android.permission.DUMP" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+    <!--
+      Allowing the agent's own notification listener at start, as Settings does when a person
+      allows one: the guest has no screen to ask on.
+    -->
+    <uses-permission android:name="android.permission.MANAGE_NOTIFICATION_LISTENERS" />
 
     <application
         android:name=".platform.AgentApplication"
@@ -89,6 +95,20 @@
             <meta-data
                 android:name="android.view.im"
                 android:resource="@xml/host_input_method" />
+        </service>
+
+        <!--
+          The agent's notification listener. Only the notification manager may bind it, and it
+          runs in the agent's process, which is always running.
+        -->
+        <service
+            android:name=".platform.HostNotificationListener"
+            android:exported="true"
+            android:label="@string/notification_listener_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
         </service>
     </application>
 </manifest>

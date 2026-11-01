@@ -18,6 +18,8 @@ import io.github.thisisthepy.dsa.agent.power.DevicePower
 import io.github.thisisthepy.dsa.agent.power.Lifecycle
 import io.github.thisisthepy.dsa.agent.memory.MemoryReporter
 import io.github.thisisthepy.dsa.agent.memory.MemorySource
+import io.github.thisisthepy.dsa.agent.notifications.NotificationForwarder
+import io.github.thisisthepy.dsa.agent.notifications.NotificationSource
 import io.github.thisisthepy.dsa.agent.requests.HostRequests
 import io.github.thisisthepy.dsa.agent.requests.RequestResult
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
@@ -57,7 +59,8 @@ import io.github.thisisthepy.dsa.control.v1.PointerAction
  * shown the agent turns the screen off and puts the device into Doze, and the host's battery
  * becomes the guest's ([Lifecycle]). Text copied on the host becomes the guest's clipboard
  * text, and text copied in the guest goes to the host, while the user shares the clipboard
- * ([ClipboardSync]).
+ * ([ClipboardSync]). The guest's notifications go to the host's notification centre, and a
+ * click or a dismissal there comes back to them ([NotificationForwarder]).
  */
 class Agent(
     private val ownPackage: String,
@@ -81,6 +84,7 @@ class Agent(
     private val frameTrace: FrameStatsTrace? = null,
     private val touchSounds: TouchSounds = TouchSounds.NONE,
     clipboard: GuestClipboard = GuestClipboard.NONE,
+    notifications: NotificationSource = NotificationSource.NONE,
 ) {
     private val channel = ChannelClient(
         locator = locator,
@@ -129,6 +133,13 @@ class Agent(
         MemoryReporter(it, scheduler, log, isConnected = { channel.connected }, send = { frame -> channel.send(frame) })
     }
     private val clipboardSync = ClipboardSync(clipboard, { frame -> channel.send(frame) }, log, isConnected = { channel.connected })
+    private val notificationForwarder = NotificationForwarder(
+        ownPackage,
+        notifications,
+        { frame -> channel.send(frame) },
+        log,
+        isConnected = { channel.connected },
+    )
     private val freeform = FreeformSetup(windowing, scheduler, log)
     private val arranger = TaskArranger(actions, windowing::displaySize, log)
     private val installed = InstalledAppReporter(ownPackage) { frame -> channel.send(frame) }
@@ -152,6 +163,7 @@ class Agent(
             listen()
             lifecycle.start { work -> scheduler.post(work) }
             clipboardSync.start { work -> scheduler.post(work) }
+            notificationForwarder.start { work -> scheduler.post(work) }
             listenToApps()
             channel.start()
             requestRefresh()
@@ -213,6 +225,7 @@ class Agent(
         reporter.resend()
         lifecycle.connected()
         clipboardSync.connected()
+        notificationForwarder.connected()
         installed.resend()
         memoryReporter?.connected()
         requestRefresh()
@@ -270,6 +283,7 @@ class Agent(
         }
         if (lifecycle.handle(envelope)) return true
         if (clipboardSync.handle(envelope)) return true
+        if (notificationForwarder.handle(envelope)) return true
         when (envelope.bodyCase) {
             Envelope.BodyCase.KEY_EVENT -> try {
                 keys.handle(envelope.keyEvent)

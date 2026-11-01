@@ -2,4 +2,5 @@
 <resources>
     <string name="app_name">DSA agent</string>
     <string name="input_method_name">DSA host input</string>
+    <string name="notification_listener_name">DSA host notifications</string>
 </resources>
