@@ -46,6 +46,11 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   each change of the deep idle state (`DeviceIdle`), from which the host knows the guest
   is dozing. A new connection turns a screen left off back on, since the host takes the
   screen to be on.
+- **Clipboard.** Text copied on the host arrives as `ClipboardText` and becomes the primary
+  clip; text copied in the guest goes to the host the same way. The agent reads the
+  clipboard as the guest's default input method, which Android 10 and later allow whichever
+  app has the focus. It does not send back the clip it set, drops text longer than 256 KiB
+  of UTF-8, and sends nothing while the host says sharing is off (`ClipboardSharing`).
 - **Battery.** The host sends its power (`PowerState`): AC or battery, the charge, whether
   it charges, battery saver. The agent sets the battery service to it (the `battery set`
   shell command) and battery saver with it (`PowerManager.setPowerSaveModeEnabled`). A host
@@ -345,6 +350,7 @@ The release APK, `build/outputs/apk/release/dsa-agent-release-unsigned.apk`, is 
 |---|---|
 | `src/main/kotlin/.../agent/` | The agent: task reports, requests, pointer, key and text input, the channel client, the freeform setup, task placement |
 | `src/main/kotlin/.../agent/power/` | The screen, Doze and the battery, as the host asks |
+| `src/main/kotlin/.../agent/clipboard/` | The clipboard shared with the host |
 | `src/main/kotlin/.../agent/platform/` | The framework side: the application, task source, actions, windowing, input injection, the input method, binder channel, power controls |
 | `src/test/` | The unit tests |
 | `hidden-api/` | Compile-only declarations of framework classes outside the SDK |
