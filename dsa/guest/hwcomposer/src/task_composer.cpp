@@ -312,7 +312,7 @@ void TaskComposer::compose(Frame& frame) {
             }
             const BufferSize buffers = taskBufferSize(output.buffers, frame.display, width, height);
             if (buffers != output.buffers) {
-                // The first frame, a task larger than its buffers, or a larger display.
+                // The first frame, a task past its buffers, or one far smaller than them.
                 for (uint32_t& target : output.targets) {
                     mHost.closeColorBuffer(target);
                     target = 0;

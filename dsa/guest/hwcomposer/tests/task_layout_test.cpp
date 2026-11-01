@@ -503,17 +503,20 @@ TEST(fr3_task_frames_are_composed_relative_to_the_task_origin) {
     EXPECT_EQ(layers[2].color.a, 128);
 }
 
-TEST(fr4_a_task_buffers_are_made_at_the_display_size) {
-    // The first frame of a 600x400 task on a 1920x1080 display.
-    const BufferSize first = taskBufferSize({}, kDisplay, 600, 400);
-    EXPECT_EQ(first.width, 1920);
-    EXPECT_EQ(first.height, 1080);
+TEST(fr4_a_task_buffers_follow_the_task_not_the_display) {
+    // A phone-shaped window on a monitor at 200%, on a large square display.
+    const Rect square{0, 0, 2880, 2880};
+    const BufferSize first = taskBufferSize({}, square, 824, 1464);
+    EXPECT_EQ(first.width, 1024);
+    EXPECT_EQ(first.height, 1536);
 }
 
-TEST(fr4_resizing_a_task_within_the_display_keeps_its_buffers) {
+TEST(fr4_resizing_a_task_within_a_step_keeps_its_buffers) {
     BufferSize buffers = taskBufferSize({}, kDisplay, 600, 400);
-    // A drag through many sizes, smaller and larger, up to the whole display.
-    const int64_t sizes[][2] = {{610, 405}, {580, 390}, {1200, 800}, {1920, 1080}, {300, 200}};
+    EXPECT_EQ(buffers.width, 1024);
+    EXPECT_EQ(buffers.height, 512);
+    // A drag through many sizes, smaller and larger.
+    const int64_t sizes[][2] = {{610, 405}, {580, 390}, {1000, 500}, {1024, 512}, {700, 300}};
     for (const auto& size : sizes) {
         const BufferSize next = taskBufferSize(buffers, kDisplay, size[0], size[1]);
         EXPECT_TRUE(next == buffers);
@@ -521,20 +524,35 @@ TEST(fr4_resizing_a_task_within_the_display_keeps_its_buffers) {
     }
 }
 
+TEST(fr4_a_task_past_its_buffers_gets_the_next_step_in_that_direction) {
+    const BufferSize buffers = taskBufferSize({1024, 512}, kDisplay, 1030, 500);
+    EXPECT_EQ(buffers.width, 1536);
+    EXPECT_EQ(buffers.height, 512);
+}
+
+TEST(fr4_a_maximised_task_gets_buffers_no_longer_than_the_display) {
+    const Rect square{0, 0, 2880, 2880};
+    const BufferSize buffers = taskBufferSize({1024, 1536}, square, 2880, 1700);
+    EXPECT_EQ(buffers.width, 2880);
+    EXPECT_EQ(buffers.height, 2048);
+}
+
+TEST(fr4_a_window_made_much_smaller_gives_its_buffers_back) {
+    const Rect square{0, 0, 2880, 2880};
+    const BufferSize restored = taskBufferSize({2880, 2048}, square, 824, 1464);
+    EXPECT_EQ(restored.width, 1024);
+    EXPECT_EQ(restored.height, 1536);
+    // Less than twice what it needs stays, so a drag does not remake it back and forth.
+    EXPECT_TRUE(taskBufferSize({1536, 1024}, kDisplay, 1000, 1000) ==
+                (BufferSize{1536, 1024}));
+}
+
 TEST(fr4_a_task_larger_than_the_display_gets_buffers_that_hold_it) {
     const BufferSize buffers = taskBufferSize({1920, 1080}, kDisplay, 2000, 900);
     EXPECT_EQ(buffers.width, 2000);
-    EXPECT_EQ(buffers.height, 1080);
+    EXPECT_EQ(buffers.height, 1024);
     // Once they hold it, they stay.
     EXPECT_TRUE(taskBufferSize(buffers, kDisplay, 1990, 1000) == buffers);
-}
-
-TEST(fr4_a_larger_display_remakes_the_buffers_once) {
-    const Rect larger{0, 0, 2560, 1440};
-    const BufferSize buffers = taskBufferSize({1920, 1080}, larger, 600, 400);
-    EXPECT_EQ(buffers.width, 2560);
-    EXPECT_EQ(buffers.height, 1440);
-    EXPECT_TRUE(taskBufferSize(buffers, larger, 640, 420) == buffers);
 }
 
 TEST(fr4_a_resized_task_is_composed_into_the_top_left_of_its_buffers) {

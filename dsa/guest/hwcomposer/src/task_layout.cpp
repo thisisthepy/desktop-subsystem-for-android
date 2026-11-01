@@ -275,14 +275,31 @@ std::optional<TaskDisplays::Pairing> TaskDisplays::acquire(int32_t task) {
     return std::nullopt;
 }
 
+namespace {
+
+// A drag remakes the buffers each time it crosses a multiple of this. Remaking takes tens of
+// milliseconds; each buffer's overshoot past the task costs up to this much of a side.
+constexpr int64_t kBufferStep = 512;
+
+// `task` rounded up to a step, no longer than the display unless the task itself is.
+int64_t bufferLength(int64_t task, int64_t display) {
+    const int64_t rounded = (task + kBufferStep - 1) / kBufferStep * kBufferStep;
+    return std::max(task, std::min(rounded, display));
+}
+
+}  // namespace
+
 BufferSize taskBufferSize(BufferSize current, const Rect& display, int64_t taskWidth,
                           int64_t taskHeight) {
-    const int64_t width = std::max<int64_t>({display.width(), taskWidth, 1});
-    const int64_t height = std::max<int64_t>({display.height(), taskHeight, 1});
-    if (current.covers(width, height)) {
+    const int64_t width = std::max<int64_t>(taskWidth, 1);
+    const int64_t height = std::max<int64_t>(taskHeight, 1);
+    const BufferSize fitting{bufferLength(width, display.width()),
+                             bufferLength(height, display.height())};
+    const bool wasteful = current.width * current.height >= 2 * fitting.width * fitting.height;
+    if (current.covers(width, height) && !wasteful) {
         return current;
     }
-    return BufferSize{width, height};
+    return fitting;
 }
 
 std::optional<uint32_t> TaskDisplays::release(int32_t task) {

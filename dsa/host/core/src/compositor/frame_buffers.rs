@@ -1,11 +1,11 @@
-//! How a task window's buffers are sized, so that resizing the window does not remake them.
+//! How a task window's buffers are sized, so that most steps of a resize do not remake them.
 //!
 //! Every buffer on a task's frame path (the guest's ColorBuffers, the window manager's shared
-//! texture and the window host's swapchain) is made once at the largest size the task can
-//! have, and each frame fills only its top-left region. A frame carries its content size
-//! next to the buffer, and the window shows only that region. Making a buffer is the slow
-//! part of a resize (tens of milliseconds for a swapchain's `ResizeBuffers` alone), so a size
-//! step that fits the buffers makes none.
+//! texture and the window host's swapchain) follows the size the guest gives its ColorBuffers,
+//! which is the task's size rounded up in steps, and each frame fills only its top-left
+//! region. A frame carries its content size next to the buffer, and the window shows only that
+//! region. Making a buffer is the slow part of a resize (tens of milliseconds for a
+//! swapchain's `ResizeBuffers` alone), so a size step that fits the buffers makes none.
 
 /// The part of a buffer of `buffer` pixels that a frame of `content` pixels fills: the
 /// content clipped to the buffer. A content size of 0 in either direction comes from a
@@ -49,7 +49,7 @@ pub fn swapchain_change(current: Option<(u32, u32)>, texture: (u32, u32)) -> Swa
 
 /// Whether a shared texture of `current` pixels can take the frames of a ColorBuffer of
 /// `wanted` pixels. The texture is remade only when the ColorBuffer itself changes size,
-/// which the guest does only when its display does.
+/// which the guest does only when the task passes a step of its size.
 pub fn texture_fits(current: (u32, u32), wanted: (u32, u32)) -> bool {
     current == wanted
 }

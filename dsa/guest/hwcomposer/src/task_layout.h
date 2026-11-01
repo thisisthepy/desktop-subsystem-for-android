@@ -206,10 +206,12 @@ struct BufferSize {
 };
 
 // The size a task's ColorBuffers should have, given the size they have now (`current`, 0 x 0
-// when there are none), the freeform display, and the task's size. They are made at the
-// display's size, the largest a task inside it can be, so that resizing the task's window
-// does not remake them: the answer is `current` while that still holds both the display and
-// the task. A task larger than the display gets buffers of its own size in that direction.
+// when there are none), the freeform display, and the task's size. Each buffer on the way to
+// the window is this size, so they follow the task rather than the display, which can be far
+// larger: the task's size rounded up to a step, so that most steps of a drag remake nothing.
+// The answer is `current` while that holds the task and is under twice the area it needs, so
+// a window that shrinks a lot gives the memory back without a drag remaking them back and
+// forth. A task larger than the display gets buffers of its own size in that direction.
 BufferSize taskBufferSize(BufferSize current, const Rect& display, int64_t taskWidth,
                           int64_t taskHeight);
 
