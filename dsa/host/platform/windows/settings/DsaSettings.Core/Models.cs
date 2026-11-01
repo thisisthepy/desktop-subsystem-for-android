@@ -78,3 +78,9 @@ public sealed record GuestMemoryInfo(
 public sealed record MemoryReport(GuestMemoryInfo? Guest, IReadOnlyList<HostProcess> Host, ulong HostTotalKb);
 
 public sealed record GpuInfo(string Name, string Luid, bool PrimaryDisplay);
+
+/// <summary>How installing an APK ended: <see cref="Status"/> is <c>installed</c> or the
+/// stable reason dsa gives (<c>incompatible</c>, <c>conflicting-signature</c>,
+/// <c>invalid-apk</c>, <c>insufficient-storage</c>, <c>downgrade</c>, <c>blocked</c> or
+/// <c>other</c>). <see cref="Detail"/> is what dsa said, in English.</summary>
+public sealed record InstallReport(bool Installed, string Status, string? Package, string Detail);

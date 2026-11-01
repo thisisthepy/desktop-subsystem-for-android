@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Dsa.Settings.Core;
 
@@ -172,6 +173,44 @@ public sealed class DsaService
             }
         }
         return gpus;
+    }
+
+    /// <summary>The start of dsa's line for an APK Android refused: the reason's code, then the
+    /// detail.</summary>
+    private static readonly Regex Refusal = new(@"^not installed \(([a-z-]+)\): (.*)$", RegexOptions.Singleline);
+
+    /// <summary>Installs the APK at <paramref name="path"/> in Android, starting Android first
+    /// when it is not running. A refusal by Android is a report with its reason; anything else
+    /// that keeps the APK from Android is a <see cref="DsaException"/>.</summary>
+    public async Task<InstallReport> InstallAsync(string path)
+    {
+        var result = await _cli.RunAsync(new[] { "install", path, "--json" }).ConfigureAwait(true);
+        if (result.ExitCode != 0)
+        {
+            var detail = result.Error.StartsWith("dsa: ", StringComparison.Ordinal)
+                ? result.Error["dsa: ".Length..]
+                : result.Error;
+            var refused = Refusal.Match(detail);
+            if (refused.Success)
+            {
+                return new InstallReport(false, refused.Groups[1].Value, null, refused.Groups[2].Value);
+            }
+            var problem = detail.Contains("cannot reach the DSA service", StringComparison.Ordinal)
+                ? Problem.ServiceUnreachable
+                : Problem.Refused;
+            throw new DsaException(problem, detail.Length > 0 ? detail : $"dsa ended with code {result.ExitCode}");
+        }
+        try
+        {
+            using var document = JsonDocument.Parse(result.Output);
+            var json = document.RootElement;
+            return new InstallReport(Bool(json, "installed"), String(json, "status"),
+                OptionalString(json, "package"), String(json, "message"));
+        }
+        catch (JsonException e)
+        {
+            throw new DsaException(Problem.Unreadable, $"dsa printed something other than JSON: {e.Message}");
+        }
     }
 
     /// <summary>Installs the newest version of DSA now. Returns what the service said.</summary>

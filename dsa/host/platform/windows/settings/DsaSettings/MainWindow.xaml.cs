@@ -21,6 +21,13 @@ public partial class MainWindow : FluentWindow
     {
         App.Settings.IsAdministrator = Shell.IsAdministrator();
         InitializeComponent();
+        InstallBar.DataContext = App.Install;
+        App.Install.PropertyChanged += (_, _) => InstallBar.Severity = App.Install.Severity switch
+        {
+            Dsa.Settings.Core.InstallSeverity.Success => InfoBarSeverity.Success,
+            Dsa.Settings.Core.InstallSeverity.Error => InfoBarSeverity.Error,
+            _ => InfoBarSeverity.Informational,
+        };
         // The light or the dark theme Windows uses for apps, its accent colour, and their
         // changes while the app runs.
         SystemThemeWatcher.Watch(this, WindowBackdropType.Mica, true);
@@ -33,6 +40,29 @@ public partial class MainWindow : FluentWindow
             Navigation.Navigate(StartPage());
             _ = App.Settings.LoadAsync();
         };
+    }
+
+    private static string[]? DroppedFiles(System.Windows.DragEventArgs e) =>
+        e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop)
+            ? e.Data.GetData(System.Windows.DataFormats.FileDrop) as string[]
+            : null;
+
+    /// <summary>Shows a drop is welcome only while it holds an APK and no install runs.</summary>
+    private void OnDragOver(object sender, System.Windows.DragEventArgs e)
+    {
+        e.Effects = App.Install.Accepts(DroppedFiles(e))
+            ? System.Windows.DragDropEffects.Copy
+            : System.Windows.DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void OnDrop(object sender, System.Windows.DragEventArgs e)
+    {
+        if (DroppedFiles(e) is { } files)
+        {
+            e.Handled = true;
+            await App.Install.DropAsync(files);
+        }
     }
 
     /// <summary>Whether Windows has apps use the dark theme.</summary>

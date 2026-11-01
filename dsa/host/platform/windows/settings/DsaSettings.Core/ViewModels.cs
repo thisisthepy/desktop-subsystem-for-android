@@ -296,6 +296,127 @@ public sealed class SettingsViewModel : ObservableObject
         on == ImageUpdates && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetImageUpdatesAsync(on));
 }
 
+/// <summary>How the install bar looks.</summary>
+public enum InstallSeverity
+{
+    Informational,
+    Success,
+    Error,
+}
+
+/// <summary>APK files dropped on the window: each is installed in Android in turn, and the bar
+/// at the top of the window says how it went.</summary>
+public sealed class InstallViewModel : ObservableObject
+{
+    private readonly DsaService _service;
+    private readonly ITextSource _text;
+    private bool _busy;
+    private bool _open;
+    private InstallSeverity _severity;
+    private string _title = "";
+    private string _message = "";
+
+    public InstallViewModel(DsaService service, ITextSource text)
+    {
+        _service = service;
+        _text = text;
+    }
+
+    public bool IsBusy => _busy;
+    /// <summary>Whether the bar shows; its close button sets it to false.</summary>
+    public bool IsOpen
+    {
+        get => _open;
+        set
+        {
+            _open = value;
+            Changed();
+        }
+    }
+    public InstallSeverity Severity => _severity;
+    public string Title => _title;
+    public string Message => _message;
+
+    /// <summary>Whether <paramref name="path"/> names an APK file.</summary>
+    public static bool IsApk(string path) =>
+        path.EndsWith(".apk", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether a drop of <paramref name="paths"/> would install anything, so the
+    /// window shows a drop is welcome.</summary>
+    public bool Accepts(IEnumerable<string>? paths) => !_busy && paths is not null && paths.Any(IsApk);
+
+    private void Show(InstallSeverity severity, string title, string message)
+    {
+        _severity = severity;
+        _title = title;
+        _message = message;
+        _open = true;
+        ChangedAll();
+    }
+
+    /// <summary>Installs every APK of <paramref name="paths"/>, one after the other, and says
+    /// how each went. Files that are not APKs are named and left alone.</summary>
+    public async Task DropAsync(IReadOnlyList<string> paths)
+    {
+        if (_busy)
+        {
+            return;
+        }
+        var apks = paths.Where(IsApk).ToList();
+        var others = paths.Where(p => !IsApk(p)).Select(p => Path.GetFileName(p)).ToList();
+        if (apks.Count == 0)
+        {
+            Show(InstallSeverity.Error, _text.Get("Install_FailedTitle"),
+                string.Format(CultureInfo.CurrentCulture, _text.Get("Install_NotApk"), string.Join(", ", others)));
+            return;
+        }
+        _busy = true;
+        var lines = new List<string>();
+        var failed = false;
+        try
+        {
+            foreach (var path in apks)
+            {
+                var name = Path.GetFileName(path);
+                Show(InstallSeverity.Informational, _text.Get("Install_BusyTitle"),
+                    string.Format(CultureInfo.CurrentCulture, _text.Get("Install_Busy"), name));
+                try
+                {
+                    var report = await _service.InstallAsync(path).ConfigureAwait(true);
+                    if (report.Installed)
+                    {
+                        lines.Add(string.Format(CultureInfo.CurrentCulture, _text.Get("Install_Installed"),
+                            name, report.Package ?? ""));
+                    }
+                    else
+                    {
+                        failed = true;
+                        lines.Add(string.Format(CultureInfo.CurrentCulture, _text.Get("Install_Refused"),
+                            name, _text.Get($"Install_Reason_{report.Status}"), report.Detail));
+                    }
+                }
+                catch (Exception e)
+                {
+                    failed = true;
+                    lines.Add(string.Format(CultureInfo.CurrentCulture, _text.Get("Install_NotSent"),
+                        name, Format.Problem(_text, e)));
+                }
+            }
+            if (others.Count > 0)
+            {
+                lines.Add(string.Format(CultureInfo.CurrentCulture, _text.Get("Install_NotApk"), string.Join(", ", others)));
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+        Show(failed ? InstallSeverity.Error : InstallSeverity.Success,
+            _text.Get(failed ? "Install_FailedTitle" : "Install_DoneTitle"),
+            string.Join("\n", lines));
+    }
+}
+
 /// <summary>One line of the memory page: what it is, a detail, and its size.</summary>
 public sealed record MemoryRow(string Label, string Detail, string Size);
 
