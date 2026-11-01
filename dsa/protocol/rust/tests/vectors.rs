@@ -10,11 +10,11 @@ use std::path::PathBuf;
 
 use dsa_protocol::control::{
     envelope::Body, AgentConnected, AppInfo, AuthChallenge, AuthProof, ClipboardSharing,
-    ClipboardText, CloseTask, DeviceIdle,
-    Envelope, GuestBoot, GuestMemory, Hello, HelloAccepted, HelloRejected, ImeCommit,
-    ImeComposition, ImeCursor, KeyAction, KeyEvent, LaunchApp, PointerAction, PointerEvent,
-    PointerTool, PowerState, ProcessMemory, Rect, RejectReason, RequestGuestMemory, ResizeTask,
-    Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
+    ClipboardText, CloseTask, DeviceIdle, Envelope, GuestBoot, GuestMemory, Hello, HelloAccepted,
+    HelloRejected, ImeCommit, ImeComposition, ImeCursor, KeyAction, KeyEvent, LaunchApp,
+    PointerAction, PointerEvent, PointerTool, PowerState, ProcessMemory, Rect, RejectReason,
+    RequestGuestMemory, ResizeTask, Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved,
+    TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
 
