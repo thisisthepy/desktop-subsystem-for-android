@@ -436,6 +436,18 @@ def find_aapt2():
     return None
 
 
+# Android's compiled XML (ResXMLTree): a file of chunks, each with a type, a header size and
+# a size. The tree is a string pool, a resource map, then one node chunk per namespace,
+# element start, element end and text.
+XML_FILE = 0x0003
+XML_STRING_POOL = 0x0001
+XML_START_ELEMENT = 0x0102
+XML_END_ELEMENT = 0x0103
+XML_NO_INDEX = 0xFFFFFFFF
+XML_TYPE_STRING = 0x03
+XML_UTF8 = 0x100
+
+
 def xml_strings(axml, offset):
     """The strings of the compiled XML string pool at `offset`."""
     _, header_size, _, count, _, flags, strings_start, _ = struct.unpack_from("<HHIIIIII", axml, offset)
