@@ -69,6 +69,10 @@
 (allow dsa_channeld system_app (file (read open)))
 (allow dsa_channeld platform_app (dir (search)))
 (allow dsa_channeld platform_app (file (read open)))
+; An app's process carries MLS categories (s0:c512,c768), and without this the kernel refuses the
+; read even though the rules above allow it. What the daemon may touch is still only what this
+; file allows.
+(typeattributeset mlstrustedsubject (dsa_channeld))
 
 ; vendor.dsa.boot_completed (vendor_property_contexts): init sets it to 1 when Android has
 ; finished booting, and the daemon reads it to tell the host. Nothing else may set it.
