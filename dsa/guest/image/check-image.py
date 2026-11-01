@@ -3,7 +3,8 @@
     uv run dsa/guest/image/check-image.py dsa/target/image/17.0.0-16373615 .scratch/image-keys
 
 It fails when the shell apps are still there, when the build is still debuggable, when an
-app is not signed with one of the keys in the key folder, when the agent is missing or not
+app is not signed with one of the keys in the key folder, when the framework overlay, the
+trace script or the first boot compiler setting is missing, when the agent is missing or not
 signed with the platform key, when the files do not match image.json, or when the ramdisk
 lacks the directories and links Android's first stage init needs.
 
@@ -156,6 +157,16 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     if "SYSTEM_EXT/etc/permissions/privapp-permissions-dsa-agent.xml" not in names:
         problems.append("SYSTEM_EXT/etc/permissions/privapp-permissions-dsa-agent.xml is missing, so the "
                         "framework refuses to boot with the agent")
+
+    # The framework overlay, without which every list row shows a mouse press 100 ms late.
+    if "VENDOR/overlay/DsaFrameworkOverlay.apk" not in names:
+        problems.append("VENDOR/overlay/DsaFrameworkOverlay.apk is missing, so a press on a list row "
+                        "shows only after the 100 ms tap timeout")
+    if "SYSTEM/etc/init/dsa-trace.rc" not in names:
+        problems.append("SYSTEM/etc/init/dsa-trace.rc is missing, so the input trace has no main thread timing")
+    for prop_file in ["SYSTEM/build.prop"]:
+        if prop_file in names and "pm.dexopt.first-boot=speed-profile" not in z.read(prop_file).decode():
+            problems.append(f"{prop_file} does not compile apps' own profiles at first boot")
 
     # DSA's composer, which sends the host each task's frames: with Cuttlefish's in its place,
     # no task window ever gets one.

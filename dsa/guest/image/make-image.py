@@ -31,6 +31,7 @@ import argparse
 import base64
 import gzip
 import hashlib
+import io
 import json
 import os
 import re
@@ -208,6 +209,18 @@ FRP_PROPS = {
     "ro.frp.pst": "",
 }
 
+# How ART compiles apps at a disk's first boot and at the first boot after an update. AOSP
+# leaves both at verify: the apps are checked but not compiled, so each runs interpreted and
+# JIT compiled until the background dexopt job compiles it, a job that waits for the device to
+# be idle and charging. speed-profile compiles the methods a profile names: at first boot the
+# profile an app ships (embedded in its APK or beside it), and after an update the profile
+# collected while it was used. An app without one is still only verified, so the first boot
+# grows by the apps that ship a profile, and an update's first boot by the apps used before.
+DEXOPT_PROPS = {
+    "pm.dexopt.first-boot": "speed-profile",
+    "pm.dexopt.boot-after-ota": "speed-profile",
+}
+
 # Cuttlefish ships selectable vendor APEX implementations. Its launcher passes
 # the selections in bootconfig. DSA does not run that launcher, so choose the
 # implementations that can start without Cuttlefish remote services before
@@ -374,8 +387,72 @@ def removed(name, hwcomposer=False):
     )
 
 
+def framework_overlay_sources(dest):
+    """Writes the framework overlay's manifest and values into `dest`."""
+    (dest / "res/values").mkdir(parents=True, exist_ok=True)
+    (dest / "AndroidManifest.xml").write_text(
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<manifest xmlns:android="http://schemas.android.com/apk/res/android"\n'
+        f'    package="{FRAMEWORK_OVERLAY_PACKAGE}">\n'
+        # Android 14 and later refuse a package that targets an old SDK, and the default is 1.
+        '    <uses-sdk android:minSdkVersion="34" android:targetSdkVersion="35" />\n'
+        '    <application android:hasCode="false" />\n'
+        '    <overlay android:targetPackage="android" android:isStatic="true" android:priority="100" />\n'
+        '</manifest>\n'
+    )
+    integers = "".join(f'    <integer name="{name}">{value}</integer>\n'
+                       for name, value in FRAMEWORK_OVERLAY_INTEGERS.items())
+    (dest / "res/values/dsa.xml").write_text(
+        f'<?xml version="1.0" encoding="utf-8"?>\n<resources>\n{integers}</resources>\n')
+
+
+def build_framework_overlay(aapt2, framework_res, work):
+    """Builds the framework overlay APK (unsigned; signing gives it the platform key)."""
+    sources = work / "framework-overlay"
+    shutil.rmtree(sources, ignore_errors=True)
+    framework_overlay_sources(sources)
+    compiled = sources / "compiled.zip"
+    apk = sources / "DsaFrameworkOverlay.apk"
+    run(aapt2, "compile", "--dir", sources / "res", "-o", compiled)
+    run(aapt2, "link", "-o", apk, "--manifest", sources / "AndroidManifest.xml", "-I", framework_res, compiled)
+    return apk
+
+
+def find_aapt2():
+    """aapt2 from the Android SDK's newest build-tools, or None."""
+    for variable in ("ANDROID_HOME", "ANDROID_SDK_ROOT"):
+        sdk = os.environ.get(variable)
+        if sdk:
+            found = sorted(Path(sdk).glob("build-tools/*/aapt2"),
+                           key=lambda p: [int(x) if x.isdigit() else 0 for x in re.split(r"[.-]", p.parent.name)])
+            if found:
+                return found[-1]
+    return None
+
+
+def embedded_profiles(z):
+    """The APKs in target_files that carry their own ART profile, which speed-profile compiles
+    at first boot: an embedded baseline profile, or a dex metadata file beside the APK."""
+    names = set(z.namelist())
+    found = []
+    for name in sorted(names):
+        if not name.endswith(".apk"):
+            continue
+        if name[:-4] + ".dm" in names:
+            found.append(name)
+            continue
+        try:
+            with zipfile.ZipFile(io.BytesIO(z.read(name))) as apk:
+                if "assets/dexopt/baseline.prof" in apk.namelist():
+                    found.append(name)
+        except zipfile.BadZipFile:
+            continue
+    return found
+
+
 def edit_props(text):
-    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS, **FRP_PROPS}
+    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS, **FRP_PROPS,
+                      **DEXOPT_PROPS}
     out = []
     for line in text.splitlines():
         key = line.split("=", 1)[0]
@@ -464,6 +541,10 @@ DISPLAY_BOOTCONFIG = {
 CONSOLE_LOGCAT_RC = "VENDOR/etc/init/dsa-console-logcat.rc"
 # Turns on the zram swap fstab.dsa declares, and tunes the kernel for it.
 MEMORY_RC = "VENDOR/etc/init/dsa-memory.rc"
+# Main thread timing for the input trace (dsa-trace.rc). A system script, so init itself runs it.
+TRACE_RC = "SYSTEM/etc/init/dsa-trace.rc"
+SYSTEM_FS_CONFIG = "META/filesystem_config.txt"
+TRACE_FS_CONFIG = ["system/etc/init/dsa-trace.rc 0 0 644 capabilities=0x0"]
 # The property dsa-channeld sets to have init drop the caches and compact memory, so free
 # page reporting hands idle memory back to the host. vendor_property_contexts gives it the
 # type the daemon's policy lets it set.
@@ -498,6 +579,25 @@ AGENT_APKCERTS = (
     'name="DsaAgent.apk" certificate="build/make/target/product/security/platform.x509.pem" '
     'private_key="build/make/target/product/security/platform.pk8" partition="system_ext"'
 )
+# A static overlay of framework settings, built with aapt2 against the image's own
+# framework-res. The tap timeout is how long a view inside anything that scrolls waits before
+# it shows that it is pressed, in case the touch turns into a scroll: 100 ms by default, and
+# every list row, Settings' included, is inside a RecyclerView. A mouse press is never the
+# start of a scroll, and the pressed ripple then starts 100 ms after the click. At 0 a touch
+# that becomes a scroll shows the row pressed until it moves past the touch slop.
+FRAMEWORK_OVERLAY_APK = "VENDOR/overlay/DsaFrameworkOverlay.apk"
+FRAMEWORK_OVERLAY_PACKAGE = "io.github.thisisthepy.dsa.overlay.framework"
+FRAMEWORK_OVERLAY_INTEGERS = {"config_tapTimeoutMillis": 0}
+FRAMEWORK_OVERLAY_APKCERTS = (
+    'name="DsaFrameworkOverlay.apk" certificate="build/make/target/product/security/platform.x509.pem" '
+    'private_key="build/make/target/product/security/platform.pk8" partition="vendor"'
+)
+FRAMEWORK_OVERLAY_FS_CONFIG = [
+    "vendor/overlay 0 0 755 capabilities=0x0",
+    "vendor/overlay/DsaFrameworkOverlay.apk 0 0 644 capabilities=0x0",
+]
+VENDOR_OVERLAY_CONTEXT = "/vendor/overlay(/.*)? u:object_r:vendor_overlay_file:s0"
+
 SYSTEM_EXT_FS_CONFIG = "META/system_ext_filesystem_config.txt"
 AGENT_FS_CONFIG = [
     "system_ext/priv-app/DsaAgent 0 0 755 capabilities=0x0",
@@ -531,6 +631,8 @@ def update_vendor_file_contexts(fc_text, channeld=False, hwcomposer=False):
         entries.append((r"/vendor/bin/dsa-channeld", CHANNELD_CONTEXT))
     if hwcomposer:
         entries.append((r"/vendor/bin/hw/dsa-hwcomposer", HWCOMPOSER_CONTEXT))
+    # Usually there already, as /(vendor|system/vendor)/overlay(/.*)?.
+    entries.append(("overlay(/.*)?", VENDOR_OVERLAY_CONTEXT))
     for pattern, rule in entries:
         if not any(pattern in line for line in lines):
             lines.append(rule)
@@ -764,11 +866,12 @@ def recompile_precompiled_sepolicy(otatools, cil_map, vendor_version, genfs_vers
 
 
 def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=None, channeld=None,
-           agent=None, hwcomposer=None):
+           agent=None, hwcomposer=None, framework_overlay=None):
     """Copies target_files, removing the shell apps and the published kernel modules,
     switching to a user build and adding the Hyper-V mount table, the control channel
-    daemon when `channeld` names one, the agent when `agent` names its APK, and DSA's
-    composer in place of Cuttlefish's when `hwcomposer` names one."""
+    daemon when `channeld` names one, the agent when `agent` names its APK, DSA's
+    composer in place of Cuttlefish's when `hwcomposer` names one, and the framework
+    overlay when `framework_overlay` names its APK."""
     fstab = (HERE / "fstab.dsa").read_bytes()
     console_logcat = (HERE / "console-logcat.rc").read_bytes()
     graphics_payload = Path(graphics_library).read_bytes() if graphics_library else None
@@ -776,6 +879,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
     channeld_payload = Path(channeld).read_bytes() if channeld else None
     agent_payload = Path(agent).read_bytes() if agent else None
     hwcomposer_payload = Path(hwcomposer).read_bytes() if hwcomposer else None
+    overlay_payload = Path(framework_overlay).read_bytes() if framework_overlay else None
     has_hwcomposer = hwcomposer_payload is not None
     replaced_graphics_payload = False
     replaced_vulkan_payload = False
@@ -892,10 +996,15 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 elif name == "META/apkcerts.txt":
                     data = b"".join(
                         line + b"\n" for line in data.splitlines()
-                        if not any(f'name="{a}.apk"' in line.decode() for a in REMOVED_APPS + ["DsaAgent"])
+                        if not any(f'name="{a}.apk"' in line.decode()
+                                   for a in REMOVED_APPS + ["DsaAgent", "DsaFrameworkOverlay"])
                     )
                     if agent_payload is not None:
                         data += AGENT_APKCERTS.encode() + b"\n"
+                    if overlay_payload is not None:
+                        data += FRAMEWORK_OVERLAY_APKCERTS.encode() + b"\n"
+                elif name == SYSTEM_FS_CONFIG:
+                    data = add_filesystem_config(data.decode(), TRACE_FS_CONFIG).encode()
                 elif name == SYSTEM_EXT_FS_CONFIG and agent_payload is not None:
                     data = add_filesystem_config(data.decode(), AGENT_FS_CONFIG).encode()
                 elif name in FSTAB_DIRS.values():
@@ -910,6 +1019,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                             text += f"{prefix}fstab.dsa 0 0 644 capabilities=0x0\n"
                     if name == "META/vendor_filesystem_config.txt":
                         text = update_vendor_filesystem_config(text, channeld_payload is not None, has_hwcomposer)
+                        if overlay_payload is not None:
+                            text = add_filesystem_config(text, FRAMEWORK_OVERLAY_FS_CONFIG)
                     data = text.encode()
                 elif name == "VENDOR/etc/ueventd.rc":
                     data = data.rstrip(b"\n") + b"\n" + CONSOLE_UEVENTD_LINE.encode() + b"\n"
@@ -926,6 +1037,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             zout.writestr(directory + "fstab.dsa", fstab)
         zout.writestr(CONSOLE_LOGCAT_RC, console_logcat)
         zout.writestr(MEMORY_RC, (HERE / "dsa-memory.rc").read_bytes())
+        zout.writestr(TRACE_RC, (HERE / "dsa-trace.rc").read_bytes())
         if VENDOR_PROPERTY_CONTEXTS not in names:
             zout.writestr(VENDOR_PROPERTY_CONTEXTS, update_vendor_property_contexts(""))
         zout.writestr(UNAVAILABLE_FEATURES, (HERE / "unavailable-features.xml").read_bytes())
@@ -939,6 +1051,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             zout.writestr(CHANNEL_MANIFEST, (HERE / "dsa-channel-manifest.xml").read_bytes())
             if VENDOR_SERVICE_CONTEXTS not in names:
                 zout.writestr(VENDOR_SERVICE_CONTEXTS, update_vendor_service_contexts(""))
+        if overlay_payload is not None:
+            zout.writestr(FRAMEWORK_OVERLAY_APK, overlay_payload)
         if agent_payload is not None:
             zout.writestr(AGENT_APK, agent_payload)
             zout.writestr(AGENT_PERMISSIONS, AGENT_PERMISSIONS_SOURCE.read_bytes())
@@ -1194,6 +1308,9 @@ def main():
     parser.add_argument("--agent", type=Path,
                         help="the guest agent's APK (DsaAgent), unsigned or signed with any key; "
                         "the image signs it with the platform key")
+    parser.add_argument("--aapt2", type=Path,
+                        help="aapt2 from the Android SDK's build-tools, which builds the framework overlay; "
+                             "found under ANDROID_HOME when not given, and without it the image has no overlay")
     parser.add_argument("--graphics-dir", type=Path,
                         help="a directory containing guest graphics libraries (vulkan.ranchu.so, libOpenglSystemCommon.so)")
     args = parser.parse_args()
@@ -1230,9 +1347,24 @@ def main():
         if sibling.exists():
             vulkan_driver = sibling
 
+    framework_overlay = None
+    aapt2 = args.aapt2 or find_aapt2()
+    with zipfile.ZipFile(target_files) as z:
+        profiled = embedded_profiles(z)
+        print(f"{len(profiled)} apps carry an ART profile that first boot compiles with: "
+              f"{', '.join(Path(n).name for n in profiled) or 'none'}", flush=True)
+        if aapt2:
+            framework_res = work / "framework-res.apk"
+            framework_res.write_bytes(z.read("SYSTEM/framework/framework-res.apk"))
+    if aapt2:
+        framework_overlay = build_framework_overlay(aapt2, framework_res, work)
+    else:
+        print("no aapt2, so the image has no framework overlay", flush=True)
+
     modified = work / "modified.zip"
     modify(target_files, modified, graphics_library=graphics_library, vulkan_driver=vulkan_driver,
-           otatools=otatools, channeld=args.channeld, agent=args.agent, hwcomposer=args.hwcomposer)
+           otatools=otatools, channeld=args.channeld, agent=args.agent, hwcomposer=args.hwcomposer,
+           framework_overlay=framework_overlay)
 
     signed = work / "signed.zip"
     # It runs where AOSP's certificates sit at the paths apkcerts.txt names, so every path

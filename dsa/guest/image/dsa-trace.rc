@@ -1,0 +1,11 @@
+# With the input trace on (androidboot.hardware.dsa_input_trace=1 on the kernel command line),
+# every app's main thread logs each message it takes 16 ms or more to handle ("Slow dispatch"),
+# naming the handler and the callback, and the first message it starts 16 ms or more late
+# ("Slow delivery"). A frame, an activity launch and a click are each one such message, so the
+# log shows where the main thread's time went between a press and the frame that answers it.
+# Off by default: the lines go to the serial console, and each byte written there costs time.
+#
+# It is a system script, not a vendor one, because init runs vendor scripts in a context that
+# may not set log properties. Each app reads the property when its main thread starts.
+on property:ro.boot.hardware.dsa_input_trace=1
+    setprop log.looper.any.main.slow 16
