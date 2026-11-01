@@ -86,6 +86,9 @@ use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{self, envelope::Body};
 use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 
+use crate::accessibility::{
+    AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, TreeUpdate,
+};
 use crate::apk::{self, InstallOutcome};
 use crate::clipboard;
 use crate::clock_trace::ClockTrace;
@@ -529,6 +532,8 @@ struct Shared {
     widget_requests: Mutex<HashMap<u32, Sender<WidgetAnswer>>>,
     /// The ID of the last request about widgets.
     last_widget_request: AtomicU32,
+    /// Who watches each task's accessibility tree.
+    accessibility: Mutex<AccessibilityHub>,
 }
 
 /// What the agent answers about widgets.
@@ -579,6 +584,14 @@ pub struct WidgetWatch {
 enum InstallEvent {
     Progress(u64),
     Done(InstallOutcome),
+}
+
+/// The watchers of each task's accessibility tree. The guest reads a task's tree while the
+/// task has at least one.
+#[derive(Default)]
+struct AccessibilityHub {
+    next_watch: u64,
+    watchers: HashMap<i32, Vec<(u64, Sender<GuestAccessibility>)>>,
 }
 
 /// The guest's tasks and who is watching them, under one lock, so a new watcher's starting
@@ -707,6 +720,25 @@ impl Shared {
         }
     }
 
+    /// Hands what the guest sent about a task's accessibility to the task's watchers.
+    fn publish_accessibility(&self, task_id: i32, message: GuestAccessibility) {
+        let mut hub = self.accessibility.lock().unwrap_or_else(|e| e.into_inner());
+        match hub.watchers.get_mut(&task_id) {
+            Some(watchers) => watchers.retain(|(_, w)| w.send(message.clone()).is_ok()),
+            None => eprintln!(
+                "accessibility: dropped the guest's tree of task {task_id}, which nobody watches"
+            ),
+        }
+    }
+
+    /// The tasks whose accessibility tree is watched.
+    fn watched_tasks(&self) -> Vec<i32> {
+        let hub = self.accessibility.lock().unwrap_or_else(|e| e.into_inner());
+        let mut tasks: Vec<i32> = hub.watchers.keys().copied().collect();
+        tasks.sort();
+        tasks
+    }
+
     /// Hands text the guest copied to every clipboard watcher still listening.
     fn publish_clipboard(&self, text: &str) {
         self.clipboard_watchers
@@ -791,6 +823,7 @@ impl Session {
             widgets: Mutex::new(WidgetHub::default()),
             widget_requests: Mutex::new(HashMap::new()),
             last_widget_request: AtomicU32::new(0),
+            accessibility: Mutex::new(AccessibilityHub::default()),
         });
         let freeze_delay = config.freeze_after.unwrap_or(DEFAULT_FREEZE_AFTER);
         let (commands, command_rx) = mpsc::channel();
@@ -1246,6 +1279,73 @@ impl Session {
         rx
     }
 
+    /// Watches a task's accessibility tree, for a host accessibility client. The first watch
+    /// of a task asks the guest to read the task's tree, and dropping the last tells it to
+    /// stop, so the guest reads nothing nobody watches. A new watch of a task already watched
+    /// asks the guest for a full tree again, which every watcher receives. The watch lasts
+    /// across restarts of the guest: each agent that connects is asked again.
+    pub fn watch_accessibility(&self, task_id: i32) -> AccessibilityWatch {
+        let (tx, updates) = mpsc::channel();
+        let id = {
+            let mut hub = self
+                .shared
+                .accessibility
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            hub.next_watch += 1;
+            let id = hub.next_watch;
+            hub.watchers.entry(task_id).or_default().push((id, tx));
+            id
+        };
+        eprintln!(
+            "accessibility: a host client watches task {task_id}; asking Android for its tree"
+        );
+        send_quietly(
+            &self.shared,
+            &self.commands,
+            Body::AccessibilityWatch(control::AccessibilityWatch { task_id, on: true }),
+        );
+        let shared = Arc::clone(&self.shared);
+        let commands = self.commands.clone();
+        AccessibilityWatch::new(updates, move || {
+            let last = {
+                let mut hub = shared
+                    .accessibility
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                let watchers = hub.watchers.entry(task_id).or_default();
+                watchers.retain(|(watch, _)| *watch != id);
+                let last = watchers.is_empty();
+                if last {
+                    hub.watchers.remove(&task_id);
+                }
+                last
+            };
+            if last {
+                eprintln!(
+                    "accessibility: no host client watches task {task_id}; Android stops reading it"
+                );
+                send_quietly(
+                    &shared,
+                    &commands,
+                    Body::AccessibilityWatch(control::AccessibilityWatch { task_id, on: false }),
+                );
+            }
+        })
+    }
+
+    /// Asks the guest to do `action` on a node of a task. The answer arrives on the task's
+    /// watches. Needs a running guest.
+    pub fn accessibility_action(
+        &self,
+        task_id: i32,
+        action: &ActionRequest,
+    ) -> Result<(), SessionError> {
+        self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::AccessibilityAction(action.to_control(task_id))),
+        }))
+    }
+
     /// Sends `file` to the guest's agent, which asks the user which app opens it (or takes
     /// it, to share). Returns once the agent has the whole file and has asked; an error says
     /// why it did not get there. Needs a running guest.
@@ -1596,6 +1696,25 @@ impl Drop for Session {
         let _ = self.commands.send(Command::Shutdown);
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
+        }
+    }
+}
+
+/// Sends `body` to the guest without waiting for it to go out, from any thread: through the
+/// connection's second handle when the guest can take it, else through the worker. A frame
+/// for a guest that is not running is dropped; what it said is sent again when the agent
+/// connects.
+fn send_quietly(shared: &Shared, commands: &Sender<Command>, body: Body) {
+    let frame = dsa_protocol::encode(&control::Envelope { body: Some(body) });
+    match shared.send_direct(&frame) {
+        Some(Ok(())) => {}
+        Some(Err(error)) => {
+            eprintln!("control channel: a message to the guest did not go out: {error}")
+        }
+        None => {
+            // Nobody waits for the answer.
+            let (reply, _) = mpsc::channel();
+            let _ = commands.send(Command::Send(frame, reply));
         }
     }
 }
@@ -2387,6 +2506,13 @@ impl Worker {
             if self.links_in_android {
                 self.send_body(Body::LinkHandling(control::LinkHandling { in_guest: true }));
             }
+            // A new agent reads no task's accessibility tree until it is asked.
+            for task_id in self.shared.watched_tasks() {
+                self.send_body(Body::AccessibilityWatch(control::AccessibilityWatch {
+                    task_id,
+                    on: true,
+                }));
+            }
             // A new agent takes the clipboards to be shared, and has none of the host's text.
             self.clipboard_last = None;
             if !self.clipboard_sharing {
@@ -2932,6 +3058,24 @@ impl Worker {
             Some(Body::AgentConnected(_)) => {
                 eprintln!("control channel: dropping a message that stops at the guest's daemon");
             }
+            Some(Body::AccessibilityTree(tree)) => {
+                let task_id = tree.task_id;
+                match TreeUpdate::from_control(tree) {
+                    Ok(update) => self
+                        .shared
+                        .publish_accessibility(task_id, GuestAccessibility::Tree(update)),
+                    Err(why) => eprintln!(
+                        "accessibility: dropped the guest's tree of task {task_id}: {why}"
+                    ),
+                }
+            }
+            Some(Body::AccessibilityActionResult(result)) => {
+                let task_id = result.task_id;
+                self.shared.publish_accessibility(
+                    task_id,
+                    GuestAccessibility::ActionResult(ActionResult::from_control(result)),
+                );
+            }
             Some(Body::ScreenState(_))
             | Some(Body::PowerState(_))
             | Some(Body::CloseTask(_))
@@ -2957,6 +3101,8 @@ impl Worker {
             | Some(Body::RemoveWidget(_))
             | Some(Body::ResizeWidget(_))
             | Some(Body::WidgetPointer(_))
+            | Some(Body::AccessibilityWatch(_))
+            | Some(Body::AccessibilityAction(_))
             | Some(Body::ClockProbe(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
             }

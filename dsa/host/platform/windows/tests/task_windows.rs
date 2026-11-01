@@ -114,6 +114,7 @@ impl HostLauncher for InProcessHosts {
             process_id: std::process::id(),
             logger: None,
             listing,
+            accessibility: None,
         };
         thread::spawn(move || {
             if let Err(why) = app_window::run(setup) {

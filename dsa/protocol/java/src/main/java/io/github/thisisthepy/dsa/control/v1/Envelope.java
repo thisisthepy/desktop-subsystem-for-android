@@ -65,16 +65,10 @@ public  final class Envelope extends
     NOTIFICATION_REMOVED(71),
     NOTIFICATION_CLICKED(72),
     NOTIFICATION_DISMISSED(73),
-    LIST_WIDGET_PROVIDERS(90),
-    WIDGET_PROVIDERS(91),
-    ADD_WIDGET(92),
-    WIDGET_ADDED(93),
-    WIDGET_UPDATED(94),
-    WIDGET_LIST(95),
-    REMOVE_WIDGET(96),
-    RESIZE_WIDGET(97),
-    WIDGET_FRAME(98),
-    WIDGET_POINTER(99),
+    ACCESSIBILITY_WATCH(80),
+    ACCESSIBILITY_TREE(81),
+    ACCESSIBILITY_ACTION(82),
+    ACCESSIBILITY_ACTION_RESULT(83),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -135,16 +129,10 @@ public  final class Envelope extends
         case 71: return NOTIFICATION_REMOVED;
         case 72: return NOTIFICATION_CLICKED;
         case 73: return NOTIFICATION_DISMISSED;
-        case 90: return LIST_WIDGET_PROVIDERS;
-        case 91: return WIDGET_PROVIDERS;
-        case 92: return ADD_WIDGET;
-        case 93: return WIDGET_ADDED;
-        case 94: return WIDGET_UPDATED;
-        case 95: return WIDGET_LIST;
-        case 96: return REMOVE_WIDGET;
-        case 97: return RESIZE_WIDGET;
-        case 98: return WIDGET_FRAME;
-        case 99: return WIDGET_POINTER;
+        case 80: return ACCESSIBILITY_WATCH;
+        case 81: return ACCESSIBILITY_TREE;
+        case 82: return ACCESSIBILITY_ACTION;
+        case 83: return ACCESSIBILITY_ACTION_RESULT;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -2416,501 +2404,201 @@ public  final class Envelope extends
     }
   }
 
-  public static final int LIST_WIDGET_PROVIDERS_FIELD_NUMBER = 90;
+  public static final int ACCESSIBILITY_WATCH_FIELD_NUMBER = 80;
   /**
-   * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
+   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
    */
   @java.lang.Override
-  public boolean hasListWidgetProviders() {
-    return bodyCase_ == 90;
+  public boolean hasAccessibilityWatch() {
+    return bodyCase_ == 80;
   }
   /**
-   * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
+   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
    */
   @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.ListWidgetProviders getListWidgetProviders() {
-    if (bodyCase_ == 90) {
-       return (io.github.thisisthepy.dsa.control.v1.ListWidgetProviders) body_;
+  public io.github.thisisthepy.dsa.control.v1.AccessibilityWatch getAccessibilityWatch() {
+    if (bodyCase_ == 80) {
+       return (io.github.thisisthepy.dsa.control.v1.AccessibilityWatch) body_;
     }
-    return io.github.thisisthepy.dsa.control.v1.ListWidgetProviders.getDefaultInstance();
+    return io.github.thisisthepy.dsa.control.v1.AccessibilityWatch.getDefaultInstance();
   }
   /**
-   * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
+   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
    */
-  private void setListWidgetProviders(io.github.thisisthepy.dsa.control.v1.ListWidgetProviders value) {
+  private void setAccessibilityWatch(io.github.thisisthepy.dsa.control.v1.AccessibilityWatch value) {
     value.getClass();
   body_ = value;
-    bodyCase_ = 90;
+    bodyCase_ = 80;
   }
   /**
-   * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
+   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
    */
-  private void mergeListWidgetProviders(io.github.thisisthepy.dsa.control.v1.ListWidgetProviders value) {
+  private void mergeAccessibilityWatch(io.github.thisisthepy.dsa.control.v1.AccessibilityWatch value) {
     value.getClass();
-  if (bodyCase_ == 90 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.ListWidgetProviders.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.ListWidgetProviders.newBuilder((io.github.thisisthepy.dsa.control.v1.ListWidgetProviders) body_)
+  if (bodyCase_ == 80 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.AccessibilityWatch.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.AccessibilityWatch.newBuilder((io.github.thisisthepy.dsa.control.v1.AccessibilityWatch) body_)
           .mergeFrom(value).buildPartial();
     } else {
       body_ = value;
     }
-    bodyCase_ = 90;
+    bodyCase_ = 80;
   }
   /**
-   * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
+   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
    */
-  private void clearListWidgetProviders() {
-    if (bodyCase_ == 90) {
+  private void clearAccessibilityWatch() {
+    if (bodyCase_ == 80) {
       bodyCase_ = 0;
       body_ = null;
     }
   }
 
-  public static final int WIDGET_PROVIDERS_FIELD_NUMBER = 91;
+  public static final int ACCESSIBILITY_TREE_FIELD_NUMBER = 81;
   /**
-   * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
+   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
    */
   @java.lang.Override
-  public boolean hasWidgetProviders() {
-    return bodyCase_ == 91;
+  public boolean hasAccessibilityTree() {
+    return bodyCase_ == 81;
   }
   /**
-   * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
+   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
    */
   @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.WidgetProviders getWidgetProviders() {
-    if (bodyCase_ == 91) {
-       return (io.github.thisisthepy.dsa.control.v1.WidgetProviders) body_;
+  public io.github.thisisthepy.dsa.control.v1.AccessibilityTree getAccessibilityTree() {
+    if (bodyCase_ == 81) {
+       return (io.github.thisisthepy.dsa.control.v1.AccessibilityTree) body_;
     }
-    return io.github.thisisthepy.dsa.control.v1.WidgetProviders.getDefaultInstance();
+    return io.github.thisisthepy.dsa.control.v1.AccessibilityTree.getDefaultInstance();
   }
   /**
-   * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
+   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
    */
-  private void setWidgetProviders(io.github.thisisthepy.dsa.control.v1.WidgetProviders value) {
+  private void setAccessibilityTree(io.github.thisisthepy.dsa.control.v1.AccessibilityTree value) {
     value.getClass();
   body_ = value;
-    bodyCase_ = 91;
+    bodyCase_ = 81;
   }
   /**
-   * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
+   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
    */
-  private void mergeWidgetProviders(io.github.thisisthepy.dsa.control.v1.WidgetProviders value) {
+  private void mergeAccessibilityTree(io.github.thisisthepy.dsa.control.v1.AccessibilityTree value) {
     value.getClass();
-  if (bodyCase_ == 91 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.WidgetProviders.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.WidgetProviders.newBuilder((io.github.thisisthepy.dsa.control.v1.WidgetProviders) body_)
+  if (bodyCase_ == 81 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.AccessibilityTree.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.AccessibilityTree.newBuilder((io.github.thisisthepy.dsa.control.v1.AccessibilityTree) body_)
           .mergeFrom(value).buildPartial();
     } else {
       body_ = value;
     }
-    bodyCase_ = 91;
+    bodyCase_ = 81;
   }
   /**
-   * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
+   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
    */
-  private void clearWidgetProviders() {
-    if (bodyCase_ == 91) {
+  private void clearAccessibilityTree() {
+    if (bodyCase_ == 81) {
       bodyCase_ = 0;
       body_ = null;
     }
   }
 
-  public static final int ADD_WIDGET_FIELD_NUMBER = 92;
+  public static final int ACCESSIBILITY_ACTION_FIELD_NUMBER = 82;
   /**
-   * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
+   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
    */
   @java.lang.Override
-  public boolean hasAddWidget() {
-    return bodyCase_ == 92;
+  public boolean hasAccessibilityAction() {
+    return bodyCase_ == 82;
   }
   /**
-   * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
+   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
    */
   @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.AddWidget getAddWidget() {
-    if (bodyCase_ == 92) {
-       return (io.github.thisisthepy.dsa.control.v1.AddWidget) body_;
+  public io.github.thisisthepy.dsa.control.v1.AccessibilityAction getAccessibilityAction() {
+    if (bodyCase_ == 82) {
+       return (io.github.thisisthepy.dsa.control.v1.AccessibilityAction) body_;
     }
-    return io.github.thisisthepy.dsa.control.v1.AddWidget.getDefaultInstance();
+    return io.github.thisisthepy.dsa.control.v1.AccessibilityAction.getDefaultInstance();
   }
   /**
-   * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
+   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
    */
-  private void setAddWidget(io.github.thisisthepy.dsa.control.v1.AddWidget value) {
+  private void setAccessibilityAction(io.github.thisisthepy.dsa.control.v1.AccessibilityAction value) {
     value.getClass();
   body_ = value;
-    bodyCase_ = 92;
+    bodyCase_ = 82;
   }
   /**
-   * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
+   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
    */
-  private void mergeAddWidget(io.github.thisisthepy.dsa.control.v1.AddWidget value) {
+  private void mergeAccessibilityAction(io.github.thisisthepy.dsa.control.v1.AccessibilityAction value) {
     value.getClass();
-  if (bodyCase_ == 92 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.AddWidget.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.AddWidget.newBuilder((io.github.thisisthepy.dsa.control.v1.AddWidget) body_)
+  if (bodyCase_ == 82 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.AccessibilityAction.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.AccessibilityAction.newBuilder((io.github.thisisthepy.dsa.control.v1.AccessibilityAction) body_)
           .mergeFrom(value).buildPartial();
     } else {
       body_ = value;
     }
-    bodyCase_ = 92;
+    bodyCase_ = 82;
   }
   /**
-   * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
+   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
    */
-  private void clearAddWidget() {
-    if (bodyCase_ == 92) {
+  private void clearAccessibilityAction() {
+    if (bodyCase_ == 82) {
       bodyCase_ = 0;
       body_ = null;
     }
   }
 
-  public static final int WIDGET_ADDED_FIELD_NUMBER = 93;
+  public static final int ACCESSIBILITY_ACTION_RESULT_FIELD_NUMBER = 83;
   /**
-   * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
+   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
    */
   @java.lang.Override
-  public boolean hasWidgetAdded() {
-    return bodyCase_ == 93;
+  public boolean hasAccessibilityActionResult() {
+    return bodyCase_ == 83;
   }
   /**
-   * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
+   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
    */
   @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.WidgetAdded getWidgetAdded() {
-    if (bodyCase_ == 93) {
-       return (io.github.thisisthepy.dsa.control.v1.WidgetAdded) body_;
+  public io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult getAccessibilityActionResult() {
+    if (bodyCase_ == 83) {
+       return (io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult) body_;
     }
-    return io.github.thisisthepy.dsa.control.v1.WidgetAdded.getDefaultInstance();
+    return io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult.getDefaultInstance();
   }
   /**
-   * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
+   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
    */
-  private void setWidgetAdded(io.github.thisisthepy.dsa.control.v1.WidgetAdded value) {
+  private void setAccessibilityActionResult(io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult value) {
     value.getClass();
   body_ = value;
-    bodyCase_ = 93;
+    bodyCase_ = 83;
   }
   /**
-   * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
+   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
    */
-  private void mergeWidgetAdded(io.github.thisisthepy.dsa.control.v1.WidgetAdded value) {
+  private void mergeAccessibilityActionResult(io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult value) {
     value.getClass();
-  if (bodyCase_ == 93 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.WidgetAdded.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.WidgetAdded.newBuilder((io.github.thisisthepy.dsa.control.v1.WidgetAdded) body_)
+  if (bodyCase_ == 83 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult.newBuilder((io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult) body_)
           .mergeFrom(value).buildPartial();
     } else {
       body_ = value;
     }
-    bodyCase_ = 93;
+    bodyCase_ = 83;
   }
   /**
-   * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
+   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
    */
-  private void clearWidgetAdded() {
-    if (bodyCase_ == 93) {
-      bodyCase_ = 0;
-      body_ = null;
-    }
-  }
-
-  public static final int WIDGET_UPDATED_FIELD_NUMBER = 94;
-  /**
-   * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
-   */
-  @java.lang.Override
-  public boolean hasWidgetUpdated() {
-    return bodyCase_ == 94;
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
-   */
-  @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.WidgetUpdated getWidgetUpdated() {
-    if (bodyCase_ == 94) {
-       return (io.github.thisisthepy.dsa.control.v1.WidgetUpdated) body_;
-    }
-    return io.github.thisisthepy.dsa.control.v1.WidgetUpdated.getDefaultInstance();
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
-   */
-  private void setWidgetUpdated(io.github.thisisthepy.dsa.control.v1.WidgetUpdated value) {
-    value.getClass();
-  body_ = value;
-    bodyCase_ = 94;
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
-   */
-  private void mergeWidgetUpdated(io.github.thisisthepy.dsa.control.v1.WidgetUpdated value) {
-    value.getClass();
-  if (bodyCase_ == 94 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.WidgetUpdated.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.WidgetUpdated.newBuilder((io.github.thisisthepy.dsa.control.v1.WidgetUpdated) body_)
-          .mergeFrom(value).buildPartial();
-    } else {
-      body_ = value;
-    }
-    bodyCase_ = 94;
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
-   */
-  private void clearWidgetUpdated() {
-    if (bodyCase_ == 94) {
-      bodyCase_ = 0;
-      body_ = null;
-    }
-  }
-
-  public static final int WIDGET_LIST_FIELD_NUMBER = 95;
-  /**
-   * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
-   */
-  @java.lang.Override
-  public boolean hasWidgetList() {
-    return bodyCase_ == 95;
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
-   */
-  @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.WidgetList getWidgetList() {
-    if (bodyCase_ == 95) {
-       return (io.github.thisisthepy.dsa.control.v1.WidgetList) body_;
-    }
-    return io.github.thisisthepy.dsa.control.v1.WidgetList.getDefaultInstance();
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
-   */
-  private void setWidgetList(io.github.thisisthepy.dsa.control.v1.WidgetList value) {
-    value.getClass();
-  body_ = value;
-    bodyCase_ = 95;
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
-   */
-  private void mergeWidgetList(io.github.thisisthepy.dsa.control.v1.WidgetList value) {
-    value.getClass();
-  if (bodyCase_ == 95 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.WidgetList.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.WidgetList.newBuilder((io.github.thisisthepy.dsa.control.v1.WidgetList) body_)
-          .mergeFrom(value).buildPartial();
-    } else {
-      body_ = value;
-    }
-    bodyCase_ = 95;
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
-   */
-  private void clearWidgetList() {
-    if (bodyCase_ == 95) {
-      bodyCase_ = 0;
-      body_ = null;
-    }
-  }
-
-  public static final int REMOVE_WIDGET_FIELD_NUMBER = 96;
-  /**
-   * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
-   */
-  @java.lang.Override
-  public boolean hasRemoveWidget() {
-    return bodyCase_ == 96;
-  }
-  /**
-   * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
-   */
-  @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.RemoveWidget getRemoveWidget() {
-    if (bodyCase_ == 96) {
-       return (io.github.thisisthepy.dsa.control.v1.RemoveWidget) body_;
-    }
-    return io.github.thisisthepy.dsa.control.v1.RemoveWidget.getDefaultInstance();
-  }
-  /**
-   * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
-   */
-  private void setRemoveWidget(io.github.thisisthepy.dsa.control.v1.RemoveWidget value) {
-    value.getClass();
-  body_ = value;
-    bodyCase_ = 96;
-  }
-  /**
-   * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
-   */
-  private void mergeRemoveWidget(io.github.thisisthepy.dsa.control.v1.RemoveWidget value) {
-    value.getClass();
-  if (bodyCase_ == 96 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.RemoveWidget.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.RemoveWidget.newBuilder((io.github.thisisthepy.dsa.control.v1.RemoveWidget) body_)
-          .mergeFrom(value).buildPartial();
-    } else {
-      body_ = value;
-    }
-    bodyCase_ = 96;
-  }
-  /**
-   * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
-   */
-  private void clearRemoveWidget() {
-    if (bodyCase_ == 96) {
-      bodyCase_ = 0;
-      body_ = null;
-    }
-  }
-
-  public static final int RESIZE_WIDGET_FIELD_NUMBER = 97;
-  /**
-   * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
-   */
-  @java.lang.Override
-  public boolean hasResizeWidget() {
-    return bodyCase_ == 97;
-  }
-  /**
-   * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
-   */
-  @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.ResizeWidget getResizeWidget() {
-    if (bodyCase_ == 97) {
-       return (io.github.thisisthepy.dsa.control.v1.ResizeWidget) body_;
-    }
-    return io.github.thisisthepy.dsa.control.v1.ResizeWidget.getDefaultInstance();
-  }
-  /**
-   * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
-   */
-  private void setResizeWidget(io.github.thisisthepy.dsa.control.v1.ResizeWidget value) {
-    value.getClass();
-  body_ = value;
-    bodyCase_ = 97;
-  }
-  /**
-   * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
-   */
-  private void mergeResizeWidget(io.github.thisisthepy.dsa.control.v1.ResizeWidget value) {
-    value.getClass();
-  if (bodyCase_ == 97 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.ResizeWidget.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.ResizeWidget.newBuilder((io.github.thisisthepy.dsa.control.v1.ResizeWidget) body_)
-          .mergeFrom(value).buildPartial();
-    } else {
-      body_ = value;
-    }
-    bodyCase_ = 97;
-  }
-  /**
-   * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
-   */
-  private void clearResizeWidget() {
-    if (bodyCase_ == 97) {
-      bodyCase_ = 0;
-      body_ = null;
-    }
-  }
-
-  public static final int WIDGET_FRAME_FIELD_NUMBER = 98;
-  /**
-   * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
-   */
-  @java.lang.Override
-  public boolean hasWidgetFrame() {
-    return bodyCase_ == 98;
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
-   */
-  @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.WidgetFrame getWidgetFrame() {
-    if (bodyCase_ == 98) {
-       return (io.github.thisisthepy.dsa.control.v1.WidgetFrame) body_;
-    }
-    return io.github.thisisthepy.dsa.control.v1.WidgetFrame.getDefaultInstance();
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
-   */
-  private void setWidgetFrame(io.github.thisisthepy.dsa.control.v1.WidgetFrame value) {
-    value.getClass();
-  body_ = value;
-    bodyCase_ = 98;
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
-   */
-  private void mergeWidgetFrame(io.github.thisisthepy.dsa.control.v1.WidgetFrame value) {
-    value.getClass();
-  if (bodyCase_ == 98 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.WidgetFrame.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.WidgetFrame.newBuilder((io.github.thisisthepy.dsa.control.v1.WidgetFrame) body_)
-          .mergeFrom(value).buildPartial();
-    } else {
-      body_ = value;
-    }
-    bodyCase_ = 98;
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
-   */
-  private void clearWidgetFrame() {
-    if (bodyCase_ == 98) {
-      bodyCase_ = 0;
-      body_ = null;
-    }
-  }
-
-  public static final int WIDGET_POINTER_FIELD_NUMBER = 99;
-  /**
-   * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
-   */
-  @java.lang.Override
-  public boolean hasWidgetPointer() {
-    return bodyCase_ == 99;
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
-   */
-  @java.lang.Override
-  public io.github.thisisthepy.dsa.control.v1.WidgetPointer getWidgetPointer() {
-    if (bodyCase_ == 99) {
-       return (io.github.thisisthepy.dsa.control.v1.WidgetPointer) body_;
-    }
-    return io.github.thisisthepy.dsa.control.v1.WidgetPointer.getDefaultInstance();
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
-   */
-  private void setWidgetPointer(io.github.thisisthepy.dsa.control.v1.WidgetPointer value) {
-    value.getClass();
-  body_ = value;
-    bodyCase_ = 99;
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
-   */
-  private void mergeWidgetPointer(io.github.thisisthepy.dsa.control.v1.WidgetPointer value) {
-    value.getClass();
-  if (bodyCase_ == 99 &&
-        body_ != io.github.thisisthepy.dsa.control.v1.WidgetPointer.getDefaultInstance()) {
-      body_ = io.github.thisisthepy.dsa.control.v1.WidgetPointer.newBuilder((io.github.thisisthepy.dsa.control.v1.WidgetPointer) body_)
-          .mergeFrom(value).buildPartial();
-    } else {
-      body_ = value;
-    }
-    bodyCase_ = 99;
-  }
-  /**
-   * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
-   */
-  private void clearWidgetPointer() {
-    if (bodyCase_ == 99) {
+  private void clearAccessibilityActionResult() {
+    if (bodyCase_ == 83) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -5188,482 +4876,194 @@ public  final class Envelope extends
     }
 
     /**
-     * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
+     * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
      */
     @java.lang.Override
-    public boolean hasListWidgetProviders() {
-      return instance.hasListWidgetProviders();
+    public boolean hasAccessibilityWatch() {
+      return instance.hasAccessibilityWatch();
     }
     /**
-     * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
+     * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
      */
     @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.ListWidgetProviders getListWidgetProviders() {
-      return instance.getListWidgetProviders();
+    public io.github.thisisthepy.dsa.control.v1.AccessibilityWatch getAccessibilityWatch() {
+      return instance.getAccessibilityWatch();
     }
     /**
-     * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
+     * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
      */
-    public Builder setListWidgetProviders(io.github.thisisthepy.dsa.control.v1.ListWidgetProviders value) {
+    public Builder setAccessibilityWatch(io.github.thisisthepy.dsa.control.v1.AccessibilityWatch value) {
       copyOnWrite();
-      instance.setListWidgetProviders(value);
+      instance.setAccessibilityWatch(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
+     * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
      */
-    public Builder setListWidgetProviders(
-        io.github.thisisthepy.dsa.control.v1.ListWidgetProviders.Builder builderForValue) {
+    public Builder setAccessibilityWatch(
+        io.github.thisisthepy.dsa.control.v1.AccessibilityWatch.Builder builderForValue) {
       copyOnWrite();
-      instance.setListWidgetProviders(builderForValue.build());
+      instance.setAccessibilityWatch(builderForValue.build());
       return this;
     }
     /**
-     * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
+     * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
      */
-    public Builder mergeListWidgetProviders(io.github.thisisthepy.dsa.control.v1.ListWidgetProviders value) {
+    public Builder mergeAccessibilityWatch(io.github.thisisthepy.dsa.control.v1.AccessibilityWatch value) {
       copyOnWrite();
-      instance.mergeListWidgetProviders(value);
+      instance.mergeAccessibilityWatch(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
+     * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
      */
-    public Builder clearListWidgetProviders() {
+    public Builder clearAccessibilityWatch() {
       copyOnWrite();
-      instance.clearListWidgetProviders();
+      instance.clearAccessibilityWatch();
       return this;
     }
 
     /**
-     * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
+     * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
      */
     @java.lang.Override
-    public boolean hasWidgetProviders() {
-      return instance.hasWidgetProviders();
+    public boolean hasAccessibilityTree() {
+      return instance.hasAccessibilityTree();
     }
     /**
-     * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
+     * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
      */
     @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.WidgetProviders getWidgetProviders() {
-      return instance.getWidgetProviders();
+    public io.github.thisisthepy.dsa.control.v1.AccessibilityTree getAccessibilityTree() {
+      return instance.getAccessibilityTree();
     }
     /**
-     * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
+     * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
      */
-    public Builder setWidgetProviders(io.github.thisisthepy.dsa.control.v1.WidgetProviders value) {
+    public Builder setAccessibilityTree(io.github.thisisthepy.dsa.control.v1.AccessibilityTree value) {
       copyOnWrite();
-      instance.setWidgetProviders(value);
+      instance.setAccessibilityTree(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
+     * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
      */
-    public Builder setWidgetProviders(
-        io.github.thisisthepy.dsa.control.v1.WidgetProviders.Builder builderForValue) {
+    public Builder setAccessibilityTree(
+        io.github.thisisthepy.dsa.control.v1.AccessibilityTree.Builder builderForValue) {
       copyOnWrite();
-      instance.setWidgetProviders(builderForValue.build());
+      instance.setAccessibilityTree(builderForValue.build());
       return this;
     }
     /**
-     * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
+     * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
      */
-    public Builder mergeWidgetProviders(io.github.thisisthepy.dsa.control.v1.WidgetProviders value) {
+    public Builder mergeAccessibilityTree(io.github.thisisthepy.dsa.control.v1.AccessibilityTree value) {
       copyOnWrite();
-      instance.mergeWidgetProviders(value);
+      instance.mergeAccessibilityTree(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
+     * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
      */
-    public Builder clearWidgetProviders() {
+    public Builder clearAccessibilityTree() {
       copyOnWrite();
-      instance.clearWidgetProviders();
+      instance.clearAccessibilityTree();
       return this;
     }
 
     /**
-     * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
+     * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
      */
     @java.lang.Override
-    public boolean hasAddWidget() {
-      return instance.hasAddWidget();
+    public boolean hasAccessibilityAction() {
+      return instance.hasAccessibilityAction();
     }
     /**
-     * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
+     * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
      */
     @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.AddWidget getAddWidget() {
-      return instance.getAddWidget();
+    public io.github.thisisthepy.dsa.control.v1.AccessibilityAction getAccessibilityAction() {
+      return instance.getAccessibilityAction();
     }
     /**
-     * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
+     * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
      */
-    public Builder setAddWidget(io.github.thisisthepy.dsa.control.v1.AddWidget value) {
+    public Builder setAccessibilityAction(io.github.thisisthepy.dsa.control.v1.AccessibilityAction value) {
       copyOnWrite();
-      instance.setAddWidget(value);
+      instance.setAccessibilityAction(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
+     * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
      */
-    public Builder setAddWidget(
-        io.github.thisisthepy.dsa.control.v1.AddWidget.Builder builderForValue) {
+    public Builder setAccessibilityAction(
+        io.github.thisisthepy.dsa.control.v1.AccessibilityAction.Builder builderForValue) {
       copyOnWrite();
-      instance.setAddWidget(builderForValue.build());
+      instance.setAccessibilityAction(builderForValue.build());
       return this;
     }
     /**
-     * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
+     * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
      */
-    public Builder mergeAddWidget(io.github.thisisthepy.dsa.control.v1.AddWidget value) {
+    public Builder mergeAccessibilityAction(io.github.thisisthepy.dsa.control.v1.AccessibilityAction value) {
       copyOnWrite();
-      instance.mergeAddWidget(value);
+      instance.mergeAccessibilityAction(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
+     * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
      */
-    public Builder clearAddWidget() {
+    public Builder clearAccessibilityAction() {
       copyOnWrite();
-      instance.clearAddWidget();
+      instance.clearAccessibilityAction();
       return this;
     }
 
     /**
-     * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
+     * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
      */
     @java.lang.Override
-    public boolean hasWidgetAdded() {
-      return instance.hasWidgetAdded();
+    public boolean hasAccessibilityActionResult() {
+      return instance.hasAccessibilityActionResult();
     }
     /**
-     * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
+     * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
      */
     @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.WidgetAdded getWidgetAdded() {
-      return instance.getWidgetAdded();
+    public io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult getAccessibilityActionResult() {
+      return instance.getAccessibilityActionResult();
     }
     /**
-     * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
+     * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
      */
-    public Builder setWidgetAdded(io.github.thisisthepy.dsa.control.v1.WidgetAdded value) {
+    public Builder setAccessibilityActionResult(io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult value) {
       copyOnWrite();
-      instance.setWidgetAdded(value);
+      instance.setAccessibilityActionResult(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
+     * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
      */
-    public Builder setWidgetAdded(
-        io.github.thisisthepy.dsa.control.v1.WidgetAdded.Builder builderForValue) {
+    public Builder setAccessibilityActionResult(
+        io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult.Builder builderForValue) {
       copyOnWrite();
-      instance.setWidgetAdded(builderForValue.build());
+      instance.setAccessibilityActionResult(builderForValue.build());
       return this;
     }
     /**
-     * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
+     * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
      */
-    public Builder mergeWidgetAdded(io.github.thisisthepy.dsa.control.v1.WidgetAdded value) {
+    public Builder mergeAccessibilityActionResult(io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult value) {
       copyOnWrite();
-      instance.mergeWidgetAdded(value);
+      instance.mergeAccessibilityActionResult(value);
       return this;
     }
     /**
-     * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
+     * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
      */
-    public Builder clearWidgetAdded() {
+    public Builder clearAccessibilityActionResult() {
       copyOnWrite();
-      instance.clearWidgetAdded();
-      return this;
-    }
-
-    /**
-     * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
-     */
-    @java.lang.Override
-    public boolean hasWidgetUpdated() {
-      return instance.hasWidgetUpdated();
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
-     */
-    @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.WidgetUpdated getWidgetUpdated() {
-      return instance.getWidgetUpdated();
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
-     */
-    public Builder setWidgetUpdated(io.github.thisisthepy.dsa.control.v1.WidgetUpdated value) {
-      copyOnWrite();
-      instance.setWidgetUpdated(value);
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
-     */
-    public Builder setWidgetUpdated(
-        io.github.thisisthepy.dsa.control.v1.WidgetUpdated.Builder builderForValue) {
-      copyOnWrite();
-      instance.setWidgetUpdated(builderForValue.build());
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
-     */
-    public Builder mergeWidgetUpdated(io.github.thisisthepy.dsa.control.v1.WidgetUpdated value) {
-      copyOnWrite();
-      instance.mergeWidgetUpdated(value);
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
-     */
-    public Builder clearWidgetUpdated() {
-      copyOnWrite();
-      instance.clearWidgetUpdated();
-      return this;
-    }
-
-    /**
-     * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
-     */
-    @java.lang.Override
-    public boolean hasWidgetList() {
-      return instance.hasWidgetList();
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
-     */
-    @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.WidgetList getWidgetList() {
-      return instance.getWidgetList();
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
-     */
-    public Builder setWidgetList(io.github.thisisthepy.dsa.control.v1.WidgetList value) {
-      copyOnWrite();
-      instance.setWidgetList(value);
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
-     */
-    public Builder setWidgetList(
-        io.github.thisisthepy.dsa.control.v1.WidgetList.Builder builderForValue) {
-      copyOnWrite();
-      instance.setWidgetList(builderForValue.build());
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
-     */
-    public Builder mergeWidgetList(io.github.thisisthepy.dsa.control.v1.WidgetList value) {
-      copyOnWrite();
-      instance.mergeWidgetList(value);
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
-     */
-    public Builder clearWidgetList() {
-      copyOnWrite();
-      instance.clearWidgetList();
-      return this;
-    }
-
-    /**
-     * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
-     */
-    @java.lang.Override
-    public boolean hasRemoveWidget() {
-      return instance.hasRemoveWidget();
-    }
-    /**
-     * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
-     */
-    @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.RemoveWidget getRemoveWidget() {
-      return instance.getRemoveWidget();
-    }
-    /**
-     * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
-     */
-    public Builder setRemoveWidget(io.github.thisisthepy.dsa.control.v1.RemoveWidget value) {
-      copyOnWrite();
-      instance.setRemoveWidget(value);
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
-     */
-    public Builder setRemoveWidget(
-        io.github.thisisthepy.dsa.control.v1.RemoveWidget.Builder builderForValue) {
-      copyOnWrite();
-      instance.setRemoveWidget(builderForValue.build());
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
-     */
-    public Builder mergeRemoveWidget(io.github.thisisthepy.dsa.control.v1.RemoveWidget value) {
-      copyOnWrite();
-      instance.mergeRemoveWidget(value);
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
-     */
-    public Builder clearRemoveWidget() {
-      copyOnWrite();
-      instance.clearRemoveWidget();
-      return this;
-    }
-
-    /**
-     * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
-     */
-    @java.lang.Override
-    public boolean hasResizeWidget() {
-      return instance.hasResizeWidget();
-    }
-    /**
-     * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
-     */
-    @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.ResizeWidget getResizeWidget() {
-      return instance.getResizeWidget();
-    }
-    /**
-     * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
-     */
-    public Builder setResizeWidget(io.github.thisisthepy.dsa.control.v1.ResizeWidget value) {
-      copyOnWrite();
-      instance.setResizeWidget(value);
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
-     */
-    public Builder setResizeWidget(
-        io.github.thisisthepy.dsa.control.v1.ResizeWidget.Builder builderForValue) {
-      copyOnWrite();
-      instance.setResizeWidget(builderForValue.build());
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
-     */
-    public Builder mergeResizeWidget(io.github.thisisthepy.dsa.control.v1.ResizeWidget value) {
-      copyOnWrite();
-      instance.mergeResizeWidget(value);
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
-     */
-    public Builder clearResizeWidget() {
-      copyOnWrite();
-      instance.clearResizeWidget();
-      return this;
-    }
-
-    /**
-     * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
-     */
-    @java.lang.Override
-    public boolean hasWidgetFrame() {
-      return instance.hasWidgetFrame();
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
-     */
-    @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.WidgetFrame getWidgetFrame() {
-      return instance.getWidgetFrame();
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
-     */
-    public Builder setWidgetFrame(io.github.thisisthepy.dsa.control.v1.WidgetFrame value) {
-      copyOnWrite();
-      instance.setWidgetFrame(value);
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
-     */
-    public Builder setWidgetFrame(
-        io.github.thisisthepy.dsa.control.v1.WidgetFrame.Builder builderForValue) {
-      copyOnWrite();
-      instance.setWidgetFrame(builderForValue.build());
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
-     */
-    public Builder mergeWidgetFrame(io.github.thisisthepy.dsa.control.v1.WidgetFrame value) {
-      copyOnWrite();
-      instance.mergeWidgetFrame(value);
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
-     */
-    public Builder clearWidgetFrame() {
-      copyOnWrite();
-      instance.clearWidgetFrame();
-      return this;
-    }
-
-    /**
-     * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
-     */
-    @java.lang.Override
-    public boolean hasWidgetPointer() {
-      return instance.hasWidgetPointer();
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
-     */
-    @java.lang.Override
-    public io.github.thisisthepy.dsa.control.v1.WidgetPointer getWidgetPointer() {
-      return instance.getWidgetPointer();
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
-     */
-    public Builder setWidgetPointer(io.github.thisisthepy.dsa.control.v1.WidgetPointer value) {
-      copyOnWrite();
-      instance.setWidgetPointer(value);
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
-     */
-    public Builder setWidgetPointer(
-        io.github.thisisthepy.dsa.control.v1.WidgetPointer.Builder builderForValue) {
-      copyOnWrite();
-      instance.setWidgetPointer(builderForValue.build());
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
-     */
-    public Builder mergeWidgetPointer(io.github.thisisthepy.dsa.control.v1.WidgetPointer value) {
-      copyOnWrite();
-      instance.mergeWidgetPointer(value);
-      return this;
-    }
-    /**
-     * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
-     */
-    public Builder clearWidgetPointer() {
-      copyOnWrite();
-      instance.clearWidgetPointer();
+      instance.clearAccessibilityActionResult();
       return this;
     }
 
@@ -5730,26 +5130,19 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.NotificationRemoved.class,
             io.github.thisisthepy.dsa.control.v1.NotificationClicked.class,
             io.github.thisisthepy.dsa.control.v1.NotificationDismissed.class,
-            io.github.thisisthepy.dsa.control.v1.ListWidgetProviders.class,
-            io.github.thisisthepy.dsa.control.v1.WidgetProviders.class,
-            io.github.thisisthepy.dsa.control.v1.AddWidget.class,
-            io.github.thisisthepy.dsa.control.v1.WidgetAdded.class,
-            io.github.thisisthepy.dsa.control.v1.WidgetUpdated.class,
-            io.github.thisisthepy.dsa.control.v1.WidgetList.class,
-            io.github.thisisthepy.dsa.control.v1.RemoveWidget.class,
-            io.github.thisisthepy.dsa.control.v1.ResizeWidget.class,
-            io.github.thisisthepy.dsa.control.v1.WidgetFrame.class,
-            io.github.thisisthepy.dsa.control.v1.WidgetPointer.class,
+            io.github.thisisthepy.dsa.control.v1.AccessibilityWatch.class,
+            io.github.thisisthepy.dsa.control.v1.AccessibilityTree.class,
+            io.github.thisisthepy.dsa.control.v1.AccessibilityAction.class,
+            io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult.class,
           };
           java.lang.String info =
-              "\u00007\u0001\u0000\u0001c7\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<\u0000" +
+              "\u00001\u0001\u0000\u0001S1\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<\u0000" +
               "\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<\u0000\u000b" +
               "<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012<\u0000\u0013" +
               "<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000\u0019<\u0000" +
               "\u001a<\u0000\u001b<\u0000\u001c<\u0000\u001d<\u0000(<\u0000)<\u0000*<\u00002<\u0000" +
               "3<\u00004<\u00005<\u00006<\u0000<<\u0000=<\u0000><\u0000?<\u0000@<\u0000F<\u0000" +
-              "G<\u0000H<\u0000I<\u0000Z<\u0000[<\u0000\\<\u0000]<\u0000^<\u0000_<\u0000`<\u0000" +
-              "a<\u0000b<\u0000c<\u0000";
+              "G<\u0000H<\u0000I<\u0000P<\u0000Q<\u0000R<\u0000S<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

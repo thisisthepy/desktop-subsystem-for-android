@@ -30,7 +30,8 @@
 //! - [`compositor`]: the DSA Window Manager, which owns no window and hands each task's
 //!   frames to its app's window host (Windows only).
 //! - [`app_window`]: the app window host, the program that owns an app's task windows
-//!   (Windows only).
+//!   (Windows only), and its UI Automation tree of each task ([`ui_automation`] says what
+//!   each node is in it).
 //! - [`app_exe`]: each app's own copy of the window host, named and drawn as the app
 //!   (Windows only).
 //! - [`start_menu`]: a Start menu shortcut for each app installed in the user's Android, which
@@ -84,6 +85,7 @@ pub mod service;
 pub mod setup;
 #[cfg(windows)]
 pub mod start_menu;
+pub mod ui_automation;
 pub mod uninstall;
 #[cfg(windows)]
 pub mod user_disk;

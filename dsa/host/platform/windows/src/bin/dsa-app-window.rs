@@ -266,6 +266,11 @@ fn main() -> std::process::ExitCode {
         process_id: std::process::id(),
         logger: logger.clone(),
         listing,
+        accessibility: Some(Arc::new(move || {
+            Box::new(NamedPipeConnector {
+                name: api_pipe.into(),
+            }) as Box<dyn dsa_transport::Connector>
+        })),
     };
     match run(setup) {
         Ok(()) => std::process::ExitCode::SUCCESS,

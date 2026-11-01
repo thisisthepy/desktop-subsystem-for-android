@@ -8,8 +8,10 @@
   nothing. Its first service is the guest's input method (platform/HostInputMethod.kt), which
   shows nothing and types what the host's input method composes. Its other service is its
   notification listener (platform/AndroidNotifications.kt), which hands the guest's
-  notifications to the host. It is also the guest's widget host (platform/AndroidWidgets.kt),
-  which draws the widgets the user placed on the host's desktop.
+  notifications to the host. An accessibility service (platform/HostAccessibilityService.kt)
+  is enabled only while a host accessibility client watches a task. It is also the guest's
+  widget host (platform/AndroidWidgets.kt), which draws the widgets the user placed on the
+  host's desktop.
   Every permission here is also in privapp-permissions-dsa-agent.xml.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -168,6 +170,25 @@
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
+        </service>
+
+        <!--
+          Reads the nodes of the tasks a host accessibility client (a screen reader) watches,
+          so the host can show them in each task window's accessibility tree. The agent
+          enables it only while the host watches a task and disables it after; it shows
+          nothing. BIND_ACCESSIBILITY_SERVICE keeps every caller but the system out.
+        -->
+        <service
+            android:name=".platform.HostAccessibilityService"
+            android:exported="true"
+            android:label="@string/accessibility_service_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/host_accessibility_service" />
         </service>
     </application>
 </manifest>

@@ -218,174 +218,6 @@ pub struct ActOnNotification {
     #[prost(enumeration = "NotificationAction", tag = "2")]
     pub action: i32,
 }
-/// Asks for the widgets the apps in the caller's Android offer. The answer is WidgetProviders.
-/// Needs the caller's Android to be running.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListWidgetProviders {}
-/// One widget an app in the caller's Android offers.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct WidgetProvider {
-    /// The provider's component, as `package/class`. AddWidget names it.
-    #[prost(string, tag = "1")]
-    pub provider: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub package_name: ::prost::alloc::string::String,
-    #[prost(string, tag = "3")]
-    pub label: ::prost::alloc::string::String,
-    /// A PNG image of at most 160 pixels on a side; empty for none.
-    #[prost(bytes = "vec", tag = "4")]
-    pub preview_png: ::prost::alloc::vec::Vec<u8>,
-    /// Sizes in density-independent pixels (dp), which are the host's device-independent
-    /// pixels: a dp is one pixel at a scale of 100%. A maximum of 0 means no limit.
-    #[prost(uint32, tag = "5")]
-    pub min_width_dp: u32,
-    #[prost(uint32, tag = "6")]
-    pub min_height_dp: u32,
-    #[prost(uint32, tag = "7")]
-    pub default_width_dp: u32,
-    #[prost(uint32, tag = "8")]
-    pub default_height_dp: u32,
-    #[prost(uint32, tag = "9")]
-    pub max_width_dp: u32,
-    #[prost(uint32, tag = "10")]
-    pub max_height_dp: u32,
-    /// 1 horizontally, 2 vertically, 3 both, 0 not at all.
-    #[prost(uint32, tag = "11")]
-    pub resize_mode: u32,
-    /// Whether the app asks the user to set the widget up when it is placed.
-    #[prost(bool, tag = "12")]
-    pub needs_configuration: bool,
-}
-/// The answer to ListWidgetProviders, in label order.
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct WidgetProviders {
-    #[prost(message, repeated, tag = "1")]
-    pub providers: ::prost::alloc::vec::Vec<WidgetProvider>,
-}
-/// Places a new widget of `provider` on the caller's desktop. When the app asks the user to set
-/// it up, its setup shows as a window first, and the answer waits for the user. The answer is
-/// the new Widget, or ERROR_CODE_WIDGET_REFUSED with the reason.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct AddWidget {
-    #[prost(string, tag = "1")]
-    pub provider: ::prost::alloc::string::String,
-}
-/// Removes a widget: Android forgets it, its window closes, and its place is forgotten.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct RemoveWidget {
-    #[prost(int32, tag = "1")]
-    pub widget_id: i32,
-}
-/// Where a widget's window is on the caller's desktop. The position is in the host's
-/// physical screen pixels; the size is in dp, so it stays the same on a monitor of another
-/// scale.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct WidgetPlacement {
-    #[prost(int32, tag = "1")]
-    pub x: i32,
-    #[prost(int32, tag = "2")]
-    pub y: i32,
-    #[prost(uint32, tag = "3")]
-    pub width_dp: u32,
-    #[prost(uint32, tag = "4")]
-    pub height_dp: u32,
-}
-/// One widget placed on the caller's desktop.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct Widget {
-    #[prost(int32, tag = "1")]
-    pub widget_id: i32,
-    #[prost(message, optional, tag = "2")]
-    pub provider: ::core::option::Option<WidgetProvider>,
-    /// Where its window goes: where the user left it, else a place the service picked.
-    #[prost(message, optional, tag = "3")]
-    pub placement: ::core::option::Option<WidgetPlacement>,
-}
-/// Asks for the widgets placed on the caller's desktop. The answer is Widgets.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ListWidgets {}
-/// The answer to ListWidgets: the widgets Android has placed, in ID order.
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct Widgets {
-    #[prost(message, repeated, tag = "1")]
-    pub widgets: ::prost::alloc::vec::Vec<Widget>,
-    /// How many widgets the service remembers a place for. Above 0 while Android is stopped,
-    /// its widgets come back once it runs.
-    #[prost(uint32, tag = "2")]
-    pub remembered: u32,
-}
-/// Watches the caller's widgets. The answer is Widgets, and the connection then carries a
-/// WidgetEvent for each change. The client sends nothing more on it.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct WatchWidgets {}
-/// What a widget shows now: a PNG image of `width` by `height` pixels with an alpha channel.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct WidgetFrame {
-    #[prost(int32, tag = "1")]
-    pub widget_id: i32,
-    #[prost(uint32, tag = "2")]
-    pub width: u32,
-    #[prost(uint32, tag = "3")]
-    pub height: u32,
-    #[prost(bytes = "vec", tag = "4")]
-    pub png: ::prost::alloc::vec::Vec<u8>,
-}
-/// A widget was removed.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct WidgetRemoved {
-    #[prost(int32, tag = "1")]
-    pub widget_id: i32,
-}
-/// A change to the caller's widgets, on a connection that watches them.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct WidgetEvent {
-    #[prost(oneof = "widget_event::Body", tags = "1, 2, 3")]
-    pub body: ::core::option::Option<widget_event::Body>,
-}
-/// Nested message and enum types in `WidgetEvent`.
-pub mod widget_event {
-    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
-    pub enum Body {
-        /// A widget was placed, or Android described it again, as when it starts.
-        #[prost(message, tag = "1")]
-        Placed(super::Widget),
-        #[prost(message, tag = "2")]
-        Frame(super::WidgetFrame),
-        #[prost(message, tag = "3")]
-        Removed(super::WidgetRemoved),
-    }
-}
-/// The user moved or resized a widget's window. The service remembers the placement and
-/// tells Android the window's size, which the widget then draws at.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct PlaceWidget {
-    #[prost(int32, tag = "1")]
-    pub widget_id: i32,
-    #[prost(message, optional, tag = "2")]
-    pub placement: ::core::option::Option<WidgetPlacement>,
-    /// The window's size in its monitor's pixels, and the monitor's density (160 at a scale of
-    /// 100%).
-    #[prost(uint32, tag = "3")]
-    pub width: u32,
-    #[prost(uint32, tag = "4")]
-    pub height: u32,
-    #[prost(uint32, tag = "5")]
-    pub density_dpi: u32,
-}
-/// Pointer input in a widget's window, in the pixels the widget is drawn at.
-#[derive(Clone, Copy, PartialEq, ::prost::Message)]
-pub struct WidgetPointer {
-    #[prost(int32, tag = "1")]
-    pub widget_id: i32,
-    #[prost(enumeration = "PointerAction", tag = "2")]
-    pub action: i32,
-    #[prost(uint32, tag = "3")]
-    pub pointer_id: u32,
-    #[prost(float, tag = "4")]
-    pub x: f32,
-    #[prost(float, tag = "5")]
-    pub y: f32,
-}
 /// Installs an APK in the caller's Android. The service answers at once: Done when it takes an
 /// APK of this name and size, or an error. After Done the client sends the APK's `size` bytes
 /// in ApkChunk frames, which are not answered, and the service answers the same request id once
@@ -810,6 +642,129 @@ pub struct Settings {
     #[prost(bool, tag = "9")]
     pub clipboard: bool,
 }
+/// Turns the connection into the accessibility tree of one of the caller's task windows, for a
+/// host accessibility client (a screen reader, an inspection tool) that reads that window.
+/// After the answer (Done), the service sends an AccessibilityTree each time the task's tree
+/// arrives from Android or changes in it (a full tree first), and an AccessibilityActionResult
+/// for each AccessibilityAction the client sends. Android reads the task's accessibility nodes
+/// only while at least one such connection for the task is open: closing the last one stops
+/// it. The connection lasts across restarts of the Android, which sends a full tree again.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WatchAccessibility {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+}
+/// The range a slider or a progress bar has, and where it stands in it.
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct NodeRange {
+    #[prost(float, tag = "1")]
+    pub min: f32,
+    #[prost(float, tag = "2")]
+    pub max: f32,
+    #[prost(float, tag = "3")]
+    pub current: f32,
+}
+/// One accessibility node of a task, as Android describes it.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AccessibilityNode {
+    /// Unique among the nodes of one tree epoch, never 0.
+    #[prost(uint32, tag = "1")]
+    pub id: u32,
+    #[prost(uint32, repeated, tag = "2")]
+    pub child_ids: ::prost::alloc::vec::Vec<u32>,
+    /// The Android class the node says it is, from which its role is worked out.
+    #[prost(string, tag = "3")]
+    pub class_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub text: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub content_description: ::prost::alloc::string::String,
+    #[prost(string, tag = "6")]
+    pub hint: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub view_id: ::prost::alloc::string::String,
+    /// In pixels of the task's window: (0, 0) is the window's top left.
+    #[prost(message, optional, tag = "8")]
+    pub bounds: ::core::option::Option<Rect>,
+    #[prost(bool, tag = "9")]
+    pub checkable: bool,
+    #[prost(bool, tag = "10")]
+    pub checked: bool,
+    #[prost(bool, tag = "11")]
+    pub selected: bool,
+    #[prost(bool, tag = "12")]
+    pub enabled: bool,
+    #[prost(bool, tag = "13")]
+    pub focusable: bool,
+    #[prost(bool, tag = "14")]
+    pub focused: bool,
+    #[prost(bool, tag = "15")]
+    pub scrollable: bool,
+    #[prost(bool, tag = "16")]
+    pub clickable: bool,
+    #[prost(bool, tag = "17")]
+    pub long_clickable: bool,
+    #[prost(bool, tag = "18")]
+    pub editable: bool,
+    #[prost(bool, tag = "19")]
+    pub password: bool,
+    #[prost(bool, tag = "20")]
+    pub heading: bool,
+    #[prost(message, optional, tag = "21")]
+    pub range: ::core::option::Option<NodeRange>,
+    #[prost(enumeration = "NodeAction", repeated, tag = "22")]
+    pub actions: ::prost::alloc::vec::Vec<i32>,
+    #[prost(string, tag = "23")]
+    pub state_description: ::prost::alloc::string::String,
+}
+/// A task's accessibility tree, or what changed in it, on a connection that watches it
+/// (WatchAccessibility). A full tree replaces what came before and starts a new epoch; a change
+/// names the epoch it applies to, carries each new or changed node whole, and the IDs of the
+/// nodes that are gone.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AccessibilityTree {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub epoch: u32,
+    #[prost(bool, tag = "3")]
+    pub full: bool,
+    #[prost(uint32, repeated, tag = "4")]
+    pub root_ids: ::prost::alloc::vec::Vec<u32>,
+    #[prost(message, repeated, tag = "5")]
+    pub nodes: ::prost::alloc::vec::Vec<AccessibilityNode>,
+    #[prost(uint32, repeated, tag = "6")]
+    pub removed_ids: ::prost::alloc::vec::Vec<u32>,
+    /// The node with the input focus, or 0 for none.
+    #[prost(uint32, tag = "7")]
+    pub focused_id: u32,
+}
+/// Client to service, on a connection that watches a task's tree: do something to one of its
+/// nodes. Not answered as a request: an AccessibilityActionResult with the same request_id
+/// follows.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AccessibilityAction {
+    #[prost(uint32, tag = "1")]
+    pub epoch: u32,
+    #[prost(uint32, tag = "2")]
+    pub node_id: u32,
+    #[prost(enumeration = "NodeAction", tag = "3")]
+    pub action: i32,
+    #[prost(string, tag = "4")]
+    pub text: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "5")]
+    pub request_id: u32,
+}
+/// What came of an AccessibilityAction.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AccessibilityActionResult {
+    #[prost(uint32, tag = "1")]
+    pub request_id: u32,
+    #[prost(bool, tag = "2")]
+    pub done: bool,
+    #[prost(string, tag = "3")]
+    pub error: ::prost::alloc::string::String,
+}
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Error {
     #[prost(enumeration = "ErrorCode", tag = "1")]
@@ -819,19 +774,19 @@ pub struct Error {
 }
 /// A request from the client. The service answers each with one Response carrying the same
 /// id, in the order the requests arrived.
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Request {
     #[prost(uint64, tag = "1")]
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 28, 29, 30, 31, 32, 33, 34"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 28"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
 /// Nested message and enum types in `Request`.
 pub mod request {
-    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
     pub enum Body {
         #[prost(message, tag = "2")]
         GetStatus(super::GetStatus),
@@ -882,29 +837,14 @@ pub mod request {
         #[prost(message, tag = "27")]
         InstallApk(super::InstallApk),
         #[prost(message, tag = "28")]
-        ListWidgetProviders(super::ListWidgetProviders),
-        #[prost(message, tag = "29")]
-        AddWidget(super::AddWidget),
-        #[prost(message, tag = "30")]
-        RemoveWidget(super::RemoveWidget),
-        #[prost(message, tag = "31")]
-        ListWidgets(super::ListWidgets),
-        #[prost(message, tag = "32")]
-        WatchWidgets(super::WatchWidgets),
-        #[prost(message, tag = "33")]
-        PlaceWidget(super::PlaceWidget),
-        #[prost(message, tag = "34")]
-        WidgetPointer(super::WidgetPointer),
+        WatchAccessibility(super::WatchAccessibility),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Response {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(
-        oneof = "response::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14"
-    )]
+    #[prost(oneof = "response::Body", tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11")]
     pub body: ::core::option::Option<response::Body>,
 }
 /// Nested message and enum types in `Response`.
@@ -931,12 +871,6 @@ pub mod response {
         Settings(super::Settings),
         #[prost(message, tag = "11")]
         InstallResult(super::InstallResult),
-        #[prost(message, tag = "12")]
-        WidgetProviders(super::WidgetProviders),
-        #[prost(message, tag = "13")]
-        Widget(super::Widget),
-        #[prost(message, tag = "14")]
-        Widgets(super::Widgets),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.
@@ -944,7 +878,7 @@ pub mod response {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11, 15, 16, 14, 17"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11, 15, 16, 14, 17, 18, 19"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -985,7 +919,11 @@ pub mod envelope {
         #[prost(message, tag = "14")]
         ApkChunk(super::ApkChunk),
         #[prost(message, tag = "17")]
-        WidgetEvent(super::WidgetEvent),
+        AccessibilityTree(super::AccessibilityTree),
+        #[prost(message, tag = "18")]
+        AccessibilityAction(super::AccessibilityAction),
+        #[prost(message, tag = "19")]
+        AccessibilityActionResult(super::AccessibilityActionResult),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -1370,6 +1308,54 @@ impl KeyAction {
         }
     }
 }
+/// What can be done to an accessibility node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum NodeAction {
+    Unspecified = 0,
+    Click = 1,
+    LongClick = 2,
+    SetText = 3,
+    ScrollForward = 4,
+    ScrollBackward = 5,
+    Focus = 6,
+    AccessibilityFocus = 7,
+    Select = 8,
+}
+impl NodeAction {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "NODE_ACTION_UNSPECIFIED",
+            Self::Click => "NODE_ACTION_CLICK",
+            Self::LongClick => "NODE_ACTION_LONG_CLICK",
+            Self::SetText => "NODE_ACTION_SET_TEXT",
+            Self::ScrollForward => "NODE_ACTION_SCROLL_FORWARD",
+            Self::ScrollBackward => "NODE_ACTION_SCROLL_BACKWARD",
+            Self::Focus => "NODE_ACTION_FOCUS",
+            Self::AccessibilityFocus => "NODE_ACTION_ACCESSIBILITY_FOCUS",
+            Self::Select => "NODE_ACTION_SELECT",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "NODE_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
+            "NODE_ACTION_CLICK" => Some(Self::Click),
+            "NODE_ACTION_LONG_CLICK" => Some(Self::LongClick),
+            "NODE_ACTION_SET_TEXT" => Some(Self::SetText),
+            "NODE_ACTION_SCROLL_FORWARD" => Some(Self::ScrollForward),
+            "NODE_ACTION_SCROLL_BACKWARD" => Some(Self::ScrollBackward),
+            "NODE_ACTION_FOCUS" => Some(Self::Focus),
+            "NODE_ACTION_ACCESSIBILITY_FOCUS" => Some(Self::AccessibilityFocus),
+            "NODE_ACTION_SELECT" => Some(Self::Select),
+            _ => None,
+        }
+    }
+}
 /// What went wrong with a request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
@@ -1395,9 +1381,6 @@ pub enum ErrorCode {
     /// An APK was not taken: it is too large, its name is not an APK's, or it did not arrive
     /// whole. The detail says which. An APK Android refused is answered with InstallResult.
     InstallRefused = 8,
-    /// A widget was not placed: its app offers no such widget, Android did not allow it, or the
-    /// user canceled its setup. The detail says which.
-    WidgetRefused = 9,
 }
 impl ErrorCode {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1415,7 +1398,6 @@ impl ErrorCode {
             Self::NotAllowed => "ERROR_CODE_NOT_ALLOWED",
             Self::FileRefused => "ERROR_CODE_FILE_REFUSED",
             Self::InstallRefused => "ERROR_CODE_INSTALL_REFUSED",
-            Self::WidgetRefused => "ERROR_CODE_WIDGET_REFUSED",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1430,7 +1412,6 @@ impl ErrorCode {
             "ERROR_CODE_NOT_ALLOWED" => Some(Self::NotAllowed),
             "ERROR_CODE_FILE_REFUSED" => Some(Self::FileRefused),
             "ERROR_CODE_INSTALL_REFUSED" => Some(Self::InstallRefused),
-            "ERROR_CODE_WIDGET_REFUSED" => Some(Self::WidgetRefused),
             _ => None,
         }
     }

@@ -9,19 +9,16 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use dsa_protocol::control::{
-    envelope::Body, AgentConnected, ApkChunk, AppInfo, AuthChallenge, AuthProof, CancelInstall,
-    ClipboardSharing, ClipboardText, ClockAnswer, ClockProbe, CloseTask, DeviceIdle, Envelope,
-    FileAction, FileChunk, FileProgress, GuestBoot, GuestMemory, GuestNotification, Hello,
-    HelloAccepted, HelloRejected, ImeCommit, ImeComposition, ImeCursor, InstallApk,
-    InstallProgress, InstallResult, InstallStatus, KeyAction, KeyEvent, LaunchApp, LinkHandling,
-    NotificationClicked, NotificationDismissed, NotificationRemoved, OpenFile, OpenLink,
-    PointerAction, PointerEvent, PointerTool, PowerState, ProcessMemory, Rect, RejectReason,
-    RequestGuestMemory, ResizeTask, Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved,
-    TaskUpdated,
-};
-use dsa_protocol::control::{
-    AddWidget, ListWidgetProviders, RemoveWidget, ResizeWidget, WidgetAdded, WidgetFrame,
-    WidgetList, WidgetPointer, WidgetProvider, WidgetProviders, WidgetUpdated,
+    envelope::Body, AccessibilityAction, AccessibilityActionResult, AccessibilityNode,
+    AccessibilityTree, AccessibilityWatch, AgentConnected, ApkChunk, AppInfo, AuthChallenge,
+    AuthProof, CancelInstall, ClipboardSharing, ClipboardText, ClockAnswer, ClockProbe, CloseTask,
+    DeviceIdle, Envelope, FileAction, FileChunk, FileProgress, GuestBoot, GuestMemory,
+    GuestNotification, Hello, HelloAccepted, HelloRejected, ImeCommit, ImeComposition, ImeCursor,
+    InstallApk, InstallProgress, InstallResult, InstallStatus, KeyAction, KeyEvent, LaunchApp,
+    LinkHandling, NodeAction, NodeRange, NotificationClicked, NotificationDismissed,
+    NotificationRemoved, OpenFile, OpenLink, PointerAction, PointerEvent, PointerTool, PowerState,
+    ProcessMemory, Rect, RejectReason, RequestGuestMemory, ResizeTask, Role, ScreenState,
+    SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
 
@@ -600,6 +597,155 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                 pointer_id: 0,
                 x: 10.5,
                 y: 20.25,
+            })),
+        ),
+        (
+            "accessibility_watch_on",
+            wrap(Body::AccessibilityWatch(AccessibilityWatch {
+                task_id: 42,
+                on: true,
+            })),
+        ),
+        (
+            "accessibility_watch_off",
+            wrap(Body::AccessibilityWatch(AccessibilityWatch {
+                task_id: 42,
+                on: false,
+            })),
+        ),
+        (
+            "accessibility_tree_full",
+            wrap(Body::AccessibilityTree(AccessibilityTree {
+                task_id: 42,
+                epoch: 1,
+                full: true,
+                root_ids: vec![1],
+                nodes: vec![
+                    AccessibilityNode {
+                        id: 1,
+                        child_ids: vec![2, 3],
+                        class_name: "android.widget.FrameLayout".into(),
+                        bounds: Some(Rect {
+                            left: 0,
+                            top: 0,
+                            right: 400,
+                            bottom: 600,
+                        }),
+                        enabled: true,
+                        ..AccessibilityNode::default()
+                    },
+                    AccessibilityNode {
+                        id: 2,
+                        class_name: "android.widget.TextView".into(),
+                        text: "Network & internet".into(),
+                        bounds: Some(Rect {
+                            left: 0,
+                            top: 0,
+                            right: 400,
+                            bottom: 80,
+                        }),
+                        enabled: true,
+                        clickable: true,
+                        actions: vec![
+                            NodeAction::Click as i32,
+                            NodeAction::AccessibilityFocus as i32,
+                        ],
+                        ..AccessibilityNode::default()
+                    },
+                    AccessibilityNode {
+                        id: 3,
+                        class_name: "android.widget.SeekBar".into(),
+                        content_description: "Volume".into(),
+                        bounds: Some(Rect {
+                            left: 16,
+                            top: 100,
+                            right: 384,
+                            bottom: 140,
+                        }),
+                        enabled: true,
+                        focusable: true,
+                        range: Some(NodeRange {
+                            min: 0.0,
+                            max: 100.0,
+                            current: 50.0,
+                        }),
+                        actions: vec![
+                            NodeAction::ScrollForward as i32,
+                            NodeAction::ScrollBackward as i32,
+                        ],
+                        state_description: "50 percent".into(),
+                        ..AccessibilityNode::default()
+                    },
+                ],
+                removed_ids: vec![],
+                focused_id: 3,
+            })),
+        ),
+        (
+            "accessibility_tree_delta",
+            wrap(Body::AccessibilityTree(AccessibilityTree {
+                task_id: 42,
+                epoch: 1,
+                full: false,
+                root_ids: vec![1],
+                nodes: vec![AccessibilityNode {
+                    id: 2,
+                    child_ids: vec![],
+                    class_name: "android.widget.EditText".into(),
+                    text: "Wi-Fi".into(),
+                    content_description: String::new(),
+                    hint: "Name".into(),
+                    view_id: "com.android.settings:id/title".into(),
+                    bounds: Some(Rect {
+                        left: 0,
+                        top: 0,
+                        right: 400,
+                        bottom: 80,
+                    }),
+                    checkable: true,
+                    checked: true,
+                    selected: true,
+                    enabled: true,
+                    focusable: true,
+                    focused: true,
+                    scrollable: true,
+                    clickable: true,
+                    long_clickable: true,
+                    editable: true,
+                    password: true,
+                    heading: true,
+                    range: None,
+                    actions: vec![
+                        NodeAction::Click as i32,
+                        NodeAction::LongClick as i32,
+                        NodeAction::SetText as i32,
+                        NodeAction::Focus as i32,
+                        NodeAction::Select as i32,
+                    ],
+                    state_description: String::new(),
+                }],
+                removed_ids: vec![3],
+                focused_id: 0,
+            })),
+        ),
+        (
+            "accessibility_action",
+            wrap(Body::AccessibilityAction(AccessibilityAction {
+                task_id: 42,
+                epoch: 1,
+                node_id: 2,
+                action: NodeAction::SetText as i32,
+                text: "hello".into(),
+                request_id: 7,
+            })),
+        ),
+        (
+            "accessibility_action_result",
+            wrap(Body::AccessibilityActionResult(AccessibilityActionResult {
+                task_id: 42,
+                request_id: 7,
+                done: false,
+                error: "the node is gone".into(),
             })),
         ),
     ])

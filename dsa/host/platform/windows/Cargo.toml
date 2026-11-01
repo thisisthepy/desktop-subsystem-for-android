@@ -55,6 +55,8 @@ windows-sys = { version = "0.61", features = [
 # Direct3D 11, DXGI and DirectComposition, which present each task's frames in its window.
 # They are COM interfaces, which windows-sys does not describe.
 windows-numerics = "0.3"
+# The COM objects of each task window's UI Automation tree: #[implement] names this crate.
+windows-core = "0.62"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Direct3D",
@@ -67,6 +69,9 @@ windows = { version = "0.62", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
+    # Each task window's UI Automation tree: its providers, VARIANTs and SAFEARRAYs.
+    "Win32_System_Ole",
+    "Win32_UI_Accessibility",
     "Win32_System_Variant",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",

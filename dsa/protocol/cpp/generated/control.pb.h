@@ -45,9 +45,21 @@ struct TableStruct_control_2eproto {
 namespace dsa {
 namespace control {
 namespace v1 {
-class AddWidget;
-struct AddWidgetDefaultTypeInternal;
-extern AddWidgetDefaultTypeInternal _AddWidget_default_instance_;
+class AccessibilityAction;
+struct AccessibilityActionDefaultTypeInternal;
+extern AccessibilityActionDefaultTypeInternal _AccessibilityAction_default_instance_;
+class AccessibilityActionResult;
+struct AccessibilityActionResultDefaultTypeInternal;
+extern AccessibilityActionResultDefaultTypeInternal _AccessibilityActionResult_default_instance_;
+class AccessibilityNode;
+struct AccessibilityNodeDefaultTypeInternal;
+extern AccessibilityNodeDefaultTypeInternal _AccessibilityNode_default_instance_;
+class AccessibilityTree;
+struct AccessibilityTreeDefaultTypeInternal;
+extern AccessibilityTreeDefaultTypeInternal _AccessibilityTree_default_instance_;
+class AccessibilityWatch;
+struct AccessibilityWatchDefaultTypeInternal;
+extern AccessibilityWatchDefaultTypeInternal _AccessibilityWatch_default_instance_;
 class AgentConnected;
 struct AgentConnectedDefaultTypeInternal;
 extern AgentConnectedDefaultTypeInternal _AgentConnected_default_instance_;
@@ -144,9 +156,9 @@ extern LaunchAppDefaultTypeInternal _LaunchApp_default_instance_;
 class LinkHandling;
 struct LinkHandlingDefaultTypeInternal;
 extern LinkHandlingDefaultTypeInternal _LinkHandling_default_instance_;
-class ListWidgetProviders;
-struct ListWidgetProvidersDefaultTypeInternal;
-extern ListWidgetProvidersDefaultTypeInternal _ListWidgetProviders_default_instance_;
+class NodeRange;
+struct NodeRangeDefaultTypeInternal;
+extern NodeRangeDefaultTypeInternal _NodeRange_default_instance_;
 class NotificationClicked;
 struct NotificationClickedDefaultTypeInternal;
 extern NotificationClickedDefaultTypeInternal _NotificationClicked_default_instance_;
@@ -174,18 +186,12 @@ extern ProcessMemoryDefaultTypeInternal _ProcessMemory_default_instance_;
 class Rect;
 struct RectDefaultTypeInternal;
 extern RectDefaultTypeInternal _Rect_default_instance_;
-class RemoveWidget;
-struct RemoveWidgetDefaultTypeInternal;
-extern RemoveWidgetDefaultTypeInternal _RemoveWidget_default_instance_;
 class RequestGuestMemory;
 struct RequestGuestMemoryDefaultTypeInternal;
 extern RequestGuestMemoryDefaultTypeInternal _RequestGuestMemory_default_instance_;
 class ResizeTask;
 struct ResizeTaskDefaultTypeInternal;
 extern ResizeTaskDefaultTypeInternal _ResizeTask_default_instance_;
-class ResizeWidget;
-struct ResizeWidgetDefaultTypeInternal;
-extern ResizeWidgetDefaultTypeInternal _ResizeWidget_default_instance_;
 class ScreenState;
 struct ScreenStateDefaultTypeInternal;
 extern ScreenStateDefaultTypeInternal _ScreenState_default_instance_;
@@ -201,32 +207,15 @@ extern TaskRemovedDefaultTypeInternal _TaskRemoved_default_instance_;
 class TaskUpdated;
 struct TaskUpdatedDefaultTypeInternal;
 extern TaskUpdatedDefaultTypeInternal _TaskUpdated_default_instance_;
-class WidgetAdded;
-struct WidgetAddedDefaultTypeInternal;
-extern WidgetAddedDefaultTypeInternal _WidgetAdded_default_instance_;
-class WidgetFrame;
-struct WidgetFrameDefaultTypeInternal;
-extern WidgetFrameDefaultTypeInternal _WidgetFrame_default_instance_;
-class WidgetList;
-struct WidgetListDefaultTypeInternal;
-extern WidgetListDefaultTypeInternal _WidgetList_default_instance_;
-class WidgetPointer;
-struct WidgetPointerDefaultTypeInternal;
-extern WidgetPointerDefaultTypeInternal _WidgetPointer_default_instance_;
-class WidgetProvider;
-struct WidgetProviderDefaultTypeInternal;
-extern WidgetProviderDefaultTypeInternal _WidgetProvider_default_instance_;
-class WidgetProviders;
-struct WidgetProvidersDefaultTypeInternal;
-extern WidgetProvidersDefaultTypeInternal _WidgetProviders_default_instance_;
-class WidgetUpdated;
-struct WidgetUpdatedDefaultTypeInternal;
-extern WidgetUpdatedDefaultTypeInternal _WidgetUpdated_default_instance_;
 }  // namespace v1
 }  // namespace control
 }  // namespace dsa
 PROTOBUF_NAMESPACE_OPEN
-template<> ::dsa::control::v1::AddWidget* Arena::CreateMaybeMessage<::dsa::control::v1::AddWidget>(Arena*);
+template<> ::dsa::control::v1::AccessibilityAction* Arena::CreateMaybeMessage<::dsa::control::v1::AccessibilityAction>(Arena*);
+template<> ::dsa::control::v1::AccessibilityActionResult* Arena::CreateMaybeMessage<::dsa::control::v1::AccessibilityActionResult>(Arena*);
+template<> ::dsa::control::v1::AccessibilityNode* Arena::CreateMaybeMessage<::dsa::control::v1::AccessibilityNode>(Arena*);
+template<> ::dsa::control::v1::AccessibilityTree* Arena::CreateMaybeMessage<::dsa::control::v1::AccessibilityTree>(Arena*);
+template<> ::dsa::control::v1::AccessibilityWatch* Arena::CreateMaybeMessage<::dsa::control::v1::AccessibilityWatch>(Arena*);
 template<> ::dsa::control::v1::AgentConnected* Arena::CreateMaybeMessage<::dsa::control::v1::AgentConnected>(Arena*);
 template<> ::dsa::control::v1::ApkChunk* Arena::CreateMaybeMessage<::dsa::control::v1::ApkChunk>(Arena*);
 template<> ::dsa::control::v1::AppInfo* Arena::CreateMaybeMessage<::dsa::control::v1::AppInfo>(Arena*);
@@ -259,7 +248,7 @@ template<> ::dsa::control::v1::InstalledApps* Arena::CreateMaybeMessage<::dsa::c
 template<> ::dsa::control::v1::KeyEvent* Arena::CreateMaybeMessage<::dsa::control::v1::KeyEvent>(Arena*);
 template<> ::dsa::control::v1::LaunchApp* Arena::CreateMaybeMessage<::dsa::control::v1::LaunchApp>(Arena*);
 template<> ::dsa::control::v1::LinkHandling* Arena::CreateMaybeMessage<::dsa::control::v1::LinkHandling>(Arena*);
-template<> ::dsa::control::v1::ListWidgetProviders* Arena::CreateMaybeMessage<::dsa::control::v1::ListWidgetProviders>(Arena*);
+template<> ::dsa::control::v1::NodeRange* Arena::CreateMaybeMessage<::dsa::control::v1::NodeRange>(Arena*);
 template<> ::dsa::control::v1::NotificationClicked* Arena::CreateMaybeMessage<::dsa::control::v1::NotificationClicked>(Arena*);
 template<> ::dsa::control::v1::NotificationDismissed* Arena::CreateMaybeMessage<::dsa::control::v1::NotificationDismissed>(Arena*);
 template<> ::dsa::control::v1::NotificationRemoved* Arena::CreateMaybeMessage<::dsa::control::v1::NotificationRemoved>(Arena*);
@@ -269,22 +258,13 @@ template<> ::dsa::control::v1::PointerEvent* Arena::CreateMaybeMessage<::dsa::co
 template<> ::dsa::control::v1::PowerState* Arena::CreateMaybeMessage<::dsa::control::v1::PowerState>(Arena*);
 template<> ::dsa::control::v1::ProcessMemory* Arena::CreateMaybeMessage<::dsa::control::v1::ProcessMemory>(Arena*);
 template<> ::dsa::control::v1::Rect* Arena::CreateMaybeMessage<::dsa::control::v1::Rect>(Arena*);
-template<> ::dsa::control::v1::RemoveWidget* Arena::CreateMaybeMessage<::dsa::control::v1::RemoveWidget>(Arena*);
 template<> ::dsa::control::v1::RequestGuestMemory* Arena::CreateMaybeMessage<::dsa::control::v1::RequestGuestMemory>(Arena*);
 template<> ::dsa::control::v1::ResizeTask* Arena::CreateMaybeMessage<::dsa::control::v1::ResizeTask>(Arena*);
-template<> ::dsa::control::v1::ResizeWidget* Arena::CreateMaybeMessage<::dsa::control::v1::ResizeWidget>(Arena*);
 template<> ::dsa::control::v1::ScreenState* Arena::CreateMaybeMessage<::dsa::control::v1::ScreenState>(Arena*);
 template<> ::dsa::control::v1::SetTaskDensity* Arena::CreateMaybeMessage<::dsa::control::v1::SetTaskDensity>(Arena*);
 template<> ::dsa::control::v1::TaskFrames* Arena::CreateMaybeMessage<::dsa::control::v1::TaskFrames>(Arena*);
 template<> ::dsa::control::v1::TaskRemoved* Arena::CreateMaybeMessage<::dsa::control::v1::TaskRemoved>(Arena*);
 template<> ::dsa::control::v1::TaskUpdated* Arena::CreateMaybeMessage<::dsa::control::v1::TaskUpdated>(Arena*);
-template<> ::dsa::control::v1::WidgetAdded* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetAdded>(Arena*);
-template<> ::dsa::control::v1::WidgetFrame* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetFrame>(Arena*);
-template<> ::dsa::control::v1::WidgetList* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetList>(Arena*);
-template<> ::dsa::control::v1::WidgetPointer* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetPointer>(Arena*);
-template<> ::dsa::control::v1::WidgetProvider* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetProvider>(Arena*);
-template<> ::dsa::control::v1::WidgetProviders* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetProviders>(Arena*);
-template<> ::dsa::control::v1::WidgetUpdated* Arena::CreateMaybeMessage<::dsa::control::v1::WidgetUpdated>(Arena*);
 PROTOBUF_NAMESPACE_CLOSE
 namespace dsa {
 namespace control {
@@ -481,6 +461,34 @@ inline const std::string& FileAction_Name(T enum_t_value) {
 }
 bool FileAction_Parse(
     ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, FileAction* value);
+enum NodeAction : int {
+  NODE_ACTION_UNSPECIFIED = 0,
+  NODE_ACTION_CLICK = 1,
+  NODE_ACTION_LONG_CLICK = 2,
+  NODE_ACTION_SET_TEXT = 3,
+  NODE_ACTION_SCROLL_FORWARD = 4,
+  NODE_ACTION_SCROLL_BACKWARD = 5,
+  NODE_ACTION_FOCUS = 6,
+  NODE_ACTION_ACCESSIBILITY_FOCUS = 7,
+  NODE_ACTION_SELECT = 8,
+  NodeAction_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
+  NodeAction_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
+};
+bool NodeAction_IsValid(int value);
+constexpr NodeAction NodeAction_MIN = NODE_ACTION_UNSPECIFIED;
+constexpr NodeAction NodeAction_MAX = NODE_ACTION_SELECT;
+constexpr int NodeAction_ARRAYSIZE = NodeAction_MAX + 1;
+
+const std::string& NodeAction_Name(NodeAction value);
+template<typename T>
+inline const std::string& NodeAction_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, NodeAction>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function NodeAction_Name.");
+  return NodeAction_Name(static_cast<NodeAction>(enum_t_value));
+}
+bool NodeAction_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, NodeAction* value);
 // ===================================================================
 
 class Hello final :
@@ -7803,24 +7811,24 @@ class ClockAnswer final :
 };
 // -------------------------------------------------------------------
 
-class ListWidgetProviders final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.ListWidgetProviders) */ {
+class AccessibilityWatch final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AccessibilityWatch) */ {
  public:
-  inline ListWidgetProviders() : ListWidgetProviders(nullptr) {}
-  ~ListWidgetProviders() override;
-  explicit PROTOBUF_CONSTEXPR ListWidgetProviders(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+  inline AccessibilityWatch() : AccessibilityWatch(nullptr) {}
+  ~AccessibilityWatch() override;
+  explicit PROTOBUF_CONSTEXPR AccessibilityWatch(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
 
-  ListWidgetProviders(const ListWidgetProviders& from);
-  ListWidgetProviders(ListWidgetProviders&& from) noexcept
-    : ListWidgetProviders() {
+  AccessibilityWatch(const AccessibilityWatch& from);
+  AccessibilityWatch(AccessibilityWatch&& from) noexcept
+    : AccessibilityWatch() {
     *this = ::std::move(from);
   }
 
-  inline ListWidgetProviders& operator=(const ListWidgetProviders& from) {
+  inline AccessibilityWatch& operator=(const AccessibilityWatch& from) {
     CopyFrom(from);
     return *this;
   }
-  inline ListWidgetProviders& operator=(ListWidgetProviders&& from) noexcept {
+  inline AccessibilityWatch& operator=(AccessibilityWatch&& from) noexcept {
     if (this == &from) return *this;
     if (GetOwningArena() == from.GetOwningArena()
   #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
@@ -7834,20 +7842,20 @@ class ListWidgetProviders final :
     return *this;
   }
 
-  static const ListWidgetProviders& default_instance() {
+  static const AccessibilityWatch& default_instance() {
     return *internal_default_instance();
   }
-  static inline const ListWidgetProviders* internal_default_instance() {
-    return reinterpret_cast<const ListWidgetProviders*>(
-               &_ListWidgetProviders_default_instance_);
+  static inline const AccessibilityWatch* internal_default_instance() {
+    return reinterpret_cast<const AccessibilityWatch*>(
+               &_AccessibilityWatch_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
     47;
 
-  friend void swap(ListWidgetProviders& a, ListWidgetProviders& b) {
+  friend void swap(AccessibilityWatch& a, AccessibilityWatch& b) {
     a.Swap(&b);
   }
-  inline void Swap(ListWidgetProviders* other) {
+  inline void Swap(AccessibilityWatch* other) {
     if (other == this) return;
   #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
     if (GetOwningArena() != nullptr &&
@@ -7860,7 +7868,7 @@ class ListWidgetProviders final :
       ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
     }
   }
-  void UnsafeArenaSwap(ListWidgetProviders* other) {
+  void UnsafeArenaSwap(AccessibilityWatch* other) {
     if (other == this) return;
     GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
     InternalSwap(other);
@@ -7868,12 +7876,12 @@ class ListWidgetProviders final :
 
   // implements Message ----------------------------------------------
 
-  ListWidgetProviders* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<ListWidgetProviders>(arena);
+  AccessibilityWatch* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<AccessibilityWatch>(arena);
   }
   void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const ListWidgetProviders& from);
-  void MergeFrom(const ListWidgetProviders& from);
+  void CopyFrom(const AccessibilityWatch& from);
+  void MergeFrom(const AccessibilityWatch& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -7887,15 +7895,15 @@ class ListWidgetProviders final :
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
   void SetCachedSize(int size) const;
-  void InternalSwap(ListWidgetProviders* other);
+  void InternalSwap(AccessibilityWatch* other);
 
   private:
   friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
   static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.ListWidgetProviders";
+    return "dsa.control.v1.AccessibilityWatch";
   }
   protected:
-  explicit ListWidgetProviders(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+  explicit AccessibilityWatch(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                        bool is_message_owned = false);
   public:
 
@@ -7906,18 +7914,28 @@ class ListWidgetProviders final :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kRequestIdFieldNumber = 1,
+    kTaskIdFieldNumber = 1,
+    kOnFieldNumber = 2,
   };
-  // uint32 request_id = 1;
-  void clear_request_id();
-  uint32_t request_id() const;
-  void set_request_id(uint32_t value);
+  // int32 task_id = 1;
+  void clear_task_id();
+  int32_t task_id() const;
+  void set_task_id(int32_t value);
   private:
-  uint32_t _internal_request_id() const;
-  void _internal_set_request_id(uint32_t value);
+  int32_t _internal_task_id() const;
+  void _internal_set_task_id(int32_t value);
   public:
 
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.ListWidgetProviders)
+  // bool on = 2;
+  void clear_on();
+  bool on() const;
+  void set_on(bool value);
+  private:
+  bool _internal_on() const;
+  void _internal_set_on(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.AccessibilityWatch)
  private:
   class _Internal;
 
@@ -7925,7 +7943,8 @@ class ListWidgetProviders final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
-    uint32_t request_id_;
+    int32_t task_id_;
+    bool on_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -7933,24 +7952,24 @@ class ListWidgetProviders final :
 };
 // -------------------------------------------------------------------
 
-class WidgetProvider final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.WidgetProvider) */ {
+class NodeRange final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.NodeRange) */ {
  public:
-  inline WidgetProvider() : WidgetProvider(nullptr) {}
-  ~WidgetProvider() override;
-  explicit PROTOBUF_CONSTEXPR WidgetProvider(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+  inline NodeRange() : NodeRange(nullptr) {}
+  ~NodeRange() override;
+  explicit PROTOBUF_CONSTEXPR NodeRange(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
 
-  WidgetProvider(const WidgetProvider& from);
-  WidgetProvider(WidgetProvider&& from) noexcept
-    : WidgetProvider() {
+  NodeRange(const NodeRange& from);
+  NodeRange(NodeRange&& from) noexcept
+    : NodeRange() {
     *this = ::std::move(from);
   }
 
-  inline WidgetProvider& operator=(const WidgetProvider& from) {
+  inline NodeRange& operator=(const NodeRange& from) {
     CopyFrom(from);
     return *this;
   }
-  inline WidgetProvider& operator=(WidgetProvider&& from) noexcept {
+  inline NodeRange& operator=(NodeRange&& from) noexcept {
     if (this == &from) return *this;
     if (GetOwningArena() == from.GetOwningArena()
   #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
@@ -7964,20 +7983,20 @@ class WidgetProvider final :
     return *this;
   }
 
-  static const WidgetProvider& default_instance() {
+  static const NodeRange& default_instance() {
     return *internal_default_instance();
   }
-  static inline const WidgetProvider* internal_default_instance() {
-    return reinterpret_cast<const WidgetProvider*>(
-               &_WidgetProvider_default_instance_);
+  static inline const NodeRange* internal_default_instance() {
+    return reinterpret_cast<const NodeRange*>(
+               &_NodeRange_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
     48;
 
-  friend void swap(WidgetProvider& a, WidgetProvider& b) {
+  friend void swap(NodeRange& a, NodeRange& b) {
     a.Swap(&b);
   }
-  inline void Swap(WidgetProvider* other) {
+  inline void Swap(NodeRange* other) {
     if (other == this) return;
   #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
     if (GetOwningArena() != nullptr &&
@@ -7990,7 +8009,7 @@ class WidgetProvider final :
       ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
     }
   }
-  void UnsafeArenaSwap(WidgetProvider* other) {
+  void UnsafeArenaSwap(NodeRange* other) {
     if (other == this) return;
     GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
     InternalSwap(other);
@@ -7998,12 +8017,12 @@ class WidgetProvider final :
 
   // implements Message ----------------------------------------------
 
-  WidgetProvider* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<WidgetProvider>(arena);
+  NodeRange* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<NodeRange>(arena);
   }
   void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const WidgetProvider& from);
-  void MergeFrom(const WidgetProvider& from);
+  void CopyFrom(const NodeRange& from);
+  void MergeFrom(const NodeRange& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -8017,15 +8036,15 @@ class WidgetProvider final :
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
   void SetCachedSize(int size) const;
-  void InternalSwap(WidgetProvider* other);
+  void InternalSwap(NodeRange* other);
 
   private:
   friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
   static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.WidgetProvider";
+    return "dsa.control.v1.NodeRange";
   }
   protected:
-  explicit WidgetProvider(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+  explicit NodeRange(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                        bool is_message_owned = false);
   public:
 
@@ -8036,148 +8055,38 @@ class WidgetProvider final :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kProviderFieldNumber = 1,
-    kPackageNameFieldNumber = 2,
-    kLabelFieldNumber = 3,
-    kPreviewPngFieldNumber = 4,
-    kMinWidthDpFieldNumber = 5,
-    kMinHeightDpFieldNumber = 6,
-    kDefaultWidthDpFieldNumber = 7,
-    kDefaultHeightDpFieldNumber = 8,
-    kMaxWidthDpFieldNumber = 9,
-    kMaxHeightDpFieldNumber = 10,
-    kResizeModeFieldNumber = 11,
-    kNeedsConfigurationFieldNumber = 12,
+    kMinFieldNumber = 1,
+    kMaxFieldNumber = 2,
+    kCurrentFieldNumber = 3,
   };
-  // string provider = 1;
-  void clear_provider();
-  const std::string& provider() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_provider(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_provider();
-  PROTOBUF_NODISCARD std::string* release_provider();
-  void set_allocated_provider(std::string* provider);
+  // float min = 1;
+  void clear_min();
+  float min() const;
+  void set_min(float value);
   private:
-  const std::string& _internal_provider() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_provider(const std::string& value);
-  std::string* _internal_mutable_provider();
+  float _internal_min() const;
+  void _internal_set_min(float value);
   public:
 
-  // string package_name = 2;
-  void clear_package_name();
-  const std::string& package_name() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_package_name(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_package_name();
-  PROTOBUF_NODISCARD std::string* release_package_name();
-  void set_allocated_package_name(std::string* package_name);
+  // float max = 2;
+  void clear_max();
+  float max() const;
+  void set_max(float value);
   private:
-  const std::string& _internal_package_name() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_package_name(const std::string& value);
-  std::string* _internal_mutable_package_name();
+  float _internal_max() const;
+  void _internal_set_max(float value);
   public:
 
-  // string label = 3;
-  void clear_label();
-  const std::string& label() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_label(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_label();
-  PROTOBUF_NODISCARD std::string* release_label();
-  void set_allocated_label(std::string* label);
+  // float current = 3;
+  void clear_current();
+  float current() const;
+  void set_current(float value);
   private:
-  const std::string& _internal_label() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_label(const std::string& value);
-  std::string* _internal_mutable_label();
+  float _internal_current() const;
+  void _internal_set_current(float value);
   public:
 
-  // bytes preview_png = 4;
-  void clear_preview_png();
-  const std::string& preview_png() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_preview_png(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_preview_png();
-  PROTOBUF_NODISCARD std::string* release_preview_png();
-  void set_allocated_preview_png(std::string* preview_png);
-  private:
-  const std::string& _internal_preview_png() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_preview_png(const std::string& value);
-  std::string* _internal_mutable_preview_png();
-  public:
-
-  // uint32 min_width_dp = 5;
-  void clear_min_width_dp();
-  uint32_t min_width_dp() const;
-  void set_min_width_dp(uint32_t value);
-  private:
-  uint32_t _internal_min_width_dp() const;
-  void _internal_set_min_width_dp(uint32_t value);
-  public:
-
-  // uint32 min_height_dp = 6;
-  void clear_min_height_dp();
-  uint32_t min_height_dp() const;
-  void set_min_height_dp(uint32_t value);
-  private:
-  uint32_t _internal_min_height_dp() const;
-  void _internal_set_min_height_dp(uint32_t value);
-  public:
-
-  // uint32 default_width_dp = 7;
-  void clear_default_width_dp();
-  uint32_t default_width_dp() const;
-  void set_default_width_dp(uint32_t value);
-  private:
-  uint32_t _internal_default_width_dp() const;
-  void _internal_set_default_width_dp(uint32_t value);
-  public:
-
-  // uint32 default_height_dp = 8;
-  void clear_default_height_dp();
-  uint32_t default_height_dp() const;
-  void set_default_height_dp(uint32_t value);
-  private:
-  uint32_t _internal_default_height_dp() const;
-  void _internal_set_default_height_dp(uint32_t value);
-  public:
-
-  // uint32 max_width_dp = 9;
-  void clear_max_width_dp();
-  uint32_t max_width_dp() const;
-  void set_max_width_dp(uint32_t value);
-  private:
-  uint32_t _internal_max_width_dp() const;
-  void _internal_set_max_width_dp(uint32_t value);
-  public:
-
-  // uint32 max_height_dp = 10;
-  void clear_max_height_dp();
-  uint32_t max_height_dp() const;
-  void set_max_height_dp(uint32_t value);
-  private:
-  uint32_t _internal_max_height_dp() const;
-  void _internal_set_max_height_dp(uint32_t value);
-  public:
-
-  // uint32 resize_mode = 11;
-  void clear_resize_mode();
-  uint32_t resize_mode() const;
-  void set_resize_mode(uint32_t value);
-  private:
-  uint32_t _internal_resize_mode() const;
-  void _internal_set_resize_mode(uint32_t value);
-  public:
-
-  // bool needs_configuration = 12;
-  void clear_needs_configuration();
-  bool needs_configuration() const;
-  void set_needs_configuration(bool value);
-  private:
-  bool _internal_needs_configuration() const;
-  void _internal_set_needs_configuration(bool value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.WidgetProvider)
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.NodeRange)
  private:
   class _Internal;
 
@@ -8185,18 +8094,9 @@ class WidgetProvider final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr provider_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr package_name_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr label_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr preview_png_;
-    uint32_t min_width_dp_;
-    uint32_t min_height_dp_;
-    uint32_t default_width_dp_;
-    uint32_t default_height_dp_;
-    uint32_t max_width_dp_;
-    uint32_t max_height_dp_;
-    uint32_t resize_mode_;
-    bool needs_configuration_;
+    float min_;
+    float max_;
+    float current_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -8204,24 +8104,24 @@ class WidgetProvider final :
 };
 // -------------------------------------------------------------------
 
-class WidgetProviders final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.WidgetProviders) */ {
+class AccessibilityNode final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AccessibilityNode) */ {
  public:
-  inline WidgetProviders() : WidgetProviders(nullptr) {}
-  ~WidgetProviders() override;
-  explicit PROTOBUF_CONSTEXPR WidgetProviders(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+  inline AccessibilityNode() : AccessibilityNode(nullptr) {}
+  ~AccessibilityNode() override;
+  explicit PROTOBUF_CONSTEXPR AccessibilityNode(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
 
-  WidgetProviders(const WidgetProviders& from);
-  WidgetProviders(WidgetProviders&& from) noexcept
-    : WidgetProviders() {
+  AccessibilityNode(const AccessibilityNode& from);
+  AccessibilityNode(AccessibilityNode&& from) noexcept
+    : AccessibilityNode() {
     *this = ::std::move(from);
   }
 
-  inline WidgetProviders& operator=(const WidgetProviders& from) {
+  inline AccessibilityNode& operator=(const AccessibilityNode& from) {
     CopyFrom(from);
     return *this;
   }
-  inline WidgetProviders& operator=(WidgetProviders&& from) noexcept {
+  inline AccessibilityNode& operator=(AccessibilityNode&& from) noexcept {
     if (this == &from) return *this;
     if (GetOwningArena() == from.GetOwningArena()
   #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
@@ -8235,20 +8135,20 @@ class WidgetProviders final :
     return *this;
   }
 
-  static const WidgetProviders& default_instance() {
+  static const AccessibilityNode& default_instance() {
     return *internal_default_instance();
   }
-  static inline const WidgetProviders* internal_default_instance() {
-    return reinterpret_cast<const WidgetProviders*>(
-               &_WidgetProviders_default_instance_);
+  static inline const AccessibilityNode* internal_default_instance() {
+    return reinterpret_cast<const AccessibilityNode*>(
+               &_AccessibilityNode_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
     49;
 
-  friend void swap(WidgetProviders& a, WidgetProviders& b) {
+  friend void swap(AccessibilityNode& a, AccessibilityNode& b) {
     a.Swap(&b);
   }
-  inline void Swap(WidgetProviders* other) {
+  inline void Swap(AccessibilityNode* other) {
     if (other == this) return;
   #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
     if (GetOwningArena() != nullptr &&
@@ -8261,7 +8161,7 @@ class WidgetProviders final :
       ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
     }
   }
-  void UnsafeArenaSwap(WidgetProviders* other) {
+  void UnsafeArenaSwap(AccessibilityNode* other) {
     if (other == this) return;
     GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
     InternalSwap(other);
@@ -8269,12 +8169,12 @@ class WidgetProviders final :
 
   // implements Message ----------------------------------------------
 
-  WidgetProviders* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<WidgetProviders>(arena);
+  AccessibilityNode* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<AccessibilityNode>(arena);
   }
   void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const WidgetProviders& from);
-  void MergeFrom(const WidgetProviders& from);
+  void CopyFrom(const AccessibilityNode& from);
+  void MergeFrom(const AccessibilityNode& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -8288,15 +8188,15 @@ class WidgetProviders final :
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
   void SetCachedSize(int size) const;
-  void InternalSwap(WidgetProviders* other);
+  void InternalSwap(AccessibilityNode* other);
 
   private:
   friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
   static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.WidgetProviders";
+    return "dsa.control.v1.AccessibilityNode";
   }
   protected:
-  explicit WidgetProviders(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+  explicit AccessibilityNode(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                        bool is_message_owned = false);
   public:
 
@@ -8307,47 +8207,307 @@ class WidgetProviders final :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kProvidersFieldNumber = 2,
-    kRequestIdFieldNumber = 1,
-    kCompleteFieldNumber = 3,
+    kChildIdsFieldNumber = 2,
+    kActionsFieldNumber = 22,
+    kClassNameFieldNumber = 3,
+    kTextFieldNumber = 4,
+    kContentDescriptionFieldNumber = 5,
+    kHintFieldNumber = 6,
+    kViewIdFieldNumber = 7,
+    kStateDescriptionFieldNumber = 23,
+    kBoundsFieldNumber = 8,
+    kRangeFieldNumber = 21,
+    kIdFieldNumber = 1,
+    kCheckableFieldNumber = 9,
+    kCheckedFieldNumber = 10,
+    kSelectedFieldNumber = 11,
+    kEnabledFieldNumber = 12,
+    kFocusableFieldNumber = 13,
+    kFocusedFieldNumber = 14,
+    kScrollableFieldNumber = 15,
+    kClickableFieldNumber = 16,
+    kLongClickableFieldNumber = 17,
+    kEditableFieldNumber = 18,
+    kPasswordFieldNumber = 19,
+    kHeadingFieldNumber = 20,
   };
-  // repeated .dsa.control.v1.WidgetProvider providers = 2;
-  int providers_size() const;
+  // repeated uint32 child_ids = 2;
+  int child_ids_size() const;
   private:
-  int _internal_providers_size() const;
+  int _internal_child_ids_size() const;
   public:
-  void clear_providers();
-  ::dsa::control::v1::WidgetProvider* mutable_providers(int index);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetProvider >*
-      mutable_providers();
+  void clear_child_ids();
   private:
-  const ::dsa::control::v1::WidgetProvider& _internal_providers(int index) const;
-  ::dsa::control::v1::WidgetProvider* _internal_add_providers();
+  uint32_t _internal_child_ids(int index) const;
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
+      _internal_child_ids() const;
+  void _internal_add_child_ids(uint32_t value);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
+      _internal_mutable_child_ids();
   public:
-  const ::dsa::control::v1::WidgetProvider& providers(int index) const;
-  ::dsa::control::v1::WidgetProvider* add_providers();
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetProvider >&
-      providers() const;
+  uint32_t child_ids(int index) const;
+  void set_child_ids(int index, uint32_t value);
+  void add_child_ids(uint32_t value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
+      child_ids() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
+      mutable_child_ids();
 
-  // uint32 request_id = 1;
-  void clear_request_id();
-  uint32_t request_id() const;
-  void set_request_id(uint32_t value);
+  // repeated .dsa.control.v1.NodeAction actions = 22;
+  int actions_size() const;
   private:
-  uint32_t _internal_request_id() const;
-  void _internal_set_request_id(uint32_t value);
+  int _internal_actions_size() const;
+  public:
+  void clear_actions();
+  private:
+  ::dsa::control::v1::NodeAction _internal_actions(int index) const;
+  void _internal_add_actions(::dsa::control::v1::NodeAction value);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField<int>* _internal_mutable_actions();
+  public:
+  ::dsa::control::v1::NodeAction actions(int index) const;
+  void set_actions(int index, ::dsa::control::v1::NodeAction value);
+  void add_actions(::dsa::control::v1::NodeAction value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField<int>& actions() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField<int>* mutable_actions();
+
+  // string class_name = 3;
+  void clear_class_name();
+  const std::string& class_name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_class_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_class_name();
+  PROTOBUF_NODISCARD std::string* release_class_name();
+  void set_allocated_class_name(std::string* class_name);
+  private:
+  const std::string& _internal_class_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_class_name(const std::string& value);
+  std::string* _internal_mutable_class_name();
   public:
 
-  // bool complete = 3;
-  void clear_complete();
-  bool complete() const;
-  void set_complete(bool value);
+  // string text = 4;
+  void clear_text();
+  const std::string& text() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_text(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_text();
+  PROTOBUF_NODISCARD std::string* release_text();
+  void set_allocated_text(std::string* text);
   private:
-  bool _internal_complete() const;
-  void _internal_set_complete(bool value);
+  const std::string& _internal_text() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_text(const std::string& value);
+  std::string* _internal_mutable_text();
   public:
 
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.WidgetProviders)
+  // string content_description = 5;
+  void clear_content_description();
+  const std::string& content_description() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_content_description(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_content_description();
+  PROTOBUF_NODISCARD std::string* release_content_description();
+  void set_allocated_content_description(std::string* content_description);
+  private:
+  const std::string& _internal_content_description() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_content_description(const std::string& value);
+  std::string* _internal_mutable_content_description();
+  public:
+
+  // string hint = 6;
+  void clear_hint();
+  const std::string& hint() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_hint(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_hint();
+  PROTOBUF_NODISCARD std::string* release_hint();
+  void set_allocated_hint(std::string* hint);
+  private:
+  const std::string& _internal_hint() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_hint(const std::string& value);
+  std::string* _internal_mutable_hint();
+  public:
+
+  // string view_id = 7;
+  void clear_view_id();
+  const std::string& view_id() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_view_id(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_view_id();
+  PROTOBUF_NODISCARD std::string* release_view_id();
+  void set_allocated_view_id(std::string* view_id);
+  private:
+  const std::string& _internal_view_id() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_view_id(const std::string& value);
+  std::string* _internal_mutable_view_id();
+  public:
+
+  // string state_description = 23;
+  void clear_state_description();
+  const std::string& state_description() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_state_description(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_state_description();
+  PROTOBUF_NODISCARD std::string* release_state_description();
+  void set_allocated_state_description(std::string* state_description);
+  private:
+  const std::string& _internal_state_description() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_state_description(const std::string& value);
+  std::string* _internal_mutable_state_description();
+  public:
+
+  // .dsa.control.v1.Rect bounds = 8;
+  bool has_bounds() const;
+  private:
+  bool _internal_has_bounds() const;
+  public:
+  void clear_bounds();
+  const ::dsa::control::v1::Rect& bounds() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::Rect* release_bounds();
+  ::dsa::control::v1::Rect* mutable_bounds();
+  void set_allocated_bounds(::dsa::control::v1::Rect* bounds);
+  private:
+  const ::dsa::control::v1::Rect& _internal_bounds() const;
+  ::dsa::control::v1::Rect* _internal_mutable_bounds();
+  public:
+  void unsafe_arena_set_allocated_bounds(
+      ::dsa::control::v1::Rect* bounds);
+  ::dsa::control::v1::Rect* unsafe_arena_release_bounds();
+
+  // .dsa.control.v1.NodeRange range = 21;
+  bool has_range() const;
+  private:
+  bool _internal_has_range() const;
+  public:
+  void clear_range();
+  const ::dsa::control::v1::NodeRange& range() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::NodeRange* release_range();
+  ::dsa::control::v1::NodeRange* mutable_range();
+  void set_allocated_range(::dsa::control::v1::NodeRange* range);
+  private:
+  const ::dsa::control::v1::NodeRange& _internal_range() const;
+  ::dsa::control::v1::NodeRange* _internal_mutable_range();
+  public:
+  void unsafe_arena_set_allocated_range(
+      ::dsa::control::v1::NodeRange* range);
+  ::dsa::control::v1::NodeRange* unsafe_arena_release_range();
+
+  // uint32 id = 1;
+  void clear_id();
+  uint32_t id() const;
+  void set_id(uint32_t value);
+  private:
+  uint32_t _internal_id() const;
+  void _internal_set_id(uint32_t value);
+  public:
+
+  // bool checkable = 9;
+  void clear_checkable();
+  bool checkable() const;
+  void set_checkable(bool value);
+  private:
+  bool _internal_checkable() const;
+  void _internal_set_checkable(bool value);
+  public:
+
+  // bool checked = 10;
+  void clear_checked();
+  bool checked() const;
+  void set_checked(bool value);
+  private:
+  bool _internal_checked() const;
+  void _internal_set_checked(bool value);
+  public:
+
+  // bool selected = 11;
+  void clear_selected();
+  bool selected() const;
+  void set_selected(bool value);
+  private:
+  bool _internal_selected() const;
+  void _internal_set_selected(bool value);
+  public:
+
+  // bool enabled = 12;
+  void clear_enabled();
+  bool enabled() const;
+  void set_enabled(bool value);
+  private:
+  bool _internal_enabled() const;
+  void _internal_set_enabled(bool value);
+  public:
+
+  // bool focusable = 13;
+  void clear_focusable();
+  bool focusable() const;
+  void set_focusable(bool value);
+  private:
+  bool _internal_focusable() const;
+  void _internal_set_focusable(bool value);
+  public:
+
+  // bool focused = 14;
+  void clear_focused();
+  bool focused() const;
+  void set_focused(bool value);
+  private:
+  bool _internal_focused() const;
+  void _internal_set_focused(bool value);
+  public:
+
+  // bool scrollable = 15;
+  void clear_scrollable();
+  bool scrollable() const;
+  void set_scrollable(bool value);
+  private:
+  bool _internal_scrollable() const;
+  void _internal_set_scrollable(bool value);
+  public:
+
+  // bool clickable = 16;
+  void clear_clickable();
+  bool clickable() const;
+  void set_clickable(bool value);
+  private:
+  bool _internal_clickable() const;
+  void _internal_set_clickable(bool value);
+  public:
+
+  // bool long_clickable = 17;
+  void clear_long_clickable();
+  bool long_clickable() const;
+  void set_long_clickable(bool value);
+  private:
+  bool _internal_long_clickable() const;
+  void _internal_set_long_clickable(bool value);
+  public:
+
+  // bool editable = 18;
+  void clear_editable();
+  bool editable() const;
+  void set_editable(bool value);
+  private:
+  bool _internal_editable() const;
+  void _internal_set_editable(bool value);
+  public:
+
+  // bool password = 19;
+  void clear_password();
+  bool password() const;
+  void set_password(bool value);
+  private:
+  bool _internal_password() const;
+  void _internal_set_password(bool value);
+  public:
+
+  // bool heading = 20;
+  void clear_heading();
+  bool heading() const;
+  void set_heading(bool value);
+  private:
+  bool _internal_heading() const;
+  void _internal_set_heading(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.AccessibilityNode)
  private:
   class _Internal;
 
@@ -8355,9 +8515,31 @@ class WidgetProviders final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetProvider > providers_;
-    uint32_t request_id_;
-    bool complete_;
+    ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t > child_ids_;
+    mutable std::atomic<int> _child_ids_cached_byte_size_;
+    ::PROTOBUF_NAMESPACE_ID::RepeatedField<int> actions_;
+    mutable std::atomic<int> _actions_cached_byte_size_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr class_name_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr text_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr content_description_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr hint_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr view_id_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr state_description_;
+    ::dsa::control::v1::Rect* bounds_;
+    ::dsa::control::v1::NodeRange* range_;
+    uint32_t id_;
+    bool checkable_;
+    bool checked_;
+    bool selected_;
+    bool enabled_;
+    bool focusable_;
+    bool focused_;
+    bool scrollable_;
+    bool clickable_;
+    bool long_clickable_;
+    bool editable_;
+    bool password_;
+    bool heading_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -8365,24 +8547,24 @@ class WidgetProviders final :
 };
 // -------------------------------------------------------------------
 
-class AddWidget final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AddWidget) */ {
+class AccessibilityTree final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AccessibilityTree) */ {
  public:
-  inline AddWidget() : AddWidget(nullptr) {}
-  ~AddWidget() override;
-  explicit PROTOBUF_CONSTEXPR AddWidget(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+  inline AccessibilityTree() : AccessibilityTree(nullptr) {}
+  ~AccessibilityTree() override;
+  explicit PROTOBUF_CONSTEXPR AccessibilityTree(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
 
-  AddWidget(const AddWidget& from);
-  AddWidget(AddWidget&& from) noexcept
-    : AddWidget() {
+  AccessibilityTree(const AccessibilityTree& from);
+  AccessibilityTree(AccessibilityTree&& from) noexcept
+    : AccessibilityTree() {
     *this = ::std::move(from);
   }
 
-  inline AddWidget& operator=(const AddWidget& from) {
+  inline AccessibilityTree& operator=(const AccessibilityTree& from) {
     CopyFrom(from);
     return *this;
   }
-  inline AddWidget& operator=(AddWidget&& from) noexcept {
+  inline AccessibilityTree& operator=(AccessibilityTree&& from) noexcept {
     if (this == &from) return *this;
     if (GetOwningArena() == from.GetOwningArena()
   #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
@@ -8396,20 +8578,20 @@ class AddWidget final :
     return *this;
   }
 
-  static const AddWidget& default_instance() {
+  static const AccessibilityTree& default_instance() {
     return *internal_default_instance();
   }
-  static inline const AddWidget* internal_default_instance() {
-    return reinterpret_cast<const AddWidget*>(
-               &_AddWidget_default_instance_);
+  static inline const AccessibilityTree* internal_default_instance() {
+    return reinterpret_cast<const AccessibilityTree*>(
+               &_AccessibilityTree_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
     50;
 
-  friend void swap(AddWidget& a, AddWidget& b) {
+  friend void swap(AccessibilityTree& a, AccessibilityTree& b) {
     a.Swap(&b);
   }
-  inline void Swap(AddWidget* other) {
+  inline void Swap(AccessibilityTree* other) {
     if (other == this) return;
   #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
     if (GetOwningArena() != nullptr &&
@@ -8422,7 +8604,7 @@ class AddWidget final :
       ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
     }
   }
-  void UnsafeArenaSwap(AddWidget* other) {
+  void UnsafeArenaSwap(AccessibilityTree* other) {
     if (other == this) return;
     GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
     InternalSwap(other);
@@ -8430,12 +8612,12 @@ class AddWidget final :
 
   // implements Message ----------------------------------------------
 
-  AddWidget* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<AddWidget>(arena);
+  AccessibilityTree* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<AccessibilityTree>(arena);
   }
   void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const AddWidget& from);
-  void MergeFrom(const AddWidget& from);
+  void CopyFrom(const AccessibilityTree& from);
+  void MergeFrom(const AccessibilityTree& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -8449,15 +8631,15 @@ class AddWidget final :
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
   void SetCachedSize(int size) const;
-  void InternalSwap(AddWidget* other);
+  void InternalSwap(AccessibilityTree* other);
 
   private:
   friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
   static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.AddWidget";
+    return "dsa.control.v1.AccessibilityTree";
   }
   protected:
-  explicit AddWidget(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+  explicit AccessibilityTree(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                        bool is_message_owned = false);
   public:
 
@@ -8468,33 +8650,113 @@ class AddWidget final :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kProviderFieldNumber = 2,
-    kRequestIdFieldNumber = 1,
+    kRootIdsFieldNumber = 4,
+    kNodesFieldNumber = 5,
+    kRemovedIdsFieldNumber = 6,
+    kTaskIdFieldNumber = 1,
+    kEpochFieldNumber = 2,
+    kFullFieldNumber = 3,
+    kFocusedIdFieldNumber = 7,
   };
-  // string provider = 2;
-  void clear_provider();
-  const std::string& provider() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_provider(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_provider();
-  PROTOBUF_NODISCARD std::string* release_provider();
-  void set_allocated_provider(std::string* provider);
+  // repeated uint32 root_ids = 4;
+  int root_ids_size() const;
   private:
-  const std::string& _internal_provider() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_provider(const std::string& value);
-  std::string* _internal_mutable_provider();
+  int _internal_root_ids_size() const;
+  public:
+  void clear_root_ids();
+  private:
+  uint32_t _internal_root_ids(int index) const;
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
+      _internal_root_ids() const;
+  void _internal_add_root_ids(uint32_t value);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
+      _internal_mutable_root_ids();
+  public:
+  uint32_t root_ids(int index) const;
+  void set_root_ids(int index, uint32_t value);
+  void add_root_ids(uint32_t value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
+      root_ids() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
+      mutable_root_ids();
+
+  // repeated .dsa.control.v1.AccessibilityNode nodes = 5;
+  int nodes_size() const;
+  private:
+  int _internal_nodes_size() const;
+  public:
+  void clear_nodes();
+  ::dsa::control::v1::AccessibilityNode* mutable_nodes(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::AccessibilityNode >*
+      mutable_nodes();
+  private:
+  const ::dsa::control::v1::AccessibilityNode& _internal_nodes(int index) const;
+  ::dsa::control::v1::AccessibilityNode* _internal_add_nodes();
+  public:
+  const ::dsa::control::v1::AccessibilityNode& nodes(int index) const;
+  ::dsa::control::v1::AccessibilityNode* add_nodes();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::AccessibilityNode >&
+      nodes() const;
+
+  // repeated uint32 removed_ids = 6;
+  int removed_ids_size() const;
+  private:
+  int _internal_removed_ids_size() const;
+  public:
+  void clear_removed_ids();
+  private:
+  uint32_t _internal_removed_ids(int index) const;
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
+      _internal_removed_ids() const;
+  void _internal_add_removed_ids(uint32_t value);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
+      _internal_mutable_removed_ids();
+  public:
+  uint32_t removed_ids(int index) const;
+  void set_removed_ids(int index, uint32_t value);
+  void add_removed_ids(uint32_t value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
+      removed_ids() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
+      mutable_removed_ids();
+
+  // int32 task_id = 1;
+  void clear_task_id();
+  int32_t task_id() const;
+  void set_task_id(int32_t value);
+  private:
+  int32_t _internal_task_id() const;
+  void _internal_set_task_id(int32_t value);
   public:
 
-  // uint32 request_id = 1;
-  void clear_request_id();
-  uint32_t request_id() const;
-  void set_request_id(uint32_t value);
+  // uint32 epoch = 2;
+  void clear_epoch();
+  uint32_t epoch() const;
+  void set_epoch(uint32_t value);
   private:
-  uint32_t _internal_request_id() const;
-  void _internal_set_request_id(uint32_t value);
+  uint32_t _internal_epoch() const;
+  void _internal_set_epoch(uint32_t value);
   public:
 
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.AddWidget)
+  // bool full = 3;
+  void clear_full();
+  bool full() const;
+  void set_full(bool value);
+  private:
+  bool _internal_full() const;
+  void _internal_set_full(bool value);
+  public:
+
+  // uint32 focused_id = 7;
+  void clear_focused_id();
+  uint32_t focused_id() const;
+  void set_focused_id(uint32_t value);
+  private:
+  uint32_t _internal_focused_id() const;
+  void _internal_set_focused_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.AccessibilityTree)
  private:
   class _Internal;
 
@@ -8502,8 +8764,15 @@ class AddWidget final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr provider_;
-    uint32_t request_id_;
+    ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t > root_ids_;
+    mutable std::atomic<int> _root_ids_cached_byte_size_;
+    ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::AccessibilityNode > nodes_;
+    ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t > removed_ids_;
+    mutable std::atomic<int> _removed_ids_cached_byte_size_;
+    int32_t task_id_;
+    uint32_t epoch_;
+    bool full_;
+    uint32_t focused_id_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -8511,24 +8780,24 @@ class AddWidget final :
 };
 // -------------------------------------------------------------------
 
-class WidgetAdded final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.WidgetAdded) */ {
+class AccessibilityAction final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AccessibilityAction) */ {
  public:
-  inline WidgetAdded() : WidgetAdded(nullptr) {}
-  ~WidgetAdded() override;
-  explicit PROTOBUF_CONSTEXPR WidgetAdded(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+  inline AccessibilityAction() : AccessibilityAction(nullptr) {}
+  ~AccessibilityAction() override;
+  explicit PROTOBUF_CONSTEXPR AccessibilityAction(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
 
-  WidgetAdded(const WidgetAdded& from);
-  WidgetAdded(WidgetAdded&& from) noexcept
-    : WidgetAdded() {
+  AccessibilityAction(const AccessibilityAction& from);
+  AccessibilityAction(AccessibilityAction&& from) noexcept
+    : AccessibilityAction() {
     *this = ::std::move(from);
   }
 
-  inline WidgetAdded& operator=(const WidgetAdded& from) {
+  inline AccessibilityAction& operator=(const AccessibilityAction& from) {
     CopyFrom(from);
     return *this;
   }
-  inline WidgetAdded& operator=(WidgetAdded&& from) noexcept {
+  inline AccessibilityAction& operator=(AccessibilityAction&& from) noexcept {
     if (this == &from) return *this;
     if (GetOwningArena() == from.GetOwningArena()
   #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
@@ -8542,20 +8811,20 @@ class WidgetAdded final :
     return *this;
   }
 
-  static const WidgetAdded& default_instance() {
+  static const AccessibilityAction& default_instance() {
     return *internal_default_instance();
   }
-  static inline const WidgetAdded* internal_default_instance() {
-    return reinterpret_cast<const WidgetAdded*>(
-               &_WidgetAdded_default_instance_);
+  static inline const AccessibilityAction* internal_default_instance() {
+    return reinterpret_cast<const AccessibilityAction*>(
+               &_AccessibilityAction_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
     51;
 
-  friend void swap(WidgetAdded& a, WidgetAdded& b) {
+  friend void swap(AccessibilityAction& a, AccessibilityAction& b) {
     a.Swap(&b);
   }
-  inline void Swap(WidgetAdded* other) {
+  inline void Swap(AccessibilityAction* other) {
     if (other == this) return;
   #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
     if (GetOwningArena() != nullptr &&
@@ -8568,7 +8837,7 @@ class WidgetAdded final :
       ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
     }
   }
-  void UnsafeArenaSwap(WidgetAdded* other) {
+  void UnsafeArenaSwap(AccessibilityAction* other) {
     if (other == this) return;
     GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
     InternalSwap(other);
@@ -8576,12 +8845,12 @@ class WidgetAdded final :
 
   // implements Message ----------------------------------------------
 
-  WidgetAdded* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<WidgetAdded>(arena);
+  AccessibilityAction* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<AccessibilityAction>(arena);
   }
   void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const WidgetAdded& from);
-  void MergeFrom(const WidgetAdded& from);
+  void CopyFrom(const AccessibilityAction& from);
+  void MergeFrom(const AccessibilityAction& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -8595,15 +8864,15 @@ class WidgetAdded final :
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
   void SetCachedSize(int size) const;
-  void InternalSwap(WidgetAdded* other);
+  void InternalSwap(AccessibilityAction* other);
 
   private:
   friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
   static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.WidgetAdded";
+    return "dsa.control.v1.AccessibilityAction";
   }
   protected:
-  explicit WidgetAdded(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+  explicit AccessibilityAction(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                        bool is_message_owned = false);
   public:
 
@@ -8614,11 +8883,202 @@ class WidgetAdded final :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kErrorFieldNumber = 3,
-    kRequestIdFieldNumber = 1,
-    kWidgetIdFieldNumber = 2,
+    kTextFieldNumber = 5,
+    kTaskIdFieldNumber = 1,
+    kEpochFieldNumber = 2,
+    kNodeIdFieldNumber = 3,
+    kActionFieldNumber = 4,
+    kRequestIdFieldNumber = 6,
   };
-  // string error = 3;
+  // string text = 5;
+  void clear_text();
+  const std::string& text() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_text(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_text();
+  PROTOBUF_NODISCARD std::string* release_text();
+  void set_allocated_text(std::string* text);
+  private:
+  const std::string& _internal_text() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_text(const std::string& value);
+  std::string* _internal_mutable_text();
+  public:
+
+  // int32 task_id = 1;
+  void clear_task_id();
+  int32_t task_id() const;
+  void set_task_id(int32_t value);
+  private:
+  int32_t _internal_task_id() const;
+  void _internal_set_task_id(int32_t value);
+  public:
+
+  // uint32 epoch = 2;
+  void clear_epoch();
+  uint32_t epoch() const;
+  void set_epoch(uint32_t value);
+  private:
+  uint32_t _internal_epoch() const;
+  void _internal_set_epoch(uint32_t value);
+  public:
+
+  // uint32 node_id = 3;
+  void clear_node_id();
+  uint32_t node_id() const;
+  void set_node_id(uint32_t value);
+  private:
+  uint32_t _internal_node_id() const;
+  void _internal_set_node_id(uint32_t value);
+  public:
+
+  // .dsa.control.v1.NodeAction action = 4;
+  void clear_action();
+  ::dsa::control::v1::NodeAction action() const;
+  void set_action(::dsa::control::v1::NodeAction value);
+  private:
+  ::dsa::control::v1::NodeAction _internal_action() const;
+  void _internal_set_action(::dsa::control::v1::NodeAction value);
+  public:
+
+  // uint32 request_id = 6;
+  void clear_request_id();
+  uint32_t request_id() const;
+  void set_request_id(uint32_t value);
+  private:
+  uint32_t _internal_request_id() const;
+  void _internal_set_request_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.AccessibilityAction)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr text_;
+    int32_t task_id_;
+    uint32_t epoch_;
+    uint32_t node_id_;
+    int action_;
+    uint32_t request_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class AccessibilityActionResult final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.AccessibilityActionResult) */ {
+ public:
+  inline AccessibilityActionResult() : AccessibilityActionResult(nullptr) {}
+  ~AccessibilityActionResult() override;
+  explicit PROTOBUF_CONSTEXPR AccessibilityActionResult(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  AccessibilityActionResult(const AccessibilityActionResult& from);
+  AccessibilityActionResult(AccessibilityActionResult&& from) noexcept
+    : AccessibilityActionResult() {
+    *this = ::std::move(from);
+  }
+
+  inline AccessibilityActionResult& operator=(const AccessibilityActionResult& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline AccessibilityActionResult& operator=(AccessibilityActionResult&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const AccessibilityActionResult& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const AccessibilityActionResult* internal_default_instance() {
+    return reinterpret_cast<const AccessibilityActionResult*>(
+               &_AccessibilityActionResult_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    52;
+
+  friend void swap(AccessibilityActionResult& a, AccessibilityActionResult& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(AccessibilityActionResult* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(AccessibilityActionResult* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  AccessibilityActionResult* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<AccessibilityActionResult>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const AccessibilityActionResult& from);
+  void MergeFrom(const AccessibilityActionResult& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(AccessibilityActionResult* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.AccessibilityActionResult";
+  }
+  protected:
+  explicit AccessibilityActionResult(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kErrorFieldNumber = 4,
+    kTaskIdFieldNumber = 1,
+    kRequestIdFieldNumber = 2,
+    kDoneFieldNumber = 3,
+  };
+  // string error = 4;
   void clear_error();
   const std::string& error() const;
   template <typename ArgT0 = const std::string&, typename... ArgT>
@@ -8632,7 +9092,16 @@ class WidgetAdded final :
   std::string* _internal_mutable_error();
   public:
 
-  // uint32 request_id = 1;
+  // int32 task_id = 1;
+  void clear_task_id();
+  int32_t task_id() const;
+  void set_task_id(int32_t value);
+  private:
+  int32_t _internal_task_id() const;
+  void _internal_set_task_id(int32_t value);
+  public:
+
+  // uint32 request_id = 2;
   void clear_request_id();
   uint32_t request_id() const;
   void set_request_id(uint32_t value);
@@ -8641,16 +9110,16 @@ class WidgetAdded final :
   void _internal_set_request_id(uint32_t value);
   public:
 
-  // int32 widget_id = 2;
-  void clear_widget_id();
-  int32_t widget_id() const;
-  void set_widget_id(int32_t value);
+  // bool done = 3;
+  void clear_done();
+  bool done() const;
+  void set_done(bool value);
   private:
-  int32_t _internal_widget_id() const;
-  void _internal_set_widget_id(int32_t value);
+  bool _internal_done() const;
+  void _internal_set_done(bool value);
   public:
 
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.WidgetAdded)
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.AccessibilityActionResult)
  private:
   class _Internal;
 
@@ -8659,959 +9128,9 @@ class WidgetAdded final :
   typedef void DestructorSkippable_;
   struct Impl_ {
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr error_;
+    int32_t task_id_;
     uint32_t request_id_;
-    int32_t widget_id_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class WidgetUpdated final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.WidgetUpdated) */ {
- public:
-  inline WidgetUpdated() : WidgetUpdated(nullptr) {}
-  ~WidgetUpdated() override;
-  explicit PROTOBUF_CONSTEXPR WidgetUpdated(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  WidgetUpdated(const WidgetUpdated& from);
-  WidgetUpdated(WidgetUpdated&& from) noexcept
-    : WidgetUpdated() {
-    *this = ::std::move(from);
-  }
-
-  inline WidgetUpdated& operator=(const WidgetUpdated& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline WidgetUpdated& operator=(WidgetUpdated&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const WidgetUpdated& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const WidgetUpdated* internal_default_instance() {
-    return reinterpret_cast<const WidgetUpdated*>(
-               &_WidgetUpdated_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    52;
-
-  friend void swap(WidgetUpdated& a, WidgetUpdated& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(WidgetUpdated* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(WidgetUpdated* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  WidgetUpdated* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<WidgetUpdated>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const WidgetUpdated& from);
-  void MergeFrom(const WidgetUpdated& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(WidgetUpdated* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.WidgetUpdated";
-  }
-  protected:
-  explicit WidgetUpdated(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kProviderFieldNumber = 2,
-    kWidgetIdFieldNumber = 1,
-  };
-  // .dsa.control.v1.WidgetProvider provider = 2;
-  bool has_provider() const;
-  private:
-  bool _internal_has_provider() const;
-  public:
-  void clear_provider();
-  const ::dsa::control::v1::WidgetProvider& provider() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::WidgetProvider* release_provider();
-  ::dsa::control::v1::WidgetProvider* mutable_provider();
-  void set_allocated_provider(::dsa::control::v1::WidgetProvider* provider);
-  private:
-  const ::dsa::control::v1::WidgetProvider& _internal_provider() const;
-  ::dsa::control::v1::WidgetProvider* _internal_mutable_provider();
-  public:
-  void unsafe_arena_set_allocated_provider(
-      ::dsa::control::v1::WidgetProvider* provider);
-  ::dsa::control::v1::WidgetProvider* unsafe_arena_release_provider();
-
-  // int32 widget_id = 1;
-  void clear_widget_id();
-  int32_t widget_id() const;
-  void set_widget_id(int32_t value);
-  private:
-  int32_t _internal_widget_id() const;
-  void _internal_set_widget_id(int32_t value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.WidgetUpdated)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    ::dsa::control::v1::WidgetProvider* provider_;
-    int32_t widget_id_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class WidgetList final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.WidgetList) */ {
- public:
-  inline WidgetList() : WidgetList(nullptr) {}
-  ~WidgetList() override;
-  explicit PROTOBUF_CONSTEXPR WidgetList(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  WidgetList(const WidgetList& from);
-  WidgetList(WidgetList&& from) noexcept
-    : WidgetList() {
-    *this = ::std::move(from);
-  }
-
-  inline WidgetList& operator=(const WidgetList& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline WidgetList& operator=(WidgetList&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const WidgetList& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const WidgetList* internal_default_instance() {
-    return reinterpret_cast<const WidgetList*>(
-               &_WidgetList_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    53;
-
-  friend void swap(WidgetList& a, WidgetList& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(WidgetList* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(WidgetList* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  WidgetList* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<WidgetList>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const WidgetList& from);
-  void MergeFrom(const WidgetList& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(WidgetList* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.WidgetList";
-  }
-  protected:
-  explicit WidgetList(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kWidgetIdsFieldNumber = 1,
-  };
-  // repeated int32 widget_ids = 1;
-  int widget_ids_size() const;
-  private:
-  int _internal_widget_ids_size() const;
-  public:
-  void clear_widget_ids();
-  private:
-  int32_t _internal_widget_ids(int index) const;
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< int32_t >&
-      _internal_widget_ids() const;
-  void _internal_add_widget_ids(int32_t value);
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< int32_t >*
-      _internal_mutable_widget_ids();
-  public:
-  int32_t widget_ids(int index) const;
-  void set_widget_ids(int index, int32_t value);
-  void add_widget_ids(int32_t value);
-  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< int32_t >&
-      widget_ids() const;
-  ::PROTOBUF_NAMESPACE_ID::RepeatedField< int32_t >*
-      mutable_widget_ids();
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.WidgetList)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::RepeatedField< int32_t > widget_ids_;
-    mutable std::atomic<int> _widget_ids_cached_byte_size_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class RemoveWidget final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.RemoveWidget) */ {
- public:
-  inline RemoveWidget() : RemoveWidget(nullptr) {}
-  ~RemoveWidget() override;
-  explicit PROTOBUF_CONSTEXPR RemoveWidget(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  RemoveWidget(const RemoveWidget& from);
-  RemoveWidget(RemoveWidget&& from) noexcept
-    : RemoveWidget() {
-    *this = ::std::move(from);
-  }
-
-  inline RemoveWidget& operator=(const RemoveWidget& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline RemoveWidget& operator=(RemoveWidget&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const RemoveWidget& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const RemoveWidget* internal_default_instance() {
-    return reinterpret_cast<const RemoveWidget*>(
-               &_RemoveWidget_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    54;
-
-  friend void swap(RemoveWidget& a, RemoveWidget& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(RemoveWidget* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(RemoveWidget* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  RemoveWidget* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<RemoveWidget>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const RemoveWidget& from);
-  void MergeFrom(const RemoveWidget& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(RemoveWidget* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.RemoveWidget";
-  }
-  protected:
-  explicit RemoveWidget(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kWidgetIdFieldNumber = 1,
-  };
-  // int32 widget_id = 1;
-  void clear_widget_id();
-  int32_t widget_id() const;
-  void set_widget_id(int32_t value);
-  private:
-  int32_t _internal_widget_id() const;
-  void _internal_set_widget_id(int32_t value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.RemoveWidget)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    int32_t widget_id_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class ResizeWidget final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.ResizeWidget) */ {
- public:
-  inline ResizeWidget() : ResizeWidget(nullptr) {}
-  ~ResizeWidget() override;
-  explicit PROTOBUF_CONSTEXPR ResizeWidget(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  ResizeWidget(const ResizeWidget& from);
-  ResizeWidget(ResizeWidget&& from) noexcept
-    : ResizeWidget() {
-    *this = ::std::move(from);
-  }
-
-  inline ResizeWidget& operator=(const ResizeWidget& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline ResizeWidget& operator=(ResizeWidget&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const ResizeWidget& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const ResizeWidget* internal_default_instance() {
-    return reinterpret_cast<const ResizeWidget*>(
-               &_ResizeWidget_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    55;
-
-  friend void swap(ResizeWidget& a, ResizeWidget& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(ResizeWidget* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(ResizeWidget* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  ResizeWidget* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<ResizeWidget>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const ResizeWidget& from);
-  void MergeFrom(const ResizeWidget& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(ResizeWidget* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.ResizeWidget";
-  }
-  protected:
-  explicit ResizeWidget(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kWidgetIdFieldNumber = 1,
-    kWidthFieldNumber = 2,
-    kHeightFieldNumber = 3,
-    kDensityDpiFieldNumber = 4,
-    kWidthDpFieldNumber = 5,
-    kHeightDpFieldNumber = 6,
-  };
-  // int32 widget_id = 1;
-  void clear_widget_id();
-  int32_t widget_id() const;
-  void set_widget_id(int32_t value);
-  private:
-  int32_t _internal_widget_id() const;
-  void _internal_set_widget_id(int32_t value);
-  public:
-
-  // uint32 width = 2;
-  void clear_width();
-  uint32_t width() const;
-  void set_width(uint32_t value);
-  private:
-  uint32_t _internal_width() const;
-  void _internal_set_width(uint32_t value);
-  public:
-
-  // uint32 height = 3;
-  void clear_height();
-  uint32_t height() const;
-  void set_height(uint32_t value);
-  private:
-  uint32_t _internal_height() const;
-  void _internal_set_height(uint32_t value);
-  public:
-
-  // uint32 density_dpi = 4;
-  void clear_density_dpi();
-  uint32_t density_dpi() const;
-  void set_density_dpi(uint32_t value);
-  private:
-  uint32_t _internal_density_dpi() const;
-  void _internal_set_density_dpi(uint32_t value);
-  public:
-
-  // uint32 width_dp = 5;
-  void clear_width_dp();
-  uint32_t width_dp() const;
-  void set_width_dp(uint32_t value);
-  private:
-  uint32_t _internal_width_dp() const;
-  void _internal_set_width_dp(uint32_t value);
-  public:
-
-  // uint32 height_dp = 6;
-  void clear_height_dp();
-  uint32_t height_dp() const;
-  void set_height_dp(uint32_t value);
-  private:
-  uint32_t _internal_height_dp() const;
-  void _internal_set_height_dp(uint32_t value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.ResizeWidget)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    int32_t widget_id_;
-    uint32_t width_;
-    uint32_t height_;
-    uint32_t density_dpi_;
-    uint32_t width_dp_;
-    uint32_t height_dp_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class WidgetFrame final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.WidgetFrame) */ {
- public:
-  inline WidgetFrame() : WidgetFrame(nullptr) {}
-  ~WidgetFrame() override;
-  explicit PROTOBUF_CONSTEXPR WidgetFrame(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  WidgetFrame(const WidgetFrame& from);
-  WidgetFrame(WidgetFrame&& from) noexcept
-    : WidgetFrame() {
-    *this = ::std::move(from);
-  }
-
-  inline WidgetFrame& operator=(const WidgetFrame& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline WidgetFrame& operator=(WidgetFrame&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const WidgetFrame& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const WidgetFrame* internal_default_instance() {
-    return reinterpret_cast<const WidgetFrame*>(
-               &_WidgetFrame_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    56;
-
-  friend void swap(WidgetFrame& a, WidgetFrame& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(WidgetFrame* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(WidgetFrame* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  WidgetFrame* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<WidgetFrame>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const WidgetFrame& from);
-  void MergeFrom(const WidgetFrame& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(WidgetFrame* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.WidgetFrame";
-  }
-  protected:
-  explicit WidgetFrame(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kPngFieldNumber = 4,
-    kWidgetIdFieldNumber = 1,
-    kWidthFieldNumber = 2,
-    kHeightFieldNumber = 3,
-  };
-  // bytes png = 4;
-  void clear_png();
-  const std::string& png() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_png(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_png();
-  PROTOBUF_NODISCARD std::string* release_png();
-  void set_allocated_png(std::string* png);
-  private:
-  const std::string& _internal_png() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_png(const std::string& value);
-  std::string* _internal_mutable_png();
-  public:
-
-  // int32 widget_id = 1;
-  void clear_widget_id();
-  int32_t widget_id() const;
-  void set_widget_id(int32_t value);
-  private:
-  int32_t _internal_widget_id() const;
-  void _internal_set_widget_id(int32_t value);
-  public:
-
-  // uint32 width = 2;
-  void clear_width();
-  uint32_t width() const;
-  void set_width(uint32_t value);
-  private:
-  uint32_t _internal_width() const;
-  void _internal_set_width(uint32_t value);
-  public:
-
-  // uint32 height = 3;
-  void clear_height();
-  uint32_t height() const;
-  void set_height(uint32_t value);
-  private:
-  uint32_t _internal_height() const;
-  void _internal_set_height(uint32_t value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.WidgetFrame)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr png_;
-    int32_t widget_id_;
-    uint32_t width_;
-    uint32_t height_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class WidgetPointer final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.WidgetPointer) */ {
- public:
-  inline WidgetPointer() : WidgetPointer(nullptr) {}
-  ~WidgetPointer() override;
-  explicit PROTOBUF_CONSTEXPR WidgetPointer(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  WidgetPointer(const WidgetPointer& from);
-  WidgetPointer(WidgetPointer&& from) noexcept
-    : WidgetPointer() {
-    *this = ::std::move(from);
-  }
-
-  inline WidgetPointer& operator=(const WidgetPointer& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline WidgetPointer& operator=(WidgetPointer&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const WidgetPointer& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const WidgetPointer* internal_default_instance() {
-    return reinterpret_cast<const WidgetPointer*>(
-               &_WidgetPointer_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    57;
-
-  friend void swap(WidgetPointer& a, WidgetPointer& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(WidgetPointer* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(WidgetPointer* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  WidgetPointer* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<WidgetPointer>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const WidgetPointer& from);
-  void MergeFrom(const WidgetPointer& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(WidgetPointer* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.WidgetPointer";
-  }
-  protected:
-  explicit WidgetPointer(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kWidgetIdFieldNumber = 1,
-    kActionFieldNumber = 2,
-    kPointerIdFieldNumber = 3,
-    kXFieldNumber = 4,
-    kYFieldNumber = 5,
-  };
-  // int32 widget_id = 1;
-  void clear_widget_id();
-  int32_t widget_id() const;
-  void set_widget_id(int32_t value);
-  private:
-  int32_t _internal_widget_id() const;
-  void _internal_set_widget_id(int32_t value);
-  public:
-
-  // .dsa.control.v1.PointerAction action = 2;
-  void clear_action();
-  ::dsa::control::v1::PointerAction action() const;
-  void set_action(::dsa::control::v1::PointerAction value);
-  private:
-  ::dsa::control::v1::PointerAction _internal_action() const;
-  void _internal_set_action(::dsa::control::v1::PointerAction value);
-  public:
-
-  // uint32 pointer_id = 3;
-  void clear_pointer_id();
-  uint32_t pointer_id() const;
-  void set_pointer_id(uint32_t value);
-  private:
-  uint32_t _internal_pointer_id() const;
-  void _internal_set_pointer_id(uint32_t value);
-  public:
-
-  // float x = 4;
-  void clear_x();
-  float x() const;
-  void set_x(float value);
-  private:
-  float _internal_x() const;
-  void _internal_set_x(float value);
-  public:
-
-  // float y = 5;
-  void clear_y();
-  float y() const;
-  void set_y(float value);
-  private:
-  float _internal_y() const;
-  void _internal_set_y(float value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.WidgetPointer)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    int32_t widget_id_;
-    int action_;
-    uint32_t pointer_id_;
-    float x_;
-    float y_;
+    bool done_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -9699,16 +9218,10 @@ class Envelope final :
     kNotificationRemoved = 71,
     kNotificationClicked = 72,
     kNotificationDismissed = 73,
-    kListWidgetProviders = 90,
-    kWidgetProviders = 91,
-    kAddWidget = 92,
-    kWidgetAdded = 93,
-    kWidgetUpdated = 94,
-    kWidgetList = 95,
-    kRemoveWidget = 96,
-    kResizeWidget = 97,
-    kWidgetFrame = 98,
-    kWidgetPointer = 99,
+    kAccessibilityWatch = 80,
+    kAccessibilityTree = 81,
+    kAccessibilityAction = 82,
+    kAccessibilityActionResult = 83,
     BODY_NOT_SET = 0,
   };
 
@@ -9717,7 +9230,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    58;
+    53;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -9826,16 +9339,10 @@ class Envelope final :
     kNotificationRemovedFieldNumber = 71,
     kNotificationClickedFieldNumber = 72,
     kNotificationDismissedFieldNumber = 73,
-    kListWidgetProvidersFieldNumber = 90,
-    kWidgetProvidersFieldNumber = 91,
-    kAddWidgetFieldNumber = 92,
-    kWidgetAddedFieldNumber = 93,
-    kWidgetUpdatedFieldNumber = 94,
-    kWidgetListFieldNumber = 95,
-    kRemoveWidgetFieldNumber = 96,
-    kResizeWidgetFieldNumber = 97,
-    kWidgetFrameFieldNumber = 98,
-    kWidgetPointerFieldNumber = 99,
+    kAccessibilityWatchFieldNumber = 80,
+    kAccessibilityTreeFieldNumber = 81,
+    kAccessibilityActionFieldNumber = 82,
+    kAccessibilityActionResultFieldNumber = 83,
   };
   // .dsa.control.v1.Hello hello = 1;
   bool has_hello() const;
@@ -10647,185 +10154,77 @@ class Envelope final :
       ::dsa::control::v1::NotificationDismissed* notification_dismissed);
   ::dsa::control::v1::NotificationDismissed* unsafe_arena_release_notification_dismissed();
 
-  // .dsa.control.v1.ListWidgetProviders list_widget_providers = 90;
-  bool has_list_widget_providers() const;
+  // .dsa.control.v1.AccessibilityWatch accessibility_watch = 80;
+  bool has_accessibility_watch() const;
   private:
-  bool _internal_has_list_widget_providers() const;
+  bool _internal_has_accessibility_watch() const;
   public:
-  void clear_list_widget_providers();
-  const ::dsa::control::v1::ListWidgetProviders& list_widget_providers() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::ListWidgetProviders* release_list_widget_providers();
-  ::dsa::control::v1::ListWidgetProviders* mutable_list_widget_providers();
-  void set_allocated_list_widget_providers(::dsa::control::v1::ListWidgetProviders* list_widget_providers);
+  void clear_accessibility_watch();
+  const ::dsa::control::v1::AccessibilityWatch& accessibility_watch() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::AccessibilityWatch* release_accessibility_watch();
+  ::dsa::control::v1::AccessibilityWatch* mutable_accessibility_watch();
+  void set_allocated_accessibility_watch(::dsa::control::v1::AccessibilityWatch* accessibility_watch);
   private:
-  const ::dsa::control::v1::ListWidgetProviders& _internal_list_widget_providers() const;
-  ::dsa::control::v1::ListWidgetProviders* _internal_mutable_list_widget_providers();
+  const ::dsa::control::v1::AccessibilityWatch& _internal_accessibility_watch() const;
+  ::dsa::control::v1::AccessibilityWatch* _internal_mutable_accessibility_watch();
   public:
-  void unsafe_arena_set_allocated_list_widget_providers(
-      ::dsa::control::v1::ListWidgetProviders* list_widget_providers);
-  ::dsa::control::v1::ListWidgetProviders* unsafe_arena_release_list_widget_providers();
+  void unsafe_arena_set_allocated_accessibility_watch(
+      ::dsa::control::v1::AccessibilityWatch* accessibility_watch);
+  ::dsa::control::v1::AccessibilityWatch* unsafe_arena_release_accessibility_watch();
 
-  // .dsa.control.v1.WidgetProviders widget_providers = 91;
-  bool has_widget_providers() const;
+  // .dsa.control.v1.AccessibilityTree accessibility_tree = 81;
+  bool has_accessibility_tree() const;
   private:
-  bool _internal_has_widget_providers() const;
+  bool _internal_has_accessibility_tree() const;
   public:
-  void clear_widget_providers();
-  const ::dsa::control::v1::WidgetProviders& widget_providers() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::WidgetProviders* release_widget_providers();
-  ::dsa::control::v1::WidgetProviders* mutable_widget_providers();
-  void set_allocated_widget_providers(::dsa::control::v1::WidgetProviders* widget_providers);
+  void clear_accessibility_tree();
+  const ::dsa::control::v1::AccessibilityTree& accessibility_tree() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::AccessibilityTree* release_accessibility_tree();
+  ::dsa::control::v1::AccessibilityTree* mutable_accessibility_tree();
+  void set_allocated_accessibility_tree(::dsa::control::v1::AccessibilityTree* accessibility_tree);
   private:
-  const ::dsa::control::v1::WidgetProviders& _internal_widget_providers() const;
-  ::dsa::control::v1::WidgetProviders* _internal_mutable_widget_providers();
+  const ::dsa::control::v1::AccessibilityTree& _internal_accessibility_tree() const;
+  ::dsa::control::v1::AccessibilityTree* _internal_mutable_accessibility_tree();
   public:
-  void unsafe_arena_set_allocated_widget_providers(
-      ::dsa::control::v1::WidgetProviders* widget_providers);
-  ::dsa::control::v1::WidgetProviders* unsafe_arena_release_widget_providers();
+  void unsafe_arena_set_allocated_accessibility_tree(
+      ::dsa::control::v1::AccessibilityTree* accessibility_tree);
+  ::dsa::control::v1::AccessibilityTree* unsafe_arena_release_accessibility_tree();
 
-  // .dsa.control.v1.AddWidget add_widget = 92;
-  bool has_add_widget() const;
+  // .dsa.control.v1.AccessibilityAction accessibility_action = 82;
+  bool has_accessibility_action() const;
   private:
-  bool _internal_has_add_widget() const;
+  bool _internal_has_accessibility_action() const;
   public:
-  void clear_add_widget();
-  const ::dsa::control::v1::AddWidget& add_widget() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::AddWidget* release_add_widget();
-  ::dsa::control::v1::AddWidget* mutable_add_widget();
-  void set_allocated_add_widget(::dsa::control::v1::AddWidget* add_widget);
+  void clear_accessibility_action();
+  const ::dsa::control::v1::AccessibilityAction& accessibility_action() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::AccessibilityAction* release_accessibility_action();
+  ::dsa::control::v1::AccessibilityAction* mutable_accessibility_action();
+  void set_allocated_accessibility_action(::dsa::control::v1::AccessibilityAction* accessibility_action);
   private:
-  const ::dsa::control::v1::AddWidget& _internal_add_widget() const;
-  ::dsa::control::v1::AddWidget* _internal_mutable_add_widget();
+  const ::dsa::control::v1::AccessibilityAction& _internal_accessibility_action() const;
+  ::dsa::control::v1::AccessibilityAction* _internal_mutable_accessibility_action();
   public:
-  void unsafe_arena_set_allocated_add_widget(
-      ::dsa::control::v1::AddWidget* add_widget);
-  ::dsa::control::v1::AddWidget* unsafe_arena_release_add_widget();
+  void unsafe_arena_set_allocated_accessibility_action(
+      ::dsa::control::v1::AccessibilityAction* accessibility_action);
+  ::dsa::control::v1::AccessibilityAction* unsafe_arena_release_accessibility_action();
 
-  // .dsa.control.v1.WidgetAdded widget_added = 93;
-  bool has_widget_added() const;
+  // .dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;
+  bool has_accessibility_action_result() const;
   private:
-  bool _internal_has_widget_added() const;
+  bool _internal_has_accessibility_action_result() const;
   public:
-  void clear_widget_added();
-  const ::dsa::control::v1::WidgetAdded& widget_added() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::WidgetAdded* release_widget_added();
-  ::dsa::control::v1::WidgetAdded* mutable_widget_added();
-  void set_allocated_widget_added(::dsa::control::v1::WidgetAdded* widget_added);
+  void clear_accessibility_action_result();
+  const ::dsa::control::v1::AccessibilityActionResult& accessibility_action_result() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::AccessibilityActionResult* release_accessibility_action_result();
+  ::dsa::control::v1::AccessibilityActionResult* mutable_accessibility_action_result();
+  void set_allocated_accessibility_action_result(::dsa::control::v1::AccessibilityActionResult* accessibility_action_result);
   private:
-  const ::dsa::control::v1::WidgetAdded& _internal_widget_added() const;
-  ::dsa::control::v1::WidgetAdded* _internal_mutable_widget_added();
+  const ::dsa::control::v1::AccessibilityActionResult& _internal_accessibility_action_result() const;
+  ::dsa::control::v1::AccessibilityActionResult* _internal_mutable_accessibility_action_result();
   public:
-  void unsafe_arena_set_allocated_widget_added(
-      ::dsa::control::v1::WidgetAdded* widget_added);
-  ::dsa::control::v1::WidgetAdded* unsafe_arena_release_widget_added();
-
-  // .dsa.control.v1.WidgetUpdated widget_updated = 94;
-  bool has_widget_updated() const;
-  private:
-  bool _internal_has_widget_updated() const;
-  public:
-  void clear_widget_updated();
-  const ::dsa::control::v1::WidgetUpdated& widget_updated() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::WidgetUpdated* release_widget_updated();
-  ::dsa::control::v1::WidgetUpdated* mutable_widget_updated();
-  void set_allocated_widget_updated(::dsa::control::v1::WidgetUpdated* widget_updated);
-  private:
-  const ::dsa::control::v1::WidgetUpdated& _internal_widget_updated() const;
-  ::dsa::control::v1::WidgetUpdated* _internal_mutable_widget_updated();
-  public:
-  void unsafe_arena_set_allocated_widget_updated(
-      ::dsa::control::v1::WidgetUpdated* widget_updated);
-  ::dsa::control::v1::WidgetUpdated* unsafe_arena_release_widget_updated();
-
-  // .dsa.control.v1.WidgetList widget_list = 95;
-  bool has_widget_list() const;
-  private:
-  bool _internal_has_widget_list() const;
-  public:
-  void clear_widget_list();
-  const ::dsa::control::v1::WidgetList& widget_list() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::WidgetList* release_widget_list();
-  ::dsa::control::v1::WidgetList* mutable_widget_list();
-  void set_allocated_widget_list(::dsa::control::v1::WidgetList* widget_list);
-  private:
-  const ::dsa::control::v1::WidgetList& _internal_widget_list() const;
-  ::dsa::control::v1::WidgetList* _internal_mutable_widget_list();
-  public:
-  void unsafe_arena_set_allocated_widget_list(
-      ::dsa::control::v1::WidgetList* widget_list);
-  ::dsa::control::v1::WidgetList* unsafe_arena_release_widget_list();
-
-  // .dsa.control.v1.RemoveWidget remove_widget = 96;
-  bool has_remove_widget() const;
-  private:
-  bool _internal_has_remove_widget() const;
-  public:
-  void clear_remove_widget();
-  const ::dsa::control::v1::RemoveWidget& remove_widget() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::RemoveWidget* release_remove_widget();
-  ::dsa::control::v1::RemoveWidget* mutable_remove_widget();
-  void set_allocated_remove_widget(::dsa::control::v1::RemoveWidget* remove_widget);
-  private:
-  const ::dsa::control::v1::RemoveWidget& _internal_remove_widget() const;
-  ::dsa::control::v1::RemoveWidget* _internal_mutable_remove_widget();
-  public:
-  void unsafe_arena_set_allocated_remove_widget(
-      ::dsa::control::v1::RemoveWidget* remove_widget);
-  ::dsa::control::v1::RemoveWidget* unsafe_arena_release_remove_widget();
-
-  // .dsa.control.v1.ResizeWidget resize_widget = 97;
-  bool has_resize_widget() const;
-  private:
-  bool _internal_has_resize_widget() const;
-  public:
-  void clear_resize_widget();
-  const ::dsa::control::v1::ResizeWidget& resize_widget() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::ResizeWidget* release_resize_widget();
-  ::dsa::control::v1::ResizeWidget* mutable_resize_widget();
-  void set_allocated_resize_widget(::dsa::control::v1::ResizeWidget* resize_widget);
-  private:
-  const ::dsa::control::v1::ResizeWidget& _internal_resize_widget() const;
-  ::dsa::control::v1::ResizeWidget* _internal_mutable_resize_widget();
-  public:
-  void unsafe_arena_set_allocated_resize_widget(
-      ::dsa::control::v1::ResizeWidget* resize_widget);
-  ::dsa::control::v1::ResizeWidget* unsafe_arena_release_resize_widget();
-
-  // .dsa.control.v1.WidgetFrame widget_frame = 98;
-  bool has_widget_frame() const;
-  private:
-  bool _internal_has_widget_frame() const;
-  public:
-  void clear_widget_frame();
-  const ::dsa::control::v1::WidgetFrame& widget_frame() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::WidgetFrame* release_widget_frame();
-  ::dsa::control::v1::WidgetFrame* mutable_widget_frame();
-  void set_allocated_widget_frame(::dsa::control::v1::WidgetFrame* widget_frame);
-  private:
-  const ::dsa::control::v1::WidgetFrame& _internal_widget_frame() const;
-  ::dsa::control::v1::WidgetFrame* _internal_mutable_widget_frame();
-  public:
-  void unsafe_arena_set_allocated_widget_frame(
-      ::dsa::control::v1::WidgetFrame* widget_frame);
-  ::dsa::control::v1::WidgetFrame* unsafe_arena_release_widget_frame();
-
-  // .dsa.control.v1.WidgetPointer widget_pointer = 99;
-  bool has_widget_pointer() const;
-  private:
-  bool _internal_has_widget_pointer() const;
-  public:
-  void clear_widget_pointer();
-  const ::dsa::control::v1::WidgetPointer& widget_pointer() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::WidgetPointer* release_widget_pointer();
-  ::dsa::control::v1::WidgetPointer* mutable_widget_pointer();
-  void set_allocated_widget_pointer(::dsa::control::v1::WidgetPointer* widget_pointer);
-  private:
-  const ::dsa::control::v1::WidgetPointer& _internal_widget_pointer() const;
-  ::dsa::control::v1::WidgetPointer* _internal_mutable_widget_pointer();
-  public:
-  void unsafe_arena_set_allocated_widget_pointer(
-      ::dsa::control::v1::WidgetPointer* widget_pointer);
-  ::dsa::control::v1::WidgetPointer* unsafe_arena_release_widget_pointer();
+  void unsafe_arena_set_allocated_accessibility_action_result(
+      ::dsa::control::v1::AccessibilityActionResult* accessibility_action_result);
+  ::dsa::control::v1::AccessibilityActionResult* unsafe_arena_release_accessibility_action_result();
 
   void clear_body();
   BodyCase body_case() const;
@@ -10877,16 +10276,10 @@ class Envelope final :
   void set_has_notification_removed();
   void set_has_notification_clicked();
   void set_has_notification_dismissed();
-  void set_has_list_widget_providers();
-  void set_has_widget_providers();
-  void set_has_add_widget();
-  void set_has_widget_added();
-  void set_has_widget_updated();
-  void set_has_widget_list();
-  void set_has_remove_widget();
-  void set_has_resize_widget();
-  void set_has_widget_frame();
-  void set_has_widget_pointer();
+  void set_has_accessibility_watch();
+  void set_has_accessibility_tree();
+  void set_has_accessibility_action();
+  void set_has_accessibility_action_result();
 
   inline bool has_body() const;
   inline void clear_has_body();
@@ -10943,16 +10336,10 @@ class Envelope final :
       ::dsa::control::v1::NotificationRemoved* notification_removed_;
       ::dsa::control::v1::NotificationClicked* notification_clicked_;
       ::dsa::control::v1::NotificationDismissed* notification_dismissed_;
-      ::dsa::control::v1::ListWidgetProviders* list_widget_providers_;
-      ::dsa::control::v1::WidgetProviders* widget_providers_;
-      ::dsa::control::v1::AddWidget* add_widget_;
-      ::dsa::control::v1::WidgetAdded* widget_added_;
-      ::dsa::control::v1::WidgetUpdated* widget_updated_;
-      ::dsa::control::v1::WidgetList* widget_list_;
-      ::dsa::control::v1::RemoveWidget* remove_widget_;
-      ::dsa::control::v1::ResizeWidget* resize_widget_;
-      ::dsa::control::v1::WidgetFrame* widget_frame_;
-      ::dsa::control::v1::WidgetPointer* widget_pointer_;
+      ::dsa::control::v1::AccessibilityWatch* accessibility_watch_;
+      ::dsa::control::v1::AccessibilityTree* accessibility_tree_;
+      ::dsa::control::v1::AccessibilityAction* accessibility_action_;
+      ::dsa::control::v1::AccessibilityActionResult* accessibility_action_result_;
     } body_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -15283,707 +14670,472 @@ inline void ClockAnswer::set_guest_mono_ns(uint64_t value) {
 
 // -------------------------------------------------------------------
 
-// ListWidgetProviders
+// AccessibilityWatch
 
-// uint32 request_id = 1;
-inline void ListWidgetProviders::clear_request_id() {
-  _impl_.request_id_ = 0u;
+// int32 task_id = 1;
+inline void AccessibilityWatch::clear_task_id() {
+  _impl_.task_id_ = 0;
 }
-inline uint32_t ListWidgetProviders::_internal_request_id() const {
-  return _impl_.request_id_;
+inline int32_t AccessibilityWatch::_internal_task_id() const {
+  return _impl_.task_id_;
 }
-inline uint32_t ListWidgetProviders::request_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.ListWidgetProviders.request_id)
-  return _internal_request_id();
+inline int32_t AccessibilityWatch::task_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityWatch.task_id)
+  return _internal_task_id();
 }
-inline void ListWidgetProviders::_internal_set_request_id(uint32_t value) {
+inline void AccessibilityWatch::_internal_set_task_id(int32_t value) {
   
-  _impl_.request_id_ = value;
+  _impl_.task_id_ = value;
 }
-inline void ListWidgetProviders::set_request_id(uint32_t value) {
-  _internal_set_request_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.ListWidgetProviders.request_id)
+inline void AccessibilityWatch::set_task_id(int32_t value) {
+  _internal_set_task_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityWatch.task_id)
+}
+
+// bool on = 2;
+inline void AccessibilityWatch::clear_on() {
+  _impl_.on_ = false;
+}
+inline bool AccessibilityWatch::_internal_on() const {
+  return _impl_.on_;
+}
+inline bool AccessibilityWatch::on() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityWatch.on)
+  return _internal_on();
+}
+inline void AccessibilityWatch::_internal_set_on(bool value) {
+  
+  _impl_.on_ = value;
+}
+inline void AccessibilityWatch::set_on(bool value) {
+  _internal_set_on(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityWatch.on)
 }
 
 // -------------------------------------------------------------------
 
-// WidgetProvider
+// NodeRange
 
-// string provider = 1;
-inline void WidgetProvider::clear_provider() {
-  _impl_.provider_.ClearToEmpty();
+// float min = 1;
+inline void NodeRange::clear_min() {
+  _impl_.min_ = 0;
 }
-inline const std::string& WidgetProvider::provider() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProvider.provider)
-  return _internal_provider();
+inline float NodeRange::_internal_min() const {
+  return _impl_.min_;
 }
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void WidgetProvider::set_provider(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.provider_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProvider.provider)
+inline float NodeRange::min() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.NodeRange.min)
+  return _internal_min();
 }
-inline std::string* WidgetProvider::mutable_provider() {
-  std::string* _s = _internal_mutable_provider();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetProvider.provider)
-  return _s;
-}
-inline const std::string& WidgetProvider::_internal_provider() const {
-  return _impl_.provider_.Get();
-}
-inline void WidgetProvider::_internal_set_provider(const std::string& value) {
+inline void NodeRange::_internal_set_min(float value) {
   
-  _impl_.provider_.Set(value, GetArenaForAllocation());
+  _impl_.min_ = value;
 }
-inline std::string* WidgetProvider::_internal_mutable_provider() {
-  
-  return _impl_.provider_.Mutable(GetArenaForAllocation());
-}
-inline std::string* WidgetProvider::release_provider() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.WidgetProvider.provider)
-  return _impl_.provider_.Release();
-}
-inline void WidgetProvider::set_allocated_provider(std::string* provider) {
-  if (provider != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.provider_.SetAllocated(provider, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.provider_.IsDefault()) {
-    _impl_.provider_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.WidgetProvider.provider)
+inline void NodeRange::set_min(float value) {
+  _internal_set_min(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.NodeRange.min)
 }
 
-// string package_name = 2;
-inline void WidgetProvider::clear_package_name() {
-  _impl_.package_name_.ClearToEmpty();
+// float max = 2;
+inline void NodeRange::clear_max() {
+  _impl_.max_ = 0;
 }
-inline const std::string& WidgetProvider::package_name() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProvider.package_name)
-  return _internal_package_name();
+inline float NodeRange::_internal_max() const {
+  return _impl_.max_;
 }
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void WidgetProvider::set_package_name(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.package_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProvider.package_name)
+inline float NodeRange::max() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.NodeRange.max)
+  return _internal_max();
 }
-inline std::string* WidgetProvider::mutable_package_name() {
-  std::string* _s = _internal_mutable_package_name();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetProvider.package_name)
-  return _s;
-}
-inline const std::string& WidgetProvider::_internal_package_name() const {
-  return _impl_.package_name_.Get();
-}
-inline void WidgetProvider::_internal_set_package_name(const std::string& value) {
+inline void NodeRange::_internal_set_max(float value) {
   
-  _impl_.package_name_.Set(value, GetArenaForAllocation());
+  _impl_.max_ = value;
 }
-inline std::string* WidgetProvider::_internal_mutable_package_name() {
-  
-  return _impl_.package_name_.Mutable(GetArenaForAllocation());
-}
-inline std::string* WidgetProvider::release_package_name() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.WidgetProvider.package_name)
-  return _impl_.package_name_.Release();
-}
-inline void WidgetProvider::set_allocated_package_name(std::string* package_name) {
-  if (package_name != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.package_name_.SetAllocated(package_name, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.package_name_.IsDefault()) {
-    _impl_.package_name_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.WidgetProvider.package_name)
+inline void NodeRange::set_max(float value) {
+  _internal_set_max(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.NodeRange.max)
 }
 
-// string label = 3;
-inline void WidgetProvider::clear_label() {
-  _impl_.label_.ClearToEmpty();
+// float current = 3;
+inline void NodeRange::clear_current() {
+  _impl_.current_ = 0;
 }
-inline const std::string& WidgetProvider::label() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProvider.label)
-  return _internal_label();
+inline float NodeRange::_internal_current() const {
+  return _impl_.current_;
 }
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void WidgetProvider::set_label(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.label_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProvider.label)
+inline float NodeRange::current() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.NodeRange.current)
+  return _internal_current();
 }
-inline std::string* WidgetProvider::mutable_label() {
-  std::string* _s = _internal_mutable_label();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetProvider.label)
-  return _s;
-}
-inline const std::string& WidgetProvider::_internal_label() const {
-  return _impl_.label_.Get();
-}
-inline void WidgetProvider::_internal_set_label(const std::string& value) {
+inline void NodeRange::_internal_set_current(float value) {
   
-  _impl_.label_.Set(value, GetArenaForAllocation());
+  _impl_.current_ = value;
 }
-inline std::string* WidgetProvider::_internal_mutable_label() {
-  
-  return _impl_.label_.Mutable(GetArenaForAllocation());
-}
-inline std::string* WidgetProvider::release_label() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.WidgetProvider.label)
-  return _impl_.label_.Release();
-}
-inline void WidgetProvider::set_allocated_label(std::string* label) {
-  if (label != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.label_.SetAllocated(label, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.label_.IsDefault()) {
-    _impl_.label_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.WidgetProvider.label)
-}
-
-// bytes preview_png = 4;
-inline void WidgetProvider::clear_preview_png() {
-  _impl_.preview_png_.ClearToEmpty();
-}
-inline const std::string& WidgetProvider::preview_png() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProvider.preview_png)
-  return _internal_preview_png();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void WidgetProvider::set_preview_png(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.preview_png_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProvider.preview_png)
-}
-inline std::string* WidgetProvider::mutable_preview_png() {
-  std::string* _s = _internal_mutable_preview_png();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetProvider.preview_png)
-  return _s;
-}
-inline const std::string& WidgetProvider::_internal_preview_png() const {
-  return _impl_.preview_png_.Get();
-}
-inline void WidgetProvider::_internal_set_preview_png(const std::string& value) {
-  
-  _impl_.preview_png_.Set(value, GetArenaForAllocation());
-}
-inline std::string* WidgetProvider::_internal_mutable_preview_png() {
-  
-  return _impl_.preview_png_.Mutable(GetArenaForAllocation());
-}
-inline std::string* WidgetProvider::release_preview_png() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.WidgetProvider.preview_png)
-  return _impl_.preview_png_.Release();
-}
-inline void WidgetProvider::set_allocated_preview_png(std::string* preview_png) {
-  if (preview_png != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.preview_png_.SetAllocated(preview_png, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.preview_png_.IsDefault()) {
-    _impl_.preview_png_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.WidgetProvider.preview_png)
-}
-
-// uint32 min_width_dp = 5;
-inline void WidgetProvider::clear_min_width_dp() {
-  _impl_.min_width_dp_ = 0u;
-}
-inline uint32_t WidgetProvider::_internal_min_width_dp() const {
-  return _impl_.min_width_dp_;
-}
-inline uint32_t WidgetProvider::min_width_dp() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProvider.min_width_dp)
-  return _internal_min_width_dp();
-}
-inline void WidgetProvider::_internal_set_min_width_dp(uint32_t value) {
-  
-  _impl_.min_width_dp_ = value;
-}
-inline void WidgetProvider::set_min_width_dp(uint32_t value) {
-  _internal_set_min_width_dp(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProvider.min_width_dp)
-}
-
-// uint32 min_height_dp = 6;
-inline void WidgetProvider::clear_min_height_dp() {
-  _impl_.min_height_dp_ = 0u;
-}
-inline uint32_t WidgetProvider::_internal_min_height_dp() const {
-  return _impl_.min_height_dp_;
-}
-inline uint32_t WidgetProvider::min_height_dp() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProvider.min_height_dp)
-  return _internal_min_height_dp();
-}
-inline void WidgetProvider::_internal_set_min_height_dp(uint32_t value) {
-  
-  _impl_.min_height_dp_ = value;
-}
-inline void WidgetProvider::set_min_height_dp(uint32_t value) {
-  _internal_set_min_height_dp(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProvider.min_height_dp)
-}
-
-// uint32 default_width_dp = 7;
-inline void WidgetProvider::clear_default_width_dp() {
-  _impl_.default_width_dp_ = 0u;
-}
-inline uint32_t WidgetProvider::_internal_default_width_dp() const {
-  return _impl_.default_width_dp_;
-}
-inline uint32_t WidgetProvider::default_width_dp() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProvider.default_width_dp)
-  return _internal_default_width_dp();
-}
-inline void WidgetProvider::_internal_set_default_width_dp(uint32_t value) {
-  
-  _impl_.default_width_dp_ = value;
-}
-inline void WidgetProvider::set_default_width_dp(uint32_t value) {
-  _internal_set_default_width_dp(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProvider.default_width_dp)
-}
-
-// uint32 default_height_dp = 8;
-inline void WidgetProvider::clear_default_height_dp() {
-  _impl_.default_height_dp_ = 0u;
-}
-inline uint32_t WidgetProvider::_internal_default_height_dp() const {
-  return _impl_.default_height_dp_;
-}
-inline uint32_t WidgetProvider::default_height_dp() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProvider.default_height_dp)
-  return _internal_default_height_dp();
-}
-inline void WidgetProvider::_internal_set_default_height_dp(uint32_t value) {
-  
-  _impl_.default_height_dp_ = value;
-}
-inline void WidgetProvider::set_default_height_dp(uint32_t value) {
-  _internal_set_default_height_dp(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProvider.default_height_dp)
-}
-
-// uint32 max_width_dp = 9;
-inline void WidgetProvider::clear_max_width_dp() {
-  _impl_.max_width_dp_ = 0u;
-}
-inline uint32_t WidgetProvider::_internal_max_width_dp() const {
-  return _impl_.max_width_dp_;
-}
-inline uint32_t WidgetProvider::max_width_dp() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProvider.max_width_dp)
-  return _internal_max_width_dp();
-}
-inline void WidgetProvider::_internal_set_max_width_dp(uint32_t value) {
-  
-  _impl_.max_width_dp_ = value;
-}
-inline void WidgetProvider::set_max_width_dp(uint32_t value) {
-  _internal_set_max_width_dp(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProvider.max_width_dp)
-}
-
-// uint32 max_height_dp = 10;
-inline void WidgetProvider::clear_max_height_dp() {
-  _impl_.max_height_dp_ = 0u;
-}
-inline uint32_t WidgetProvider::_internal_max_height_dp() const {
-  return _impl_.max_height_dp_;
-}
-inline uint32_t WidgetProvider::max_height_dp() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProvider.max_height_dp)
-  return _internal_max_height_dp();
-}
-inline void WidgetProvider::_internal_set_max_height_dp(uint32_t value) {
-  
-  _impl_.max_height_dp_ = value;
-}
-inline void WidgetProvider::set_max_height_dp(uint32_t value) {
-  _internal_set_max_height_dp(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProvider.max_height_dp)
-}
-
-// uint32 resize_mode = 11;
-inline void WidgetProvider::clear_resize_mode() {
-  _impl_.resize_mode_ = 0u;
-}
-inline uint32_t WidgetProvider::_internal_resize_mode() const {
-  return _impl_.resize_mode_;
-}
-inline uint32_t WidgetProvider::resize_mode() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProvider.resize_mode)
-  return _internal_resize_mode();
-}
-inline void WidgetProvider::_internal_set_resize_mode(uint32_t value) {
-  
-  _impl_.resize_mode_ = value;
-}
-inline void WidgetProvider::set_resize_mode(uint32_t value) {
-  _internal_set_resize_mode(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProvider.resize_mode)
-}
-
-// bool needs_configuration = 12;
-inline void WidgetProvider::clear_needs_configuration() {
-  _impl_.needs_configuration_ = false;
-}
-inline bool WidgetProvider::_internal_needs_configuration() const {
-  return _impl_.needs_configuration_;
-}
-inline bool WidgetProvider::needs_configuration() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProvider.needs_configuration)
-  return _internal_needs_configuration();
-}
-inline void WidgetProvider::_internal_set_needs_configuration(bool value) {
-  
-  _impl_.needs_configuration_ = value;
-}
-inline void WidgetProvider::set_needs_configuration(bool value) {
-  _internal_set_needs_configuration(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProvider.needs_configuration)
+inline void NodeRange::set_current(float value) {
+  _internal_set_current(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.NodeRange.current)
 }
 
 // -------------------------------------------------------------------
 
-// WidgetProviders
+// AccessibilityNode
 
-// uint32 request_id = 1;
-inline void WidgetProviders::clear_request_id() {
-  _impl_.request_id_ = 0u;
+// uint32 id = 1;
+inline void AccessibilityNode::clear_id() {
+  _impl_.id_ = 0u;
 }
-inline uint32_t WidgetProviders::_internal_request_id() const {
-  return _impl_.request_id_;
+inline uint32_t AccessibilityNode::_internal_id() const {
+  return _impl_.id_;
 }
-inline uint32_t WidgetProviders::request_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProviders.request_id)
-  return _internal_request_id();
+inline uint32_t AccessibilityNode::id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.id)
+  return _internal_id();
 }
-inline void WidgetProviders::_internal_set_request_id(uint32_t value) {
+inline void AccessibilityNode::_internal_set_id(uint32_t value) {
   
-  _impl_.request_id_ = value;
+  _impl_.id_ = value;
 }
-inline void WidgetProviders::set_request_id(uint32_t value) {
-  _internal_set_request_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProviders.request_id)
-}
-
-// repeated .dsa.control.v1.WidgetProvider providers = 2;
-inline int WidgetProviders::_internal_providers_size() const {
-  return _impl_.providers_.size();
-}
-inline int WidgetProviders::providers_size() const {
-  return _internal_providers_size();
-}
-inline void WidgetProviders::clear_providers() {
-  _impl_.providers_.Clear();
-}
-inline ::dsa::control::v1::WidgetProvider* WidgetProviders::mutable_providers(int index) {
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetProviders.providers)
-  return _impl_.providers_.Mutable(index);
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetProvider >*
-WidgetProviders::mutable_providers() {
-  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.WidgetProviders.providers)
-  return &_impl_.providers_;
-}
-inline const ::dsa::control::v1::WidgetProvider& WidgetProviders::_internal_providers(int index) const {
-  return _impl_.providers_.Get(index);
-}
-inline const ::dsa::control::v1::WidgetProvider& WidgetProviders::providers(int index) const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProviders.providers)
-  return _internal_providers(index);
-}
-inline ::dsa::control::v1::WidgetProvider* WidgetProviders::_internal_add_providers() {
-  return _impl_.providers_.Add();
-}
-inline ::dsa::control::v1::WidgetProvider* WidgetProviders::add_providers() {
-  ::dsa::control::v1::WidgetProvider* _add = _internal_add_providers();
-  // @@protoc_insertion_point(field_add:dsa.control.v1.WidgetProviders.providers)
-  return _add;
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::WidgetProvider >&
-WidgetProviders::providers() const {
-  // @@protoc_insertion_point(field_list:dsa.control.v1.WidgetProviders.providers)
-  return _impl_.providers_;
+inline void AccessibilityNode::set_id(uint32_t value) {
+  _internal_set_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.id)
 }
 
-// bool complete = 3;
-inline void WidgetProviders::clear_complete() {
-  _impl_.complete_ = false;
+// repeated uint32 child_ids = 2;
+inline int AccessibilityNode::_internal_child_ids_size() const {
+  return _impl_.child_ids_.size();
 }
-inline bool WidgetProviders::_internal_complete() const {
-  return _impl_.complete_;
+inline int AccessibilityNode::child_ids_size() const {
+  return _internal_child_ids_size();
 }
-inline bool WidgetProviders::complete() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProviders.complete)
-  return _internal_complete();
+inline void AccessibilityNode::clear_child_ids() {
+  _impl_.child_ids_.Clear();
 }
-inline void WidgetProviders::_internal_set_complete(bool value) {
-  
-  _impl_.complete_ = value;
+inline uint32_t AccessibilityNode::_internal_child_ids(int index) const {
+  return _impl_.child_ids_.Get(index);
 }
-inline void WidgetProviders::set_complete(bool value) {
-  _internal_set_complete(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProviders.complete)
+inline uint32_t AccessibilityNode::child_ids(int index) const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.child_ids)
+  return _internal_child_ids(index);
+}
+inline void AccessibilityNode::set_child_ids(int index, uint32_t value) {
+  _impl_.child_ids_.Set(index, value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.child_ids)
+}
+inline void AccessibilityNode::_internal_add_child_ids(uint32_t value) {
+  _impl_.child_ids_.Add(value);
+}
+inline void AccessibilityNode::add_child_ids(uint32_t value) {
+  _internal_add_child_ids(value);
+  // @@protoc_insertion_point(field_add:dsa.control.v1.AccessibilityNode.child_ids)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
+AccessibilityNode::_internal_child_ids() const {
+  return _impl_.child_ids_;
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
+AccessibilityNode::child_ids() const {
+  // @@protoc_insertion_point(field_list:dsa.control.v1.AccessibilityNode.child_ids)
+  return _internal_child_ids();
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
+AccessibilityNode::_internal_mutable_child_ids() {
+  return &_impl_.child_ids_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
+AccessibilityNode::mutable_child_ids() {
+  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.AccessibilityNode.child_ids)
+  return _internal_mutable_child_ids();
 }
 
-// -------------------------------------------------------------------
-
-// AddWidget
-
-// uint32 request_id = 1;
-inline void AddWidget::clear_request_id() {
-  _impl_.request_id_ = 0u;
+// string class_name = 3;
+inline void AccessibilityNode::clear_class_name() {
+  _impl_.class_name_.ClearToEmpty();
 }
-inline uint32_t AddWidget::_internal_request_id() const {
-  return _impl_.request_id_;
-}
-inline uint32_t AddWidget::request_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AddWidget.request_id)
-  return _internal_request_id();
-}
-inline void AddWidget::_internal_set_request_id(uint32_t value) {
-  
-  _impl_.request_id_ = value;
-}
-inline void AddWidget::set_request_id(uint32_t value) {
-  _internal_set_request_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AddWidget.request_id)
-}
-
-// string provider = 2;
-inline void AddWidget::clear_provider() {
-  _impl_.provider_.ClearToEmpty();
-}
-inline const std::string& AddWidget::provider() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.AddWidget.provider)
-  return _internal_provider();
+inline const std::string& AccessibilityNode::class_name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.class_name)
+  return _internal_class_name();
 }
 template <typename ArgT0, typename... ArgT>
 inline PROTOBUF_ALWAYS_INLINE
-void AddWidget::set_provider(ArgT0&& arg0, ArgT... args) {
+void AccessibilityNode::set_class_name(ArgT0&& arg0, ArgT... args) {
  
- _impl_.provider_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.AddWidget.provider)
+ _impl_.class_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.class_name)
 }
-inline std::string* AddWidget::mutable_provider() {
-  std::string* _s = _internal_mutable_provider();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AddWidget.provider)
+inline std::string* AccessibilityNode::mutable_class_name() {
+  std::string* _s = _internal_mutable_class_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.class_name)
   return _s;
 }
-inline const std::string& AddWidget::_internal_provider() const {
-  return _impl_.provider_.Get();
+inline const std::string& AccessibilityNode::_internal_class_name() const {
+  return _impl_.class_name_.Get();
 }
-inline void AddWidget::_internal_set_provider(const std::string& value) {
+inline void AccessibilityNode::_internal_set_class_name(const std::string& value) {
   
-  _impl_.provider_.Set(value, GetArenaForAllocation());
+  _impl_.class_name_.Set(value, GetArenaForAllocation());
 }
-inline std::string* AddWidget::_internal_mutable_provider() {
+inline std::string* AccessibilityNode::_internal_mutable_class_name() {
   
-  return _impl_.provider_.Mutable(GetArenaForAllocation());
+  return _impl_.class_name_.Mutable(GetArenaForAllocation());
 }
-inline std::string* AddWidget::release_provider() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.AddWidget.provider)
-  return _impl_.provider_.Release();
+inline std::string* AccessibilityNode::release_class_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.class_name)
+  return _impl_.class_name_.Release();
 }
-inline void AddWidget::set_allocated_provider(std::string* provider) {
-  if (provider != nullptr) {
+inline void AccessibilityNode::set_allocated_class_name(std::string* class_name) {
+  if (class_name != nullptr) {
     
   } else {
     
   }
-  _impl_.provider_.SetAllocated(provider, GetArenaForAllocation());
+  _impl_.class_name_.SetAllocated(class_name, GetArenaForAllocation());
 #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.provider_.IsDefault()) {
-    _impl_.provider_.Set("", GetArenaForAllocation());
+  if (_impl_.class_name_.IsDefault()) {
+    _impl_.class_name_.Set("", GetArenaForAllocation());
   }
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AddWidget.provider)
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.class_name)
 }
 
-// -------------------------------------------------------------------
-
-// WidgetAdded
-
-// uint32 request_id = 1;
-inline void WidgetAdded::clear_request_id() {
-  _impl_.request_id_ = 0u;
+// string text = 4;
+inline void AccessibilityNode::clear_text() {
+  _impl_.text_.ClearToEmpty();
 }
-inline uint32_t WidgetAdded::_internal_request_id() const {
-  return _impl_.request_id_;
-}
-inline uint32_t WidgetAdded::request_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetAdded.request_id)
-  return _internal_request_id();
-}
-inline void WidgetAdded::_internal_set_request_id(uint32_t value) {
-  
-  _impl_.request_id_ = value;
-}
-inline void WidgetAdded::set_request_id(uint32_t value) {
-  _internal_set_request_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetAdded.request_id)
-}
-
-// int32 widget_id = 2;
-inline void WidgetAdded::clear_widget_id() {
-  _impl_.widget_id_ = 0;
-}
-inline int32_t WidgetAdded::_internal_widget_id() const {
-  return _impl_.widget_id_;
-}
-inline int32_t WidgetAdded::widget_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetAdded.widget_id)
-  return _internal_widget_id();
-}
-inline void WidgetAdded::_internal_set_widget_id(int32_t value) {
-  
-  _impl_.widget_id_ = value;
-}
-inline void WidgetAdded::set_widget_id(int32_t value) {
-  _internal_set_widget_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetAdded.widget_id)
-}
-
-// string error = 3;
-inline void WidgetAdded::clear_error() {
-  _impl_.error_.ClearToEmpty();
-}
-inline const std::string& WidgetAdded::error() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetAdded.error)
-  return _internal_error();
+inline const std::string& AccessibilityNode::text() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.text)
+  return _internal_text();
 }
 template <typename ArgT0, typename... ArgT>
 inline PROTOBUF_ALWAYS_INLINE
-void WidgetAdded::set_error(ArgT0&& arg0, ArgT... args) {
+void AccessibilityNode::set_text(ArgT0&& arg0, ArgT... args) {
  
- _impl_.error_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetAdded.error)
+ _impl_.text_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.text)
 }
-inline std::string* WidgetAdded::mutable_error() {
-  std::string* _s = _internal_mutable_error();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetAdded.error)
+inline std::string* AccessibilityNode::mutable_text() {
+  std::string* _s = _internal_mutable_text();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.text)
   return _s;
 }
-inline const std::string& WidgetAdded::_internal_error() const {
-  return _impl_.error_.Get();
+inline const std::string& AccessibilityNode::_internal_text() const {
+  return _impl_.text_.Get();
 }
-inline void WidgetAdded::_internal_set_error(const std::string& value) {
+inline void AccessibilityNode::_internal_set_text(const std::string& value) {
   
-  _impl_.error_.Set(value, GetArenaForAllocation());
+  _impl_.text_.Set(value, GetArenaForAllocation());
 }
-inline std::string* WidgetAdded::_internal_mutable_error() {
+inline std::string* AccessibilityNode::_internal_mutable_text() {
   
-  return _impl_.error_.Mutable(GetArenaForAllocation());
+  return _impl_.text_.Mutable(GetArenaForAllocation());
 }
-inline std::string* WidgetAdded::release_error() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.WidgetAdded.error)
-  return _impl_.error_.Release();
+inline std::string* AccessibilityNode::release_text() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.text)
+  return _impl_.text_.Release();
 }
-inline void WidgetAdded::set_allocated_error(std::string* error) {
-  if (error != nullptr) {
+inline void AccessibilityNode::set_allocated_text(std::string* text) {
+  if (text != nullptr) {
     
   } else {
     
   }
-  _impl_.error_.SetAllocated(error, GetArenaForAllocation());
+  _impl_.text_.SetAllocated(text, GetArenaForAllocation());
 #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.error_.IsDefault()) {
-    _impl_.error_.Set("", GetArenaForAllocation());
+  if (_impl_.text_.IsDefault()) {
+    _impl_.text_.Set("", GetArenaForAllocation());
   }
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.WidgetAdded.error)
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.text)
 }
 
-// -------------------------------------------------------------------
-
-// WidgetUpdated
-
-// int32 widget_id = 1;
-inline void WidgetUpdated::clear_widget_id() {
-  _impl_.widget_id_ = 0;
+// string content_description = 5;
+inline void AccessibilityNode::clear_content_description() {
+  _impl_.content_description_.ClearToEmpty();
 }
-inline int32_t WidgetUpdated::_internal_widget_id() const {
-  return _impl_.widget_id_;
+inline const std::string& AccessibilityNode::content_description() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.content_description)
+  return _internal_content_description();
 }
-inline int32_t WidgetUpdated::widget_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetUpdated.widget_id)
-  return _internal_widget_id();
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void AccessibilityNode::set_content_description(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.content_description_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.content_description)
 }
-inline void WidgetUpdated::_internal_set_widget_id(int32_t value) {
+inline std::string* AccessibilityNode::mutable_content_description() {
+  std::string* _s = _internal_mutable_content_description();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.content_description)
+  return _s;
+}
+inline const std::string& AccessibilityNode::_internal_content_description() const {
+  return _impl_.content_description_.Get();
+}
+inline void AccessibilityNode::_internal_set_content_description(const std::string& value) {
   
-  _impl_.widget_id_ = value;
+  _impl_.content_description_.Set(value, GetArenaForAllocation());
 }
-inline void WidgetUpdated::set_widget_id(int32_t value) {
-  _internal_set_widget_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetUpdated.widget_id)
+inline std::string* AccessibilityNode::_internal_mutable_content_description() {
+  
+  return _impl_.content_description_.Mutable(GetArenaForAllocation());
+}
+inline std::string* AccessibilityNode::release_content_description() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.content_description)
+  return _impl_.content_description_.Release();
+}
+inline void AccessibilityNode::set_allocated_content_description(std::string* content_description) {
+  if (content_description != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.content_description_.SetAllocated(content_description, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.content_description_.IsDefault()) {
+    _impl_.content_description_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.content_description)
 }
 
-// .dsa.control.v1.WidgetProvider provider = 2;
-inline bool WidgetUpdated::_internal_has_provider() const {
-  return this != internal_default_instance() && _impl_.provider_ != nullptr;
+// string hint = 6;
+inline void AccessibilityNode::clear_hint() {
+  _impl_.hint_.ClearToEmpty();
 }
-inline bool WidgetUpdated::has_provider() const {
-  return _internal_has_provider();
+inline const std::string& AccessibilityNode::hint() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.hint)
+  return _internal_hint();
 }
-inline void WidgetUpdated::clear_provider() {
-  if (GetArenaForAllocation() == nullptr && _impl_.provider_ != nullptr) {
-    delete _impl_.provider_;
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void AccessibilityNode::set_hint(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.hint_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.hint)
+}
+inline std::string* AccessibilityNode::mutable_hint() {
+  std::string* _s = _internal_mutable_hint();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.hint)
+  return _s;
+}
+inline const std::string& AccessibilityNode::_internal_hint() const {
+  return _impl_.hint_.Get();
+}
+inline void AccessibilityNode::_internal_set_hint(const std::string& value) {
+  
+  _impl_.hint_.Set(value, GetArenaForAllocation());
+}
+inline std::string* AccessibilityNode::_internal_mutable_hint() {
+  
+  return _impl_.hint_.Mutable(GetArenaForAllocation());
+}
+inline std::string* AccessibilityNode::release_hint() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.hint)
+  return _impl_.hint_.Release();
+}
+inline void AccessibilityNode::set_allocated_hint(std::string* hint) {
+  if (hint != nullptr) {
+    
+  } else {
+    
   }
-  _impl_.provider_ = nullptr;
+  _impl_.hint_.SetAllocated(hint, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.hint_.IsDefault()) {
+    _impl_.hint_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.hint)
 }
-inline const ::dsa::control::v1::WidgetProvider& WidgetUpdated::_internal_provider() const {
-  const ::dsa::control::v1::WidgetProvider* p = _impl_.provider_;
-  return p != nullptr ? *p : reinterpret_cast<const ::dsa::control::v1::WidgetProvider&>(
-      ::dsa::control::v1::_WidgetProvider_default_instance_);
+
+// string view_id = 7;
+inline void AccessibilityNode::clear_view_id() {
+  _impl_.view_id_.ClearToEmpty();
 }
-inline const ::dsa::control::v1::WidgetProvider& WidgetUpdated::provider() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetUpdated.provider)
-  return _internal_provider();
+inline const std::string& AccessibilityNode::view_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.view_id)
+  return _internal_view_id();
 }
-inline void WidgetUpdated::unsafe_arena_set_allocated_provider(
-    ::dsa::control::v1::WidgetProvider* provider) {
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void AccessibilityNode::set_view_id(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.view_id_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.view_id)
+}
+inline std::string* AccessibilityNode::mutable_view_id() {
+  std::string* _s = _internal_mutable_view_id();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.view_id)
+  return _s;
+}
+inline const std::string& AccessibilityNode::_internal_view_id() const {
+  return _impl_.view_id_.Get();
+}
+inline void AccessibilityNode::_internal_set_view_id(const std::string& value) {
+  
+  _impl_.view_id_.Set(value, GetArenaForAllocation());
+}
+inline std::string* AccessibilityNode::_internal_mutable_view_id() {
+  
+  return _impl_.view_id_.Mutable(GetArenaForAllocation());
+}
+inline std::string* AccessibilityNode::release_view_id() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.view_id)
+  return _impl_.view_id_.Release();
+}
+inline void AccessibilityNode::set_allocated_view_id(std::string* view_id) {
+  if (view_id != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.view_id_.SetAllocated(view_id, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.view_id_.IsDefault()) {
+    _impl_.view_id_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.view_id)
+}
+
+// .dsa.control.v1.Rect bounds = 8;
+inline bool AccessibilityNode::_internal_has_bounds() const {
+  return this != internal_default_instance() && _impl_.bounds_ != nullptr;
+}
+inline bool AccessibilityNode::has_bounds() const {
+  return _internal_has_bounds();
+}
+inline void AccessibilityNode::clear_bounds() {
+  if (GetArenaForAllocation() == nullptr && _impl_.bounds_ != nullptr) {
+    delete _impl_.bounds_;
+  }
+  _impl_.bounds_ = nullptr;
+}
+inline const ::dsa::control::v1::Rect& AccessibilityNode::_internal_bounds() const {
+  const ::dsa::control::v1::Rect* p = _impl_.bounds_;
+  return p != nullptr ? *p : reinterpret_cast<const ::dsa::control::v1::Rect&>(
+      ::dsa::control::v1::_Rect_default_instance_);
+}
+inline const ::dsa::control::v1::Rect& AccessibilityNode::bounds() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.bounds)
+  return _internal_bounds();
+}
+inline void AccessibilityNode::unsafe_arena_set_allocated_bounds(
+    ::dsa::control::v1::Rect* bounds) {
   if (GetArenaForAllocation() == nullptr) {
-    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.provider_);
+    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.bounds_);
   }
-  _impl_.provider_ = provider;
-  if (provider) {
+  _impl_.bounds_ = bounds;
+  if (bounds) {
     
   } else {
     
   }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.WidgetUpdated.provider)
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.AccessibilityNode.bounds)
 }
-inline ::dsa::control::v1::WidgetProvider* WidgetUpdated::release_provider() {
+inline ::dsa::control::v1::Rect* AccessibilityNode::release_bounds() {
   
-  ::dsa::control::v1::WidgetProvider* temp = _impl_.provider_;
-  _impl_.provider_ = nullptr;
+  ::dsa::control::v1::Rect* temp = _impl_.bounds_;
+  _impl_.bounds_ = nullptr;
 #ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
   auto* old =  reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(temp);
   temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
@@ -15995,461 +15147,953 @@ inline ::dsa::control::v1::WidgetProvider* WidgetUpdated::release_provider() {
 #endif  // !PROTOBUF_FORCE_COPY_IN_RELEASE
   return temp;
 }
-inline ::dsa::control::v1::WidgetProvider* WidgetUpdated::unsafe_arena_release_provider() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.WidgetUpdated.provider)
+inline ::dsa::control::v1::Rect* AccessibilityNode::unsafe_arena_release_bounds() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.bounds)
   
-  ::dsa::control::v1::WidgetProvider* temp = _impl_.provider_;
-  _impl_.provider_ = nullptr;
+  ::dsa::control::v1::Rect* temp = _impl_.bounds_;
+  _impl_.bounds_ = nullptr;
   return temp;
 }
-inline ::dsa::control::v1::WidgetProvider* WidgetUpdated::_internal_mutable_provider() {
+inline ::dsa::control::v1::Rect* AccessibilityNode::_internal_mutable_bounds() {
   
-  if (_impl_.provider_ == nullptr) {
-    auto* p = CreateMaybeMessage<::dsa::control::v1::WidgetProvider>(GetArenaForAllocation());
-    _impl_.provider_ = p;
+  if (_impl_.bounds_ == nullptr) {
+    auto* p = CreateMaybeMessage<::dsa::control::v1::Rect>(GetArenaForAllocation());
+    _impl_.bounds_ = p;
   }
-  return _impl_.provider_;
+  return _impl_.bounds_;
 }
-inline ::dsa::control::v1::WidgetProvider* WidgetUpdated::mutable_provider() {
-  ::dsa::control::v1::WidgetProvider* _msg = _internal_mutable_provider();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetUpdated.provider)
+inline ::dsa::control::v1::Rect* AccessibilityNode::mutable_bounds() {
+  ::dsa::control::v1::Rect* _msg = _internal_mutable_bounds();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.bounds)
   return _msg;
 }
-inline void WidgetUpdated::set_allocated_provider(::dsa::control::v1::WidgetProvider* provider) {
+inline void AccessibilityNode::set_allocated_bounds(::dsa::control::v1::Rect* bounds) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
   if (message_arena == nullptr) {
-    delete _impl_.provider_;
+    delete _impl_.bounds_;
   }
-  if (provider) {
+  if (bounds) {
     ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
-        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(provider);
+        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(bounds);
     if (message_arena != submessage_arena) {
-      provider = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, provider, submessage_arena);
+      bounds = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, bounds, submessage_arena);
     }
     
   } else {
     
   }
-  _impl_.provider_ = provider;
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.WidgetUpdated.provider)
+  _impl_.bounds_ = bounds;
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.bounds)
 }
 
-// -------------------------------------------------------------------
-
-// WidgetList
-
-// repeated int32 widget_ids = 1;
-inline int WidgetList::_internal_widget_ids_size() const {
-  return _impl_.widget_ids_.size();
+// bool checkable = 9;
+inline void AccessibilityNode::clear_checkable() {
+  _impl_.checkable_ = false;
 }
-inline int WidgetList::widget_ids_size() const {
-  return _internal_widget_ids_size();
+inline bool AccessibilityNode::_internal_checkable() const {
+  return _impl_.checkable_;
 }
-inline void WidgetList::clear_widget_ids() {
-  _impl_.widget_ids_.Clear();
+inline bool AccessibilityNode::checkable() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.checkable)
+  return _internal_checkable();
 }
-inline int32_t WidgetList::_internal_widget_ids(int index) const {
-  return _impl_.widget_ids_.Get(index);
-}
-inline int32_t WidgetList::widget_ids(int index) const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetList.widget_ids)
-  return _internal_widget_ids(index);
-}
-inline void WidgetList::set_widget_ids(int index, int32_t value) {
-  _impl_.widget_ids_.Set(index, value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetList.widget_ids)
-}
-inline void WidgetList::_internal_add_widget_ids(int32_t value) {
-  _impl_.widget_ids_.Add(value);
-}
-inline void WidgetList::add_widget_ids(int32_t value) {
-  _internal_add_widget_ids(value);
-  // @@protoc_insertion_point(field_add:dsa.control.v1.WidgetList.widget_ids)
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< int32_t >&
-WidgetList::_internal_widget_ids() const {
-  return _impl_.widget_ids_;
-}
-inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< int32_t >&
-WidgetList::widget_ids() const {
-  // @@protoc_insertion_point(field_list:dsa.control.v1.WidgetList.widget_ids)
-  return _internal_widget_ids();
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< int32_t >*
-WidgetList::_internal_mutable_widget_ids() {
-  return &_impl_.widget_ids_;
-}
-inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< int32_t >*
-WidgetList::mutable_widget_ids() {
-  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.WidgetList.widget_ids)
-  return _internal_mutable_widget_ids();
-}
-
-// -------------------------------------------------------------------
-
-// RemoveWidget
-
-// int32 widget_id = 1;
-inline void RemoveWidget::clear_widget_id() {
-  _impl_.widget_id_ = 0;
-}
-inline int32_t RemoveWidget::_internal_widget_id() const {
-  return _impl_.widget_id_;
-}
-inline int32_t RemoveWidget::widget_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.RemoveWidget.widget_id)
-  return _internal_widget_id();
-}
-inline void RemoveWidget::_internal_set_widget_id(int32_t value) {
+inline void AccessibilityNode::_internal_set_checkable(bool value) {
   
-  _impl_.widget_id_ = value;
+  _impl_.checkable_ = value;
 }
-inline void RemoveWidget::set_widget_id(int32_t value) {
-  _internal_set_widget_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.RemoveWidget.widget_id)
+inline void AccessibilityNode::set_checkable(bool value) {
+  _internal_set_checkable(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.checkable)
 }
 
-// -------------------------------------------------------------------
-
-// ResizeWidget
-
-// int32 widget_id = 1;
-inline void ResizeWidget::clear_widget_id() {
-  _impl_.widget_id_ = 0;
+// bool checked = 10;
+inline void AccessibilityNode::clear_checked() {
+  _impl_.checked_ = false;
 }
-inline int32_t ResizeWidget::_internal_widget_id() const {
-  return _impl_.widget_id_;
+inline bool AccessibilityNode::_internal_checked() const {
+  return _impl_.checked_;
 }
-inline int32_t ResizeWidget::widget_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.ResizeWidget.widget_id)
-  return _internal_widget_id();
+inline bool AccessibilityNode::checked() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.checked)
+  return _internal_checked();
 }
-inline void ResizeWidget::_internal_set_widget_id(int32_t value) {
+inline void AccessibilityNode::_internal_set_checked(bool value) {
   
-  _impl_.widget_id_ = value;
+  _impl_.checked_ = value;
 }
-inline void ResizeWidget::set_widget_id(int32_t value) {
-  _internal_set_widget_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.ResizeWidget.widget_id)
+inline void AccessibilityNode::set_checked(bool value) {
+  _internal_set_checked(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.checked)
 }
 
-// uint32 width = 2;
-inline void ResizeWidget::clear_width() {
-  _impl_.width_ = 0u;
+// bool selected = 11;
+inline void AccessibilityNode::clear_selected() {
+  _impl_.selected_ = false;
 }
-inline uint32_t ResizeWidget::_internal_width() const {
-  return _impl_.width_;
+inline bool AccessibilityNode::_internal_selected() const {
+  return _impl_.selected_;
 }
-inline uint32_t ResizeWidget::width() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.ResizeWidget.width)
-  return _internal_width();
+inline bool AccessibilityNode::selected() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.selected)
+  return _internal_selected();
 }
-inline void ResizeWidget::_internal_set_width(uint32_t value) {
+inline void AccessibilityNode::_internal_set_selected(bool value) {
   
-  _impl_.width_ = value;
+  _impl_.selected_ = value;
 }
-inline void ResizeWidget::set_width(uint32_t value) {
-  _internal_set_width(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.ResizeWidget.width)
+inline void AccessibilityNode::set_selected(bool value) {
+  _internal_set_selected(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.selected)
 }
 
-// uint32 height = 3;
-inline void ResizeWidget::clear_height() {
-  _impl_.height_ = 0u;
+// bool enabled = 12;
+inline void AccessibilityNode::clear_enabled() {
+  _impl_.enabled_ = false;
 }
-inline uint32_t ResizeWidget::_internal_height() const {
-  return _impl_.height_;
+inline bool AccessibilityNode::_internal_enabled() const {
+  return _impl_.enabled_;
 }
-inline uint32_t ResizeWidget::height() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.ResizeWidget.height)
-  return _internal_height();
+inline bool AccessibilityNode::enabled() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.enabled)
+  return _internal_enabled();
 }
-inline void ResizeWidget::_internal_set_height(uint32_t value) {
+inline void AccessibilityNode::_internal_set_enabled(bool value) {
   
-  _impl_.height_ = value;
+  _impl_.enabled_ = value;
 }
-inline void ResizeWidget::set_height(uint32_t value) {
-  _internal_set_height(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.ResizeWidget.height)
+inline void AccessibilityNode::set_enabled(bool value) {
+  _internal_set_enabled(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.enabled)
 }
 
-// uint32 density_dpi = 4;
-inline void ResizeWidget::clear_density_dpi() {
-  _impl_.density_dpi_ = 0u;
+// bool focusable = 13;
+inline void AccessibilityNode::clear_focusable() {
+  _impl_.focusable_ = false;
 }
-inline uint32_t ResizeWidget::_internal_density_dpi() const {
-  return _impl_.density_dpi_;
+inline bool AccessibilityNode::_internal_focusable() const {
+  return _impl_.focusable_;
 }
-inline uint32_t ResizeWidget::density_dpi() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.ResizeWidget.density_dpi)
-  return _internal_density_dpi();
+inline bool AccessibilityNode::focusable() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.focusable)
+  return _internal_focusable();
 }
-inline void ResizeWidget::_internal_set_density_dpi(uint32_t value) {
+inline void AccessibilityNode::_internal_set_focusable(bool value) {
   
-  _impl_.density_dpi_ = value;
+  _impl_.focusable_ = value;
 }
-inline void ResizeWidget::set_density_dpi(uint32_t value) {
-  _internal_set_density_dpi(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.ResizeWidget.density_dpi)
+inline void AccessibilityNode::set_focusable(bool value) {
+  _internal_set_focusable(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.focusable)
 }
 
-// uint32 width_dp = 5;
-inline void ResizeWidget::clear_width_dp() {
-  _impl_.width_dp_ = 0u;
+// bool focused = 14;
+inline void AccessibilityNode::clear_focused() {
+  _impl_.focused_ = false;
 }
-inline uint32_t ResizeWidget::_internal_width_dp() const {
-  return _impl_.width_dp_;
+inline bool AccessibilityNode::_internal_focused() const {
+  return _impl_.focused_;
 }
-inline uint32_t ResizeWidget::width_dp() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.ResizeWidget.width_dp)
-  return _internal_width_dp();
+inline bool AccessibilityNode::focused() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.focused)
+  return _internal_focused();
 }
-inline void ResizeWidget::_internal_set_width_dp(uint32_t value) {
+inline void AccessibilityNode::_internal_set_focused(bool value) {
   
-  _impl_.width_dp_ = value;
+  _impl_.focused_ = value;
 }
-inline void ResizeWidget::set_width_dp(uint32_t value) {
-  _internal_set_width_dp(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.ResizeWidget.width_dp)
+inline void AccessibilityNode::set_focused(bool value) {
+  _internal_set_focused(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.focused)
 }
 
-// uint32 height_dp = 6;
-inline void ResizeWidget::clear_height_dp() {
-  _impl_.height_dp_ = 0u;
+// bool scrollable = 15;
+inline void AccessibilityNode::clear_scrollable() {
+  _impl_.scrollable_ = false;
 }
-inline uint32_t ResizeWidget::_internal_height_dp() const {
-  return _impl_.height_dp_;
+inline bool AccessibilityNode::_internal_scrollable() const {
+  return _impl_.scrollable_;
 }
-inline uint32_t ResizeWidget::height_dp() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.ResizeWidget.height_dp)
-  return _internal_height_dp();
+inline bool AccessibilityNode::scrollable() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.scrollable)
+  return _internal_scrollable();
 }
-inline void ResizeWidget::_internal_set_height_dp(uint32_t value) {
+inline void AccessibilityNode::_internal_set_scrollable(bool value) {
   
-  _impl_.height_dp_ = value;
+  _impl_.scrollable_ = value;
 }
-inline void ResizeWidget::set_height_dp(uint32_t value) {
-  _internal_set_height_dp(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.ResizeWidget.height_dp)
+inline void AccessibilityNode::set_scrollable(bool value) {
+  _internal_set_scrollable(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.scrollable)
 }
 
-// -------------------------------------------------------------------
-
-// WidgetFrame
-
-// int32 widget_id = 1;
-inline void WidgetFrame::clear_widget_id() {
-  _impl_.widget_id_ = 0;
+// bool clickable = 16;
+inline void AccessibilityNode::clear_clickable() {
+  _impl_.clickable_ = false;
 }
-inline int32_t WidgetFrame::_internal_widget_id() const {
-  return _impl_.widget_id_;
+inline bool AccessibilityNode::_internal_clickable() const {
+  return _impl_.clickable_;
 }
-inline int32_t WidgetFrame::widget_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetFrame.widget_id)
-  return _internal_widget_id();
+inline bool AccessibilityNode::clickable() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.clickable)
+  return _internal_clickable();
 }
-inline void WidgetFrame::_internal_set_widget_id(int32_t value) {
+inline void AccessibilityNode::_internal_set_clickable(bool value) {
   
-  _impl_.widget_id_ = value;
+  _impl_.clickable_ = value;
 }
-inline void WidgetFrame::set_widget_id(int32_t value) {
-  _internal_set_widget_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetFrame.widget_id)
-}
-
-// uint32 width = 2;
-inline void WidgetFrame::clear_width() {
-  _impl_.width_ = 0u;
-}
-inline uint32_t WidgetFrame::_internal_width() const {
-  return _impl_.width_;
-}
-inline uint32_t WidgetFrame::width() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetFrame.width)
-  return _internal_width();
-}
-inline void WidgetFrame::_internal_set_width(uint32_t value) {
-  
-  _impl_.width_ = value;
-}
-inline void WidgetFrame::set_width(uint32_t value) {
-  _internal_set_width(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetFrame.width)
+inline void AccessibilityNode::set_clickable(bool value) {
+  _internal_set_clickable(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.clickable)
 }
 
-// uint32 height = 3;
-inline void WidgetFrame::clear_height() {
-  _impl_.height_ = 0u;
+// bool long_clickable = 17;
+inline void AccessibilityNode::clear_long_clickable() {
+  _impl_.long_clickable_ = false;
 }
-inline uint32_t WidgetFrame::_internal_height() const {
-  return _impl_.height_;
+inline bool AccessibilityNode::_internal_long_clickable() const {
+  return _impl_.long_clickable_;
 }
-inline uint32_t WidgetFrame::height() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetFrame.height)
-  return _internal_height();
+inline bool AccessibilityNode::long_clickable() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.long_clickable)
+  return _internal_long_clickable();
 }
-inline void WidgetFrame::_internal_set_height(uint32_t value) {
+inline void AccessibilityNode::_internal_set_long_clickable(bool value) {
   
-  _impl_.height_ = value;
+  _impl_.long_clickable_ = value;
 }
-inline void WidgetFrame::set_height(uint32_t value) {
-  _internal_set_height(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetFrame.height)
+inline void AccessibilityNode::set_long_clickable(bool value) {
+  _internal_set_long_clickable(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.long_clickable)
 }
 
-// bytes png = 4;
-inline void WidgetFrame::clear_png() {
-  _impl_.png_.ClearToEmpty();
+// bool editable = 18;
+inline void AccessibilityNode::clear_editable() {
+  _impl_.editable_ = false;
 }
-inline const std::string& WidgetFrame::png() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetFrame.png)
-  return _internal_png();
+inline bool AccessibilityNode::_internal_editable() const {
+  return _impl_.editable_;
 }
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void WidgetFrame::set_png(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.png_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetFrame.png)
+inline bool AccessibilityNode::editable() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.editable)
+  return _internal_editable();
 }
-inline std::string* WidgetFrame::mutable_png() {
-  std::string* _s = _internal_mutable_png();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetFrame.png)
-  return _s;
-}
-inline const std::string& WidgetFrame::_internal_png() const {
-  return _impl_.png_.Get();
-}
-inline void WidgetFrame::_internal_set_png(const std::string& value) {
+inline void AccessibilityNode::_internal_set_editable(bool value) {
   
-  _impl_.png_.Set(value, GetArenaForAllocation());
+  _impl_.editable_ = value;
 }
-inline std::string* WidgetFrame::_internal_mutable_png() {
+inline void AccessibilityNode::set_editable(bool value) {
+  _internal_set_editable(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.editable)
+}
+
+// bool password = 19;
+inline void AccessibilityNode::clear_password() {
+  _impl_.password_ = false;
+}
+inline bool AccessibilityNode::_internal_password() const {
+  return _impl_.password_;
+}
+inline bool AccessibilityNode::password() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.password)
+  return _internal_password();
+}
+inline void AccessibilityNode::_internal_set_password(bool value) {
   
-  return _impl_.png_.Mutable(GetArenaForAllocation());
+  _impl_.password_ = value;
 }
-inline std::string* WidgetFrame::release_png() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.WidgetFrame.png)
-  return _impl_.png_.Release();
+inline void AccessibilityNode::set_password(bool value) {
+  _internal_set_password(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.password)
 }
-inline void WidgetFrame::set_allocated_png(std::string* png) {
-  if (png != nullptr) {
+
+// bool heading = 20;
+inline void AccessibilityNode::clear_heading() {
+  _impl_.heading_ = false;
+}
+inline bool AccessibilityNode::_internal_heading() const {
+  return _impl_.heading_;
+}
+inline bool AccessibilityNode::heading() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.heading)
+  return _internal_heading();
+}
+inline void AccessibilityNode::_internal_set_heading(bool value) {
+  
+  _impl_.heading_ = value;
+}
+inline void AccessibilityNode::set_heading(bool value) {
+  _internal_set_heading(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.heading)
+}
+
+// .dsa.control.v1.NodeRange range = 21;
+inline bool AccessibilityNode::_internal_has_range() const {
+  return this != internal_default_instance() && _impl_.range_ != nullptr;
+}
+inline bool AccessibilityNode::has_range() const {
+  return _internal_has_range();
+}
+inline void AccessibilityNode::clear_range() {
+  if (GetArenaForAllocation() == nullptr && _impl_.range_ != nullptr) {
+    delete _impl_.range_;
+  }
+  _impl_.range_ = nullptr;
+}
+inline const ::dsa::control::v1::NodeRange& AccessibilityNode::_internal_range() const {
+  const ::dsa::control::v1::NodeRange* p = _impl_.range_;
+  return p != nullptr ? *p : reinterpret_cast<const ::dsa::control::v1::NodeRange&>(
+      ::dsa::control::v1::_NodeRange_default_instance_);
+}
+inline const ::dsa::control::v1::NodeRange& AccessibilityNode::range() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.range)
+  return _internal_range();
+}
+inline void AccessibilityNode::unsafe_arena_set_allocated_range(
+    ::dsa::control::v1::NodeRange* range) {
+  if (GetArenaForAllocation() == nullptr) {
+    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.range_);
+  }
+  _impl_.range_ = range;
+  if (range) {
     
   } else {
     
   }
-  _impl_.png_.SetAllocated(png, GetArenaForAllocation());
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.AccessibilityNode.range)
+}
+inline ::dsa::control::v1::NodeRange* AccessibilityNode::release_range() {
+  
+  ::dsa::control::v1::NodeRange* temp = _impl_.range_;
+  _impl_.range_ = nullptr;
+#ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
+  auto* old =  reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(temp);
+  temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  if (GetArenaForAllocation() == nullptr) { delete old; }
+#else  // PROTOBUF_FORCE_COPY_IN_RELEASE
+  if (GetArenaForAllocation() != nullptr) {
+    temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  }
+#endif  // !PROTOBUF_FORCE_COPY_IN_RELEASE
+  return temp;
+}
+inline ::dsa::control::v1::NodeRange* AccessibilityNode::unsafe_arena_release_range() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.range)
+  
+  ::dsa::control::v1::NodeRange* temp = _impl_.range_;
+  _impl_.range_ = nullptr;
+  return temp;
+}
+inline ::dsa::control::v1::NodeRange* AccessibilityNode::_internal_mutable_range() {
+  
+  if (_impl_.range_ == nullptr) {
+    auto* p = CreateMaybeMessage<::dsa::control::v1::NodeRange>(GetArenaForAllocation());
+    _impl_.range_ = p;
+  }
+  return _impl_.range_;
+}
+inline ::dsa::control::v1::NodeRange* AccessibilityNode::mutable_range() {
+  ::dsa::control::v1::NodeRange* _msg = _internal_mutable_range();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.range)
+  return _msg;
+}
+inline void AccessibilityNode::set_allocated_range(::dsa::control::v1::NodeRange* range) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  if (message_arena == nullptr) {
+    delete _impl_.range_;
+  }
+  if (range) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(range);
+    if (message_arena != submessage_arena) {
+      range = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, range, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  _impl_.range_ = range;
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.range)
+}
+
+// repeated .dsa.control.v1.NodeAction actions = 22;
+inline int AccessibilityNode::_internal_actions_size() const {
+  return _impl_.actions_.size();
+}
+inline int AccessibilityNode::actions_size() const {
+  return _internal_actions_size();
+}
+inline void AccessibilityNode::clear_actions() {
+  _impl_.actions_.Clear();
+}
+inline ::dsa::control::v1::NodeAction AccessibilityNode::_internal_actions(int index) const {
+  return static_cast< ::dsa::control::v1::NodeAction >(_impl_.actions_.Get(index));
+}
+inline ::dsa::control::v1::NodeAction AccessibilityNode::actions(int index) const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.actions)
+  return _internal_actions(index);
+}
+inline void AccessibilityNode::set_actions(int index, ::dsa::control::v1::NodeAction value) {
+  _impl_.actions_.Set(index, value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.actions)
+}
+inline void AccessibilityNode::_internal_add_actions(::dsa::control::v1::NodeAction value) {
+  _impl_.actions_.Add(value);
+}
+inline void AccessibilityNode::add_actions(::dsa::control::v1::NodeAction value) {
+  _internal_add_actions(value);
+  // @@protoc_insertion_point(field_add:dsa.control.v1.AccessibilityNode.actions)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField<int>&
+AccessibilityNode::actions() const {
+  // @@protoc_insertion_point(field_list:dsa.control.v1.AccessibilityNode.actions)
+  return _impl_.actions_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField<int>*
+AccessibilityNode::_internal_mutable_actions() {
+  return &_impl_.actions_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField<int>*
+AccessibilityNode::mutable_actions() {
+  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.AccessibilityNode.actions)
+  return _internal_mutable_actions();
+}
+
+// string state_description = 23;
+inline void AccessibilityNode::clear_state_description() {
+  _impl_.state_description_.ClearToEmpty();
+}
+inline const std::string& AccessibilityNode::state_description() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityNode.state_description)
+  return _internal_state_description();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void AccessibilityNode::set_state_description(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.state_description_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityNode.state_description)
+}
+inline std::string* AccessibilityNode::mutable_state_description() {
+  std::string* _s = _internal_mutable_state_description();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityNode.state_description)
+  return _s;
+}
+inline const std::string& AccessibilityNode::_internal_state_description() const {
+  return _impl_.state_description_.Get();
+}
+inline void AccessibilityNode::_internal_set_state_description(const std::string& value) {
+  
+  _impl_.state_description_.Set(value, GetArenaForAllocation());
+}
+inline std::string* AccessibilityNode::_internal_mutable_state_description() {
+  
+  return _impl_.state_description_.Mutable(GetArenaForAllocation());
+}
+inline std::string* AccessibilityNode::release_state_description() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityNode.state_description)
+  return _impl_.state_description_.Release();
+}
+inline void AccessibilityNode::set_allocated_state_description(std::string* state_description) {
+  if (state_description != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.state_description_.SetAllocated(state_description, GetArenaForAllocation());
 #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.png_.IsDefault()) {
-    _impl_.png_.Set("", GetArenaForAllocation());
+  if (_impl_.state_description_.IsDefault()) {
+    _impl_.state_description_.Set("", GetArenaForAllocation());
   }
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.WidgetFrame.png)
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityNode.state_description)
 }
 
 // -------------------------------------------------------------------
 
-// WidgetPointer
+// AccessibilityTree
 
-// int32 widget_id = 1;
-inline void WidgetPointer::clear_widget_id() {
-  _impl_.widget_id_ = 0;
+// int32 task_id = 1;
+inline void AccessibilityTree::clear_task_id() {
+  _impl_.task_id_ = 0;
 }
-inline int32_t WidgetPointer::_internal_widget_id() const {
-  return _impl_.widget_id_;
+inline int32_t AccessibilityTree::_internal_task_id() const {
+  return _impl_.task_id_;
 }
-inline int32_t WidgetPointer::widget_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetPointer.widget_id)
-  return _internal_widget_id();
+inline int32_t AccessibilityTree::task_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityTree.task_id)
+  return _internal_task_id();
 }
-inline void WidgetPointer::_internal_set_widget_id(int32_t value) {
+inline void AccessibilityTree::_internal_set_task_id(int32_t value) {
   
-  _impl_.widget_id_ = value;
+  _impl_.task_id_ = value;
 }
-inline void WidgetPointer::set_widget_id(int32_t value) {
-  _internal_set_widget_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetPointer.widget_id)
+inline void AccessibilityTree::set_task_id(int32_t value) {
+  _internal_set_task_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityTree.task_id)
 }
 
-// .dsa.control.v1.PointerAction action = 2;
-inline void WidgetPointer::clear_action() {
+// uint32 epoch = 2;
+inline void AccessibilityTree::clear_epoch() {
+  _impl_.epoch_ = 0u;
+}
+inline uint32_t AccessibilityTree::_internal_epoch() const {
+  return _impl_.epoch_;
+}
+inline uint32_t AccessibilityTree::epoch() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityTree.epoch)
+  return _internal_epoch();
+}
+inline void AccessibilityTree::_internal_set_epoch(uint32_t value) {
+  
+  _impl_.epoch_ = value;
+}
+inline void AccessibilityTree::set_epoch(uint32_t value) {
+  _internal_set_epoch(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityTree.epoch)
+}
+
+// bool full = 3;
+inline void AccessibilityTree::clear_full() {
+  _impl_.full_ = false;
+}
+inline bool AccessibilityTree::_internal_full() const {
+  return _impl_.full_;
+}
+inline bool AccessibilityTree::full() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityTree.full)
+  return _internal_full();
+}
+inline void AccessibilityTree::_internal_set_full(bool value) {
+  
+  _impl_.full_ = value;
+}
+inline void AccessibilityTree::set_full(bool value) {
+  _internal_set_full(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityTree.full)
+}
+
+// repeated uint32 root_ids = 4;
+inline int AccessibilityTree::_internal_root_ids_size() const {
+  return _impl_.root_ids_.size();
+}
+inline int AccessibilityTree::root_ids_size() const {
+  return _internal_root_ids_size();
+}
+inline void AccessibilityTree::clear_root_ids() {
+  _impl_.root_ids_.Clear();
+}
+inline uint32_t AccessibilityTree::_internal_root_ids(int index) const {
+  return _impl_.root_ids_.Get(index);
+}
+inline uint32_t AccessibilityTree::root_ids(int index) const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityTree.root_ids)
+  return _internal_root_ids(index);
+}
+inline void AccessibilityTree::set_root_ids(int index, uint32_t value) {
+  _impl_.root_ids_.Set(index, value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityTree.root_ids)
+}
+inline void AccessibilityTree::_internal_add_root_ids(uint32_t value) {
+  _impl_.root_ids_.Add(value);
+}
+inline void AccessibilityTree::add_root_ids(uint32_t value) {
+  _internal_add_root_ids(value);
+  // @@protoc_insertion_point(field_add:dsa.control.v1.AccessibilityTree.root_ids)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
+AccessibilityTree::_internal_root_ids() const {
+  return _impl_.root_ids_;
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
+AccessibilityTree::root_ids() const {
+  // @@protoc_insertion_point(field_list:dsa.control.v1.AccessibilityTree.root_ids)
+  return _internal_root_ids();
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
+AccessibilityTree::_internal_mutable_root_ids() {
+  return &_impl_.root_ids_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
+AccessibilityTree::mutable_root_ids() {
+  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.AccessibilityTree.root_ids)
+  return _internal_mutable_root_ids();
+}
+
+// repeated .dsa.control.v1.AccessibilityNode nodes = 5;
+inline int AccessibilityTree::_internal_nodes_size() const {
+  return _impl_.nodes_.size();
+}
+inline int AccessibilityTree::nodes_size() const {
+  return _internal_nodes_size();
+}
+inline void AccessibilityTree::clear_nodes() {
+  _impl_.nodes_.Clear();
+}
+inline ::dsa::control::v1::AccessibilityNode* AccessibilityTree::mutable_nodes(int index) {
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityTree.nodes)
+  return _impl_.nodes_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::AccessibilityNode >*
+AccessibilityTree::mutable_nodes() {
+  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.AccessibilityTree.nodes)
+  return &_impl_.nodes_;
+}
+inline const ::dsa::control::v1::AccessibilityNode& AccessibilityTree::_internal_nodes(int index) const {
+  return _impl_.nodes_.Get(index);
+}
+inline const ::dsa::control::v1::AccessibilityNode& AccessibilityTree::nodes(int index) const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityTree.nodes)
+  return _internal_nodes(index);
+}
+inline ::dsa::control::v1::AccessibilityNode* AccessibilityTree::_internal_add_nodes() {
+  return _impl_.nodes_.Add();
+}
+inline ::dsa::control::v1::AccessibilityNode* AccessibilityTree::add_nodes() {
+  ::dsa::control::v1::AccessibilityNode* _add = _internal_add_nodes();
+  // @@protoc_insertion_point(field_add:dsa.control.v1.AccessibilityTree.nodes)
+  return _add;
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::AccessibilityNode >&
+AccessibilityTree::nodes() const {
+  // @@protoc_insertion_point(field_list:dsa.control.v1.AccessibilityTree.nodes)
+  return _impl_.nodes_;
+}
+
+// repeated uint32 removed_ids = 6;
+inline int AccessibilityTree::_internal_removed_ids_size() const {
+  return _impl_.removed_ids_.size();
+}
+inline int AccessibilityTree::removed_ids_size() const {
+  return _internal_removed_ids_size();
+}
+inline void AccessibilityTree::clear_removed_ids() {
+  _impl_.removed_ids_.Clear();
+}
+inline uint32_t AccessibilityTree::_internal_removed_ids(int index) const {
+  return _impl_.removed_ids_.Get(index);
+}
+inline uint32_t AccessibilityTree::removed_ids(int index) const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityTree.removed_ids)
+  return _internal_removed_ids(index);
+}
+inline void AccessibilityTree::set_removed_ids(int index, uint32_t value) {
+  _impl_.removed_ids_.Set(index, value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityTree.removed_ids)
+}
+inline void AccessibilityTree::_internal_add_removed_ids(uint32_t value) {
+  _impl_.removed_ids_.Add(value);
+}
+inline void AccessibilityTree::add_removed_ids(uint32_t value) {
+  _internal_add_removed_ids(value);
+  // @@protoc_insertion_point(field_add:dsa.control.v1.AccessibilityTree.removed_ids)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
+AccessibilityTree::_internal_removed_ids() const {
+  return _impl_.removed_ids_;
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >&
+AccessibilityTree::removed_ids() const {
+  // @@protoc_insertion_point(field_list:dsa.control.v1.AccessibilityTree.removed_ids)
+  return _internal_removed_ids();
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
+AccessibilityTree::_internal_mutable_removed_ids() {
+  return &_impl_.removed_ids_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< uint32_t >*
+AccessibilityTree::mutable_removed_ids() {
+  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.AccessibilityTree.removed_ids)
+  return _internal_mutable_removed_ids();
+}
+
+// uint32 focused_id = 7;
+inline void AccessibilityTree::clear_focused_id() {
+  _impl_.focused_id_ = 0u;
+}
+inline uint32_t AccessibilityTree::_internal_focused_id() const {
+  return _impl_.focused_id_;
+}
+inline uint32_t AccessibilityTree::focused_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityTree.focused_id)
+  return _internal_focused_id();
+}
+inline void AccessibilityTree::_internal_set_focused_id(uint32_t value) {
+  
+  _impl_.focused_id_ = value;
+}
+inline void AccessibilityTree::set_focused_id(uint32_t value) {
+  _internal_set_focused_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityTree.focused_id)
+}
+
+// -------------------------------------------------------------------
+
+// AccessibilityAction
+
+// int32 task_id = 1;
+inline void AccessibilityAction::clear_task_id() {
+  _impl_.task_id_ = 0;
+}
+inline int32_t AccessibilityAction::_internal_task_id() const {
+  return _impl_.task_id_;
+}
+inline int32_t AccessibilityAction::task_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityAction.task_id)
+  return _internal_task_id();
+}
+inline void AccessibilityAction::_internal_set_task_id(int32_t value) {
+  
+  _impl_.task_id_ = value;
+}
+inline void AccessibilityAction::set_task_id(int32_t value) {
+  _internal_set_task_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityAction.task_id)
+}
+
+// uint32 epoch = 2;
+inline void AccessibilityAction::clear_epoch() {
+  _impl_.epoch_ = 0u;
+}
+inline uint32_t AccessibilityAction::_internal_epoch() const {
+  return _impl_.epoch_;
+}
+inline uint32_t AccessibilityAction::epoch() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityAction.epoch)
+  return _internal_epoch();
+}
+inline void AccessibilityAction::_internal_set_epoch(uint32_t value) {
+  
+  _impl_.epoch_ = value;
+}
+inline void AccessibilityAction::set_epoch(uint32_t value) {
+  _internal_set_epoch(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityAction.epoch)
+}
+
+// uint32 node_id = 3;
+inline void AccessibilityAction::clear_node_id() {
+  _impl_.node_id_ = 0u;
+}
+inline uint32_t AccessibilityAction::_internal_node_id() const {
+  return _impl_.node_id_;
+}
+inline uint32_t AccessibilityAction::node_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityAction.node_id)
+  return _internal_node_id();
+}
+inline void AccessibilityAction::_internal_set_node_id(uint32_t value) {
+  
+  _impl_.node_id_ = value;
+}
+inline void AccessibilityAction::set_node_id(uint32_t value) {
+  _internal_set_node_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityAction.node_id)
+}
+
+// .dsa.control.v1.NodeAction action = 4;
+inline void AccessibilityAction::clear_action() {
   _impl_.action_ = 0;
 }
-inline ::dsa::control::v1::PointerAction WidgetPointer::_internal_action() const {
-  return static_cast< ::dsa::control::v1::PointerAction >(_impl_.action_);
+inline ::dsa::control::v1::NodeAction AccessibilityAction::_internal_action() const {
+  return static_cast< ::dsa::control::v1::NodeAction >(_impl_.action_);
 }
-inline ::dsa::control::v1::PointerAction WidgetPointer::action() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetPointer.action)
+inline ::dsa::control::v1::NodeAction AccessibilityAction::action() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityAction.action)
   return _internal_action();
 }
-inline void WidgetPointer::_internal_set_action(::dsa::control::v1::PointerAction value) {
+inline void AccessibilityAction::_internal_set_action(::dsa::control::v1::NodeAction value) {
   
   _impl_.action_ = value;
 }
-inline void WidgetPointer::set_action(::dsa::control::v1::PointerAction value) {
+inline void AccessibilityAction::set_action(::dsa::control::v1::NodeAction value) {
   _internal_set_action(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetPointer.action)
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityAction.action)
 }
 
-// uint32 pointer_id = 3;
-inline void WidgetPointer::clear_pointer_id() {
-  _impl_.pointer_id_ = 0u;
+// string text = 5;
+inline void AccessibilityAction::clear_text() {
+  _impl_.text_.ClearToEmpty();
 }
-inline uint32_t WidgetPointer::_internal_pointer_id() const {
-  return _impl_.pointer_id_;
+inline const std::string& AccessibilityAction::text() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityAction.text)
+  return _internal_text();
 }
-inline uint32_t WidgetPointer::pointer_id() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetPointer.pointer_id)
-  return _internal_pointer_id();
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void AccessibilityAction::set_text(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.text_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityAction.text)
 }
-inline void WidgetPointer::_internal_set_pointer_id(uint32_t value) {
+inline std::string* AccessibilityAction::mutable_text() {
+  std::string* _s = _internal_mutable_text();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityAction.text)
+  return _s;
+}
+inline const std::string& AccessibilityAction::_internal_text() const {
+  return _impl_.text_.Get();
+}
+inline void AccessibilityAction::_internal_set_text(const std::string& value) {
   
-  _impl_.pointer_id_ = value;
+  _impl_.text_.Set(value, GetArenaForAllocation());
 }
-inline void WidgetPointer::set_pointer_id(uint32_t value) {
-  _internal_set_pointer_id(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetPointer.pointer_id)
+inline std::string* AccessibilityAction::_internal_mutable_text() {
+  
+  return _impl_.text_.Mutable(GetArenaForAllocation());
+}
+inline std::string* AccessibilityAction::release_text() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityAction.text)
+  return _impl_.text_.Release();
+}
+inline void AccessibilityAction::set_allocated_text(std::string* text) {
+  if (text != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.text_.SetAllocated(text, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.text_.IsDefault()) {
+    _impl_.text_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityAction.text)
 }
 
-// float x = 4;
-inline void WidgetPointer::clear_x() {
-  _impl_.x_ = 0;
+// uint32 request_id = 6;
+inline void AccessibilityAction::clear_request_id() {
+  _impl_.request_id_ = 0u;
 }
-inline float WidgetPointer::_internal_x() const {
-  return _impl_.x_;
+inline uint32_t AccessibilityAction::_internal_request_id() const {
+  return _impl_.request_id_;
 }
-inline float WidgetPointer::x() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetPointer.x)
-  return _internal_x();
+inline uint32_t AccessibilityAction::request_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityAction.request_id)
+  return _internal_request_id();
 }
-inline void WidgetPointer::_internal_set_x(float value) {
+inline void AccessibilityAction::_internal_set_request_id(uint32_t value) {
   
-  _impl_.x_ = value;
+  _impl_.request_id_ = value;
 }
-inline void WidgetPointer::set_x(float value) {
-  _internal_set_x(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetPointer.x)
+inline void AccessibilityAction::set_request_id(uint32_t value) {
+  _internal_set_request_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityAction.request_id)
 }
 
-// float y = 5;
-inline void WidgetPointer::clear_y() {
-  _impl_.y_ = 0;
+// -------------------------------------------------------------------
+
+// AccessibilityActionResult
+
+// int32 task_id = 1;
+inline void AccessibilityActionResult::clear_task_id() {
+  _impl_.task_id_ = 0;
 }
-inline float WidgetPointer::_internal_y() const {
-  return _impl_.y_;
+inline int32_t AccessibilityActionResult::_internal_task_id() const {
+  return _impl_.task_id_;
 }
-inline float WidgetPointer::y() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetPointer.y)
-  return _internal_y();
+inline int32_t AccessibilityActionResult::task_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityActionResult.task_id)
+  return _internal_task_id();
 }
-inline void WidgetPointer::_internal_set_y(float value) {
+inline void AccessibilityActionResult::_internal_set_task_id(int32_t value) {
   
-  _impl_.y_ = value;
+  _impl_.task_id_ = value;
 }
-inline void WidgetPointer::set_y(float value) {
-  _internal_set_y(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetPointer.y)
+inline void AccessibilityActionResult::set_task_id(int32_t value) {
+  _internal_set_task_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityActionResult.task_id)
+}
+
+// uint32 request_id = 2;
+inline void AccessibilityActionResult::clear_request_id() {
+  _impl_.request_id_ = 0u;
+}
+inline uint32_t AccessibilityActionResult::_internal_request_id() const {
+  return _impl_.request_id_;
+}
+inline uint32_t AccessibilityActionResult::request_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityActionResult.request_id)
+  return _internal_request_id();
+}
+inline void AccessibilityActionResult::_internal_set_request_id(uint32_t value) {
+  
+  _impl_.request_id_ = value;
+}
+inline void AccessibilityActionResult::set_request_id(uint32_t value) {
+  _internal_set_request_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityActionResult.request_id)
+}
+
+// bool done = 3;
+inline void AccessibilityActionResult::clear_done() {
+  _impl_.done_ = false;
+}
+inline bool AccessibilityActionResult::_internal_done() const {
+  return _impl_.done_;
+}
+inline bool AccessibilityActionResult::done() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityActionResult.done)
+  return _internal_done();
+}
+inline void AccessibilityActionResult::_internal_set_done(bool value) {
+  
+  _impl_.done_ = value;
+}
+inline void AccessibilityActionResult::set_done(bool value) {
+  _internal_set_done(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityActionResult.done)
+}
+
+// string error = 4;
+inline void AccessibilityActionResult::clear_error() {
+  _impl_.error_.ClearToEmpty();
+}
+inline const std::string& AccessibilityActionResult::error() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.AccessibilityActionResult.error)
+  return _internal_error();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void AccessibilityActionResult::set_error(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.error_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.AccessibilityActionResult.error)
+}
+inline std::string* AccessibilityActionResult::mutable_error() {
+  std::string* _s = _internal_mutable_error();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.AccessibilityActionResult.error)
+  return _s;
+}
+inline const std::string& AccessibilityActionResult::_internal_error() const {
+  return _impl_.error_.Get();
+}
+inline void AccessibilityActionResult::_internal_set_error(const std::string& value) {
+  
+  _impl_.error_.Set(value, GetArenaForAllocation());
+}
+inline std::string* AccessibilityActionResult::_internal_mutable_error() {
+  
+  return _impl_.error_.Mutable(GetArenaForAllocation());
+}
+inline std::string* AccessibilityActionResult::release_error() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.AccessibilityActionResult.error)
+  return _impl_.error_.Release();
+}
+inline void AccessibilityActionResult::set_allocated_error(std::string* error) {
+  if (error != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.error_.SetAllocated(error, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.error_.IsDefault()) {
+    _impl_.error_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.AccessibilityActionResult.error)
 }
 
 // -------------------------------------------------------------------
@@ -19786,743 +19430,299 @@ inline ::dsa::control::v1::NotificationDismissed* Envelope::mutable_notification
   return _msg;
 }
 
-// .dsa.control.v1.ListWidgetProviders list_widget_providers = 90;
-inline bool Envelope::_internal_has_list_widget_providers() const {
-  return body_case() == kListWidgetProviders;
+// .dsa.control.v1.AccessibilityWatch accessibility_watch = 80;
+inline bool Envelope::_internal_has_accessibility_watch() const {
+  return body_case() == kAccessibilityWatch;
 }
-inline bool Envelope::has_list_widget_providers() const {
-  return _internal_has_list_widget_providers();
+inline bool Envelope::has_accessibility_watch() const {
+  return _internal_has_accessibility_watch();
 }
-inline void Envelope::set_has_list_widget_providers() {
-  _impl_._oneof_case_[0] = kListWidgetProviders;
+inline void Envelope::set_has_accessibility_watch() {
+  _impl_._oneof_case_[0] = kAccessibilityWatch;
 }
-inline void Envelope::clear_list_widget_providers() {
-  if (_internal_has_list_widget_providers()) {
+inline void Envelope::clear_accessibility_watch() {
+  if (_internal_has_accessibility_watch()) {
     if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.list_widget_providers_;
+      delete _impl_.body_.accessibility_watch_;
     }
     clear_has_body();
   }
 }
-inline ::dsa::control::v1::ListWidgetProviders* Envelope::release_list_widget_providers() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.list_widget_providers)
-  if (_internal_has_list_widget_providers()) {
+inline ::dsa::control::v1::AccessibilityWatch* Envelope::release_accessibility_watch() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.accessibility_watch)
+  if (_internal_has_accessibility_watch()) {
     clear_has_body();
-    ::dsa::control::v1::ListWidgetProviders* temp = _impl_.body_.list_widget_providers_;
+    ::dsa::control::v1::AccessibilityWatch* temp = _impl_.body_.accessibility_watch_;
     if (GetArenaForAllocation() != nullptr) {
       temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
     }
-    _impl_.body_.list_widget_providers_ = nullptr;
+    _impl_.body_.accessibility_watch_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline const ::dsa::control::v1::ListWidgetProviders& Envelope::_internal_list_widget_providers() const {
-  return _internal_has_list_widget_providers()
-      ? *_impl_.body_.list_widget_providers_
-      : reinterpret_cast< ::dsa::control::v1::ListWidgetProviders&>(::dsa::control::v1::_ListWidgetProviders_default_instance_);
+inline const ::dsa::control::v1::AccessibilityWatch& Envelope::_internal_accessibility_watch() const {
+  return _internal_has_accessibility_watch()
+      ? *_impl_.body_.accessibility_watch_
+      : reinterpret_cast< ::dsa::control::v1::AccessibilityWatch&>(::dsa::control::v1::_AccessibilityWatch_default_instance_);
 }
-inline const ::dsa::control::v1::ListWidgetProviders& Envelope::list_widget_providers() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.list_widget_providers)
-  return _internal_list_widget_providers();
+inline const ::dsa::control::v1::AccessibilityWatch& Envelope::accessibility_watch() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.accessibility_watch)
+  return _internal_accessibility_watch();
 }
-inline ::dsa::control::v1::ListWidgetProviders* Envelope::unsafe_arena_release_list_widget_providers() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.list_widget_providers)
-  if (_internal_has_list_widget_providers()) {
+inline ::dsa::control::v1::AccessibilityWatch* Envelope::unsafe_arena_release_accessibility_watch() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.accessibility_watch)
+  if (_internal_has_accessibility_watch()) {
     clear_has_body();
-    ::dsa::control::v1::ListWidgetProviders* temp = _impl_.body_.list_widget_providers_;
-    _impl_.body_.list_widget_providers_ = nullptr;
+    ::dsa::control::v1::AccessibilityWatch* temp = _impl_.body_.accessibility_watch_;
+    _impl_.body_.accessibility_watch_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline void Envelope::unsafe_arena_set_allocated_list_widget_providers(::dsa::control::v1::ListWidgetProviders* list_widget_providers) {
+inline void Envelope::unsafe_arena_set_allocated_accessibility_watch(::dsa::control::v1::AccessibilityWatch* accessibility_watch) {
   clear_body();
-  if (list_widget_providers) {
-    set_has_list_widget_providers();
-    _impl_.body_.list_widget_providers_ = list_widget_providers;
+  if (accessibility_watch) {
+    set_has_accessibility_watch();
+    _impl_.body_.accessibility_watch_ = accessibility_watch;
   }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.list_widget_providers)
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.accessibility_watch)
 }
-inline ::dsa::control::v1::ListWidgetProviders* Envelope::_internal_mutable_list_widget_providers() {
-  if (!_internal_has_list_widget_providers()) {
+inline ::dsa::control::v1::AccessibilityWatch* Envelope::_internal_mutable_accessibility_watch() {
+  if (!_internal_has_accessibility_watch()) {
     clear_body();
-    set_has_list_widget_providers();
-    _impl_.body_.list_widget_providers_ = CreateMaybeMessage< ::dsa::control::v1::ListWidgetProviders >(GetArenaForAllocation());
+    set_has_accessibility_watch();
+    _impl_.body_.accessibility_watch_ = CreateMaybeMessage< ::dsa::control::v1::AccessibilityWatch >(GetArenaForAllocation());
   }
-  return _impl_.body_.list_widget_providers_;
+  return _impl_.body_.accessibility_watch_;
 }
-inline ::dsa::control::v1::ListWidgetProviders* Envelope::mutable_list_widget_providers() {
-  ::dsa::control::v1::ListWidgetProviders* _msg = _internal_mutable_list_widget_providers();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.list_widget_providers)
+inline ::dsa::control::v1::AccessibilityWatch* Envelope::mutable_accessibility_watch() {
+  ::dsa::control::v1::AccessibilityWatch* _msg = _internal_mutable_accessibility_watch();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.accessibility_watch)
   return _msg;
 }
 
-// .dsa.control.v1.WidgetProviders widget_providers = 91;
-inline bool Envelope::_internal_has_widget_providers() const {
-  return body_case() == kWidgetProviders;
+// .dsa.control.v1.AccessibilityTree accessibility_tree = 81;
+inline bool Envelope::_internal_has_accessibility_tree() const {
+  return body_case() == kAccessibilityTree;
 }
-inline bool Envelope::has_widget_providers() const {
-  return _internal_has_widget_providers();
+inline bool Envelope::has_accessibility_tree() const {
+  return _internal_has_accessibility_tree();
 }
-inline void Envelope::set_has_widget_providers() {
-  _impl_._oneof_case_[0] = kWidgetProviders;
+inline void Envelope::set_has_accessibility_tree() {
+  _impl_._oneof_case_[0] = kAccessibilityTree;
 }
-inline void Envelope::clear_widget_providers() {
-  if (_internal_has_widget_providers()) {
+inline void Envelope::clear_accessibility_tree() {
+  if (_internal_has_accessibility_tree()) {
     if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.widget_providers_;
+      delete _impl_.body_.accessibility_tree_;
     }
     clear_has_body();
   }
 }
-inline ::dsa::control::v1::WidgetProviders* Envelope::release_widget_providers() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.widget_providers)
-  if (_internal_has_widget_providers()) {
+inline ::dsa::control::v1::AccessibilityTree* Envelope::release_accessibility_tree() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.accessibility_tree)
+  if (_internal_has_accessibility_tree()) {
     clear_has_body();
-    ::dsa::control::v1::WidgetProviders* temp = _impl_.body_.widget_providers_;
+    ::dsa::control::v1::AccessibilityTree* temp = _impl_.body_.accessibility_tree_;
     if (GetArenaForAllocation() != nullptr) {
       temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
     }
-    _impl_.body_.widget_providers_ = nullptr;
+    _impl_.body_.accessibility_tree_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline const ::dsa::control::v1::WidgetProviders& Envelope::_internal_widget_providers() const {
-  return _internal_has_widget_providers()
-      ? *_impl_.body_.widget_providers_
-      : reinterpret_cast< ::dsa::control::v1::WidgetProviders&>(::dsa::control::v1::_WidgetProviders_default_instance_);
+inline const ::dsa::control::v1::AccessibilityTree& Envelope::_internal_accessibility_tree() const {
+  return _internal_has_accessibility_tree()
+      ? *_impl_.body_.accessibility_tree_
+      : reinterpret_cast< ::dsa::control::v1::AccessibilityTree&>(::dsa::control::v1::_AccessibilityTree_default_instance_);
 }
-inline const ::dsa::control::v1::WidgetProviders& Envelope::widget_providers() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.widget_providers)
-  return _internal_widget_providers();
+inline const ::dsa::control::v1::AccessibilityTree& Envelope::accessibility_tree() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.accessibility_tree)
+  return _internal_accessibility_tree();
 }
-inline ::dsa::control::v1::WidgetProviders* Envelope::unsafe_arena_release_widget_providers() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.widget_providers)
-  if (_internal_has_widget_providers()) {
+inline ::dsa::control::v1::AccessibilityTree* Envelope::unsafe_arena_release_accessibility_tree() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.accessibility_tree)
+  if (_internal_has_accessibility_tree()) {
     clear_has_body();
-    ::dsa::control::v1::WidgetProviders* temp = _impl_.body_.widget_providers_;
-    _impl_.body_.widget_providers_ = nullptr;
+    ::dsa::control::v1::AccessibilityTree* temp = _impl_.body_.accessibility_tree_;
+    _impl_.body_.accessibility_tree_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline void Envelope::unsafe_arena_set_allocated_widget_providers(::dsa::control::v1::WidgetProviders* widget_providers) {
+inline void Envelope::unsafe_arena_set_allocated_accessibility_tree(::dsa::control::v1::AccessibilityTree* accessibility_tree) {
   clear_body();
-  if (widget_providers) {
-    set_has_widget_providers();
-    _impl_.body_.widget_providers_ = widget_providers;
+  if (accessibility_tree) {
+    set_has_accessibility_tree();
+    _impl_.body_.accessibility_tree_ = accessibility_tree;
   }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.widget_providers)
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.accessibility_tree)
 }
-inline ::dsa::control::v1::WidgetProviders* Envelope::_internal_mutable_widget_providers() {
-  if (!_internal_has_widget_providers()) {
+inline ::dsa::control::v1::AccessibilityTree* Envelope::_internal_mutable_accessibility_tree() {
+  if (!_internal_has_accessibility_tree()) {
     clear_body();
-    set_has_widget_providers();
-    _impl_.body_.widget_providers_ = CreateMaybeMessage< ::dsa::control::v1::WidgetProviders >(GetArenaForAllocation());
+    set_has_accessibility_tree();
+    _impl_.body_.accessibility_tree_ = CreateMaybeMessage< ::dsa::control::v1::AccessibilityTree >(GetArenaForAllocation());
   }
-  return _impl_.body_.widget_providers_;
+  return _impl_.body_.accessibility_tree_;
 }
-inline ::dsa::control::v1::WidgetProviders* Envelope::mutable_widget_providers() {
-  ::dsa::control::v1::WidgetProviders* _msg = _internal_mutable_widget_providers();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.widget_providers)
+inline ::dsa::control::v1::AccessibilityTree* Envelope::mutable_accessibility_tree() {
+  ::dsa::control::v1::AccessibilityTree* _msg = _internal_mutable_accessibility_tree();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.accessibility_tree)
   return _msg;
 }
 
-// .dsa.control.v1.AddWidget add_widget = 92;
-inline bool Envelope::_internal_has_add_widget() const {
-  return body_case() == kAddWidget;
+// .dsa.control.v1.AccessibilityAction accessibility_action = 82;
+inline bool Envelope::_internal_has_accessibility_action() const {
+  return body_case() == kAccessibilityAction;
 }
-inline bool Envelope::has_add_widget() const {
-  return _internal_has_add_widget();
+inline bool Envelope::has_accessibility_action() const {
+  return _internal_has_accessibility_action();
 }
-inline void Envelope::set_has_add_widget() {
-  _impl_._oneof_case_[0] = kAddWidget;
+inline void Envelope::set_has_accessibility_action() {
+  _impl_._oneof_case_[0] = kAccessibilityAction;
 }
-inline void Envelope::clear_add_widget() {
-  if (_internal_has_add_widget()) {
+inline void Envelope::clear_accessibility_action() {
+  if (_internal_has_accessibility_action()) {
     if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.add_widget_;
+      delete _impl_.body_.accessibility_action_;
     }
     clear_has_body();
   }
 }
-inline ::dsa::control::v1::AddWidget* Envelope::release_add_widget() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.add_widget)
-  if (_internal_has_add_widget()) {
+inline ::dsa::control::v1::AccessibilityAction* Envelope::release_accessibility_action() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.accessibility_action)
+  if (_internal_has_accessibility_action()) {
     clear_has_body();
-    ::dsa::control::v1::AddWidget* temp = _impl_.body_.add_widget_;
+    ::dsa::control::v1::AccessibilityAction* temp = _impl_.body_.accessibility_action_;
     if (GetArenaForAllocation() != nullptr) {
       temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
     }
-    _impl_.body_.add_widget_ = nullptr;
+    _impl_.body_.accessibility_action_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline const ::dsa::control::v1::AddWidget& Envelope::_internal_add_widget() const {
-  return _internal_has_add_widget()
-      ? *_impl_.body_.add_widget_
-      : reinterpret_cast< ::dsa::control::v1::AddWidget&>(::dsa::control::v1::_AddWidget_default_instance_);
+inline const ::dsa::control::v1::AccessibilityAction& Envelope::_internal_accessibility_action() const {
+  return _internal_has_accessibility_action()
+      ? *_impl_.body_.accessibility_action_
+      : reinterpret_cast< ::dsa::control::v1::AccessibilityAction&>(::dsa::control::v1::_AccessibilityAction_default_instance_);
 }
-inline const ::dsa::control::v1::AddWidget& Envelope::add_widget() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.add_widget)
-  return _internal_add_widget();
+inline const ::dsa::control::v1::AccessibilityAction& Envelope::accessibility_action() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.accessibility_action)
+  return _internal_accessibility_action();
 }
-inline ::dsa::control::v1::AddWidget* Envelope::unsafe_arena_release_add_widget() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.add_widget)
-  if (_internal_has_add_widget()) {
+inline ::dsa::control::v1::AccessibilityAction* Envelope::unsafe_arena_release_accessibility_action() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.accessibility_action)
+  if (_internal_has_accessibility_action()) {
     clear_has_body();
-    ::dsa::control::v1::AddWidget* temp = _impl_.body_.add_widget_;
-    _impl_.body_.add_widget_ = nullptr;
+    ::dsa::control::v1::AccessibilityAction* temp = _impl_.body_.accessibility_action_;
+    _impl_.body_.accessibility_action_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline void Envelope::unsafe_arena_set_allocated_add_widget(::dsa::control::v1::AddWidget* add_widget) {
+inline void Envelope::unsafe_arena_set_allocated_accessibility_action(::dsa::control::v1::AccessibilityAction* accessibility_action) {
   clear_body();
-  if (add_widget) {
-    set_has_add_widget();
-    _impl_.body_.add_widget_ = add_widget;
+  if (accessibility_action) {
+    set_has_accessibility_action();
+    _impl_.body_.accessibility_action_ = accessibility_action;
   }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.add_widget)
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.accessibility_action)
 }
-inline ::dsa::control::v1::AddWidget* Envelope::_internal_mutable_add_widget() {
-  if (!_internal_has_add_widget()) {
+inline ::dsa::control::v1::AccessibilityAction* Envelope::_internal_mutable_accessibility_action() {
+  if (!_internal_has_accessibility_action()) {
     clear_body();
-    set_has_add_widget();
-    _impl_.body_.add_widget_ = CreateMaybeMessage< ::dsa::control::v1::AddWidget >(GetArenaForAllocation());
+    set_has_accessibility_action();
+    _impl_.body_.accessibility_action_ = CreateMaybeMessage< ::dsa::control::v1::AccessibilityAction >(GetArenaForAllocation());
   }
-  return _impl_.body_.add_widget_;
+  return _impl_.body_.accessibility_action_;
 }
-inline ::dsa::control::v1::AddWidget* Envelope::mutable_add_widget() {
-  ::dsa::control::v1::AddWidget* _msg = _internal_mutable_add_widget();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.add_widget)
+inline ::dsa::control::v1::AccessibilityAction* Envelope::mutable_accessibility_action() {
+  ::dsa::control::v1::AccessibilityAction* _msg = _internal_mutable_accessibility_action();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.accessibility_action)
   return _msg;
 }
 
-// .dsa.control.v1.WidgetAdded widget_added = 93;
-inline bool Envelope::_internal_has_widget_added() const {
-  return body_case() == kWidgetAdded;
+// .dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;
+inline bool Envelope::_internal_has_accessibility_action_result() const {
+  return body_case() == kAccessibilityActionResult;
 }
-inline bool Envelope::has_widget_added() const {
-  return _internal_has_widget_added();
+inline bool Envelope::has_accessibility_action_result() const {
+  return _internal_has_accessibility_action_result();
 }
-inline void Envelope::set_has_widget_added() {
-  _impl_._oneof_case_[0] = kWidgetAdded;
+inline void Envelope::set_has_accessibility_action_result() {
+  _impl_._oneof_case_[0] = kAccessibilityActionResult;
 }
-inline void Envelope::clear_widget_added() {
-  if (_internal_has_widget_added()) {
+inline void Envelope::clear_accessibility_action_result() {
+  if (_internal_has_accessibility_action_result()) {
     if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.widget_added_;
+      delete _impl_.body_.accessibility_action_result_;
     }
     clear_has_body();
   }
 }
-inline ::dsa::control::v1::WidgetAdded* Envelope::release_widget_added() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.widget_added)
-  if (_internal_has_widget_added()) {
+inline ::dsa::control::v1::AccessibilityActionResult* Envelope::release_accessibility_action_result() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.accessibility_action_result)
+  if (_internal_has_accessibility_action_result()) {
     clear_has_body();
-    ::dsa::control::v1::WidgetAdded* temp = _impl_.body_.widget_added_;
+    ::dsa::control::v1::AccessibilityActionResult* temp = _impl_.body_.accessibility_action_result_;
     if (GetArenaForAllocation() != nullptr) {
       temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
     }
-    _impl_.body_.widget_added_ = nullptr;
+    _impl_.body_.accessibility_action_result_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline const ::dsa::control::v1::WidgetAdded& Envelope::_internal_widget_added() const {
-  return _internal_has_widget_added()
-      ? *_impl_.body_.widget_added_
-      : reinterpret_cast< ::dsa::control::v1::WidgetAdded&>(::dsa::control::v1::_WidgetAdded_default_instance_);
+inline const ::dsa::control::v1::AccessibilityActionResult& Envelope::_internal_accessibility_action_result() const {
+  return _internal_has_accessibility_action_result()
+      ? *_impl_.body_.accessibility_action_result_
+      : reinterpret_cast< ::dsa::control::v1::AccessibilityActionResult&>(::dsa::control::v1::_AccessibilityActionResult_default_instance_);
 }
-inline const ::dsa::control::v1::WidgetAdded& Envelope::widget_added() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.widget_added)
-  return _internal_widget_added();
+inline const ::dsa::control::v1::AccessibilityActionResult& Envelope::accessibility_action_result() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.accessibility_action_result)
+  return _internal_accessibility_action_result();
 }
-inline ::dsa::control::v1::WidgetAdded* Envelope::unsafe_arena_release_widget_added() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.widget_added)
-  if (_internal_has_widget_added()) {
+inline ::dsa::control::v1::AccessibilityActionResult* Envelope::unsafe_arena_release_accessibility_action_result() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.accessibility_action_result)
+  if (_internal_has_accessibility_action_result()) {
     clear_has_body();
-    ::dsa::control::v1::WidgetAdded* temp = _impl_.body_.widget_added_;
-    _impl_.body_.widget_added_ = nullptr;
+    ::dsa::control::v1::AccessibilityActionResult* temp = _impl_.body_.accessibility_action_result_;
+    _impl_.body_.accessibility_action_result_ = nullptr;
     return temp;
   } else {
     return nullptr;
   }
 }
-inline void Envelope::unsafe_arena_set_allocated_widget_added(::dsa::control::v1::WidgetAdded* widget_added) {
+inline void Envelope::unsafe_arena_set_allocated_accessibility_action_result(::dsa::control::v1::AccessibilityActionResult* accessibility_action_result) {
   clear_body();
-  if (widget_added) {
-    set_has_widget_added();
-    _impl_.body_.widget_added_ = widget_added;
+  if (accessibility_action_result) {
+    set_has_accessibility_action_result();
+    _impl_.body_.accessibility_action_result_ = accessibility_action_result;
   }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.widget_added)
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.accessibility_action_result)
 }
-inline ::dsa::control::v1::WidgetAdded* Envelope::_internal_mutable_widget_added() {
-  if (!_internal_has_widget_added()) {
+inline ::dsa::control::v1::AccessibilityActionResult* Envelope::_internal_mutable_accessibility_action_result() {
+  if (!_internal_has_accessibility_action_result()) {
     clear_body();
-    set_has_widget_added();
-    _impl_.body_.widget_added_ = CreateMaybeMessage< ::dsa::control::v1::WidgetAdded >(GetArenaForAllocation());
+    set_has_accessibility_action_result();
+    _impl_.body_.accessibility_action_result_ = CreateMaybeMessage< ::dsa::control::v1::AccessibilityActionResult >(GetArenaForAllocation());
   }
-  return _impl_.body_.widget_added_;
-}
-inline ::dsa::control::v1::WidgetAdded* Envelope::mutable_widget_added() {
-  ::dsa::control::v1::WidgetAdded* _msg = _internal_mutable_widget_added();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.widget_added)
-  return _msg;
-}
-
-// .dsa.control.v1.WidgetUpdated widget_updated = 94;
-inline bool Envelope::_internal_has_widget_updated() const {
-  return body_case() == kWidgetUpdated;
-}
-inline bool Envelope::has_widget_updated() const {
-  return _internal_has_widget_updated();
-}
-inline void Envelope::set_has_widget_updated() {
-  _impl_._oneof_case_[0] = kWidgetUpdated;
-}
-inline void Envelope::clear_widget_updated() {
-  if (_internal_has_widget_updated()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.widget_updated_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::WidgetUpdated* Envelope::release_widget_updated() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.widget_updated)
-  if (_internal_has_widget_updated()) {
-    clear_has_body();
-    ::dsa::control::v1::WidgetUpdated* temp = _impl_.body_.widget_updated_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.widget_updated_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::WidgetUpdated& Envelope::_internal_widget_updated() const {
-  return _internal_has_widget_updated()
-      ? *_impl_.body_.widget_updated_
-      : reinterpret_cast< ::dsa::control::v1::WidgetUpdated&>(::dsa::control::v1::_WidgetUpdated_default_instance_);
-}
-inline const ::dsa::control::v1::WidgetUpdated& Envelope::widget_updated() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.widget_updated)
-  return _internal_widget_updated();
-}
-inline ::dsa::control::v1::WidgetUpdated* Envelope::unsafe_arena_release_widget_updated() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.widget_updated)
-  if (_internal_has_widget_updated()) {
-    clear_has_body();
-    ::dsa::control::v1::WidgetUpdated* temp = _impl_.body_.widget_updated_;
-    _impl_.body_.widget_updated_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_widget_updated(::dsa::control::v1::WidgetUpdated* widget_updated) {
-  clear_body();
-  if (widget_updated) {
-    set_has_widget_updated();
-    _impl_.body_.widget_updated_ = widget_updated;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.widget_updated)
-}
-inline ::dsa::control::v1::WidgetUpdated* Envelope::_internal_mutable_widget_updated() {
-  if (!_internal_has_widget_updated()) {
-    clear_body();
-    set_has_widget_updated();
-    _impl_.body_.widget_updated_ = CreateMaybeMessage< ::dsa::control::v1::WidgetUpdated >(GetArenaForAllocation());
-  }
-  return _impl_.body_.widget_updated_;
-}
-inline ::dsa::control::v1::WidgetUpdated* Envelope::mutable_widget_updated() {
-  ::dsa::control::v1::WidgetUpdated* _msg = _internal_mutable_widget_updated();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.widget_updated)
-  return _msg;
-}
-
-// .dsa.control.v1.WidgetList widget_list = 95;
-inline bool Envelope::_internal_has_widget_list() const {
-  return body_case() == kWidgetList;
-}
-inline bool Envelope::has_widget_list() const {
-  return _internal_has_widget_list();
-}
-inline void Envelope::set_has_widget_list() {
-  _impl_._oneof_case_[0] = kWidgetList;
-}
-inline void Envelope::clear_widget_list() {
-  if (_internal_has_widget_list()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.widget_list_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::WidgetList* Envelope::release_widget_list() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.widget_list)
-  if (_internal_has_widget_list()) {
-    clear_has_body();
-    ::dsa::control::v1::WidgetList* temp = _impl_.body_.widget_list_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.widget_list_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::WidgetList& Envelope::_internal_widget_list() const {
-  return _internal_has_widget_list()
-      ? *_impl_.body_.widget_list_
-      : reinterpret_cast< ::dsa::control::v1::WidgetList&>(::dsa::control::v1::_WidgetList_default_instance_);
-}
-inline const ::dsa::control::v1::WidgetList& Envelope::widget_list() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.widget_list)
-  return _internal_widget_list();
-}
-inline ::dsa::control::v1::WidgetList* Envelope::unsafe_arena_release_widget_list() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.widget_list)
-  if (_internal_has_widget_list()) {
-    clear_has_body();
-    ::dsa::control::v1::WidgetList* temp = _impl_.body_.widget_list_;
-    _impl_.body_.widget_list_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_widget_list(::dsa::control::v1::WidgetList* widget_list) {
-  clear_body();
-  if (widget_list) {
-    set_has_widget_list();
-    _impl_.body_.widget_list_ = widget_list;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.widget_list)
-}
-inline ::dsa::control::v1::WidgetList* Envelope::_internal_mutable_widget_list() {
-  if (!_internal_has_widget_list()) {
-    clear_body();
-    set_has_widget_list();
-    _impl_.body_.widget_list_ = CreateMaybeMessage< ::dsa::control::v1::WidgetList >(GetArenaForAllocation());
-  }
-  return _impl_.body_.widget_list_;
-}
-inline ::dsa::control::v1::WidgetList* Envelope::mutable_widget_list() {
-  ::dsa::control::v1::WidgetList* _msg = _internal_mutable_widget_list();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.widget_list)
-  return _msg;
-}
-
-// .dsa.control.v1.RemoveWidget remove_widget = 96;
-inline bool Envelope::_internal_has_remove_widget() const {
-  return body_case() == kRemoveWidget;
-}
-inline bool Envelope::has_remove_widget() const {
-  return _internal_has_remove_widget();
-}
-inline void Envelope::set_has_remove_widget() {
-  _impl_._oneof_case_[0] = kRemoveWidget;
-}
-inline void Envelope::clear_remove_widget() {
-  if (_internal_has_remove_widget()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.remove_widget_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::RemoveWidget* Envelope::release_remove_widget() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.remove_widget)
-  if (_internal_has_remove_widget()) {
-    clear_has_body();
-    ::dsa::control::v1::RemoveWidget* temp = _impl_.body_.remove_widget_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.remove_widget_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::RemoveWidget& Envelope::_internal_remove_widget() const {
-  return _internal_has_remove_widget()
-      ? *_impl_.body_.remove_widget_
-      : reinterpret_cast< ::dsa::control::v1::RemoveWidget&>(::dsa::control::v1::_RemoveWidget_default_instance_);
-}
-inline const ::dsa::control::v1::RemoveWidget& Envelope::remove_widget() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.remove_widget)
-  return _internal_remove_widget();
-}
-inline ::dsa::control::v1::RemoveWidget* Envelope::unsafe_arena_release_remove_widget() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.remove_widget)
-  if (_internal_has_remove_widget()) {
-    clear_has_body();
-    ::dsa::control::v1::RemoveWidget* temp = _impl_.body_.remove_widget_;
-    _impl_.body_.remove_widget_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_remove_widget(::dsa::control::v1::RemoveWidget* remove_widget) {
-  clear_body();
-  if (remove_widget) {
-    set_has_remove_widget();
-    _impl_.body_.remove_widget_ = remove_widget;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.remove_widget)
-}
-inline ::dsa::control::v1::RemoveWidget* Envelope::_internal_mutable_remove_widget() {
-  if (!_internal_has_remove_widget()) {
-    clear_body();
-    set_has_remove_widget();
-    _impl_.body_.remove_widget_ = CreateMaybeMessage< ::dsa::control::v1::RemoveWidget >(GetArenaForAllocation());
-  }
-  return _impl_.body_.remove_widget_;
-}
-inline ::dsa::control::v1::RemoveWidget* Envelope::mutable_remove_widget() {
-  ::dsa::control::v1::RemoveWidget* _msg = _internal_mutable_remove_widget();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.remove_widget)
-  return _msg;
-}
-
-// .dsa.control.v1.ResizeWidget resize_widget = 97;
-inline bool Envelope::_internal_has_resize_widget() const {
-  return body_case() == kResizeWidget;
-}
-inline bool Envelope::has_resize_widget() const {
-  return _internal_has_resize_widget();
-}
-inline void Envelope::set_has_resize_widget() {
-  _impl_._oneof_case_[0] = kResizeWidget;
-}
-inline void Envelope::clear_resize_widget() {
-  if (_internal_has_resize_widget()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.resize_widget_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::ResizeWidget* Envelope::release_resize_widget() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.resize_widget)
-  if (_internal_has_resize_widget()) {
-    clear_has_body();
-    ::dsa::control::v1::ResizeWidget* temp = _impl_.body_.resize_widget_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.resize_widget_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::ResizeWidget& Envelope::_internal_resize_widget() const {
-  return _internal_has_resize_widget()
-      ? *_impl_.body_.resize_widget_
-      : reinterpret_cast< ::dsa::control::v1::ResizeWidget&>(::dsa::control::v1::_ResizeWidget_default_instance_);
-}
-inline const ::dsa::control::v1::ResizeWidget& Envelope::resize_widget() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.resize_widget)
-  return _internal_resize_widget();
-}
-inline ::dsa::control::v1::ResizeWidget* Envelope::unsafe_arena_release_resize_widget() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.resize_widget)
-  if (_internal_has_resize_widget()) {
-    clear_has_body();
-    ::dsa::control::v1::ResizeWidget* temp = _impl_.body_.resize_widget_;
-    _impl_.body_.resize_widget_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_resize_widget(::dsa::control::v1::ResizeWidget* resize_widget) {
-  clear_body();
-  if (resize_widget) {
-    set_has_resize_widget();
-    _impl_.body_.resize_widget_ = resize_widget;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.resize_widget)
-}
-inline ::dsa::control::v1::ResizeWidget* Envelope::_internal_mutable_resize_widget() {
-  if (!_internal_has_resize_widget()) {
-    clear_body();
-    set_has_resize_widget();
-    _impl_.body_.resize_widget_ = CreateMaybeMessage< ::dsa::control::v1::ResizeWidget >(GetArenaForAllocation());
-  }
-  return _impl_.body_.resize_widget_;
-}
-inline ::dsa::control::v1::ResizeWidget* Envelope::mutable_resize_widget() {
-  ::dsa::control::v1::ResizeWidget* _msg = _internal_mutable_resize_widget();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.resize_widget)
-  return _msg;
-}
-
-// .dsa.control.v1.WidgetFrame widget_frame = 98;
-inline bool Envelope::_internal_has_widget_frame() const {
-  return body_case() == kWidgetFrame;
-}
-inline bool Envelope::has_widget_frame() const {
-  return _internal_has_widget_frame();
-}
-inline void Envelope::set_has_widget_frame() {
-  _impl_._oneof_case_[0] = kWidgetFrame;
-}
-inline void Envelope::clear_widget_frame() {
-  if (_internal_has_widget_frame()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.widget_frame_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::WidgetFrame* Envelope::release_widget_frame() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.widget_frame)
-  if (_internal_has_widget_frame()) {
-    clear_has_body();
-    ::dsa::control::v1::WidgetFrame* temp = _impl_.body_.widget_frame_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.widget_frame_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::WidgetFrame& Envelope::_internal_widget_frame() const {
-  return _internal_has_widget_frame()
-      ? *_impl_.body_.widget_frame_
-      : reinterpret_cast< ::dsa::control::v1::WidgetFrame&>(::dsa::control::v1::_WidgetFrame_default_instance_);
-}
-inline const ::dsa::control::v1::WidgetFrame& Envelope::widget_frame() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.widget_frame)
-  return _internal_widget_frame();
-}
-inline ::dsa::control::v1::WidgetFrame* Envelope::unsafe_arena_release_widget_frame() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.widget_frame)
-  if (_internal_has_widget_frame()) {
-    clear_has_body();
-    ::dsa::control::v1::WidgetFrame* temp = _impl_.body_.widget_frame_;
-    _impl_.body_.widget_frame_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_widget_frame(::dsa::control::v1::WidgetFrame* widget_frame) {
-  clear_body();
-  if (widget_frame) {
-    set_has_widget_frame();
-    _impl_.body_.widget_frame_ = widget_frame;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.widget_frame)
-}
-inline ::dsa::control::v1::WidgetFrame* Envelope::_internal_mutable_widget_frame() {
-  if (!_internal_has_widget_frame()) {
-    clear_body();
-    set_has_widget_frame();
-    _impl_.body_.widget_frame_ = CreateMaybeMessage< ::dsa::control::v1::WidgetFrame >(GetArenaForAllocation());
-  }
-  return _impl_.body_.widget_frame_;
-}
-inline ::dsa::control::v1::WidgetFrame* Envelope::mutable_widget_frame() {
-  ::dsa::control::v1::WidgetFrame* _msg = _internal_mutable_widget_frame();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.widget_frame)
-  return _msg;
-}
-
-// .dsa.control.v1.WidgetPointer widget_pointer = 99;
-inline bool Envelope::_internal_has_widget_pointer() const {
-  return body_case() == kWidgetPointer;
-}
-inline bool Envelope::has_widget_pointer() const {
-  return _internal_has_widget_pointer();
-}
-inline void Envelope::set_has_widget_pointer() {
-  _impl_._oneof_case_[0] = kWidgetPointer;
-}
-inline void Envelope::clear_widget_pointer() {
-  if (_internal_has_widget_pointer()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.widget_pointer_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::WidgetPointer* Envelope::release_widget_pointer() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.widget_pointer)
-  if (_internal_has_widget_pointer()) {
-    clear_has_body();
-    ::dsa::control::v1::WidgetPointer* temp = _impl_.body_.widget_pointer_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.widget_pointer_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::WidgetPointer& Envelope::_internal_widget_pointer() const {
-  return _internal_has_widget_pointer()
-      ? *_impl_.body_.widget_pointer_
-      : reinterpret_cast< ::dsa::control::v1::WidgetPointer&>(::dsa::control::v1::_WidgetPointer_default_instance_);
-}
-inline const ::dsa::control::v1::WidgetPointer& Envelope::widget_pointer() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.widget_pointer)
-  return _internal_widget_pointer();
-}
-inline ::dsa::control::v1::WidgetPointer* Envelope::unsafe_arena_release_widget_pointer() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.widget_pointer)
-  if (_internal_has_widget_pointer()) {
-    clear_has_body();
-    ::dsa::control::v1::WidgetPointer* temp = _impl_.body_.widget_pointer_;
-    _impl_.body_.widget_pointer_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_widget_pointer(::dsa::control::v1::WidgetPointer* widget_pointer) {
-  clear_body();
-  if (widget_pointer) {
-    set_has_widget_pointer();
-    _impl_.body_.widget_pointer_ = widget_pointer;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.widget_pointer)
-}
-inline ::dsa::control::v1::WidgetPointer* Envelope::_internal_mutable_widget_pointer() {
-  if (!_internal_has_widget_pointer()) {
-    clear_body();
-    set_has_widget_pointer();
-    _impl_.body_.widget_pointer_ = CreateMaybeMessage< ::dsa::control::v1::WidgetPointer >(GetArenaForAllocation());
-  }
-  return _impl_.body_.widget_pointer_;
-}
-inline ::dsa::control::v1::WidgetPointer* Envelope::mutable_widget_pointer() {
-  ::dsa::control::v1::WidgetPointer* _msg = _internal_mutable_widget_pointer();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.widget_pointer)
+  return _impl_.body_.accessibility_action_result_;
+}
+inline ::dsa::control::v1::AccessibilityActionResult* Envelope::mutable_accessibility_action_result() {
+  ::dsa::control::v1::AccessibilityActionResult* _msg = _internal_mutable_accessibility_action_result();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.accessibility_action_result)
   return _msg;
 }
 
@@ -20538,16 +19738,6 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
-// -------------------------------------------------------------------
-
-// -------------------------------------------------------------------
-
-// -------------------------------------------------------------------
-
-// -------------------------------------------------------------------
-
-// -------------------------------------------------------------------
-
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
@@ -20671,6 +19861,7 @@ template <> struct is_proto_enum< ::dsa::control::v1::PointerTool> : ::std::true
 template <> struct is_proto_enum< ::dsa::control::v1::KeyAction> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::InstallStatus> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::FileAction> : ::std::true_type {};
+template <> struct is_proto_enum< ::dsa::control::v1::NodeAction> : ::std::true_type {};
 
 PROTOBUF_NAMESPACE_CLOSE
 

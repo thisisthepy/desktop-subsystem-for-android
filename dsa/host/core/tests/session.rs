@@ -2832,6 +2832,132 @@ fn nfr5_word_on_an_install_that_is_not_under_way_is_dropped() {
         .expect("the session goes on");
 }
 
+fn accessibility_watch(task_id: i32, on: bool) -> Body {
+    Body::AccessibilityWatch(dsa_protocol::control::AccessibilityWatch { task_id, on })
+}
+
+fn accessibility_tree(task_id: i32, epoch: u32, nodes: u32) -> Body {
+    use dsa_protocol::control::{AccessibilityNode, AccessibilityTree};
+    Body::AccessibilityTree(AccessibilityTree {
+        task_id,
+        epoch,
+        full: true,
+        root_ids: vec![1],
+        nodes: (1..=nodes)
+            .map(|id| AccessibilityNode {
+                id,
+                child_ids: if id == 1 {
+                    (2..=nodes).collect()
+                } else {
+                    vec![]
+                },
+                class_name: "android.widget.TextView".into(),
+                text: format!("item {id}"),
+                ..AccessibilityNode::default()
+            })
+            .collect(),
+        ..AccessibilityTree::default()
+    })
+}
+
+#[test]
+fn fr18_the_guest_reads_a_tree_only_while_a_host_client_watches_it() {
+    use dsa_host_core::accessibility::GuestAccessibility;
+    let (session, mut agent, _launcher) = active_session();
+    let first = session.watch_accessibility(7);
+    assert_eq!(next_body(&mut agent), accessibility_watch(7, true));
+    let second = session.watch_accessibility(7);
+    // A second watch asks for a full tree again, for its own start.
+    assert_eq!(next_body(&mut agent), accessibility_watch(7, true));
+    send_body(&mut agent, accessibility_tree(7, 1, 3));
+    for watch in [&first, &second] {
+        match watch.updates.recv_timeout(WAIT).unwrap() {
+            GuestAccessibility::Tree(tree) => {
+                assert_eq!(tree.task_id, 7);
+                assert_eq!(tree.nodes.len(), 3);
+                assert_eq!(tree.nodes[1].text, "item 2");
+            }
+            other => panic!("expected a tree, got {other:?}"),
+        }
+    }
+    // Another task's tree reaches neither.
+    send_body(&mut agent, accessibility_tree(8, 1, 2));
+    assert!(first
+        .updates
+        .recv_timeout(Duration::from_millis(200))
+        .is_err());
+    drop(first);
+    nothing_for_the_guest(&mut agent);
+    drop(second);
+    assert_eq!(next_body(&mut agent), accessibility_watch(7, false));
+    assert_eq!(session.state(), SessionState::Active);
+}
+
+#[test]
+fn fr18_a_new_agent_is_asked_again_for_every_watched_tree() {
+    let (session, mut agent, _launcher) = active_session();
+    let _watch = session.watch_accessibility(7);
+    assert_eq!(next_body(&mut agent), accessibility_watch(7, true));
+    report_boot(&mut agent, true, false);
+    thread::sleep(Duration::from_millis(50));
+    report_boot(&mut agent, true, true);
+    assert_eq!(next_body(&mut agent), accessibility_watch(7, true));
+}
+
+#[test]
+fn fr18_actions_go_to_the_guest_and_their_results_come_back() {
+    use dsa_host_core::accessibility::{ActionRequest, GuestAccessibility, NodeAction};
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_accessibility(7);
+    assert_eq!(next_body(&mut agent), accessibility_watch(7, true));
+    let action = ActionRequest {
+        epoch: 1,
+        node_id: 3,
+        action: NodeAction::Click,
+        text: String::new(),
+        request_id: 5,
+    };
+    session.accessibility_action(7, &action).unwrap();
+    assert_eq!(
+        next_body(&mut agent),
+        Body::AccessibilityAction(action.to_control(7))
+    );
+    send_body(
+        &mut agent,
+        Body::AccessibilityActionResult(dsa_protocol::control::AccessibilityActionResult {
+            task_id: 7,
+            request_id: 5,
+            done: true,
+            error: String::new(),
+        }),
+    );
+    match watch.updates.recv_timeout(WAIT).unwrap() {
+        GuestAccessibility::ActionResult(result) => {
+            assert_eq!(result.request_id, 5);
+            assert_eq!(result.outcome, Ok(()));
+        }
+        other => panic!("expected a result, got {other:?}"),
+    }
+}
+
+#[test]
+fn nfr5_an_oversized_accessibility_tree_is_dropped_and_the_session_goes_on() {
+    use dsa_host_core::accessibility::MAX_NODES;
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_accessibility(7);
+    assert_eq!(next_body(&mut agent), accessibility_watch(7, true));
+    send_body(&mut agent, accessibility_tree(7, 1, MAX_NODES as u32 + 10));
+    assert!(watch
+        .updates
+        .recv_timeout(Duration::from_millis(300))
+        .is_err());
+    // Host-only messages from the guest are dropped too.
+    send_body(&mut agent, accessibility_watch(7, true));
+    send_body(&mut agent, accessibility_tree(7, 2, 2));
+    assert!(watch.updates.recv_timeout(WAIT).is_ok());
+    assert_eq!(session.state(), SessionState::Active);
+}
+
 fn clock_widget() -> dsa_protocol::control::WidgetProvider {
     dsa_protocol::control::WidgetProvider {
         provider: "com.example.clock/.ClockWidget".into(),

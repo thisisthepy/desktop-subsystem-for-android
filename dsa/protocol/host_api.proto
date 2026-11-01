@@ -755,6 +755,100 @@ message Settings {
   bool clipboard = 9;
 }
 
+// Turns the connection into the accessibility tree of one of the caller's task windows, for a
+// host accessibility client (a screen reader, an inspection tool) that reads that window.
+// After the answer (Done), the service sends an AccessibilityTree each time the task's tree
+// arrives from Android or changes in it (a full tree first), and an AccessibilityActionResult
+// for each AccessibilityAction the client sends. Android reads the task's accessibility nodes
+// only while at least one such connection for the task is open: closing the last one stops
+// it. The connection lasts across restarts of the Android, which sends a full tree again.
+message WatchAccessibility {
+  int32 task_id = 1;
+}
+
+// What can be done to an accessibility node.
+enum NodeAction {
+  NODE_ACTION_UNSPECIFIED = 0;
+  NODE_ACTION_CLICK = 1;
+  NODE_ACTION_LONG_CLICK = 2;
+  NODE_ACTION_SET_TEXT = 3;
+  NODE_ACTION_SCROLL_FORWARD = 4;
+  NODE_ACTION_SCROLL_BACKWARD = 5;
+  NODE_ACTION_FOCUS = 6;
+  NODE_ACTION_ACCESSIBILITY_FOCUS = 7;
+  NODE_ACTION_SELECT = 8;
+}
+
+// The range a slider or a progress bar has, and where it stands in it.
+message NodeRange {
+  float min = 1;
+  float max = 2;
+  float current = 3;
+}
+
+// One accessibility node of a task, as Android describes it.
+message AccessibilityNode {
+  // Unique among the nodes of one tree epoch, never 0.
+  uint32 id = 1;
+  repeated uint32 child_ids = 2;
+  // The Android class the node says it is, from which its role is worked out.
+  string class_name = 3;
+  string text = 4;
+  string content_description = 5;
+  string hint = 6;
+  string view_id = 7;
+  // In pixels of the task's window: (0, 0) is the window's top left.
+  Rect bounds = 8;
+  bool checkable = 9;
+  bool checked = 10;
+  bool selected = 11;
+  bool enabled = 12;
+  bool focusable = 13;
+  bool focused = 14;
+  bool scrollable = 15;
+  bool clickable = 16;
+  bool long_clickable = 17;
+  bool editable = 18;
+  bool password = 19;
+  bool heading = 20;
+  NodeRange range = 21;
+  repeated NodeAction actions = 22;
+  string state_description = 23;
+}
+
+// A task's accessibility tree, or what changed in it, on a connection that watches it
+// (WatchAccessibility). A full tree replaces what came before and starts a new epoch; a change
+// names the epoch it applies to, carries each new or changed node whole, and the IDs of the
+// nodes that are gone.
+message AccessibilityTree {
+  int32 task_id = 1;
+  uint32 epoch = 2;
+  bool full = 3;
+  repeated uint32 root_ids = 4;
+  repeated AccessibilityNode nodes = 5;
+  repeated uint32 removed_ids = 6;
+  // The node with the input focus, or 0 for none.
+  uint32 focused_id = 7;
+}
+
+// Client to service, on a connection that watches a task's tree: do something to one of its
+// nodes. Not answered as a request: an AccessibilityActionResult with the same request_id
+// follows.
+message AccessibilityAction {
+  uint32 epoch = 1;
+  uint32 node_id = 2;
+  NodeAction action = 3;
+  string text = 4;
+  uint32 request_id = 5;
+}
+
+// What came of an AccessibilityAction.
+message AccessibilityActionResult {
+  uint32 request_id = 1;
+  bool done = 2;
+  string error = 3;
+}
+
 // What went wrong with a request.
 enum ErrorCode {
   ERROR_CODE_UNSPECIFIED = 0;
@@ -817,13 +911,14 @@ message Request {
     WatchNotifications watch_notifications = 23;
     ActOnNotification act_on_notification = 24;
     InstallApk install_apk = 27;
-    ListWidgetProviders list_widget_providers = 28;
-    AddWidget add_widget = 29;
-    RemoveWidget remove_widget = 30;
-    ListWidgets list_widgets = 31;
-    WatchWidgets watch_widgets = 32;
-    PlaceWidget place_widget = 33;
-    WidgetPointer widget_pointer = 34;
+    ListWidgetProviders list_widget_providers = 29;
+    AddWidget add_widget = 30;
+    RemoveWidget remove_widget = 31;
+    ListWidgets list_widgets = 32;
+    WatchWidgets watch_widgets = 33;
+    PlaceWidget place_widget = 34;
+    WatchAccessibility watch_accessibility = 28;
+    WidgetPointer widget_pointer = 35;
   }
 }
 
@@ -865,6 +960,9 @@ message Envelope {
     Notification notification = 15;
     NotificationRemoved notification_removed = 16;
     ApkChunk apk_chunk = 14;
-    WidgetEvent widget_event = 17;
+    AccessibilityTree accessibility_tree = 17;
+    AccessibilityAction accessibility_action = 18;
+    AccessibilityActionResult accessibility_action_result = 19;
+    WidgetEvent widget_event = 20;
   }
 }

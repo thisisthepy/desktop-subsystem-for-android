@@ -378,6 +378,44 @@ taken. One install runs at a time; a second waits for the first. A refusal carri
 reason (`incompatible`, `conflicting-signature`, `invalid-apk`, `insufficient-storage`,
 `downgrade`, `blocked` or `other`) and Android's own message. An installed app appears in the
 Start menu like every other app Android reports.
+### Accessibility
+
+Each task window has a UI Automation tree made of the Android app's accessibility nodes
+(`src/app_window/accessibility.rs`), so Narrator and other screen readers read the app, and
+inspection tools see it.
+
+- A client that reads a window sends it `WM_GETOBJECT`. The window answers with a fragment
+  root whose children are the task's nodes, and the first request starts a thread in the
+  window program that watches the task's tree through the service's local API
+  (`WatchAccessibility`). The service asks the agent in Android for it. Before any client asks,
+  nothing runs.
+- Each node has the control type of its role (a Settings row is a list item, a switch is a
+  button with the Toggle pattern), the name Android gives it (a row without one takes the text
+  inside it), and its bounds on the screen: the window's client area plus the node's place in
+  the task, which is 1:1 with the window's pixels. Nodes support Invoke, Value, Toggle,
+  SelectionItem and Scroll as they can (`src/ui_automation.rs`). Each pattern call becomes the
+  node's accessibility action in Android, so Invoke presses a row without moving the pointer.
+- As changes arrive the window raises structure changed events, property changed events (name,
+  value, toggle state, selection, enabled, bounds) and focus changed events, while a client
+  listens for them.
+- Once no client has asked for the tree for 30 seconds and none listens for events
+  (`UiaClientsAreListening`), the thread ends, the connection closes, and Android stops reading
+  the task and turns its accessibility service off when no other window is read.
+- A tree with more than 4000 nodes, or one that is not a tree, is dropped and logged in
+  `dsa-app-window.log`, and the watch starts over.
+
+To check it:
+
+1. Open Settings in Android.
+2. Run `inspect.exe` from the Windows SDK, or Accessibility Insights for Windows, and point it
+   at the Settings window. Its tree shows list items named as the rows read, and each one's
+   bounding rectangle sits on the row.
+3. Invoke a list item (Inspect: Action, Invoke). Settings opens that screen, the pointer does
+   not move, and the tree shows the new screen within a second.
+4. Close the tool, wait 30 seconds, and run `adb shell settings get secure
+   enabled_accessibility_services` from a debug build: the agent's service is no longer listed.
+5. Start Narrator (Ctrl+Win+Enter), focus the Settings window, and move through its items
+   (Caps Lock+Right). Narrator reads each list item.
 
 ## Sleep
 

@@ -503,114 +503,48 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.NotificationDismissed getNotificationDismissed();
 
   /**
-   * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
-   * @return Whether the listWidgetProviders field is set.
+   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+   * @return Whether the accessibilityWatch field is set.
    */
-  boolean hasListWidgetProviders();
+  boolean hasAccessibilityWatch();
   /**
-   * <code>.dsa.control.v1.ListWidgetProviders list_widget_providers = 90;</code>
-   * @return The listWidgetProviders.
+   * <code>.dsa.control.v1.AccessibilityWatch accessibility_watch = 80;</code>
+   * @return The accessibilityWatch.
    */
-  io.github.thisisthepy.dsa.control.v1.ListWidgetProviders getListWidgetProviders();
+  io.github.thisisthepy.dsa.control.v1.AccessibilityWatch getAccessibilityWatch();
 
   /**
-   * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
-   * @return Whether the widgetProviders field is set.
+   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+   * @return Whether the accessibilityTree field is set.
    */
-  boolean hasWidgetProviders();
+  boolean hasAccessibilityTree();
   /**
-   * <code>.dsa.control.v1.WidgetProviders widget_providers = 91;</code>
-   * @return The widgetProviders.
+   * <code>.dsa.control.v1.AccessibilityTree accessibility_tree = 81;</code>
+   * @return The accessibilityTree.
    */
-  io.github.thisisthepy.dsa.control.v1.WidgetProviders getWidgetProviders();
+  io.github.thisisthepy.dsa.control.v1.AccessibilityTree getAccessibilityTree();
 
   /**
-   * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
-   * @return Whether the addWidget field is set.
+   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+   * @return Whether the accessibilityAction field is set.
    */
-  boolean hasAddWidget();
+  boolean hasAccessibilityAction();
   /**
-   * <code>.dsa.control.v1.AddWidget add_widget = 92;</code>
-   * @return The addWidget.
+   * <code>.dsa.control.v1.AccessibilityAction accessibility_action = 82;</code>
+   * @return The accessibilityAction.
    */
-  io.github.thisisthepy.dsa.control.v1.AddWidget getAddWidget();
+  io.github.thisisthepy.dsa.control.v1.AccessibilityAction getAccessibilityAction();
 
   /**
-   * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
-   * @return Whether the widgetAdded field is set.
+   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+   * @return Whether the accessibilityActionResult field is set.
    */
-  boolean hasWidgetAdded();
+  boolean hasAccessibilityActionResult();
   /**
-   * <code>.dsa.control.v1.WidgetAdded widget_added = 93;</code>
-   * @return The widgetAdded.
+   * <code>.dsa.control.v1.AccessibilityActionResult accessibility_action_result = 83;</code>
+   * @return The accessibilityActionResult.
    */
-  io.github.thisisthepy.dsa.control.v1.WidgetAdded getWidgetAdded();
-
-  /**
-   * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
-   * @return Whether the widgetUpdated field is set.
-   */
-  boolean hasWidgetUpdated();
-  /**
-   * <code>.dsa.control.v1.WidgetUpdated widget_updated = 94;</code>
-   * @return The widgetUpdated.
-   */
-  io.github.thisisthepy.dsa.control.v1.WidgetUpdated getWidgetUpdated();
-
-  /**
-   * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
-   * @return Whether the widgetList field is set.
-   */
-  boolean hasWidgetList();
-  /**
-   * <code>.dsa.control.v1.WidgetList widget_list = 95;</code>
-   * @return The widgetList.
-   */
-  io.github.thisisthepy.dsa.control.v1.WidgetList getWidgetList();
-
-  /**
-   * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
-   * @return Whether the removeWidget field is set.
-   */
-  boolean hasRemoveWidget();
-  /**
-   * <code>.dsa.control.v1.RemoveWidget remove_widget = 96;</code>
-   * @return The removeWidget.
-   */
-  io.github.thisisthepy.dsa.control.v1.RemoveWidget getRemoveWidget();
-
-  /**
-   * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
-   * @return Whether the resizeWidget field is set.
-   */
-  boolean hasResizeWidget();
-  /**
-   * <code>.dsa.control.v1.ResizeWidget resize_widget = 97;</code>
-   * @return The resizeWidget.
-   */
-  io.github.thisisthepy.dsa.control.v1.ResizeWidget getResizeWidget();
-
-  /**
-   * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
-   * @return Whether the widgetFrame field is set.
-   */
-  boolean hasWidgetFrame();
-  /**
-   * <code>.dsa.control.v1.WidgetFrame widget_frame = 98;</code>
-   * @return The widgetFrame.
-   */
-  io.github.thisisthepy.dsa.control.v1.WidgetFrame getWidgetFrame();
-
-  /**
-   * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
-   * @return Whether the widgetPointer field is set.
-   */
-  boolean hasWidgetPointer();
-  /**
-   * <code>.dsa.control.v1.WidgetPointer widget_pointer = 99;</code>
-   * @return The widgetPointer.
-   */
-  io.github.thisisthepy.dsa.control.v1.WidgetPointer getWidgetPointer();
+  io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult getAccessibilityActionResult();
 
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

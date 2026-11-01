@@ -35,6 +35,10 @@
 //! on the caller's desktop, each with where its window goes, then every frame and change. The
 //! service remembers where each window is ([`HostApiClient::place_widget`]) in a
 //! [`WidgetPlacements`] store, and forgets it when the widget is removed.
+//!
+//! A client that watches a task's accessibility tree ([`HostApiClient::watch_accessibility`])
+//! receives the tree and its changes, and sends actions on its nodes, on the same connection.
+//! The caller's Android reads the task's tree only while such a connection is open.
 
 use std::collections::HashMap;
 use std::io::{self, Read};
@@ -53,6 +57,9 @@ use dsa_protocol::host_api::{
 use dsa_transport::local::{LocalListener, Peer};
 use dsa_transport::{Connection, Connector, TransportError};
 
+use crate::accessibility::{
+    AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, TreeUpdate,
+};
 use crate::apk::{self, InstallOutcome};
 use crate::files::{self, FileAction, FileTransfer};
 use crate::ime::{ImeCursor, ImeEvent};
@@ -231,6 +238,24 @@ pub trait UserAndroid: Send + Sync {
             "this Android does not install APKs".into(),
         ))
     }
+    /// Watches a task's accessibility tree; Android reads it while any watch of the task
+    /// lasts. `None` when this Android does not export its accessibility tree.
+    fn watch_accessibility(&self, task_id: i32) -> Option<AccessibilityWatch> {
+        let _ = task_id;
+        None
+    }
+    /// Asks this Android to do an action on a node of a task; the answer arrives on the
+    /// task's watches.
+    fn accessibility_action(
+        &self,
+        task_id: i32,
+        action: &ActionRequest,
+    ) -> Result<(), TaskRequestError> {
+        let _ = (task_id, action);
+        Err(TaskRequestError::Failed(
+            "this Android does not export its accessibility tree".into(),
+        ))
+    }
 }
 
 /// Why an APK did not reach Android.
@@ -353,6 +378,16 @@ impl UserAndroid for Session {
             SessionError::InstallRefused(why) => InstallError::Refused(why),
             other => InstallError::Refused(format!("the APK did not reach Android: {other}")),
         })
+    }
+    fn watch_accessibility(&self, task_id: i32) -> Option<AccessibilityWatch> {
+        Some(Session::watch_accessibility(self, task_id))
+    }
+    fn accessibility_action(
+        &self,
+        task_id: i32,
+        action: &ActionRequest,
+    ) -> Result<(), TaskRequestError> {
+        Session::accessibility_action(self, task_id, action).map_err(request_error)
     }
 }
 
@@ -693,6 +728,11 @@ const INSTALL_ANSWER_WAIT: Duration = Duration::from_secs(30 * 60);
 /// again.
 const LINK_POLL: Duration = Duration::from_millis(100);
 
+/// How long a connection that watches an accessibility tree waits for its client's next action
+/// before it looks for news from Android again. Short against the second a change may take to
+/// reach a host client.
+const ACCESSIBILITY_POLL: Duration = Duration::from_millis(30);
+
 /// How long the service waits for the next piece of a file a client sends. A client reads
 /// the file before it starts, so a gap this long means it is stuck or gone.
 const FILE_CHUNK_WAIT: Duration = Duration::from_secs(30);
@@ -904,6 +944,9 @@ impl HostApiService {
             if let Some(request::Body::WatchLinks(_)) = request.body {
                 return self.watch_links(connection, &peer, request.id);
             }
+            if let Some(request::Body::WatchAccessibility(watch)) = &request.body {
+                return self.watch_accessibility(connection, &peer, request.id, watch.task_id);
+            }
             if let Some(request::Body::OpenFile(open)) = &request.body {
                 return self.open_file(connection, &peer, request.id, open.clone());
             }
@@ -982,6 +1025,114 @@ impl HostApiService {
     /// Answers a StreamInput request, then passes every pointer, key and text event the client sends to
     /// its Android until the client goes away. Input to an Android that is not running is
     /// dropped: the window that sends it can do nothing better with it.
+    /// Answers a WatchAccessibility request, then sends the task's tree and the answers to the
+    /// client's actions as they come from the caller's Android, and passes each action the
+    /// client sends to it, until the client goes away. Closing the connection ends the watch,
+    /// so Android stops reading the task's tree once no client watches it. A client that sends
+    /// anything but an action is disconnected.
+    fn watch_accessibility(
+        &self,
+        mut connection: Box<dyn Connection>,
+        peer: &Peer,
+        id: u64,
+        task_id: i32,
+    ) {
+        let watch = match self.androids.android(&peer.user) {
+            Err(why) => Err(error(ErrorCode::Unavailable, why)),
+            Ok(android) => match android.watch_accessibility(task_id) {
+                Some(watch) => Ok((android, watch)),
+                None => Err(error(
+                    ErrorCode::Unavailable,
+                    "this Android does not export its accessibility tree".into(),
+                )),
+            },
+        };
+        let (android, watch) = match watch {
+            Ok(watch) => watch,
+            Err(body) => {
+                let _ = send(
+                    &mut *connection,
+                    Body::Response(Response {
+                        id,
+                        body: Some(body),
+                    }),
+                );
+                return;
+            }
+        };
+        let answer = Response {
+            id,
+            body: Some(response::Body::Done(types::Done {})),
+        };
+        if send(&mut *connection, Body::Response(answer)).is_err() {
+            return;
+        }
+        loop {
+            loop {
+                let frame = match watch.updates.try_recv() {
+                    Ok(GuestAccessibility::Tree(tree)) => {
+                        Body::AccessibilityTree(tree.to_host_api())
+                    }
+                    Ok(GuestAccessibility::ActionResult(result)) => {
+                        Body::AccessibilityActionResult(result.to_host_api())
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        connection.close();
+                        return;
+                    }
+                };
+                if send(&mut *connection, frame).is_err() {
+                    return;
+                }
+            }
+            let frame = match connection.recv(Some(ACCESSIBILITY_POLL)) {
+                Err(TransportError::Timeout) => continue,
+                Err(_) => return,
+                Ok(frame) => frame,
+            };
+            let action = match decode(&frame) {
+                Ok(Envelope {
+                    body: Some(Body::AccessibilityAction(action)),
+                }) => ActionRequest::from_host_api(action),
+                _ => Err("something other than an action arrived".to_string()),
+            };
+            match action {
+                Ok(action) => {
+                    let request_id = action.request_id;
+                    if let Err(error) = android.accessibility_action(task_id, &action) {
+                        let why = match error {
+                            TaskRequestError::NotRunning(why) | TaskRequestError::Failed(why) => {
+                                why
+                            }
+                        };
+                        let result = ActionResult {
+                            request_id,
+                            outcome: Err(why),
+                        };
+                        if send(
+                            &mut *connection,
+                            Body::AccessibilityActionResult(result.to_host_api()),
+                        )
+                        .is_err()
+                        {
+                            return;
+                        }
+                    }
+                }
+                Err(why) => {
+                    eprintln!(
+                        "local API: a client of {} broke the accessibility watch of task \
+                         {task_id} ({why}); closing its connection",
+                        peer.user
+                    );
+                    connection.close();
+                    return;
+                }
+            }
+        }
+    }
+
     /// Answers a WatchLinks request, then sends each web link the caller's Android opens until
     /// the client goes away. A client that sends anything on this connection is disconnected.
     fn watch_links(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
@@ -2003,7 +2154,8 @@ impl HostApiService {
                         | request::Body::ListWidgets(_)
                         | request::Body::WatchWidgets(_)
                         | request::Body::PlaceWidget(_)
-                        | request::Body::WidgetPointer(_) => unreachable!("answered above"),
+                        | request::Body::WidgetPointer(_)
+                        | request::Body::WatchAccessibility(_) => unreachable!("answered above"),
                     }
                     status(android.as_ref())
                 }
@@ -2701,6 +2853,24 @@ impl HostApiClient {
         }
     }
 
+    /// Watches the accessibility tree of the caller's task `task_id`: its tree and the answers
+    /// to actions arrive on the stream, which also sends the actions. The caller's Android
+    /// reads the tree until the stream is dropped. The connection carries nothing else from
+    /// here on, so the client is used up.
+    pub fn watch_accessibility(mut self, task_id: i32) -> Result<AccessibilityStream, ClientError> {
+        match self.exchange(
+            request::Body::WatchAccessibility(types::WatchAccessibility { task_id }),
+            self.timeout,
+        )? {
+            response::Body::Done(_) => Ok(AccessibilityStream {
+                connection: self.connection,
+            }),
+            _ => Err(ClientError::Malformed(
+                "expected the answer that the tree is watched".into(),
+            )),
+        }
+    }
+
     /// Sends `file` to the caller's Android, which asks the user which app opens or takes it.
     /// Returns once Android has asked. The connection ends with the transfer, so the client
     /// is used up.
@@ -3087,6 +3257,49 @@ impl ClipboardStream {
             Ok(_) => Err(ClientError::Malformed("expected clipboard text".into())),
             Err(error) => Err(ClientError::Malformed(error.to_string())),
         }
+    }
+}
+
+/// A task's accessibility tree, from [`HostApiClient::watch_accessibility`].
+pub struct AccessibilityStream {
+    connection: Box<dyn Connection>,
+}
+
+impl AccessibilityStream {
+    /// The next tree, change or action result, waiting at most `timeout`. `Ok(None)` means
+    /// nothing came in time; an error means the connection has ended. A tree that breaks the
+    /// rules (too many nodes, say) is an error too, and the stream should be dropped.
+    pub fn next(&mut self, timeout: Duration) -> Result<Option<GuestAccessibility>, ClientError> {
+        let frame = match self.connection.recv(Some(timeout)) {
+            Ok(frame) => frame,
+            Err(TransportError::Timeout) => return Ok(None),
+            Err(error) => return Err(ClientError::Transport(error)),
+        };
+        match decode(&frame) {
+            Ok(Envelope {
+                body: Some(Body::AccessibilityTree(tree)),
+            }) => TreeUpdate::from_host_api(tree)
+                .map(|tree| Some(GuestAccessibility::Tree(tree)))
+                .map_err(ClientError::Malformed),
+            Ok(Envelope {
+                body: Some(Body::AccessibilityActionResult(result)),
+            }) => Ok(Some(GuestAccessibility::ActionResult(
+                ActionResult::from_host_api(result),
+            ))),
+            Ok(_) => Err(ClientError::Malformed(
+                "expected an accessibility tree".into(),
+            )),
+            Err(error) => Err(ClientError::Malformed(error.to_string())),
+        }
+    }
+
+    /// Asks for an action on a node; its result arrives through [`AccessibilityStream::next`].
+    pub fn perform(&mut self, action: &ActionRequest) -> Result<(), ClientError> {
+        send(
+            &mut *self.connection,
+            Body::AccessibilityAction(action.to_host_api()),
+        )
+        .map_err(ClientError::Transport)
     }
 }
 
