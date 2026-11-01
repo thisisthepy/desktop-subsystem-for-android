@@ -34,7 +34,8 @@ public sealed record SettingsInfo(
     bool ProgramUpdatesAvailable,
     bool ImageUpdatesAvailable,
     string Version,
-    string? LogDir)
+    string? LogDir,
+    bool Clipboard = true)
 {
     public RenderGpuKind RenderGpuKind => RenderGpu.ToLowerInvariant() switch
     {

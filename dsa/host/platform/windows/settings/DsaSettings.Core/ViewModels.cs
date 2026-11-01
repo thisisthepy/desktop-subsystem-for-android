@@ -159,6 +159,8 @@ public sealed class SettingsViewModel : ObservableObject
     public string Error => _error ?? "";
     public bool HasError => _error is not null;
     public bool Freeze => _settings?.Freeze ?? false;
+    /// <summary>Whether text copied on Windows can be pasted in Android, and the reverse.</summary>
+    public bool Clipboard => _settings?.Clipboard ?? true;
     public bool ProgramUpdates => _settings?.ProgramUpdates ?? false;
     public bool ImageUpdates => _settings?.ImageUpdates ?? false;
     public bool ProgramUpdatesAvailable => _settings?.ProgramUpdatesAvailable ?? false;
@@ -283,6 +285,9 @@ public sealed class SettingsViewModel : ObservableObject
 
     public Task SetFreezeAsync(bool on) =>
         on == Freeze && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetFreezeAsync(on));
+
+    public Task SetClipboardAsync(bool on) =>
+        on == Clipboard && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetClipboardAsync(on));
 
     public Task SetProgramUpdatesAsync(bool on) =>
         on == ProgramUpdates && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetProgramUpdatesAsync(on));
