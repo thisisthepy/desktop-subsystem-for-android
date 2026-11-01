@@ -62,6 +62,22 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   it. The agent allows its own listener at start (`MANAGE_NOTIFICATION_LISTENERS`). The
   listener is called over binder in the agent's persistent process, so notifications still
   arrive while the device is in Doze.
+- **Widgets.** The agent is the guest's widget host (`AppWidgetHost`, host ID `0x0D5A`).
+  It lists the installed widgets for the host's gallery (`WidgetProviders`, in parts under
+  256 KiB, with previews of at most 160 pixels and 48 KiB), and places one the host asks for
+  (`AddWidget`): it allocates a widget ID, binds it without asking (`BIND_APPWIDGET`), and
+  runs the widget's setup when its app has one, through `WidgetConfigureActivity`; the setup
+  shows as a task window. Each widget's view lives in a presentation on a private virtual
+  display of the widget's size, which keeps its views running, and is drawn by the agent's
+  own hardware renderer into PNG frames (`WidgetFrame`), only when it changes, at most ten
+  times a second, and at most once a second while the guest dozes. That drawing does not use
+  the guest's display, so it goes on while the screen is off. A clock is drawn again at each
+  minute (or second) even when nothing asks. A size from the host (`ResizeWidget`) redraws
+  the widget at that size and tells its app the size in dp
+  (`AppWidgetHostView.updateAppWidgetSize`). Pointer input (`WidgetPointer`) goes to the
+  widget's view; a click opens its app on the guest's display. The widget IDs outlive the
+  agent and the guest, and the size each was drawn at is kept in the agent's preferences.
+  Each connection hears of every placed widget (`WidgetUpdated`, then `WidgetList`).
 - **APKs from the host.** `InstallApk` opens a `PackageInstaller` session, each `ApkChunk`
   is written into it in order, and the session is committed once the APK is whole. After
   each chunk the agent reports how far it got (`InstallProgress`), which paces the host, and
@@ -405,6 +421,7 @@ The release APK, `build/outputs/apk/release/dsa-agent-release-unsigned.apk`, is 
 | `src/main/kotlin/.../agent/power/` | The screen, Doze and the battery, as the host asks |
 | `src/main/kotlin/.../agent/clipboard/` | The clipboard shared with the host |
 | `src/main/kotlin/.../agent/notifications/` | The notifications shown on the host |
+| `src/main/kotlin/.../agent/widgets/` | The widgets placed on the host's desktop |
 | `src/main/kotlin/.../agent/install/` | Installing the APKs the host sends |
 | `src/main/kotlin/.../agent/platform/` | The framework side: the application, task source, actions, windowing, input injection, the input method, binder channel, power controls |
 | `src/test/` | The unit tests |

@@ -139,6 +139,18 @@ after two minutes. `"keep_window_manager": false` turns this off.
   `dsa-wm.exe --notification <uri>`: that passes the click to the service and ends, and the
   app opens in Android, which leaves Doze first. Dismissing a toast dismisses the
   notification in Android too, unless the app keeps it.
+- It shows the widgets the user placed on the desktop, each in a borderless layered window
+  of its own. The window is a tool window owned by the shell's desktop window (`Progman`),
+  so it is neither in the taskbar nor in Alt+Tab, stays when the user shows the desktop, and
+  is kept below every other window; it never takes the focus. It shows the widget's PNG
+  frames, decoded with WIC, with what the widget leaves clear see-through. Dragging the band
+  along its top moves it and dragging its edges resizes it; when the user lets go, the
+  service remembers the placement (per user, beside the user's settings, as
+  `users/<user>.widgets.json`) and tells Android the window's size, which the widget draws
+  at. Presses, moves and releases inside the widget go to Android. The widgets come from the
+  settings app's Widgets page or `dsa widgets list|add <provider>|remove <id>`. When the
+  window manager starts at sign-in and the service remembers widgets, it starts Android so
+  they come back.
 - It owns no window. Each Android app task shows in a window of the app's own window
   program (below). The window manager watches the user's tasks through the service's
   local API, starts each app's window program, and tells it to open a window for each
