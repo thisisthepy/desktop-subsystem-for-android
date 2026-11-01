@@ -477,6 +477,50 @@ message GuestBoot {
   bool agent_connected = 2;
 }
 
+// Whether an APK was installed, and if not, why. The reasons are stable, so the host can say
+// in the user's language what went wrong; the message beside them gives the guest's own words.
+enum InstallStatus {
+  INSTALL_STATUS_UNSPECIFIED = 0;
+  // The app is installed.
+  INSTALL_STATUS_SUCCESS = 1;
+  // The app does not run on this device: its ABI, its minimum Android version or a feature it
+  // requires is not there.
+  INSTALL_STATUS_INCOMPATIBLE = 2;
+  // An app of the same package is installed, signed with another key. Uninstall it first.
+  INSTALL_STATUS_CONFLICTING_SIGNATURE = 3;
+  // The file is not an APK the guest can read, or it is not signed.
+  INSTALL_STATUS_INVALID_APK = 4;
+  // The guest has no room for the app.
+  INSTALL_STATUS_INSUFFICIENT_STORAGE = 5;
+  // A newer version of the app is installed.
+  INSTALL_STATUS_DOWNGRADE = 6;
+  // A policy of the guest does not allow the app.
+  INSTALL_STATUS_BLOCKED = 7;
+  // Anything else, including a transfer that did not arrive whole. The message says what.
+  INSTALL_STATUS_OTHER = 8;
+}
+
+// Host to guest: install an APK, whose content follows in ApkChunk messages of the same
+// `transfer_id`, in order. The agent writes them into an install session as they come and
+// commits it once it has all `size` bytes. The host sends at most a few chunks ahead of the
+// agent's InstallProgress, and one install at a time.
+message InstallApk {
+  // Unique among the installs of one connection.
+  uint32 transfer_id = 1;
+  // The file's name on the host, for the guest's log.
+  string name = 2;
+  // The APK's length in bytes.
+  uint64 size = 3;
+}
+
+// Host to guest: part of the APK an InstallApk announced.
+message ApkChunk {
+  uint32 transfer_id = 1;
+  // Where `data` starts in the APK.
+  uint64 offset = 2;
+  bytes data = 3;
+}
+
 // Guest to host, from the agent: an app in the guest opened a web link, which the host opens
 // in the user's default browser. Only http and https links are sent; the host checks the link
 // again and drops anything else, so an app in the guest can never make the host run a
@@ -525,6 +569,30 @@ message FileChunk {
   // Where `data` starts in the file.
   uint64 offset = 2;
   bytes data = 3;
+}
+
+// Host to guest: stop an install whose APK will not arrive whole. The agent abandons its
+// install session and answers with InstallResult.
+message CancelInstall {
+  uint32 transfer_id = 1;
+}
+
+// Guest to host, from the agent: how many bytes of an APK the agent has written. Sent after
+// each chunk, which is what lets the host send the next ones.
+message InstallProgress {
+  uint32 transfer_id = 1;
+  uint64 received = 2;
+}
+
+// Guest to host, from the agent: the end of an install, whichever way it went. It may come at
+// any point of the transfer, as when the agent cannot open an install session.
+message InstallResult {
+  uint32 transfer_id = 1;
+  InstallStatus status = 2;
+  // The package that was installed, or that the APK is, when the guest says.
+  string package_name = 3;
+  // The guest's own words on what happened; empty when it gave none.
+  string message = 4;
 }
 
 // Guest to host, from the agent: how far a transfer has got. Sent after each chunk the agent
@@ -590,6 +658,11 @@ message Envelope {
     ScreenState screen_state = 40;
     PowerState power_state = 41;
     DeviceIdle device_idle = 42;
+    InstallApk install_apk = 60;
+    ApkChunk apk_chunk = 61;
+    CancelInstall cancel_install = 62;
+    InstallProgress install_progress = 63;
+    InstallResult install_result = 64;
     OpenLink open_link = 50;
     LinkHandling link_handling = 51;
     OpenFile open_file = 52;

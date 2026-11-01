@@ -12,15 +12,16 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use dsa_protocol::host_api::types::{ErrorCode, Role};
-use dsa_protocol::host_api::{client_connect, local_hello, HandshakeError};
+use dsa_protocol::host_api::types::{self, envelope, ErrorCode, Role};
+use dsa_protocol::host_api::{client_connect, decode, local_hello, send, HandshakeError};
 use dsa_transport::local::LocalListener;
 use dsa_transport::Connector;
 
+use crate::apk::{self, InstallOutcome, InstallStatus};
 use crate::files::{FileAction, FileTransfer, MAX_FILE_BYTES};
 use crate::host_api::{
-    running_of, stop_every, ClientError, HostApiClient, HostApiService, ProgramUpdate,
-    ServiceFacts, UpdateProgram, UserAndroid, UserAndroids,
+    running_of, stop_every, ClientError, HostApiClient, HostApiService, InstallError,
+    ProgramUpdate, ServiceFacts, UpdateProgram, UserAndroid, UserAndroids,
 };
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{buttons, PointerAction, PointerEvent, PointerTool};
@@ -68,7 +69,21 @@ pub struct FakeAndroid {
     /// What the user did with its notifications on the host, in order.
     pub notification_actions: Mutex<Vec<NotificationAction>>,
     notification_watchers: Mutex<Vec<Sender<NotificationEvent>>>,
+    /// The APKs it installed or refused, by name, with their whole content, in order.
+    pub installs: Mutex<Vec<(String, Vec<u8>)>>,
+    /// When each install began and ended, by name, in order: `+name` and `-name`.
+    pub install_steps: Mutex<Vec<String>>,
+    /// How long each install takes once its content is in.
+    pub install_time: Mutex<Duration>,
+    install_turn: Mutex<()>,
 }
+
+/// What the fake Android says of an APK: one whose content starts with [`BAD_APK`] is not an APK
+/// it can read; any other is installed as [`INSTALLED_PACKAGE`].
+pub const BAD_APK: &[u8] = b"not a zip";
+
+/// The package every APK the fake Android installs turns out to be.
+pub const INSTALLED_PACKAGE: &str = "com.example.installed";
 
 impl FakeAndroid {
     pub fn new() -> FakeAndroid {
@@ -89,6 +104,10 @@ impl FakeAndroid {
             clipboard_watchers: Mutex::new(Vec::new()),
             notification_actions: Mutex::new(Vec::new()),
             notification_watchers: Mutex::new(Vec::new()),
+            installs: Mutex::new(Vec::new()),
+            install_steps: Mutex::new(Vec::new()),
+            install_time: Mutex::new(Duration::ZERO),
+            install_turn: Mutex::new(()),
         }
     }
 
@@ -212,6 +231,47 @@ impl UserAndroid for FakeAndroid {
         }
         self.notification_actions.lock().unwrap().push(action);
         Ok(())
+    }
+    fn install_apk(
+        &self,
+        name: &str,
+        size: u64,
+        content: &mut dyn std::io::Read,
+    ) -> Result<InstallOutcome, InstallError> {
+        // One at a time, as a session installs.
+        let _turn = self.install_turn.lock().unwrap();
+        if !matches!(
+            self.state(),
+            SessionState::Active | SessionState::Dozing | SessionState::Frozen
+        ) {
+            return Err(InstallError::NotRunning(format!(
+                "Android is {}, not running",
+                self.state()
+            )));
+        }
+        self.install_steps.lock().unwrap().push(format!("+{name}"));
+        let mut apk = vec![0u8; size as usize];
+        let read = content.read_exact(&mut apk);
+        thread::sleep(*self.install_time.lock().unwrap());
+        self.install_steps.lock().unwrap().push(format!("-{name}"));
+        read.map_err(|e| InstallError::Refused(format!("the APK did not arrive whole: {e}")))?;
+        self.installs
+            .lock()
+            .unwrap()
+            .push((name.to_string(), apk.clone()));
+        Ok(if apk.starts_with(BAD_APK) {
+            InstallOutcome {
+                status: InstallStatus::InvalidApk,
+                package_name: None,
+                message: "INSTALL_PARSE_FAILED_NOT_APK: not a zip".into(),
+            }
+        } else {
+            InstallOutcome {
+                status: InstallStatus::Installed,
+                package_name: Some(INSTALLED_PACKAGE.into()),
+                message: String::new(),
+            }
+        })
     }
     fn freeze(&self) -> Result<(), TaskRequestError> {
         let mut state = self.state.lock().unwrap();
@@ -511,6 +571,30 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::clipboard_client_that_sends_a_request_is_disconnected(
                 &mut || $make,
             );
+        }
+        #[test]
+        fn fr11_an_apk_a_client_sends_is_installed_in_the_callers_android() {
+            $crate::host_api_conformance::apk_is_installed(&mut || $make);
+        }
+        #[test]
+        fn fr11_an_apk_android_refuses_is_answered_with_the_reason() {
+            $crate::host_api_conformance::refused_apk_has_its_reason(&mut || $make);
+        }
+        #[test]
+        fn fr11_a_file_that_is_no_apk_or_too_large_is_refused_before_it_is_sent() {
+            $crate::host_api_conformance::wrong_file_is_refused_before_it_is_sent(&mut || $make);
+        }
+        #[test]
+        fn fr11_an_install_to_an_android_that_is_not_running_says_so() {
+            $crate::host_api_conformance::install_needs_a_running_android(&mut || $make);
+        }
+        #[test]
+        fn fr11_a_second_install_waits_for_the_first() {
+            $crate::host_api_conformance::installs_run_one_at_a_time(&mut || $make);
+        }
+        #[test]
+        fn nfr5_a_client_that_sends_something_else_during_an_install_is_refused() {
+            $crate::host_api_conformance::malformed_install_is_refused(&mut || $make);
         }
         #[test]
         fn fr9_a_link_opened_in_the_callers_android_reaches_the_client() {
@@ -1293,6 +1377,195 @@ fn host_texts(android: &FakeAndroid, count: usize) -> Vec<String> {
         }
         thread::sleep(Duration::from_millis(5));
     }
+}
+
+/// An APK of a few local API pieces, so it crosses in more than one.
+fn sample_apk() -> Vec<u8> {
+    (0..apk::LOCAL_CHUNK_BYTES * 2 + 12_345)
+        .map(|i| (i % 251) as u8)
+        .collect()
+}
+
+pub fn apk_is_installed(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let content = sample_apk();
+    let outcome = connect(&mut *connector)
+        .install_apk("notes.apk", content.len() as u64, &mut &content[..])
+        .expect("installing");
+    assert_eq!(outcome.status, InstallStatus::Installed);
+    assert_eq!(outcome.package_name.as_deref(), Some(INSTALLED_PACKAGE));
+    let android = androids.of(&user).unwrap();
+    let installs = android.installs.lock().unwrap();
+    assert_eq!(installs.len(), 1);
+    assert_eq!(installs[0].0, "notes.apk");
+    assert!(installs[0].1 == content, "the APK arrived changed");
+}
+
+pub fn refused_apk_has_its_reason(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids);
+    connect(&mut *connector).start().unwrap();
+    let mut content = BAD_APK.to_vec();
+    content.extend_from_slice(&[0; 100]);
+    let outcome = connect(&mut *connector)
+        .install_apk("broken.apk", content.len() as u64, &mut &content[..])
+        .expect("a refusal is an outcome");
+    assert_eq!(outcome.status, InstallStatus::InvalidApk);
+    assert!(
+        outcome.message.contains("INSTALL_PARSE_FAILED_NOT_APK"),
+        "{outcome:?}"
+    );
+    // The service goes on.
+    assert_eq!(
+        connect(&mut *connector).status().unwrap().state,
+        SessionState::Active
+    );
+}
+
+pub fn wrong_file_is_refused_before_it_is_sent(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    for (name, size) in [
+        ("notes.zip", 10),
+        ("notes.apk", apk::MAX_APK_BYTES + 1),
+        ("notes.apk", 0),
+    ] {
+        // Nothing may be read: the reader fails the test if it is.
+        let mut never = Unread;
+        match connect(&mut *connector).install_apk(name, size, &mut never) {
+            Err(ClientError::Service { code, detail }) => {
+                assert_eq!(code, ErrorCode::InstallRefused, "{detail}");
+            }
+            other => panic!("expected {name} of {size} bytes to be refused, got {other:?}"),
+        }
+    }
+    assert!(androids
+        .of(&user)
+        .unwrap()
+        .installs
+        .lock()
+        .unwrap()
+        .is_empty());
+}
+
+/// A reader that must never be read.
+struct Unread;
+
+impl std::io::Read for Unread {
+    fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+        panic!("the APK was read although the service refused it");
+    }
+}
+
+pub fn install_needs_a_running_android(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let content = sample_apk();
+    match connect(&mut *connector).install_apk("notes.apk", content.len() as u64, &mut &content[..])
+    {
+        Err(ClientError::Service { code, .. }) => assert_eq!(code, ErrorCode::NotRunning),
+        other => panic!("expected the install to need a running Android, got {other:?}"),
+    }
+}
+
+pub fn installs_run_one_at_a_time(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let android = androids.of(&user).unwrap();
+    *android.install_time.lock().unwrap() = Duration::from_millis(300);
+    let first = connect(&mut *connector);
+    let second = connect(&mut *connector);
+    let one = thread::spawn(move || first.install_apk("one.apk", 3, &mut &b"one"[..]));
+    let two = thread::spawn(move || second.install_apk("two.apk", 3, &mut &b"two"[..]));
+    for install in [one, two] {
+        let outcome = install.join().unwrap().expect("both are installed");
+        assert_eq!(outcome.status, InstallStatus::Installed);
+    }
+    let steps = android.install_steps.lock().unwrap().clone();
+    assert_eq!(steps.len(), 4, "{steps:?}");
+    // Each install ends before the next begins, whichever came first.
+    assert_eq!(steps[0][1..], steps[1][1..], "{steps:?}");
+    assert!(
+        steps[0].starts_with('+') && steps[1].starts_with('-'),
+        "{steps:?}"
+    );
+    assert_eq!(steps[2][1..], steps[3][1..], "{steps:?}");
+}
+
+pub fn malformed_install_is_refused(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let mut connection = connector.connect(WAIT).unwrap();
+    client_connect(&mut *connection, &local_hello(Role::Client, "client"), WAIT).unwrap();
+    let request = types::Request {
+        id: 7,
+        body: Some(types::request::Body::InstallApk(types::InstallApk {
+            name: "notes.apk".into(),
+            size: 1000,
+        })),
+    };
+    send(&mut *connection, envelope::Body::Request(request)).unwrap();
+    let answer = |connection: &mut dyn dsa_transport::Connection| match decode(
+        &connection.recv(Some(WAIT)).expect("an answer"),
+    ) {
+        Ok(types::Envelope {
+            body: Some(envelope::Body::Response(response)),
+        }) => response,
+        other => panic!("expected an answer, got {other:?}"),
+    };
+    assert!(matches!(
+        answer(&mut *connection).body,
+        Some(types::response::Body::Done(_))
+    ));
+    // Half the APK, then something that is not a piece of it.
+    send(
+        &mut *connection,
+        envelope::Body::ApkChunk(types::ApkChunk { data: vec![1; 500] }),
+    )
+    .unwrap();
+    send(
+        &mut *connection,
+        envelope::Body::ClipboardText(types::ClipboardText {
+            text: "not an APK".into(),
+        }),
+    )
+    .unwrap();
+    let response = answer(&mut *connection);
+    assert_eq!(response.id, 7);
+    match response.body {
+        Some(types::response::Body::Error(error)) => {
+            assert_eq!(
+                error.code,
+                ErrorCode::InstallRefused as i32,
+                "{}",
+                error.detail
+            );
+        }
+        other => panic!("expected the install to be refused, got {other:?}"),
+    }
+    assert!(androids
+        .of(&user)
+        .unwrap()
+        .installs
+        .lock()
+        .unwrap()
+        .is_empty());
+    // The service and the next install go on.
+    let content = sample_apk();
+    let outcome = connect(&mut *connector)
+        .install_apk("notes.apk", content.len() as u64, &mut &content[..])
+        .unwrap();
+    assert!(outcome.installed());
 }
 
 pub fn host_clipboard_reaches_the_caller(make: MakeLocal<'_>) {

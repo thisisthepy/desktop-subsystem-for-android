@@ -241,6 +241,38 @@ std::map<std::string, v1::Envelope> Cases() {
   }
   cases["agent_connected"].mutable_agent_connected();
   {
+    v1::InstallApk* install = cases["install_apk"].mutable_install_apk();
+    install->set_transfer_id(3);
+    install->set_name("notes.apk");
+    install->set_size(1000);
+  }
+  {
+    v1::ApkChunk* chunk = cases["apk_chunk"].mutable_apk_chunk();
+    chunk->set_transfer_id(3);
+    chunk->set_offset(131072);
+    chunk->set_data(std::string("\x01\x02\x03", 3));
+  }
+  cases["cancel_install"].mutable_cancel_install()->set_transfer_id(3);
+  {
+    v1::InstallProgress* progress = cases["install_progress"].mutable_install_progress();
+    progress->set_transfer_id(3);
+    progress->set_received(131072);
+  }
+  {
+    v1::InstallResult* result = cases["install_result_success"].mutable_install_result();
+    result->set_transfer_id(3);
+    result->set_status(v1::INSTALL_STATUS_SUCCESS);
+    result->set_package_name("com.example.notes");
+  }
+  {
+    v1::InstallResult* result =
+        cases["install_result_conflicting_signature"].mutable_install_result();
+    result->set_transfer_id(3);
+    result->set_status(v1::INSTALL_STATUS_CONFLICTING_SIGNATURE);
+    result->set_package_name("com.example.notes");
+    result->set_message("INSTALL_FAILED_UPDATE_INCOMPATIBLE");
+  }
+  {
     v1::GuestBoot* boot = cases["guest_boot"].mutable_guest_boot();
     boot->set_boot_completed(true);
     boot->set_agent_connected(true);

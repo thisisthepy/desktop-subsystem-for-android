@@ -359,67 +359,6 @@ pub struct ClipboardSharing {
     #[prost(bool, tag = "1")]
     pub on: bool,
 }
-/// Guest to host, from the agent: a notification an app posted, or a new version of one it
-/// posted before under the same key, which replaces it. Only notifications a person would see
-/// come: not the ongoing notice of a foreground service, and not a group's summary, whose
-/// members come one by one. The icon is a PNG image of at most 96 pixels on a side and 64 KiB;
-/// a larger one is left out.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GuestNotification {
-    /// Android's key of the notification: unique in the guest while it is posted.
-    #[prost(string, tag = "1")]
-    pub key: ::prost::alloc::string::String,
-    /// The package that posted it.
-    #[prost(string, tag = "2")]
-    pub package_name: ::prost::alloc::string::String,
-    /// The posting app's name, as the guest shows it.
-    #[prost(string, tag = "3")]
-    pub app_label: ::prost::alloc::string::String,
-    #[prost(string, tag = "4")]
-    pub title: ::prost::alloc::string::String,
-    #[prost(string, tag = "5")]
-    pub text: ::prost::alloc::string::String,
-    /// The notification's large icon, else the app's icon, as a PNG image; empty for none.
-    #[prost(bytes = "vec", tag = "6")]
-    pub icon_png: ::prost::alloc::vec::Vec<u8>,
-    /// The importance of its channel, as Android numbers it (NotificationManager.IMPORTANCE_*):
-    /// 1 minimum, 2 low, 3 default, 4 high.
-    #[prost(int32, tag = "7")]
-    pub importance: i32,
-    /// Whether the app asked for it to interrupt: a high importance channel or a high
-    /// priority. Such a notification reaches the host while the guest is in Doze too.
-    #[prost(bool, tag = "8")]
-    pub high_priority: bool,
-    /// Whether the user may dismiss it. A notification that is not stays until the app removes
-    /// it, and the host does not ask the guest to remove it.
-    #[prost(bool, tag = "9")]
-    pub clearable: bool,
-    /// When it was posted, in milliseconds since the Unix epoch, as the app gave it.
-    #[prost(int64, tag = "10")]
-    pub when_millis: i64,
-}
-/// Guest to host, from the agent: the notification with this key is gone from the guest,
-/// because the app removed it, the user opened it, or the host asked.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct NotificationRemoved {
-    #[prost(string, tag = "1")]
-    pub key: ::prost::alloc::string::String,
-}
-/// Host to guest: the user clicked the notification with this key on the host. The agent runs
-/// the notification's content intent, as clicking it in the guest would. A key the guest does
-/// not have is answered with NotificationRemoved.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct NotificationClicked {
-    #[prost(string, tag = "1")]
-    pub key: ::prost::alloc::string::String,
-}
-/// Host to guest: the user dismissed the notification with this key on the host. The agent
-/// cancels it in the guest. A key the guest does not have is answered with NotificationRemoved.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct NotificationDismissed {
-    #[prost(string, tag = "1")]
-    pub key: ::prost::alloc::string::String,
-}
 /// Host to guest: asks the agent for a GuestMemory report now, instead of at its next
 /// periodic one.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -499,6 +438,33 @@ pub struct GuestBoot {
     #[prost(bool, tag = "2")]
     pub agent_connected: bool,
 }
+/// Host to guest: install an APK, whose content follows in ApkChunk messages of the same
+/// `transfer_id`, in order. The agent writes them into an install session as they come and
+/// commits it once it has all `size` bytes. The host sends at most a few chunks ahead of the
+/// agent's InstallProgress, and one install at a time.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InstallApk {
+    /// Unique among the installs of one connection.
+    #[prost(uint32, tag = "1")]
+    pub transfer_id: u32,
+    /// The file's name on the host, for the guest's log.
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    /// The APK's length in bytes.
+    #[prost(uint64, tag = "3")]
+    pub size: u64,
+}
+/// Host to guest: part of the APK an InstallApk announced.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ApkChunk {
+    #[prost(uint32, tag = "1")]
+    pub transfer_id: u32,
+    /// Where `data` starts in the APK.
+    #[prost(uint64, tag = "2")]
+    pub offset: u64,
+    #[prost(bytes = "vec", tag = "3")]
+    pub data: ::prost::alloc::vec::Vec<u8>,
+}
 /// Guest to host, from the agent: an app in the guest opened a web link, which the host opens
 /// in the user's default browser. Only http and https links are sent; the host checks the link
 /// again and drops anything else, so an app in the guest can never make the host run a
@@ -549,6 +515,37 @@ pub struct FileChunk {
     #[prost(bytes = "vec", tag = "3")]
     pub data: ::prost::alloc::vec::Vec<u8>,
 }
+/// Host to guest: stop an install whose APK will not arrive whole. The agent abandons its
+/// install session and answers with InstallResult.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CancelInstall {
+    #[prost(uint32, tag = "1")]
+    pub transfer_id: u32,
+}
+/// Guest to host, from the agent: how many bytes of an APK the agent has written. Sent after
+/// each chunk, which is what lets the host send the next ones.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InstallProgress {
+    #[prost(uint32, tag = "1")]
+    pub transfer_id: u32,
+    #[prost(uint64, tag = "2")]
+    pub received: u64,
+}
+/// Guest to host, from the agent: the end of an install, whichever way it went. It may come at
+/// any point of the transfer, as when the agent cannot open an install session.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InstallResult {
+    #[prost(uint32, tag = "1")]
+    pub transfer_id: u32,
+    #[prost(enumeration = "InstallStatus", tag = "2")]
+    pub status: i32,
+    /// The package that was installed, or that the APK is, when the guest says.
+    #[prost(string, tag = "3")]
+    pub package_name: ::prost::alloc::string::String,
+    /// The guest's own words on what happened; empty when it gave none.
+    #[prost(string, tag = "4")]
+    pub message: ::prost::alloc::string::String,
+}
 /// Guest to host, from the agent: how far a transfer has got. Sent after each chunk the agent
 /// has stored. When `received` is the file's whole size, the agent has asked the user which
 /// app takes it. A non-empty `error` ends the transfer: it says, in words a person can act on,
@@ -589,7 +586,7 @@ pub struct ClockAnswer {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 42, 50, 51, 52, 53, 54, 70, 71, 72, 73"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 42, 60, 61, 62, 63, 64, 50, 51, 52, 53, 54"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -659,6 +656,16 @@ pub mod envelope {
         PowerState(super::PowerState),
         #[prost(message, tag = "42")]
         DeviceIdle(super::DeviceIdle),
+        #[prost(message, tag = "60")]
+        InstallApk(super::InstallApk),
+        #[prost(message, tag = "61")]
+        ApkChunk(super::ApkChunk),
+        #[prost(message, tag = "62")]
+        CancelInstall(super::CancelInstall),
+        #[prost(message, tag = "63")]
+        InstallProgress(super::InstallProgress),
+        #[prost(message, tag = "64")]
+        InstallResult(super::InstallResult),
         #[prost(message, tag = "50")]
         OpenLink(super::OpenLink),
         #[prost(message, tag = "51")]
@@ -669,14 +676,6 @@ pub mod envelope {
         FileChunk(super::FileChunk),
         #[prost(message, tag = "54")]
         FileProgress(super::FileProgress),
-        #[prost(message, tag = "70")]
-        Notification(super::GuestNotification),
-        #[prost(message, tag = "71")]
-        NotificationRemoved(super::NotificationRemoved),
-        #[prost(message, tag = "72")]
-        NotificationClicked(super::NotificationClicked),
-        #[prost(message, tag = "73")]
-        NotificationDismissed(super::NotificationDismissed),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -898,6 +897,64 @@ impl KeyAction {
             "KEY_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
             "KEY_ACTION_DOWN" => Some(Self::Down),
             "KEY_ACTION_UP" => Some(Self::Up),
+            _ => None,
+        }
+    }
+}
+/// Whether an APK was installed, and if not, why. The reasons are stable, so the host can say
+/// in the user's language what went wrong; the message beside them gives the guest's own words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum InstallStatus {
+    Unspecified = 0,
+    /// The app is installed.
+    Success = 1,
+    /// The app does not run on this device: its ABI, its minimum Android version or a feature it
+    /// requires is not there.
+    Incompatible = 2,
+    /// An app of the same package is installed, signed with another key. Uninstall it first.
+    ConflictingSignature = 3,
+    /// The file is not an APK the guest can read, or it is not signed.
+    InvalidApk = 4,
+    /// The guest has no room for the app.
+    InsufficientStorage = 5,
+    /// A newer version of the app is installed.
+    Downgrade = 6,
+    /// A policy of the guest does not allow the app.
+    Blocked = 7,
+    /// Anything else, including a transfer that did not arrive whole. The message says what.
+    Other = 8,
+}
+impl InstallStatus {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "INSTALL_STATUS_UNSPECIFIED",
+            Self::Success => "INSTALL_STATUS_SUCCESS",
+            Self::Incompatible => "INSTALL_STATUS_INCOMPATIBLE",
+            Self::ConflictingSignature => "INSTALL_STATUS_CONFLICTING_SIGNATURE",
+            Self::InvalidApk => "INSTALL_STATUS_INVALID_APK",
+            Self::InsufficientStorage => "INSTALL_STATUS_INSUFFICIENT_STORAGE",
+            Self::Downgrade => "INSTALL_STATUS_DOWNGRADE",
+            Self::Blocked => "INSTALL_STATUS_BLOCKED",
+            Self::Other => "INSTALL_STATUS_OTHER",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "INSTALL_STATUS_UNSPECIFIED" => Some(Self::Unspecified),
+            "INSTALL_STATUS_SUCCESS" => Some(Self::Success),
+            "INSTALL_STATUS_INCOMPATIBLE" => Some(Self::Incompatible),
+            "INSTALL_STATUS_CONFLICTING_SIGNATURE" => Some(Self::ConflictingSignature),
+            "INSTALL_STATUS_INVALID_APK" => Some(Self::InvalidApk),
+            "INSTALL_STATUS_INSUFFICIENT_STORAGE" => Some(Self::InsufficientStorage),
+            "INSTALL_STATUS_DOWNGRADE" => Some(Self::Downgrade),
+            "INSTALL_STATUS_BLOCKED" => Some(Self::Blocked),
+            "INSTALL_STATUS_OTHER" => Some(Self::Other),
             _ => None,
         }
     }

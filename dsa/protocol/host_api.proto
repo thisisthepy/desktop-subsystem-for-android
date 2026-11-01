@@ -265,6 +265,51 @@ message ActOnNotification {
   NotificationAction action = 2;
 }
 
+// Installs an APK in the caller's Android. The service answers at once: Done when it takes an
+// APK of this name and size, or an error. After Done the client sends the APK's `size` bytes
+// in ApkChunk frames, which are not answered, and the service answers the same request id once
+// more: InstallResult once Android has installed the app or refused it, or an error when the
+// APK did not reach Android. The connection then ends. A second install waits for the first.
+message InstallApk {
+  // The file's name, without any folder. It ends in ".apk".
+  string name = 1;
+  // The APK's length in bytes.
+  uint64 size = 2;
+}
+
+// Part of an APK's content, on a connection that installs one (InstallApk).
+message ApkChunk {
+  bytes data = 1;
+}
+
+// Whether an APK was installed, and if not, why. The reasons are stable, so a client can say
+// in the user's language what went wrong.
+enum InstallStatus {
+  INSTALL_STATUS_UNSPECIFIED = 0;
+  INSTALL_STATUS_SUCCESS = 1;
+  // The app does not run on this Android: its ABI, its minimum version or a feature it needs.
+  INSTALL_STATUS_INCOMPATIBLE = 2;
+  // The app is installed already, signed with another key.
+  INSTALL_STATUS_CONFLICTING_SIGNATURE = 3;
+  // The file is not an APK Android can read, or it is not signed.
+  INSTALL_STATUS_INVALID_APK = 4;
+  INSTALL_STATUS_INSUFFICIENT_STORAGE = 5;
+  // A newer version of the app is installed.
+  INSTALL_STATUS_DOWNGRADE = 6;
+  // A policy of the Android does not allow the app.
+  INSTALL_STATUS_BLOCKED = 7;
+  INSTALL_STATUS_OTHER = 8;
+}
+
+// The second answer to InstallApk: how the install ended.
+message InstallResult {
+  InstallStatus status = 1;
+  // The package that was installed, or that the APK is, when Android says.
+  string package_name = 2;
+  // Android's own words on what happened; empty when it gave none.
+  string message = 3;
+}
+
 // What a pointer did.
 enum PointerAction {
   POINTER_ACTION_UNSPECIFIED = 0;
@@ -610,6 +655,9 @@ enum ErrorCode {
   // A file sent to Android was refused: it is too large, its name cannot be used, it did not
   // arrive whole, or Android could not take it. The detail says which.
   ERROR_CODE_FILE_REFUSED = 7;
+  // An APK was not taken: it is too large, its name is not an APK's, or it did not arrive
+  // whole. The detail says which. An APK Android refused is answered with InstallResult.
+  ERROR_CODE_INSTALL_REFUSED = 8;
 }
 
 message Error {
@@ -645,6 +693,7 @@ message Request {
     WatchClipboard watch_clipboard = 22;
     WatchNotifications watch_notifications = 23;
     ActOnNotification act_on_notification = 24;
+    InstallApk install_apk = 27;
   }
 }
 
@@ -660,6 +709,7 @@ message Response {
     Memory memory = 8;
     InstalledApps installed_apps = 9;
     Settings settings = 10;
+    InstallResult install_result = 11;
   }
 }
 
@@ -679,7 +729,8 @@ message Envelope {
     OpenLink open_link = 12;
     FileChunk file_chunk = 13;
     ClipboardText clipboard_text = 11;
-    Notification notification = 14;
-    NotificationRemoved notification_removed = 15;
+    Notification notification = 15;
+    NotificationRemoved notification_removed = 16;
+    ApkChunk apk_chunk = 14;
   }
 }

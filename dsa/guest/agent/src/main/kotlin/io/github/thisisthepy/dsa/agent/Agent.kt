@@ -6,6 +6,8 @@ import io.github.thisisthepy.dsa.agent.channel.ChannelLocator
 import io.github.thisisthepy.dsa.agent.clipboard.ClipboardSync
 import io.github.thisisthepy.dsa.agent.clipboard.GuestClipboard
 import io.github.thisisthepy.dsa.agent.input.EditorConnection
+import io.github.thisisthepy.dsa.agent.install.ApkInstaller
+import io.github.thisisthepy.dsa.agent.install.PackageInstallerPort
 import io.github.thisisthepy.dsa.agent.input.InputInjector
 import io.github.thisisthepy.dsa.agent.input.InputMethodSetup
 import io.github.thisisthepy.dsa.agent.input.KeyInput
@@ -67,9 +69,10 @@ import io.github.thisisthepy.dsa.control.v1.PointerAction
  * text, and text copied in the guest goes to the host, while the user shares the clipboard
  * ([ClipboardSync]). Web links apps open go to the host's browser unless the host says they
  * stay in the guest ([Links]), and files the host sends are stored and offered to the apps
- * that can open them ([FileReceiver]). The guest's notifications go to the host's
- * notification centre, and a click or a dismissal there comes back to them
- * ([NotificationForwarder]).
+ * that can open them ([FileReceiver]). APKs the host sends are installed through the guest's
+ * package installer ([ApkInstaller]), and the host is told how each install went. The guest's
+ * notifications go to the host's notification centre, and a click or a dismissal there comes
+ * back to them ([NotificationForwarder]).
  */
 class Agent(
     private val ownPackage: String,
@@ -98,6 +101,7 @@ class Agent(
     fileOpener: FileOpener = FileOpener.NONE,
     clipboard: GuestClipboard = GuestClipboard.NONE,
     notifications: NotificationSource = NotificationSource.NONE,
+    packageInstaller: PackageInstallerPort = PackageInstallerPort.NONE,
 ) {
     private val channel = ChannelClient(
         locator = locator,
@@ -152,6 +156,13 @@ class Agent(
         { frame -> channel.send(frame) },
         log,
         isConnected = { channel.connected },
+    )
+    private val apkInstaller = ApkInstaller(
+        packageInstaller,
+        { frame -> channel.send(frame) },
+        log,
+        post = { work -> scheduler.post(work) },
+        onInstalled = { requestAppsRefresh() },
     )
     private val freeform = FreeformSetup(windowing, scheduler, log)
     private val arranger = TaskArranger(actions, windowing::displaySize, log)
@@ -241,6 +252,7 @@ class Agent(
         lifecycle.connected()
         clipboardSync.connected()
         notificationForwarder.connected()
+        apkInstaller.connected()
         installed.resend()
         memoryReporter?.connected()
         links.connected()
@@ -302,6 +314,7 @@ class Agent(
         if (lifecycle.handle(envelope)) return true
         if (clipboardSync.handle(envelope)) return true
         if (notificationForwarder.handle(envelope)) return true
+        if (apkInstaller.handle(envelope)) return true
         when (envelope.bodyCase) {
             Envelope.BodyCase.KEY_EVENT -> try {
                 keys.handle(envelope.keyEvent)

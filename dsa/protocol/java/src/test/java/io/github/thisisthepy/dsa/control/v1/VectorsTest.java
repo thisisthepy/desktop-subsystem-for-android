@@ -258,6 +258,29 @@ public final class VectorsTest {
         cases.put("agent_connected", Envelope.newBuilder()
                 .setAgentConnected(AgentConnected.getDefaultInstance())
                 .build());
+        cases.put("install_apk", Envelope.newBuilder()
+                .setInstallApk(InstallApk.newBuilder().setTransferId(3).setName("notes.apk").setSize(1000))
+                .build());
+        cases.put("apk_chunk", Envelope.newBuilder()
+                .setApkChunk(ApkChunk.newBuilder().setTransferId(3).setOffset(131072)
+                        .setData(com.google.protobuf.ByteString.copyFrom(new byte[] {1, 2, 3})))
+                .build());
+        cases.put("cancel_install", Envelope.newBuilder()
+                .setCancelInstall(CancelInstall.newBuilder().setTransferId(3))
+                .build());
+        cases.put("install_progress", Envelope.newBuilder()
+                .setInstallProgress(InstallProgress.newBuilder().setTransferId(3).setReceived(131072))
+                .build());
+        cases.put("install_result_success", Envelope.newBuilder()
+                .setInstallResult(InstallResult.newBuilder().setTransferId(3)
+                        .setStatus(InstallStatus.INSTALL_STATUS_SUCCESS).setPackageName("com.example.notes"))
+                .build());
+        cases.put("install_result_conflicting_signature", Envelope.newBuilder()
+                .setInstallResult(InstallResult.newBuilder().setTransferId(3)
+                        .setStatus(InstallStatus.INSTALL_STATUS_CONFLICTING_SIGNATURE)
+                        .setPackageName("com.example.notes")
+                        .setMessage("INSTALL_FAILED_UPDATE_INCOMPATIBLE"))
+                .build());
         cases.put("guest_boot", Envelope.newBuilder()
                 .setGuestBoot(GuestBoot.newBuilder().setBootCompleted(true).setAgentConnected(true))
                 .build());

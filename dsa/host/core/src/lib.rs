@@ -24,6 +24,7 @@
 //! - [`compositor`]: platform-neutral graphics stream bookkeeping, renderer interfaces, and
 //!   which window each task and each frame goes to.
 
+pub mod apk;
 pub mod bootconfig;
 pub mod clipboard;
 pub mod clock_trace;

@@ -48,6 +48,9 @@ namespace v1 {
 class AgentConnected;
 struct AgentConnectedDefaultTypeInternal;
 extern AgentConnectedDefaultTypeInternal _AgentConnected_default_instance_;
+class ApkChunk;
+struct ApkChunkDefaultTypeInternal;
+extern ApkChunkDefaultTypeInternal _ApkChunk_default_instance_;
 class AppInfo;
 struct AppInfoDefaultTypeInternal;
 extern AppInfoDefaultTypeInternal _AppInfo_default_instance_;
@@ -57,6 +60,9 @@ extern AuthChallengeDefaultTypeInternal _AuthChallenge_default_instance_;
 class AuthProof;
 struct AuthProofDefaultTypeInternal;
 extern AuthProofDefaultTypeInternal _AuthProof_default_instance_;
+class CancelInstall;
+struct CancelInstallDefaultTypeInternal;
+extern CancelInstallDefaultTypeInternal _CancelInstall_default_instance_;
 class ClipboardSharing;
 struct ClipboardSharingDefaultTypeInternal;
 extern ClipboardSharingDefaultTypeInternal _ClipboardSharing_default_instance_;
@@ -90,9 +96,6 @@ extern GuestBootDefaultTypeInternal _GuestBoot_default_instance_;
 class GuestMemory;
 struct GuestMemoryDefaultTypeInternal;
 extern GuestMemoryDefaultTypeInternal _GuestMemory_default_instance_;
-class GuestNotification;
-struct GuestNotificationDefaultTypeInternal;
-extern GuestNotificationDefaultTypeInternal _GuestNotification_default_instance_;
 class Hello;
 struct HelloDefaultTypeInternal;
 extern HelloDefaultTypeInternal _Hello_default_instance_;
@@ -111,6 +114,15 @@ extern ImeCompositionDefaultTypeInternal _ImeComposition_default_instance_;
 class ImeCursor;
 struct ImeCursorDefaultTypeInternal;
 extern ImeCursorDefaultTypeInternal _ImeCursor_default_instance_;
+class InstallApk;
+struct InstallApkDefaultTypeInternal;
+extern InstallApkDefaultTypeInternal _InstallApk_default_instance_;
+class InstallProgress;
+struct InstallProgressDefaultTypeInternal;
+extern InstallProgressDefaultTypeInternal _InstallProgress_default_instance_;
+class InstallResult;
+struct InstallResultDefaultTypeInternal;
+extern InstallResultDefaultTypeInternal _InstallResult_default_instance_;
 class InstalledApp;
 struct InstalledAppDefaultTypeInternal;
 extern InstalledAppDefaultTypeInternal _InstalledApp_default_instance_;
@@ -126,15 +138,6 @@ extern LaunchAppDefaultTypeInternal _LaunchApp_default_instance_;
 class LinkHandling;
 struct LinkHandlingDefaultTypeInternal;
 extern LinkHandlingDefaultTypeInternal _LinkHandling_default_instance_;
-class NotificationClicked;
-struct NotificationClickedDefaultTypeInternal;
-extern NotificationClickedDefaultTypeInternal _NotificationClicked_default_instance_;
-class NotificationDismissed;
-struct NotificationDismissedDefaultTypeInternal;
-extern NotificationDismissedDefaultTypeInternal _NotificationDismissed_default_instance_;
-class NotificationRemoved;
-struct NotificationRemovedDefaultTypeInternal;
-extern NotificationRemovedDefaultTypeInternal _NotificationRemoved_default_instance_;
 class OpenFile;
 struct OpenFileDefaultTypeInternal;
 extern OpenFileDefaultTypeInternal _OpenFile_default_instance_;
@@ -179,9 +182,11 @@ extern TaskUpdatedDefaultTypeInternal _TaskUpdated_default_instance_;
 }  // namespace dsa
 PROTOBUF_NAMESPACE_OPEN
 template<> ::dsa::control::v1::AgentConnected* Arena::CreateMaybeMessage<::dsa::control::v1::AgentConnected>(Arena*);
+template<> ::dsa::control::v1::ApkChunk* Arena::CreateMaybeMessage<::dsa::control::v1::ApkChunk>(Arena*);
 template<> ::dsa::control::v1::AppInfo* Arena::CreateMaybeMessage<::dsa::control::v1::AppInfo>(Arena*);
 template<> ::dsa::control::v1::AuthChallenge* Arena::CreateMaybeMessage<::dsa::control::v1::AuthChallenge>(Arena*);
 template<> ::dsa::control::v1::AuthProof* Arena::CreateMaybeMessage<::dsa::control::v1::AuthProof>(Arena*);
+template<> ::dsa::control::v1::CancelInstall* Arena::CreateMaybeMessage<::dsa::control::v1::CancelInstall>(Arena*);
 template<> ::dsa::control::v1::ClipboardSharing* Arena::CreateMaybeMessage<::dsa::control::v1::ClipboardSharing>(Arena*);
 template<> ::dsa::control::v1::ClipboardText* Arena::CreateMaybeMessage<::dsa::control::v1::ClipboardText>(Arena*);
 template<> ::dsa::control::v1::ClockAnswer* Arena::CreateMaybeMessage<::dsa::control::v1::ClockAnswer>(Arena*);
@@ -193,21 +198,20 @@ template<> ::dsa::control::v1::FileChunk* Arena::CreateMaybeMessage<::dsa::contr
 template<> ::dsa::control::v1::FileProgress* Arena::CreateMaybeMessage<::dsa::control::v1::FileProgress>(Arena*);
 template<> ::dsa::control::v1::GuestBoot* Arena::CreateMaybeMessage<::dsa::control::v1::GuestBoot>(Arena*);
 template<> ::dsa::control::v1::GuestMemory* Arena::CreateMaybeMessage<::dsa::control::v1::GuestMemory>(Arena*);
-template<> ::dsa::control::v1::GuestNotification* Arena::CreateMaybeMessage<::dsa::control::v1::GuestNotification>(Arena*);
 template<> ::dsa::control::v1::Hello* Arena::CreateMaybeMessage<::dsa::control::v1::Hello>(Arena*);
 template<> ::dsa::control::v1::HelloAccepted* Arena::CreateMaybeMessage<::dsa::control::v1::HelloAccepted>(Arena*);
 template<> ::dsa::control::v1::HelloRejected* Arena::CreateMaybeMessage<::dsa::control::v1::HelloRejected>(Arena*);
 template<> ::dsa::control::v1::ImeCommit* Arena::CreateMaybeMessage<::dsa::control::v1::ImeCommit>(Arena*);
 template<> ::dsa::control::v1::ImeComposition* Arena::CreateMaybeMessage<::dsa::control::v1::ImeComposition>(Arena*);
 template<> ::dsa::control::v1::ImeCursor* Arena::CreateMaybeMessage<::dsa::control::v1::ImeCursor>(Arena*);
+template<> ::dsa::control::v1::InstallApk* Arena::CreateMaybeMessage<::dsa::control::v1::InstallApk>(Arena*);
+template<> ::dsa::control::v1::InstallProgress* Arena::CreateMaybeMessage<::dsa::control::v1::InstallProgress>(Arena*);
+template<> ::dsa::control::v1::InstallResult* Arena::CreateMaybeMessage<::dsa::control::v1::InstallResult>(Arena*);
 template<> ::dsa::control::v1::InstalledApp* Arena::CreateMaybeMessage<::dsa::control::v1::InstalledApp>(Arena*);
 template<> ::dsa::control::v1::InstalledApps* Arena::CreateMaybeMessage<::dsa::control::v1::InstalledApps>(Arena*);
 template<> ::dsa::control::v1::KeyEvent* Arena::CreateMaybeMessage<::dsa::control::v1::KeyEvent>(Arena*);
 template<> ::dsa::control::v1::LaunchApp* Arena::CreateMaybeMessage<::dsa::control::v1::LaunchApp>(Arena*);
 template<> ::dsa::control::v1::LinkHandling* Arena::CreateMaybeMessage<::dsa::control::v1::LinkHandling>(Arena*);
-template<> ::dsa::control::v1::NotificationClicked* Arena::CreateMaybeMessage<::dsa::control::v1::NotificationClicked>(Arena*);
-template<> ::dsa::control::v1::NotificationDismissed* Arena::CreateMaybeMessage<::dsa::control::v1::NotificationDismissed>(Arena*);
-template<> ::dsa::control::v1::NotificationRemoved* Arena::CreateMaybeMessage<::dsa::control::v1::NotificationRemoved>(Arena*);
 template<> ::dsa::control::v1::OpenFile* Arena::CreateMaybeMessage<::dsa::control::v1::OpenFile>(Arena*);
 template<> ::dsa::control::v1::OpenLink* Arena::CreateMaybeMessage<::dsa::control::v1::OpenLink>(Arena*);
 template<> ::dsa::control::v1::PointerEvent* Arena::CreateMaybeMessage<::dsa::control::v1::PointerEvent>(Arena*);
@@ -367,6 +371,34 @@ inline const std::string& KeyAction_Name(T enum_t_value) {
 }
 bool KeyAction_Parse(
     ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, KeyAction* value);
+enum InstallStatus : int {
+  INSTALL_STATUS_UNSPECIFIED = 0,
+  INSTALL_STATUS_SUCCESS = 1,
+  INSTALL_STATUS_INCOMPATIBLE = 2,
+  INSTALL_STATUS_CONFLICTING_SIGNATURE = 3,
+  INSTALL_STATUS_INVALID_APK = 4,
+  INSTALL_STATUS_INSUFFICIENT_STORAGE = 5,
+  INSTALL_STATUS_DOWNGRADE = 6,
+  INSTALL_STATUS_BLOCKED = 7,
+  INSTALL_STATUS_OTHER = 8,
+  InstallStatus_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
+  InstallStatus_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
+};
+bool InstallStatus_IsValid(int value);
+constexpr InstallStatus InstallStatus_MIN = INSTALL_STATUS_UNSPECIFIED;
+constexpr InstallStatus InstallStatus_MAX = INSTALL_STATUS_OTHER;
+constexpr int InstallStatus_ARRAYSIZE = InstallStatus_MAX + 1;
+
+const std::string& InstallStatus_Name(InstallStatus value);
+template<typename T>
+inline const std::string& InstallStatus_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, InstallStatus>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function InstallStatus_Name.");
+  return InstallStatus_Name(static_cast<InstallStatus>(enum_t_value));
+}
+bool InstallStatus_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, InstallStatus* value);
 enum FileAction : int {
   FILE_ACTION_UNSPECIFIED = 0,
   FILE_ACTION_VIEW = 1,
@@ -4446,670 +4478,6 @@ class ClipboardSharing final :
 };
 // -------------------------------------------------------------------
 
-class GuestNotification final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.GuestNotification) */ {
- public:
-  inline GuestNotification() : GuestNotification(nullptr) {}
-  ~GuestNotification() override;
-  explicit PROTOBUF_CONSTEXPR GuestNotification(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  GuestNotification(const GuestNotification& from);
-  GuestNotification(GuestNotification&& from) noexcept
-    : GuestNotification() {
-    *this = ::std::move(from);
-  }
-
-  inline GuestNotification& operator=(const GuestNotification& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline GuestNotification& operator=(GuestNotification&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const GuestNotification& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const GuestNotification* internal_default_instance() {
-    return reinterpret_cast<const GuestNotification*>(
-               &_GuestNotification_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    26;
-
-  friend void swap(GuestNotification& a, GuestNotification& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(GuestNotification* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(GuestNotification* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  GuestNotification* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<GuestNotification>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const GuestNotification& from);
-  void MergeFrom(const GuestNotification& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(GuestNotification* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.GuestNotification";
-  }
-  protected:
-  explicit GuestNotification(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kKeyFieldNumber = 1,
-    kPackageNameFieldNumber = 2,
-    kAppLabelFieldNumber = 3,
-    kTitleFieldNumber = 4,
-    kTextFieldNumber = 5,
-    kIconPngFieldNumber = 6,
-    kImportanceFieldNumber = 7,
-    kHighPriorityFieldNumber = 8,
-    kClearableFieldNumber = 9,
-    kWhenMillisFieldNumber = 10,
-  };
-  // string key = 1;
-  void clear_key();
-  const std::string& key() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_key(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_key();
-  PROTOBUF_NODISCARD std::string* release_key();
-  void set_allocated_key(std::string* key);
-  private:
-  const std::string& _internal_key() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_key(const std::string& value);
-  std::string* _internal_mutable_key();
-  public:
-
-  // string package_name = 2;
-  void clear_package_name();
-  const std::string& package_name() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_package_name(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_package_name();
-  PROTOBUF_NODISCARD std::string* release_package_name();
-  void set_allocated_package_name(std::string* package_name);
-  private:
-  const std::string& _internal_package_name() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_package_name(const std::string& value);
-  std::string* _internal_mutable_package_name();
-  public:
-
-  // string app_label = 3;
-  void clear_app_label();
-  const std::string& app_label() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_app_label(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_app_label();
-  PROTOBUF_NODISCARD std::string* release_app_label();
-  void set_allocated_app_label(std::string* app_label);
-  private:
-  const std::string& _internal_app_label() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_app_label(const std::string& value);
-  std::string* _internal_mutable_app_label();
-  public:
-
-  // string title = 4;
-  void clear_title();
-  const std::string& title() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_title(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_title();
-  PROTOBUF_NODISCARD std::string* release_title();
-  void set_allocated_title(std::string* title);
-  private:
-  const std::string& _internal_title() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_title(const std::string& value);
-  std::string* _internal_mutable_title();
-  public:
-
-  // string text = 5;
-  void clear_text();
-  const std::string& text() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_text(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_text();
-  PROTOBUF_NODISCARD std::string* release_text();
-  void set_allocated_text(std::string* text);
-  private:
-  const std::string& _internal_text() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_text(const std::string& value);
-  std::string* _internal_mutable_text();
-  public:
-
-  // bytes icon_png = 6;
-  void clear_icon_png();
-  const std::string& icon_png() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_icon_png(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_icon_png();
-  PROTOBUF_NODISCARD std::string* release_icon_png();
-  void set_allocated_icon_png(std::string* icon_png);
-  private:
-  const std::string& _internal_icon_png() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_icon_png(const std::string& value);
-  std::string* _internal_mutable_icon_png();
-  public:
-
-  // int32 importance = 7;
-  void clear_importance();
-  int32_t importance() const;
-  void set_importance(int32_t value);
-  private:
-  int32_t _internal_importance() const;
-  void _internal_set_importance(int32_t value);
-  public:
-
-  // bool high_priority = 8;
-  void clear_high_priority();
-  bool high_priority() const;
-  void set_high_priority(bool value);
-  private:
-  bool _internal_high_priority() const;
-  void _internal_set_high_priority(bool value);
-  public:
-
-  // bool clearable = 9;
-  void clear_clearable();
-  bool clearable() const;
-  void set_clearable(bool value);
-  private:
-  bool _internal_clearable() const;
-  void _internal_set_clearable(bool value);
-  public:
-
-  // int64 when_millis = 10;
-  void clear_when_millis();
-  int64_t when_millis() const;
-  void set_when_millis(int64_t value);
-  private:
-  int64_t _internal_when_millis() const;
-  void _internal_set_when_millis(int64_t value);
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.GuestNotification)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr key_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr package_name_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr app_label_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr title_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr text_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr icon_png_;
-    int32_t importance_;
-    bool high_priority_;
-    bool clearable_;
-    int64_t when_millis_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class NotificationRemoved final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.NotificationRemoved) */ {
- public:
-  inline NotificationRemoved() : NotificationRemoved(nullptr) {}
-  ~NotificationRemoved() override;
-  explicit PROTOBUF_CONSTEXPR NotificationRemoved(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  NotificationRemoved(const NotificationRemoved& from);
-  NotificationRemoved(NotificationRemoved&& from) noexcept
-    : NotificationRemoved() {
-    *this = ::std::move(from);
-  }
-
-  inline NotificationRemoved& operator=(const NotificationRemoved& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline NotificationRemoved& operator=(NotificationRemoved&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const NotificationRemoved& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const NotificationRemoved* internal_default_instance() {
-    return reinterpret_cast<const NotificationRemoved*>(
-               &_NotificationRemoved_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    27;
-
-  friend void swap(NotificationRemoved& a, NotificationRemoved& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(NotificationRemoved* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(NotificationRemoved* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  NotificationRemoved* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<NotificationRemoved>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const NotificationRemoved& from);
-  void MergeFrom(const NotificationRemoved& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(NotificationRemoved* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.NotificationRemoved";
-  }
-  protected:
-  explicit NotificationRemoved(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kKeyFieldNumber = 1,
-  };
-  // string key = 1;
-  void clear_key();
-  const std::string& key() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_key(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_key();
-  PROTOBUF_NODISCARD std::string* release_key();
-  void set_allocated_key(std::string* key);
-  private:
-  const std::string& _internal_key() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_key(const std::string& value);
-  std::string* _internal_mutable_key();
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.NotificationRemoved)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr key_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class NotificationClicked final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.NotificationClicked) */ {
- public:
-  inline NotificationClicked() : NotificationClicked(nullptr) {}
-  ~NotificationClicked() override;
-  explicit PROTOBUF_CONSTEXPR NotificationClicked(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  NotificationClicked(const NotificationClicked& from);
-  NotificationClicked(NotificationClicked&& from) noexcept
-    : NotificationClicked() {
-    *this = ::std::move(from);
-  }
-
-  inline NotificationClicked& operator=(const NotificationClicked& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline NotificationClicked& operator=(NotificationClicked&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const NotificationClicked& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const NotificationClicked* internal_default_instance() {
-    return reinterpret_cast<const NotificationClicked*>(
-               &_NotificationClicked_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    28;
-
-  friend void swap(NotificationClicked& a, NotificationClicked& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(NotificationClicked* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(NotificationClicked* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  NotificationClicked* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<NotificationClicked>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const NotificationClicked& from);
-  void MergeFrom(const NotificationClicked& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(NotificationClicked* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.NotificationClicked";
-  }
-  protected:
-  explicit NotificationClicked(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kKeyFieldNumber = 1,
-  };
-  // string key = 1;
-  void clear_key();
-  const std::string& key() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_key(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_key();
-  PROTOBUF_NODISCARD std::string* release_key();
-  void set_allocated_key(std::string* key);
-  private:
-  const std::string& _internal_key() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_key(const std::string& value);
-  std::string* _internal_mutable_key();
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.NotificationClicked)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr key_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
-class NotificationDismissed final :
-    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.NotificationDismissed) */ {
- public:
-  inline NotificationDismissed() : NotificationDismissed(nullptr) {}
-  ~NotificationDismissed() override;
-  explicit PROTOBUF_CONSTEXPR NotificationDismissed(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  NotificationDismissed(const NotificationDismissed& from);
-  NotificationDismissed(NotificationDismissed&& from) noexcept
-    : NotificationDismissed() {
-    *this = ::std::move(from);
-  }
-
-  inline NotificationDismissed& operator=(const NotificationDismissed& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline NotificationDismissed& operator=(NotificationDismissed&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  static const NotificationDismissed& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const NotificationDismissed* internal_default_instance() {
-    return reinterpret_cast<const NotificationDismissed*>(
-               &_NotificationDismissed_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    29;
-
-  friend void swap(NotificationDismissed& a, NotificationDismissed& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(NotificationDismissed* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(NotificationDismissed* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  NotificationDismissed* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<NotificationDismissed>(arena);
-  }
-  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
-  void CopyFrom(const NotificationDismissed& from);
-  void MergeFrom(const NotificationDismissed& from);
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const;
-  void InternalSwap(NotificationDismissed* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "dsa.control.v1.NotificationDismissed";
-  }
-  protected:
-  explicit NotificationDismissed(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  std::string GetTypeName() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kKeyFieldNumber = 1,
-  };
-  // string key = 1;
-  void clear_key();
-  const std::string& key() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_key(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_key();
-  PROTOBUF_NODISCARD std::string* release_key();
-  void set_allocated_key(std::string* key);
-  private:
-  const std::string& _internal_key() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_key(const std::string& value);
-  std::string* _internal_mutable_key();
-  public:
-
-  // @@protoc_insertion_point(class_scope:dsa.control.v1.NotificationDismissed)
- private:
-  class _Internal;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr key_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_control_2eproto;
-};
-// -------------------------------------------------------------------
-
 class RequestGuestMemory final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.RequestGuestMemory) */ {
  public:
@@ -5149,7 +4517,7 @@ class RequestGuestMemory final :
                &_RequestGuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    30;
+    26;
 
   friend void swap(RequestGuestMemory& a, RequestGuestMemory& b) {
     a.Swap(&b);
@@ -5266,7 +4634,7 @@ class ProcessMemory final :
                &_ProcessMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    31;
+    27;
 
   friend void swap(ProcessMemory& a, ProcessMemory& b) {
     a.Swap(&b);
@@ -5434,7 +4802,7 @@ class GuestMemory final :
                &_GuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    32;
+    28;
 
   friend void swap(GuestMemory& a, GuestMemory& b) {
     a.Swap(&b);
@@ -5716,7 +5084,7 @@ class AgentConnected final :
                &_AgentConnected_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    33;
+    29;
 
   friend void swap(AgentConnected& a, AgentConnected& b) {
     a.Swap(&b);
@@ -5833,7 +5201,7 @@ class GuestBoot final :
                &_GuestBoot_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    34;
+    30;
 
   friend void swap(GuestBoot& a, GuestBoot& b) {
     a.Swap(&b);
@@ -5935,6 +5303,320 @@ class GuestBoot final :
 };
 // -------------------------------------------------------------------
 
+class InstallApk final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.InstallApk) */ {
+ public:
+  inline InstallApk() : InstallApk(nullptr) {}
+  ~InstallApk() override;
+  explicit PROTOBUF_CONSTEXPR InstallApk(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  InstallApk(const InstallApk& from);
+  InstallApk(InstallApk&& from) noexcept
+    : InstallApk() {
+    *this = ::std::move(from);
+  }
+
+  inline InstallApk& operator=(const InstallApk& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline InstallApk& operator=(InstallApk&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const InstallApk& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const InstallApk* internal_default_instance() {
+    return reinterpret_cast<const InstallApk*>(
+               &_InstallApk_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    31;
+
+  friend void swap(InstallApk& a, InstallApk& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(InstallApk* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(InstallApk* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  InstallApk* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<InstallApk>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const InstallApk& from);
+  void MergeFrom(const InstallApk& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(InstallApk* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.InstallApk";
+  }
+  protected:
+  explicit InstallApk(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kNameFieldNumber = 2,
+    kSizeFieldNumber = 3,
+    kTransferIdFieldNumber = 1,
+  };
+  // string name = 2;
+  void clear_name();
+  const std::string& name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_name();
+  PROTOBUF_NODISCARD std::string* release_name();
+  void set_allocated_name(std::string* name);
+  private:
+  const std::string& _internal_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_name(const std::string& value);
+  std::string* _internal_mutable_name();
+  public:
+
+  // uint64 size = 3;
+  void clear_size();
+  uint64_t size() const;
+  void set_size(uint64_t value);
+  private:
+  uint64_t _internal_size() const;
+  void _internal_set_size(uint64_t value);
+  public:
+
+  // uint32 transfer_id = 1;
+  void clear_transfer_id();
+  uint32_t transfer_id() const;
+  void set_transfer_id(uint32_t value);
+  private:
+  uint32_t _internal_transfer_id() const;
+  void _internal_set_transfer_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.InstallApk)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr name_;
+    uint64_t size_;
+    uint32_t transfer_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class ApkChunk final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.ApkChunk) */ {
+ public:
+  inline ApkChunk() : ApkChunk(nullptr) {}
+  ~ApkChunk() override;
+  explicit PROTOBUF_CONSTEXPR ApkChunk(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  ApkChunk(const ApkChunk& from);
+  ApkChunk(ApkChunk&& from) noexcept
+    : ApkChunk() {
+    *this = ::std::move(from);
+  }
+
+  inline ApkChunk& operator=(const ApkChunk& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ApkChunk& operator=(ApkChunk&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ApkChunk& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const ApkChunk* internal_default_instance() {
+    return reinterpret_cast<const ApkChunk*>(
+               &_ApkChunk_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    32;
+
+  friend void swap(ApkChunk& a, ApkChunk& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ApkChunk* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(ApkChunk* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  ApkChunk* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ApkChunk>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const ApkChunk& from);
+  void MergeFrom(const ApkChunk& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(ApkChunk* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.ApkChunk";
+  }
+  protected:
+  explicit ApkChunk(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kDataFieldNumber = 3,
+    kOffsetFieldNumber = 2,
+    kTransferIdFieldNumber = 1,
+  };
+  // bytes data = 3;
+  void clear_data();
+  const std::string& data() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_data(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_data();
+  PROTOBUF_NODISCARD std::string* release_data();
+  void set_allocated_data(std::string* data);
+  private:
+  const std::string& _internal_data() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_data(const std::string& value);
+  std::string* _internal_mutable_data();
+  public:
+
+  // uint64 offset = 2;
+  void clear_offset();
+  uint64_t offset() const;
+  void set_offset(uint64_t value);
+  private:
+  uint64_t _internal_offset() const;
+  void _internal_set_offset(uint64_t value);
+  public:
+
+  // uint32 transfer_id = 1;
+  void clear_transfer_id();
+  uint32_t transfer_id() const;
+  void set_transfer_id(uint32_t value);
+  private:
+  uint32_t _internal_transfer_id() const;
+  void _internal_set_transfer_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.ApkChunk)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr data_;
+    uint64_t offset_;
+    uint32_t transfer_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class OpenLink final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.OpenLink) */ {
  public:
@@ -5974,7 +5656,7 @@ class OpenLink final :
                &_OpenLink_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    35;
+    33;
 
   friend void swap(OpenLink& a, OpenLink& b) {
     a.Swap(&b);
@@ -6109,7 +5791,7 @@ class LinkHandling final :
                &_LinkHandling_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    36;
+    34;
 
   friend void swap(LinkHandling& a, LinkHandling& b) {
     a.Swap(&b);
@@ -6239,7 +5921,7 @@ class OpenFile final :
                &_OpenFile_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    37;
+    35;
 
   friend void swap(OpenFile& a, OpenFile& b) {
     a.Swap(&b);
@@ -6407,7 +6089,7 @@ class FileChunk final :
                &_FileChunk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    38;
+    36;
 
   friend void swap(FileChunk& a, FileChunk& b) {
     a.Swap(&b);
@@ -6525,6 +6207,450 @@ class FileChunk final :
 };
 // -------------------------------------------------------------------
 
+class CancelInstall final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.CancelInstall) */ {
+ public:
+  inline CancelInstall() : CancelInstall(nullptr) {}
+  ~CancelInstall() override;
+  explicit PROTOBUF_CONSTEXPR CancelInstall(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  CancelInstall(const CancelInstall& from);
+  CancelInstall(CancelInstall&& from) noexcept
+    : CancelInstall() {
+    *this = ::std::move(from);
+  }
+
+  inline CancelInstall& operator=(const CancelInstall& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline CancelInstall& operator=(CancelInstall&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const CancelInstall& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const CancelInstall* internal_default_instance() {
+    return reinterpret_cast<const CancelInstall*>(
+               &_CancelInstall_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    37;
+
+  friend void swap(CancelInstall& a, CancelInstall& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(CancelInstall* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(CancelInstall* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  CancelInstall* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<CancelInstall>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const CancelInstall& from);
+  void MergeFrom(const CancelInstall& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(CancelInstall* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.CancelInstall";
+  }
+  protected:
+  explicit CancelInstall(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kTransferIdFieldNumber = 1,
+  };
+  // uint32 transfer_id = 1;
+  void clear_transfer_id();
+  uint32_t transfer_id() const;
+  void set_transfer_id(uint32_t value);
+  private:
+  uint32_t _internal_transfer_id() const;
+  void _internal_set_transfer_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.CancelInstall)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    uint32_t transfer_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class InstallProgress final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.InstallProgress) */ {
+ public:
+  inline InstallProgress() : InstallProgress(nullptr) {}
+  ~InstallProgress() override;
+  explicit PROTOBUF_CONSTEXPR InstallProgress(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  InstallProgress(const InstallProgress& from);
+  InstallProgress(InstallProgress&& from) noexcept
+    : InstallProgress() {
+    *this = ::std::move(from);
+  }
+
+  inline InstallProgress& operator=(const InstallProgress& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline InstallProgress& operator=(InstallProgress&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const InstallProgress& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const InstallProgress* internal_default_instance() {
+    return reinterpret_cast<const InstallProgress*>(
+               &_InstallProgress_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    38;
+
+  friend void swap(InstallProgress& a, InstallProgress& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(InstallProgress* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(InstallProgress* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  InstallProgress* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<InstallProgress>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const InstallProgress& from);
+  void MergeFrom(const InstallProgress& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(InstallProgress* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.InstallProgress";
+  }
+  protected:
+  explicit InstallProgress(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kReceivedFieldNumber = 2,
+    kTransferIdFieldNumber = 1,
+  };
+  // uint64 received = 2;
+  void clear_received();
+  uint64_t received() const;
+  void set_received(uint64_t value);
+  private:
+  uint64_t _internal_received() const;
+  void _internal_set_received(uint64_t value);
+  public:
+
+  // uint32 transfer_id = 1;
+  void clear_transfer_id();
+  uint32_t transfer_id() const;
+  void set_transfer_id(uint32_t value);
+  private:
+  uint32_t _internal_transfer_id() const;
+  void _internal_set_transfer_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.InstallProgress)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    uint64_t received_;
+    uint32_t transfer_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class InstallResult final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.InstallResult) */ {
+ public:
+  inline InstallResult() : InstallResult(nullptr) {}
+  ~InstallResult() override;
+  explicit PROTOBUF_CONSTEXPR InstallResult(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  InstallResult(const InstallResult& from);
+  InstallResult(InstallResult&& from) noexcept
+    : InstallResult() {
+    *this = ::std::move(from);
+  }
+
+  inline InstallResult& operator=(const InstallResult& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline InstallResult& operator=(InstallResult&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const InstallResult& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const InstallResult* internal_default_instance() {
+    return reinterpret_cast<const InstallResult*>(
+               &_InstallResult_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    39;
+
+  friend void swap(InstallResult& a, InstallResult& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(InstallResult* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(InstallResult* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  InstallResult* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<InstallResult>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const InstallResult& from);
+  void MergeFrom(const InstallResult& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(InstallResult* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.InstallResult";
+  }
+  protected:
+  explicit InstallResult(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kPackageNameFieldNumber = 3,
+    kMessageFieldNumber = 4,
+    kTransferIdFieldNumber = 1,
+    kStatusFieldNumber = 2,
+  };
+  // string package_name = 3;
+  void clear_package_name();
+  const std::string& package_name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_package_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_package_name();
+  PROTOBUF_NODISCARD std::string* release_package_name();
+  void set_allocated_package_name(std::string* package_name);
+  private:
+  const std::string& _internal_package_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_package_name(const std::string& value);
+  std::string* _internal_mutable_package_name();
+  public:
+
+  // string message = 4;
+  void clear_message();
+  const std::string& message() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_message(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_message();
+  PROTOBUF_NODISCARD std::string* release_message();
+  void set_allocated_message(std::string* message);
+  private:
+  const std::string& _internal_message() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_message(const std::string& value);
+  std::string* _internal_mutable_message();
+  public:
+
+  // uint32 transfer_id = 1;
+  void clear_transfer_id();
+  uint32_t transfer_id() const;
+  void set_transfer_id(uint32_t value);
+  private:
+  uint32_t _internal_transfer_id() const;
+  void _internal_set_transfer_id(uint32_t value);
+  public:
+
+  // .dsa.control.v1.InstallStatus status = 2;
+  void clear_status();
+  ::dsa::control::v1::InstallStatus status() const;
+  void set_status(::dsa::control::v1::InstallStatus value);
+  private:
+  ::dsa::control::v1::InstallStatus _internal_status() const;
+  void _internal_set_status(::dsa::control::v1::InstallStatus value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.InstallResult)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr package_name_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr message_;
+    uint32_t transfer_id_;
+    int status_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class FileProgress final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.FileProgress) */ {
  public:
@@ -6564,7 +6690,7 @@ class FileProgress final :
                &_FileProgress_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    39;
+    40;
 
   friend void swap(FileProgress& a, FileProgress& b) {
     a.Swap(&b);
@@ -6721,7 +6847,7 @@ class ClockProbe final :
                &_ClockProbe_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    40;
+    41;
 
   friend void swap(ClockProbe& a, ClockProbe& b) {
     a.Swap(&b);
@@ -6851,7 +6977,7 @@ class ClockAnswer final :
                &_ClockAnswer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    41;
+    42;
 
   friend void swap(ClockAnswer& a, ClockAnswer& b) {
     a.Swap(&b);
@@ -7019,15 +7145,16 @@ class Envelope final :
     kScreenState = 40,
     kPowerState = 41,
     kDeviceIdle = 42,
+    kInstallApk = 60,
+    kApkChunk = 61,
+    kCancelInstall = 62,
+    kInstallProgress = 63,
+    kInstallResult = 64,
     kOpenLink = 50,
     kLinkHandling = 51,
     kOpenFile = 52,
     kFileChunk = 53,
     kFileProgress = 54,
-    kNotification = 70,
-    kNotificationRemoved = 71,
-    kNotificationClicked = 72,
-    kNotificationDismissed = 73,
     BODY_NOT_SET = 0,
   };
 
@@ -7036,7 +7163,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    42;
+    43;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -7131,15 +7258,16 @@ class Envelope final :
     kScreenStateFieldNumber = 40,
     kPowerStateFieldNumber = 41,
     kDeviceIdleFieldNumber = 42,
+    kInstallApkFieldNumber = 60,
+    kApkChunkFieldNumber = 61,
+    kCancelInstallFieldNumber = 62,
+    kInstallProgressFieldNumber = 63,
+    kInstallResultFieldNumber = 64,
     kOpenLinkFieldNumber = 50,
     kLinkHandlingFieldNumber = 51,
     kOpenFileFieldNumber = 52,
     kFileChunkFieldNumber = 53,
     kFileProgressFieldNumber = 54,
-    kNotificationFieldNumber = 70,
-    kNotificationRemovedFieldNumber = 71,
-    kNotificationClickedFieldNumber = 72,
-    kNotificationDismissedFieldNumber = 73,
   };
   // .dsa.control.v1.Hello hello = 1;
   bool has_hello() const;
@@ -7699,6 +7827,96 @@ class Envelope final :
       ::dsa::control::v1::DeviceIdle* device_idle);
   ::dsa::control::v1::DeviceIdle* unsafe_arena_release_device_idle();
 
+  // .dsa.control.v1.InstallApk install_apk = 60;
+  bool has_install_apk() const;
+  private:
+  bool _internal_has_install_apk() const;
+  public:
+  void clear_install_apk();
+  const ::dsa::control::v1::InstallApk& install_apk() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::InstallApk* release_install_apk();
+  ::dsa::control::v1::InstallApk* mutable_install_apk();
+  void set_allocated_install_apk(::dsa::control::v1::InstallApk* install_apk);
+  private:
+  const ::dsa::control::v1::InstallApk& _internal_install_apk() const;
+  ::dsa::control::v1::InstallApk* _internal_mutable_install_apk();
+  public:
+  void unsafe_arena_set_allocated_install_apk(
+      ::dsa::control::v1::InstallApk* install_apk);
+  ::dsa::control::v1::InstallApk* unsafe_arena_release_install_apk();
+
+  // .dsa.control.v1.ApkChunk apk_chunk = 61;
+  bool has_apk_chunk() const;
+  private:
+  bool _internal_has_apk_chunk() const;
+  public:
+  void clear_apk_chunk();
+  const ::dsa::control::v1::ApkChunk& apk_chunk() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::ApkChunk* release_apk_chunk();
+  ::dsa::control::v1::ApkChunk* mutable_apk_chunk();
+  void set_allocated_apk_chunk(::dsa::control::v1::ApkChunk* apk_chunk);
+  private:
+  const ::dsa::control::v1::ApkChunk& _internal_apk_chunk() const;
+  ::dsa::control::v1::ApkChunk* _internal_mutable_apk_chunk();
+  public:
+  void unsafe_arena_set_allocated_apk_chunk(
+      ::dsa::control::v1::ApkChunk* apk_chunk);
+  ::dsa::control::v1::ApkChunk* unsafe_arena_release_apk_chunk();
+
+  // .dsa.control.v1.CancelInstall cancel_install = 62;
+  bool has_cancel_install() const;
+  private:
+  bool _internal_has_cancel_install() const;
+  public:
+  void clear_cancel_install();
+  const ::dsa::control::v1::CancelInstall& cancel_install() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::CancelInstall* release_cancel_install();
+  ::dsa::control::v1::CancelInstall* mutable_cancel_install();
+  void set_allocated_cancel_install(::dsa::control::v1::CancelInstall* cancel_install);
+  private:
+  const ::dsa::control::v1::CancelInstall& _internal_cancel_install() const;
+  ::dsa::control::v1::CancelInstall* _internal_mutable_cancel_install();
+  public:
+  void unsafe_arena_set_allocated_cancel_install(
+      ::dsa::control::v1::CancelInstall* cancel_install);
+  ::dsa::control::v1::CancelInstall* unsafe_arena_release_cancel_install();
+
+  // .dsa.control.v1.InstallProgress install_progress = 63;
+  bool has_install_progress() const;
+  private:
+  bool _internal_has_install_progress() const;
+  public:
+  void clear_install_progress();
+  const ::dsa::control::v1::InstallProgress& install_progress() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::InstallProgress* release_install_progress();
+  ::dsa::control::v1::InstallProgress* mutable_install_progress();
+  void set_allocated_install_progress(::dsa::control::v1::InstallProgress* install_progress);
+  private:
+  const ::dsa::control::v1::InstallProgress& _internal_install_progress() const;
+  ::dsa::control::v1::InstallProgress* _internal_mutable_install_progress();
+  public:
+  void unsafe_arena_set_allocated_install_progress(
+      ::dsa::control::v1::InstallProgress* install_progress);
+  ::dsa::control::v1::InstallProgress* unsafe_arena_release_install_progress();
+
+  // .dsa.control.v1.InstallResult install_result = 64;
+  bool has_install_result() const;
+  private:
+  bool _internal_has_install_result() const;
+  public:
+  void clear_install_result();
+  const ::dsa::control::v1::InstallResult& install_result() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::InstallResult* release_install_result();
+  ::dsa::control::v1::InstallResult* mutable_install_result();
+  void set_allocated_install_result(::dsa::control::v1::InstallResult* install_result);
+  private:
+  const ::dsa::control::v1::InstallResult& _internal_install_result() const;
+  ::dsa::control::v1::InstallResult* _internal_mutable_install_result();
+  public:
+  void unsafe_arena_set_allocated_install_result(
+      ::dsa::control::v1::InstallResult* install_result);
+  ::dsa::control::v1::InstallResult* unsafe_arena_release_install_result();
+
   // .dsa.control.v1.OpenLink open_link = 50;
   bool has_open_link() const;
   private:
@@ -7789,78 +8007,6 @@ class Envelope final :
       ::dsa::control::v1::FileProgress* file_progress);
   ::dsa::control::v1::FileProgress* unsafe_arena_release_file_progress();
 
-  // .dsa.control.v1.GuestNotification notification = 70;
-  bool has_notification() const;
-  private:
-  bool _internal_has_notification() const;
-  public:
-  void clear_notification();
-  const ::dsa::control::v1::GuestNotification& notification() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::GuestNotification* release_notification();
-  ::dsa::control::v1::GuestNotification* mutable_notification();
-  void set_allocated_notification(::dsa::control::v1::GuestNotification* notification);
-  private:
-  const ::dsa::control::v1::GuestNotification& _internal_notification() const;
-  ::dsa::control::v1::GuestNotification* _internal_mutable_notification();
-  public:
-  void unsafe_arena_set_allocated_notification(
-      ::dsa::control::v1::GuestNotification* notification);
-  ::dsa::control::v1::GuestNotification* unsafe_arena_release_notification();
-
-  // .dsa.control.v1.NotificationRemoved notification_removed = 71;
-  bool has_notification_removed() const;
-  private:
-  bool _internal_has_notification_removed() const;
-  public:
-  void clear_notification_removed();
-  const ::dsa::control::v1::NotificationRemoved& notification_removed() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::NotificationRemoved* release_notification_removed();
-  ::dsa::control::v1::NotificationRemoved* mutable_notification_removed();
-  void set_allocated_notification_removed(::dsa::control::v1::NotificationRemoved* notification_removed);
-  private:
-  const ::dsa::control::v1::NotificationRemoved& _internal_notification_removed() const;
-  ::dsa::control::v1::NotificationRemoved* _internal_mutable_notification_removed();
-  public:
-  void unsafe_arena_set_allocated_notification_removed(
-      ::dsa::control::v1::NotificationRemoved* notification_removed);
-  ::dsa::control::v1::NotificationRemoved* unsafe_arena_release_notification_removed();
-
-  // .dsa.control.v1.NotificationClicked notification_clicked = 72;
-  bool has_notification_clicked() const;
-  private:
-  bool _internal_has_notification_clicked() const;
-  public:
-  void clear_notification_clicked();
-  const ::dsa::control::v1::NotificationClicked& notification_clicked() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::NotificationClicked* release_notification_clicked();
-  ::dsa::control::v1::NotificationClicked* mutable_notification_clicked();
-  void set_allocated_notification_clicked(::dsa::control::v1::NotificationClicked* notification_clicked);
-  private:
-  const ::dsa::control::v1::NotificationClicked& _internal_notification_clicked() const;
-  ::dsa::control::v1::NotificationClicked* _internal_mutable_notification_clicked();
-  public:
-  void unsafe_arena_set_allocated_notification_clicked(
-      ::dsa::control::v1::NotificationClicked* notification_clicked);
-  ::dsa::control::v1::NotificationClicked* unsafe_arena_release_notification_clicked();
-
-  // .dsa.control.v1.NotificationDismissed notification_dismissed = 73;
-  bool has_notification_dismissed() const;
-  private:
-  bool _internal_has_notification_dismissed() const;
-  public:
-  void clear_notification_dismissed();
-  const ::dsa::control::v1::NotificationDismissed& notification_dismissed() const;
-  PROTOBUF_NODISCARD ::dsa::control::v1::NotificationDismissed* release_notification_dismissed();
-  ::dsa::control::v1::NotificationDismissed* mutable_notification_dismissed();
-  void set_allocated_notification_dismissed(::dsa::control::v1::NotificationDismissed* notification_dismissed);
-  private:
-  const ::dsa::control::v1::NotificationDismissed& _internal_notification_dismissed() const;
-  ::dsa::control::v1::NotificationDismissed* _internal_mutable_notification_dismissed();
-  public:
-  void unsafe_arena_set_allocated_notification_dismissed(
-      ::dsa::control::v1::NotificationDismissed* notification_dismissed);
-  ::dsa::control::v1::NotificationDismissed* unsafe_arena_release_notification_dismissed();
-
   void clear_body();
   BodyCase body_case() const;
   // @@protoc_insertion_point(class_scope:dsa.control.v1.Envelope)
@@ -7897,15 +8043,16 @@ class Envelope final :
   void set_has_screen_state();
   void set_has_power_state();
   void set_has_device_idle();
+  void set_has_install_apk();
+  void set_has_apk_chunk();
+  void set_has_cancel_install();
+  void set_has_install_progress();
+  void set_has_install_result();
   void set_has_open_link();
   void set_has_link_handling();
   void set_has_open_file();
   void set_has_file_chunk();
   void set_has_file_progress();
-  void set_has_notification();
-  void set_has_notification_removed();
-  void set_has_notification_clicked();
-  void set_has_notification_dismissed();
 
   inline bool has_body() const;
   inline void clear_has_body();
@@ -7948,15 +8095,16 @@ class Envelope final :
       ::dsa::control::v1::ScreenState* screen_state_;
       ::dsa::control::v1::PowerState* power_state_;
       ::dsa::control::v1::DeviceIdle* device_idle_;
+      ::dsa::control::v1::InstallApk* install_apk_;
+      ::dsa::control::v1::ApkChunk* apk_chunk_;
+      ::dsa::control::v1::CancelInstall* cancel_install_;
+      ::dsa::control::v1::InstallProgress* install_progress_;
+      ::dsa::control::v1::InstallResult* install_result_;
       ::dsa::control::v1::OpenLink* open_link_;
       ::dsa::control::v1::LinkHandling* link_handling_;
       ::dsa::control::v1::OpenFile* open_file_;
       ::dsa::control::v1::FileChunk* file_chunk_;
       ::dsa::control::v1::FileProgress* file_progress_;
-      ::dsa::control::v1::GuestNotification* notification_;
-      ::dsa::control::v1::NotificationRemoved* notification_removed_;
-      ::dsa::control::v1::NotificationClicked* notification_clicked_;
-      ::dsa::control::v1::NotificationDismissed* notification_dismissed_;
     } body_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -10423,552 +10571,6 @@ inline void ClipboardSharing::set_on(bool value) {
 
 // -------------------------------------------------------------------
 
-// GuestNotification
-
-// string key = 1;
-inline void GuestNotification::clear_key() {
-  _impl_.key_.ClearToEmpty();
-}
-inline const std::string& GuestNotification::key() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.key)
-  return _internal_key();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void GuestNotification::set_key(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.key_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.key)
-}
-inline std::string* GuestNotification::mutable_key() {
-  std::string* _s = _internal_mutable_key();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.GuestNotification.key)
-  return _s;
-}
-inline const std::string& GuestNotification::_internal_key() const {
-  return _impl_.key_.Get();
-}
-inline void GuestNotification::_internal_set_key(const std::string& value) {
-  
-  _impl_.key_.Set(value, GetArenaForAllocation());
-}
-inline std::string* GuestNotification::_internal_mutable_key() {
-  
-  return _impl_.key_.Mutable(GetArenaForAllocation());
-}
-inline std::string* GuestNotification::release_key() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.GuestNotification.key)
-  return _impl_.key_.Release();
-}
-inline void GuestNotification::set_allocated_key(std::string* key) {
-  if (key != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.key_.SetAllocated(key, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.key_.IsDefault()) {
-    _impl_.key_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.GuestNotification.key)
-}
-
-// string package_name = 2;
-inline void GuestNotification::clear_package_name() {
-  _impl_.package_name_.ClearToEmpty();
-}
-inline const std::string& GuestNotification::package_name() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.package_name)
-  return _internal_package_name();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void GuestNotification::set_package_name(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.package_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.package_name)
-}
-inline std::string* GuestNotification::mutable_package_name() {
-  std::string* _s = _internal_mutable_package_name();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.GuestNotification.package_name)
-  return _s;
-}
-inline const std::string& GuestNotification::_internal_package_name() const {
-  return _impl_.package_name_.Get();
-}
-inline void GuestNotification::_internal_set_package_name(const std::string& value) {
-  
-  _impl_.package_name_.Set(value, GetArenaForAllocation());
-}
-inline std::string* GuestNotification::_internal_mutable_package_name() {
-  
-  return _impl_.package_name_.Mutable(GetArenaForAllocation());
-}
-inline std::string* GuestNotification::release_package_name() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.GuestNotification.package_name)
-  return _impl_.package_name_.Release();
-}
-inline void GuestNotification::set_allocated_package_name(std::string* package_name) {
-  if (package_name != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.package_name_.SetAllocated(package_name, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.package_name_.IsDefault()) {
-    _impl_.package_name_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.GuestNotification.package_name)
-}
-
-// string app_label = 3;
-inline void GuestNotification::clear_app_label() {
-  _impl_.app_label_.ClearToEmpty();
-}
-inline const std::string& GuestNotification::app_label() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.app_label)
-  return _internal_app_label();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void GuestNotification::set_app_label(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.app_label_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.app_label)
-}
-inline std::string* GuestNotification::mutable_app_label() {
-  std::string* _s = _internal_mutable_app_label();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.GuestNotification.app_label)
-  return _s;
-}
-inline const std::string& GuestNotification::_internal_app_label() const {
-  return _impl_.app_label_.Get();
-}
-inline void GuestNotification::_internal_set_app_label(const std::string& value) {
-  
-  _impl_.app_label_.Set(value, GetArenaForAllocation());
-}
-inline std::string* GuestNotification::_internal_mutable_app_label() {
-  
-  return _impl_.app_label_.Mutable(GetArenaForAllocation());
-}
-inline std::string* GuestNotification::release_app_label() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.GuestNotification.app_label)
-  return _impl_.app_label_.Release();
-}
-inline void GuestNotification::set_allocated_app_label(std::string* app_label) {
-  if (app_label != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.app_label_.SetAllocated(app_label, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.app_label_.IsDefault()) {
-    _impl_.app_label_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.GuestNotification.app_label)
-}
-
-// string title = 4;
-inline void GuestNotification::clear_title() {
-  _impl_.title_.ClearToEmpty();
-}
-inline const std::string& GuestNotification::title() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.title)
-  return _internal_title();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void GuestNotification::set_title(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.title_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.title)
-}
-inline std::string* GuestNotification::mutable_title() {
-  std::string* _s = _internal_mutable_title();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.GuestNotification.title)
-  return _s;
-}
-inline const std::string& GuestNotification::_internal_title() const {
-  return _impl_.title_.Get();
-}
-inline void GuestNotification::_internal_set_title(const std::string& value) {
-  
-  _impl_.title_.Set(value, GetArenaForAllocation());
-}
-inline std::string* GuestNotification::_internal_mutable_title() {
-  
-  return _impl_.title_.Mutable(GetArenaForAllocation());
-}
-inline std::string* GuestNotification::release_title() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.GuestNotification.title)
-  return _impl_.title_.Release();
-}
-inline void GuestNotification::set_allocated_title(std::string* title) {
-  if (title != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.title_.SetAllocated(title, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.title_.IsDefault()) {
-    _impl_.title_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.GuestNotification.title)
-}
-
-// string text = 5;
-inline void GuestNotification::clear_text() {
-  _impl_.text_.ClearToEmpty();
-}
-inline const std::string& GuestNotification::text() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.text)
-  return _internal_text();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void GuestNotification::set_text(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.text_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.text)
-}
-inline std::string* GuestNotification::mutable_text() {
-  std::string* _s = _internal_mutable_text();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.GuestNotification.text)
-  return _s;
-}
-inline const std::string& GuestNotification::_internal_text() const {
-  return _impl_.text_.Get();
-}
-inline void GuestNotification::_internal_set_text(const std::string& value) {
-  
-  _impl_.text_.Set(value, GetArenaForAllocation());
-}
-inline std::string* GuestNotification::_internal_mutable_text() {
-  
-  return _impl_.text_.Mutable(GetArenaForAllocation());
-}
-inline std::string* GuestNotification::release_text() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.GuestNotification.text)
-  return _impl_.text_.Release();
-}
-inline void GuestNotification::set_allocated_text(std::string* text) {
-  if (text != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.text_.SetAllocated(text, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.text_.IsDefault()) {
-    _impl_.text_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.GuestNotification.text)
-}
-
-// bytes icon_png = 6;
-inline void GuestNotification::clear_icon_png() {
-  _impl_.icon_png_.ClearToEmpty();
-}
-inline const std::string& GuestNotification::icon_png() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.icon_png)
-  return _internal_icon_png();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void GuestNotification::set_icon_png(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.icon_png_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.icon_png)
-}
-inline std::string* GuestNotification::mutable_icon_png() {
-  std::string* _s = _internal_mutable_icon_png();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.GuestNotification.icon_png)
-  return _s;
-}
-inline const std::string& GuestNotification::_internal_icon_png() const {
-  return _impl_.icon_png_.Get();
-}
-inline void GuestNotification::_internal_set_icon_png(const std::string& value) {
-  
-  _impl_.icon_png_.Set(value, GetArenaForAllocation());
-}
-inline std::string* GuestNotification::_internal_mutable_icon_png() {
-  
-  return _impl_.icon_png_.Mutable(GetArenaForAllocation());
-}
-inline std::string* GuestNotification::release_icon_png() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.GuestNotification.icon_png)
-  return _impl_.icon_png_.Release();
-}
-inline void GuestNotification::set_allocated_icon_png(std::string* icon_png) {
-  if (icon_png != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.icon_png_.SetAllocated(icon_png, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.icon_png_.IsDefault()) {
-    _impl_.icon_png_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.GuestNotification.icon_png)
-}
-
-// int32 importance = 7;
-inline void GuestNotification::clear_importance() {
-  _impl_.importance_ = 0;
-}
-inline int32_t GuestNotification::_internal_importance() const {
-  return _impl_.importance_;
-}
-inline int32_t GuestNotification::importance() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.importance)
-  return _internal_importance();
-}
-inline void GuestNotification::_internal_set_importance(int32_t value) {
-  
-  _impl_.importance_ = value;
-}
-inline void GuestNotification::set_importance(int32_t value) {
-  _internal_set_importance(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.importance)
-}
-
-// bool high_priority = 8;
-inline void GuestNotification::clear_high_priority() {
-  _impl_.high_priority_ = false;
-}
-inline bool GuestNotification::_internal_high_priority() const {
-  return _impl_.high_priority_;
-}
-inline bool GuestNotification::high_priority() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.high_priority)
-  return _internal_high_priority();
-}
-inline void GuestNotification::_internal_set_high_priority(bool value) {
-  
-  _impl_.high_priority_ = value;
-}
-inline void GuestNotification::set_high_priority(bool value) {
-  _internal_set_high_priority(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.high_priority)
-}
-
-// bool clearable = 9;
-inline void GuestNotification::clear_clearable() {
-  _impl_.clearable_ = false;
-}
-inline bool GuestNotification::_internal_clearable() const {
-  return _impl_.clearable_;
-}
-inline bool GuestNotification::clearable() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.clearable)
-  return _internal_clearable();
-}
-inline void GuestNotification::_internal_set_clearable(bool value) {
-  
-  _impl_.clearable_ = value;
-}
-inline void GuestNotification::set_clearable(bool value) {
-  _internal_set_clearable(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.clearable)
-}
-
-// int64 when_millis = 10;
-inline void GuestNotification::clear_when_millis() {
-  _impl_.when_millis_ = int64_t{0};
-}
-inline int64_t GuestNotification::_internal_when_millis() const {
-  return _impl_.when_millis_;
-}
-inline int64_t GuestNotification::when_millis() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestNotification.when_millis)
-  return _internal_when_millis();
-}
-inline void GuestNotification::_internal_set_when_millis(int64_t value) {
-  
-  _impl_.when_millis_ = value;
-}
-inline void GuestNotification::set_when_millis(int64_t value) {
-  _internal_set_when_millis(value);
-  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestNotification.when_millis)
-}
-
-// -------------------------------------------------------------------
-
-// NotificationRemoved
-
-// string key = 1;
-inline void NotificationRemoved::clear_key() {
-  _impl_.key_.ClearToEmpty();
-}
-inline const std::string& NotificationRemoved::key() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.NotificationRemoved.key)
-  return _internal_key();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void NotificationRemoved::set_key(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.key_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.NotificationRemoved.key)
-}
-inline std::string* NotificationRemoved::mutable_key() {
-  std::string* _s = _internal_mutable_key();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.NotificationRemoved.key)
-  return _s;
-}
-inline const std::string& NotificationRemoved::_internal_key() const {
-  return _impl_.key_.Get();
-}
-inline void NotificationRemoved::_internal_set_key(const std::string& value) {
-  
-  _impl_.key_.Set(value, GetArenaForAllocation());
-}
-inline std::string* NotificationRemoved::_internal_mutable_key() {
-  
-  return _impl_.key_.Mutable(GetArenaForAllocation());
-}
-inline std::string* NotificationRemoved::release_key() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.NotificationRemoved.key)
-  return _impl_.key_.Release();
-}
-inline void NotificationRemoved::set_allocated_key(std::string* key) {
-  if (key != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.key_.SetAllocated(key, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.key_.IsDefault()) {
-    _impl_.key_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.NotificationRemoved.key)
-}
-
-// -------------------------------------------------------------------
-
-// NotificationClicked
-
-// string key = 1;
-inline void NotificationClicked::clear_key() {
-  _impl_.key_.ClearToEmpty();
-}
-inline const std::string& NotificationClicked::key() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.NotificationClicked.key)
-  return _internal_key();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void NotificationClicked::set_key(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.key_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.NotificationClicked.key)
-}
-inline std::string* NotificationClicked::mutable_key() {
-  std::string* _s = _internal_mutable_key();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.NotificationClicked.key)
-  return _s;
-}
-inline const std::string& NotificationClicked::_internal_key() const {
-  return _impl_.key_.Get();
-}
-inline void NotificationClicked::_internal_set_key(const std::string& value) {
-  
-  _impl_.key_.Set(value, GetArenaForAllocation());
-}
-inline std::string* NotificationClicked::_internal_mutable_key() {
-  
-  return _impl_.key_.Mutable(GetArenaForAllocation());
-}
-inline std::string* NotificationClicked::release_key() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.NotificationClicked.key)
-  return _impl_.key_.Release();
-}
-inline void NotificationClicked::set_allocated_key(std::string* key) {
-  if (key != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.key_.SetAllocated(key, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.key_.IsDefault()) {
-    _impl_.key_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.NotificationClicked.key)
-}
-
-// -------------------------------------------------------------------
-
-// NotificationDismissed
-
-// string key = 1;
-inline void NotificationDismissed::clear_key() {
-  _impl_.key_.ClearToEmpty();
-}
-inline const std::string& NotificationDismissed::key() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.NotificationDismissed.key)
-  return _internal_key();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void NotificationDismissed::set_key(ArgT0&& arg0, ArgT... args) {
- 
- _impl_.key_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:dsa.control.v1.NotificationDismissed.key)
-}
-inline std::string* NotificationDismissed::mutable_key() {
-  std::string* _s = _internal_mutable_key();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.NotificationDismissed.key)
-  return _s;
-}
-inline const std::string& NotificationDismissed::_internal_key() const {
-  return _impl_.key_.Get();
-}
-inline void NotificationDismissed::_internal_set_key(const std::string& value) {
-  
-  _impl_.key_.Set(value, GetArenaForAllocation());
-}
-inline std::string* NotificationDismissed::_internal_mutable_key() {
-  
-  return _impl_.key_.Mutable(GetArenaForAllocation());
-}
-inline std::string* NotificationDismissed::release_key() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.NotificationDismissed.key)
-  return _impl_.key_.Release();
-}
-inline void NotificationDismissed::set_allocated_key(std::string* key) {
-  if (key != nullptr) {
-    
-  } else {
-    
-  }
-  _impl_.key_.SetAllocated(key, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.key_.IsDefault()) {
-    _impl_.key_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.NotificationDismissed.key)
-}
-
-// -------------------------------------------------------------------
-
 // RequestGuestMemory
 
 // -------------------------------------------------------------------
@@ -11439,6 +11041,194 @@ inline void GuestBoot::set_agent_connected(bool value) {
 
 // -------------------------------------------------------------------
 
+// InstallApk
+
+// uint32 transfer_id = 1;
+inline void InstallApk::clear_transfer_id() {
+  _impl_.transfer_id_ = 0u;
+}
+inline uint32_t InstallApk::_internal_transfer_id() const {
+  return _impl_.transfer_id_;
+}
+inline uint32_t InstallApk::transfer_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallApk.transfer_id)
+  return _internal_transfer_id();
+}
+inline void InstallApk::_internal_set_transfer_id(uint32_t value) {
+  
+  _impl_.transfer_id_ = value;
+}
+inline void InstallApk::set_transfer_id(uint32_t value) {
+  _internal_set_transfer_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallApk.transfer_id)
+}
+
+// string name = 2;
+inline void InstallApk::clear_name() {
+  _impl_.name_.ClearToEmpty();
+}
+inline const std::string& InstallApk::name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallApk.name)
+  return _internal_name();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void InstallApk::set_name(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallApk.name)
+}
+inline std::string* InstallApk::mutable_name() {
+  std::string* _s = _internal_mutable_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.InstallApk.name)
+  return _s;
+}
+inline const std::string& InstallApk::_internal_name() const {
+  return _impl_.name_.Get();
+}
+inline void InstallApk::_internal_set_name(const std::string& value) {
+  
+  _impl_.name_.Set(value, GetArenaForAllocation());
+}
+inline std::string* InstallApk::_internal_mutable_name() {
+  
+  return _impl_.name_.Mutable(GetArenaForAllocation());
+}
+inline std::string* InstallApk::release_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.InstallApk.name)
+  return _impl_.name_.Release();
+}
+inline void InstallApk::set_allocated_name(std::string* name) {
+  if (name != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.name_.SetAllocated(name, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.name_.IsDefault()) {
+    _impl_.name_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.InstallApk.name)
+}
+
+// uint64 size = 3;
+inline void InstallApk::clear_size() {
+  _impl_.size_ = uint64_t{0u};
+}
+inline uint64_t InstallApk::_internal_size() const {
+  return _impl_.size_;
+}
+inline uint64_t InstallApk::size() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallApk.size)
+  return _internal_size();
+}
+inline void InstallApk::_internal_set_size(uint64_t value) {
+  
+  _impl_.size_ = value;
+}
+inline void InstallApk::set_size(uint64_t value) {
+  _internal_set_size(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallApk.size)
+}
+
+// -------------------------------------------------------------------
+
+// ApkChunk
+
+// uint32 transfer_id = 1;
+inline void ApkChunk::clear_transfer_id() {
+  _impl_.transfer_id_ = 0u;
+}
+inline uint32_t ApkChunk::_internal_transfer_id() const {
+  return _impl_.transfer_id_;
+}
+inline uint32_t ApkChunk::transfer_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ApkChunk.transfer_id)
+  return _internal_transfer_id();
+}
+inline void ApkChunk::_internal_set_transfer_id(uint32_t value) {
+  
+  _impl_.transfer_id_ = value;
+}
+inline void ApkChunk::set_transfer_id(uint32_t value) {
+  _internal_set_transfer_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ApkChunk.transfer_id)
+}
+
+// uint64 offset = 2;
+inline void ApkChunk::clear_offset() {
+  _impl_.offset_ = uint64_t{0u};
+}
+inline uint64_t ApkChunk::_internal_offset() const {
+  return _impl_.offset_;
+}
+inline uint64_t ApkChunk::offset() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ApkChunk.offset)
+  return _internal_offset();
+}
+inline void ApkChunk::_internal_set_offset(uint64_t value) {
+  
+  _impl_.offset_ = value;
+}
+inline void ApkChunk::set_offset(uint64_t value) {
+  _internal_set_offset(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ApkChunk.offset)
+}
+
+// bytes data = 3;
+inline void ApkChunk::clear_data() {
+  _impl_.data_.ClearToEmpty();
+}
+inline const std::string& ApkChunk::data() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.ApkChunk.data)
+  return _internal_data();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void ApkChunk::set_data(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.data_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.ApkChunk.data)
+}
+inline std::string* ApkChunk::mutable_data() {
+  std::string* _s = _internal_mutable_data();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.ApkChunk.data)
+  return _s;
+}
+inline const std::string& ApkChunk::_internal_data() const {
+  return _impl_.data_.Get();
+}
+inline void ApkChunk::_internal_set_data(const std::string& value) {
+  
+  _impl_.data_.Set(value, GetArenaForAllocation());
+}
+inline std::string* ApkChunk::_internal_mutable_data() {
+  
+  return _impl_.data_.Mutable(GetArenaForAllocation());
+}
+inline std::string* ApkChunk::release_data() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.ApkChunk.data)
+  return _impl_.data_.Release();
+}
+inline void ApkChunk::set_allocated_data(std::string* data) {
+  if (data != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.data_.SetAllocated(data, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.data_.IsDefault()) {
+    _impl_.data_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.ApkChunk.data)
+}
+
+// -------------------------------------------------------------------
+
 // OpenLink
 
 // string url = 1;
@@ -11721,6 +11511,218 @@ inline void FileChunk::set_allocated_data(std::string* data) {
   }
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.FileChunk.data)
+}
+
+// -------------------------------------------------------------------
+
+// CancelInstall
+
+// uint32 transfer_id = 1;
+inline void CancelInstall::clear_transfer_id() {
+  _impl_.transfer_id_ = 0u;
+}
+inline uint32_t CancelInstall::_internal_transfer_id() const {
+  return _impl_.transfer_id_;
+}
+inline uint32_t CancelInstall::transfer_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.CancelInstall.transfer_id)
+  return _internal_transfer_id();
+}
+inline void CancelInstall::_internal_set_transfer_id(uint32_t value) {
+  
+  _impl_.transfer_id_ = value;
+}
+inline void CancelInstall::set_transfer_id(uint32_t value) {
+  _internal_set_transfer_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.CancelInstall.transfer_id)
+}
+
+// -------------------------------------------------------------------
+
+// InstallProgress
+
+// uint32 transfer_id = 1;
+inline void InstallProgress::clear_transfer_id() {
+  _impl_.transfer_id_ = 0u;
+}
+inline uint32_t InstallProgress::_internal_transfer_id() const {
+  return _impl_.transfer_id_;
+}
+inline uint32_t InstallProgress::transfer_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallProgress.transfer_id)
+  return _internal_transfer_id();
+}
+inline void InstallProgress::_internal_set_transfer_id(uint32_t value) {
+  
+  _impl_.transfer_id_ = value;
+}
+inline void InstallProgress::set_transfer_id(uint32_t value) {
+  _internal_set_transfer_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallProgress.transfer_id)
+}
+
+// uint64 received = 2;
+inline void InstallProgress::clear_received() {
+  _impl_.received_ = uint64_t{0u};
+}
+inline uint64_t InstallProgress::_internal_received() const {
+  return _impl_.received_;
+}
+inline uint64_t InstallProgress::received() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallProgress.received)
+  return _internal_received();
+}
+inline void InstallProgress::_internal_set_received(uint64_t value) {
+  
+  _impl_.received_ = value;
+}
+inline void InstallProgress::set_received(uint64_t value) {
+  _internal_set_received(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallProgress.received)
+}
+
+// -------------------------------------------------------------------
+
+// InstallResult
+
+// uint32 transfer_id = 1;
+inline void InstallResult::clear_transfer_id() {
+  _impl_.transfer_id_ = 0u;
+}
+inline uint32_t InstallResult::_internal_transfer_id() const {
+  return _impl_.transfer_id_;
+}
+inline uint32_t InstallResult::transfer_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallResult.transfer_id)
+  return _internal_transfer_id();
+}
+inline void InstallResult::_internal_set_transfer_id(uint32_t value) {
+  
+  _impl_.transfer_id_ = value;
+}
+inline void InstallResult::set_transfer_id(uint32_t value) {
+  _internal_set_transfer_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallResult.transfer_id)
+}
+
+// .dsa.control.v1.InstallStatus status = 2;
+inline void InstallResult::clear_status() {
+  _impl_.status_ = 0;
+}
+inline ::dsa::control::v1::InstallStatus InstallResult::_internal_status() const {
+  return static_cast< ::dsa::control::v1::InstallStatus >(_impl_.status_);
+}
+inline ::dsa::control::v1::InstallStatus InstallResult::status() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallResult.status)
+  return _internal_status();
+}
+inline void InstallResult::_internal_set_status(::dsa::control::v1::InstallStatus value) {
+  
+  _impl_.status_ = value;
+}
+inline void InstallResult::set_status(::dsa::control::v1::InstallStatus value) {
+  _internal_set_status(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallResult.status)
+}
+
+// string package_name = 3;
+inline void InstallResult::clear_package_name() {
+  _impl_.package_name_.ClearToEmpty();
+}
+inline const std::string& InstallResult::package_name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallResult.package_name)
+  return _internal_package_name();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void InstallResult::set_package_name(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.package_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallResult.package_name)
+}
+inline std::string* InstallResult::mutable_package_name() {
+  std::string* _s = _internal_mutable_package_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.InstallResult.package_name)
+  return _s;
+}
+inline const std::string& InstallResult::_internal_package_name() const {
+  return _impl_.package_name_.Get();
+}
+inline void InstallResult::_internal_set_package_name(const std::string& value) {
+  
+  _impl_.package_name_.Set(value, GetArenaForAllocation());
+}
+inline std::string* InstallResult::_internal_mutable_package_name() {
+  
+  return _impl_.package_name_.Mutable(GetArenaForAllocation());
+}
+inline std::string* InstallResult::release_package_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.InstallResult.package_name)
+  return _impl_.package_name_.Release();
+}
+inline void InstallResult::set_allocated_package_name(std::string* package_name) {
+  if (package_name != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.package_name_.SetAllocated(package_name, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.package_name_.IsDefault()) {
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.InstallResult.package_name)
+}
+
+// string message = 4;
+inline void InstallResult::clear_message() {
+  _impl_.message_.ClearToEmpty();
+}
+inline const std::string& InstallResult::message() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.InstallResult.message)
+  return _internal_message();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void InstallResult::set_message(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.message_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstallResult.message)
+}
+inline std::string* InstallResult::mutable_message() {
+  std::string* _s = _internal_mutable_message();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.InstallResult.message)
+  return _s;
+}
+inline const std::string& InstallResult::_internal_message() const {
+  return _impl_.message_.Get();
+}
+inline void InstallResult::_internal_set_message(const std::string& value) {
+  
+  _impl_.message_.Set(value, GetArenaForAllocation());
+}
+inline std::string* InstallResult::_internal_mutable_message() {
+  
+  return _impl_.message_.Mutable(GetArenaForAllocation());
+}
+inline std::string* InstallResult::release_message() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.InstallResult.message)
+  return _impl_.message_.Release();
+}
+inline void InstallResult::set_allocated_message(std::string* message) {
+  if (message != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.message_.SetAllocated(message, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.message_.IsDefault()) {
+    _impl_.message_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.InstallResult.message)
 }
 
 // -------------------------------------------------------------------
@@ -14183,6 +14185,376 @@ inline ::dsa::control::v1::DeviceIdle* Envelope::mutable_device_idle() {
   return _msg;
 }
 
+// .dsa.control.v1.InstallApk install_apk = 60;
+inline bool Envelope::_internal_has_install_apk() const {
+  return body_case() == kInstallApk;
+}
+inline bool Envelope::has_install_apk() const {
+  return _internal_has_install_apk();
+}
+inline void Envelope::set_has_install_apk() {
+  _impl_._oneof_case_[0] = kInstallApk;
+}
+inline void Envelope::clear_install_apk() {
+  if (_internal_has_install_apk()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.install_apk_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::InstallApk* Envelope::release_install_apk() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.install_apk)
+  if (_internal_has_install_apk()) {
+    clear_has_body();
+    ::dsa::control::v1::InstallApk* temp = _impl_.body_.install_apk_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.install_apk_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::InstallApk& Envelope::_internal_install_apk() const {
+  return _internal_has_install_apk()
+      ? *_impl_.body_.install_apk_
+      : reinterpret_cast< ::dsa::control::v1::InstallApk&>(::dsa::control::v1::_InstallApk_default_instance_);
+}
+inline const ::dsa::control::v1::InstallApk& Envelope::install_apk() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.install_apk)
+  return _internal_install_apk();
+}
+inline ::dsa::control::v1::InstallApk* Envelope::unsafe_arena_release_install_apk() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.install_apk)
+  if (_internal_has_install_apk()) {
+    clear_has_body();
+    ::dsa::control::v1::InstallApk* temp = _impl_.body_.install_apk_;
+    _impl_.body_.install_apk_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_install_apk(::dsa::control::v1::InstallApk* install_apk) {
+  clear_body();
+  if (install_apk) {
+    set_has_install_apk();
+    _impl_.body_.install_apk_ = install_apk;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.install_apk)
+}
+inline ::dsa::control::v1::InstallApk* Envelope::_internal_mutable_install_apk() {
+  if (!_internal_has_install_apk()) {
+    clear_body();
+    set_has_install_apk();
+    _impl_.body_.install_apk_ = CreateMaybeMessage< ::dsa::control::v1::InstallApk >(GetArenaForAllocation());
+  }
+  return _impl_.body_.install_apk_;
+}
+inline ::dsa::control::v1::InstallApk* Envelope::mutable_install_apk() {
+  ::dsa::control::v1::InstallApk* _msg = _internal_mutable_install_apk();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.install_apk)
+  return _msg;
+}
+
+// .dsa.control.v1.ApkChunk apk_chunk = 61;
+inline bool Envelope::_internal_has_apk_chunk() const {
+  return body_case() == kApkChunk;
+}
+inline bool Envelope::has_apk_chunk() const {
+  return _internal_has_apk_chunk();
+}
+inline void Envelope::set_has_apk_chunk() {
+  _impl_._oneof_case_[0] = kApkChunk;
+}
+inline void Envelope::clear_apk_chunk() {
+  if (_internal_has_apk_chunk()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.apk_chunk_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::ApkChunk* Envelope::release_apk_chunk() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.apk_chunk)
+  if (_internal_has_apk_chunk()) {
+    clear_has_body();
+    ::dsa::control::v1::ApkChunk* temp = _impl_.body_.apk_chunk_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.apk_chunk_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::ApkChunk& Envelope::_internal_apk_chunk() const {
+  return _internal_has_apk_chunk()
+      ? *_impl_.body_.apk_chunk_
+      : reinterpret_cast< ::dsa::control::v1::ApkChunk&>(::dsa::control::v1::_ApkChunk_default_instance_);
+}
+inline const ::dsa::control::v1::ApkChunk& Envelope::apk_chunk() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.apk_chunk)
+  return _internal_apk_chunk();
+}
+inline ::dsa::control::v1::ApkChunk* Envelope::unsafe_arena_release_apk_chunk() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.apk_chunk)
+  if (_internal_has_apk_chunk()) {
+    clear_has_body();
+    ::dsa::control::v1::ApkChunk* temp = _impl_.body_.apk_chunk_;
+    _impl_.body_.apk_chunk_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_apk_chunk(::dsa::control::v1::ApkChunk* apk_chunk) {
+  clear_body();
+  if (apk_chunk) {
+    set_has_apk_chunk();
+    _impl_.body_.apk_chunk_ = apk_chunk;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.apk_chunk)
+}
+inline ::dsa::control::v1::ApkChunk* Envelope::_internal_mutable_apk_chunk() {
+  if (!_internal_has_apk_chunk()) {
+    clear_body();
+    set_has_apk_chunk();
+    _impl_.body_.apk_chunk_ = CreateMaybeMessage< ::dsa::control::v1::ApkChunk >(GetArenaForAllocation());
+  }
+  return _impl_.body_.apk_chunk_;
+}
+inline ::dsa::control::v1::ApkChunk* Envelope::mutable_apk_chunk() {
+  ::dsa::control::v1::ApkChunk* _msg = _internal_mutable_apk_chunk();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.apk_chunk)
+  return _msg;
+}
+
+// .dsa.control.v1.CancelInstall cancel_install = 62;
+inline bool Envelope::_internal_has_cancel_install() const {
+  return body_case() == kCancelInstall;
+}
+inline bool Envelope::has_cancel_install() const {
+  return _internal_has_cancel_install();
+}
+inline void Envelope::set_has_cancel_install() {
+  _impl_._oneof_case_[0] = kCancelInstall;
+}
+inline void Envelope::clear_cancel_install() {
+  if (_internal_has_cancel_install()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.cancel_install_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::CancelInstall* Envelope::release_cancel_install() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.cancel_install)
+  if (_internal_has_cancel_install()) {
+    clear_has_body();
+    ::dsa::control::v1::CancelInstall* temp = _impl_.body_.cancel_install_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.cancel_install_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::CancelInstall& Envelope::_internal_cancel_install() const {
+  return _internal_has_cancel_install()
+      ? *_impl_.body_.cancel_install_
+      : reinterpret_cast< ::dsa::control::v1::CancelInstall&>(::dsa::control::v1::_CancelInstall_default_instance_);
+}
+inline const ::dsa::control::v1::CancelInstall& Envelope::cancel_install() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.cancel_install)
+  return _internal_cancel_install();
+}
+inline ::dsa::control::v1::CancelInstall* Envelope::unsafe_arena_release_cancel_install() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.cancel_install)
+  if (_internal_has_cancel_install()) {
+    clear_has_body();
+    ::dsa::control::v1::CancelInstall* temp = _impl_.body_.cancel_install_;
+    _impl_.body_.cancel_install_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_cancel_install(::dsa::control::v1::CancelInstall* cancel_install) {
+  clear_body();
+  if (cancel_install) {
+    set_has_cancel_install();
+    _impl_.body_.cancel_install_ = cancel_install;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.cancel_install)
+}
+inline ::dsa::control::v1::CancelInstall* Envelope::_internal_mutable_cancel_install() {
+  if (!_internal_has_cancel_install()) {
+    clear_body();
+    set_has_cancel_install();
+    _impl_.body_.cancel_install_ = CreateMaybeMessage< ::dsa::control::v1::CancelInstall >(GetArenaForAllocation());
+  }
+  return _impl_.body_.cancel_install_;
+}
+inline ::dsa::control::v1::CancelInstall* Envelope::mutable_cancel_install() {
+  ::dsa::control::v1::CancelInstall* _msg = _internal_mutable_cancel_install();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.cancel_install)
+  return _msg;
+}
+
+// .dsa.control.v1.InstallProgress install_progress = 63;
+inline bool Envelope::_internal_has_install_progress() const {
+  return body_case() == kInstallProgress;
+}
+inline bool Envelope::has_install_progress() const {
+  return _internal_has_install_progress();
+}
+inline void Envelope::set_has_install_progress() {
+  _impl_._oneof_case_[0] = kInstallProgress;
+}
+inline void Envelope::clear_install_progress() {
+  if (_internal_has_install_progress()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.install_progress_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::InstallProgress* Envelope::release_install_progress() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.install_progress)
+  if (_internal_has_install_progress()) {
+    clear_has_body();
+    ::dsa::control::v1::InstallProgress* temp = _impl_.body_.install_progress_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.install_progress_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::InstallProgress& Envelope::_internal_install_progress() const {
+  return _internal_has_install_progress()
+      ? *_impl_.body_.install_progress_
+      : reinterpret_cast< ::dsa::control::v1::InstallProgress&>(::dsa::control::v1::_InstallProgress_default_instance_);
+}
+inline const ::dsa::control::v1::InstallProgress& Envelope::install_progress() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.install_progress)
+  return _internal_install_progress();
+}
+inline ::dsa::control::v1::InstallProgress* Envelope::unsafe_arena_release_install_progress() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.install_progress)
+  if (_internal_has_install_progress()) {
+    clear_has_body();
+    ::dsa::control::v1::InstallProgress* temp = _impl_.body_.install_progress_;
+    _impl_.body_.install_progress_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_install_progress(::dsa::control::v1::InstallProgress* install_progress) {
+  clear_body();
+  if (install_progress) {
+    set_has_install_progress();
+    _impl_.body_.install_progress_ = install_progress;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.install_progress)
+}
+inline ::dsa::control::v1::InstallProgress* Envelope::_internal_mutable_install_progress() {
+  if (!_internal_has_install_progress()) {
+    clear_body();
+    set_has_install_progress();
+    _impl_.body_.install_progress_ = CreateMaybeMessage< ::dsa::control::v1::InstallProgress >(GetArenaForAllocation());
+  }
+  return _impl_.body_.install_progress_;
+}
+inline ::dsa::control::v1::InstallProgress* Envelope::mutable_install_progress() {
+  ::dsa::control::v1::InstallProgress* _msg = _internal_mutable_install_progress();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.install_progress)
+  return _msg;
+}
+
+// .dsa.control.v1.InstallResult install_result = 64;
+inline bool Envelope::_internal_has_install_result() const {
+  return body_case() == kInstallResult;
+}
+inline bool Envelope::has_install_result() const {
+  return _internal_has_install_result();
+}
+inline void Envelope::set_has_install_result() {
+  _impl_._oneof_case_[0] = kInstallResult;
+}
+inline void Envelope::clear_install_result() {
+  if (_internal_has_install_result()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.install_result_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::InstallResult* Envelope::release_install_result() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.install_result)
+  if (_internal_has_install_result()) {
+    clear_has_body();
+    ::dsa::control::v1::InstallResult* temp = _impl_.body_.install_result_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.install_result_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::InstallResult& Envelope::_internal_install_result() const {
+  return _internal_has_install_result()
+      ? *_impl_.body_.install_result_
+      : reinterpret_cast< ::dsa::control::v1::InstallResult&>(::dsa::control::v1::_InstallResult_default_instance_);
+}
+inline const ::dsa::control::v1::InstallResult& Envelope::install_result() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.install_result)
+  return _internal_install_result();
+}
+inline ::dsa::control::v1::InstallResult* Envelope::unsafe_arena_release_install_result() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.install_result)
+  if (_internal_has_install_result()) {
+    clear_has_body();
+    ::dsa::control::v1::InstallResult* temp = _impl_.body_.install_result_;
+    _impl_.body_.install_result_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_install_result(::dsa::control::v1::InstallResult* install_result) {
+  clear_body();
+  if (install_result) {
+    set_has_install_result();
+    _impl_.body_.install_result_ = install_result;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.install_result)
+}
+inline ::dsa::control::v1::InstallResult* Envelope::_internal_mutable_install_result() {
+  if (!_internal_has_install_result()) {
+    clear_body();
+    set_has_install_result();
+    _impl_.body_.install_result_ = CreateMaybeMessage< ::dsa::control::v1::InstallResult >(GetArenaForAllocation());
+  }
+  return _impl_.body_.install_result_;
+}
+inline ::dsa::control::v1::InstallResult* Envelope::mutable_install_result() {
+  ::dsa::control::v1::InstallResult* _msg = _internal_mutable_install_result();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.install_result)
+  return _msg;
+}
+
 // .dsa.control.v1.OpenLink open_link = 50;
 inline bool Envelope::_internal_has_open_link() const {
   return body_case() == kOpenLink;
@@ -14553,302 +14925,6 @@ inline ::dsa::control::v1::FileProgress* Envelope::mutable_file_progress() {
   return _msg;
 }
 
-// .dsa.control.v1.GuestNotification notification = 70;
-inline bool Envelope::_internal_has_notification() const {
-  return body_case() == kNotification;
-}
-inline bool Envelope::has_notification() const {
-  return _internal_has_notification();
-}
-inline void Envelope::set_has_notification() {
-  _impl_._oneof_case_[0] = kNotification;
-}
-inline void Envelope::clear_notification() {
-  if (_internal_has_notification()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.notification_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::GuestNotification* Envelope::release_notification() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.notification)
-  if (_internal_has_notification()) {
-    clear_has_body();
-    ::dsa::control::v1::GuestNotification* temp = _impl_.body_.notification_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.notification_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::GuestNotification& Envelope::_internal_notification() const {
-  return _internal_has_notification()
-      ? *_impl_.body_.notification_
-      : reinterpret_cast< ::dsa::control::v1::GuestNotification&>(::dsa::control::v1::_GuestNotification_default_instance_);
-}
-inline const ::dsa::control::v1::GuestNotification& Envelope::notification() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.notification)
-  return _internal_notification();
-}
-inline ::dsa::control::v1::GuestNotification* Envelope::unsafe_arena_release_notification() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.notification)
-  if (_internal_has_notification()) {
-    clear_has_body();
-    ::dsa::control::v1::GuestNotification* temp = _impl_.body_.notification_;
-    _impl_.body_.notification_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_notification(::dsa::control::v1::GuestNotification* notification) {
-  clear_body();
-  if (notification) {
-    set_has_notification();
-    _impl_.body_.notification_ = notification;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.notification)
-}
-inline ::dsa::control::v1::GuestNotification* Envelope::_internal_mutable_notification() {
-  if (!_internal_has_notification()) {
-    clear_body();
-    set_has_notification();
-    _impl_.body_.notification_ = CreateMaybeMessage< ::dsa::control::v1::GuestNotification >(GetArenaForAllocation());
-  }
-  return _impl_.body_.notification_;
-}
-inline ::dsa::control::v1::GuestNotification* Envelope::mutable_notification() {
-  ::dsa::control::v1::GuestNotification* _msg = _internal_mutable_notification();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.notification)
-  return _msg;
-}
-
-// .dsa.control.v1.NotificationRemoved notification_removed = 71;
-inline bool Envelope::_internal_has_notification_removed() const {
-  return body_case() == kNotificationRemoved;
-}
-inline bool Envelope::has_notification_removed() const {
-  return _internal_has_notification_removed();
-}
-inline void Envelope::set_has_notification_removed() {
-  _impl_._oneof_case_[0] = kNotificationRemoved;
-}
-inline void Envelope::clear_notification_removed() {
-  if (_internal_has_notification_removed()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.notification_removed_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::NotificationRemoved* Envelope::release_notification_removed() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.notification_removed)
-  if (_internal_has_notification_removed()) {
-    clear_has_body();
-    ::dsa::control::v1::NotificationRemoved* temp = _impl_.body_.notification_removed_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.notification_removed_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::NotificationRemoved& Envelope::_internal_notification_removed() const {
-  return _internal_has_notification_removed()
-      ? *_impl_.body_.notification_removed_
-      : reinterpret_cast< ::dsa::control::v1::NotificationRemoved&>(::dsa::control::v1::_NotificationRemoved_default_instance_);
-}
-inline const ::dsa::control::v1::NotificationRemoved& Envelope::notification_removed() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.notification_removed)
-  return _internal_notification_removed();
-}
-inline ::dsa::control::v1::NotificationRemoved* Envelope::unsafe_arena_release_notification_removed() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.notification_removed)
-  if (_internal_has_notification_removed()) {
-    clear_has_body();
-    ::dsa::control::v1::NotificationRemoved* temp = _impl_.body_.notification_removed_;
-    _impl_.body_.notification_removed_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_notification_removed(::dsa::control::v1::NotificationRemoved* notification_removed) {
-  clear_body();
-  if (notification_removed) {
-    set_has_notification_removed();
-    _impl_.body_.notification_removed_ = notification_removed;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.notification_removed)
-}
-inline ::dsa::control::v1::NotificationRemoved* Envelope::_internal_mutable_notification_removed() {
-  if (!_internal_has_notification_removed()) {
-    clear_body();
-    set_has_notification_removed();
-    _impl_.body_.notification_removed_ = CreateMaybeMessage< ::dsa::control::v1::NotificationRemoved >(GetArenaForAllocation());
-  }
-  return _impl_.body_.notification_removed_;
-}
-inline ::dsa::control::v1::NotificationRemoved* Envelope::mutable_notification_removed() {
-  ::dsa::control::v1::NotificationRemoved* _msg = _internal_mutable_notification_removed();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.notification_removed)
-  return _msg;
-}
-
-// .dsa.control.v1.NotificationClicked notification_clicked = 72;
-inline bool Envelope::_internal_has_notification_clicked() const {
-  return body_case() == kNotificationClicked;
-}
-inline bool Envelope::has_notification_clicked() const {
-  return _internal_has_notification_clicked();
-}
-inline void Envelope::set_has_notification_clicked() {
-  _impl_._oneof_case_[0] = kNotificationClicked;
-}
-inline void Envelope::clear_notification_clicked() {
-  if (_internal_has_notification_clicked()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.notification_clicked_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::NotificationClicked* Envelope::release_notification_clicked() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.notification_clicked)
-  if (_internal_has_notification_clicked()) {
-    clear_has_body();
-    ::dsa::control::v1::NotificationClicked* temp = _impl_.body_.notification_clicked_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.notification_clicked_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::NotificationClicked& Envelope::_internal_notification_clicked() const {
-  return _internal_has_notification_clicked()
-      ? *_impl_.body_.notification_clicked_
-      : reinterpret_cast< ::dsa::control::v1::NotificationClicked&>(::dsa::control::v1::_NotificationClicked_default_instance_);
-}
-inline const ::dsa::control::v1::NotificationClicked& Envelope::notification_clicked() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.notification_clicked)
-  return _internal_notification_clicked();
-}
-inline ::dsa::control::v1::NotificationClicked* Envelope::unsafe_arena_release_notification_clicked() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.notification_clicked)
-  if (_internal_has_notification_clicked()) {
-    clear_has_body();
-    ::dsa::control::v1::NotificationClicked* temp = _impl_.body_.notification_clicked_;
-    _impl_.body_.notification_clicked_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_notification_clicked(::dsa::control::v1::NotificationClicked* notification_clicked) {
-  clear_body();
-  if (notification_clicked) {
-    set_has_notification_clicked();
-    _impl_.body_.notification_clicked_ = notification_clicked;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.notification_clicked)
-}
-inline ::dsa::control::v1::NotificationClicked* Envelope::_internal_mutable_notification_clicked() {
-  if (!_internal_has_notification_clicked()) {
-    clear_body();
-    set_has_notification_clicked();
-    _impl_.body_.notification_clicked_ = CreateMaybeMessage< ::dsa::control::v1::NotificationClicked >(GetArenaForAllocation());
-  }
-  return _impl_.body_.notification_clicked_;
-}
-inline ::dsa::control::v1::NotificationClicked* Envelope::mutable_notification_clicked() {
-  ::dsa::control::v1::NotificationClicked* _msg = _internal_mutable_notification_clicked();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.notification_clicked)
-  return _msg;
-}
-
-// .dsa.control.v1.NotificationDismissed notification_dismissed = 73;
-inline bool Envelope::_internal_has_notification_dismissed() const {
-  return body_case() == kNotificationDismissed;
-}
-inline bool Envelope::has_notification_dismissed() const {
-  return _internal_has_notification_dismissed();
-}
-inline void Envelope::set_has_notification_dismissed() {
-  _impl_._oneof_case_[0] = kNotificationDismissed;
-}
-inline void Envelope::clear_notification_dismissed() {
-  if (_internal_has_notification_dismissed()) {
-    if (GetArenaForAllocation() == nullptr) {
-      delete _impl_.body_.notification_dismissed_;
-    }
-    clear_has_body();
-  }
-}
-inline ::dsa::control::v1::NotificationDismissed* Envelope::release_notification_dismissed() {
-  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.notification_dismissed)
-  if (_internal_has_notification_dismissed()) {
-    clear_has_body();
-    ::dsa::control::v1::NotificationDismissed* temp = _impl_.body_.notification_dismissed_;
-    if (GetArenaForAllocation() != nullptr) {
-      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-    }
-    _impl_.body_.notification_dismissed_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline const ::dsa::control::v1::NotificationDismissed& Envelope::_internal_notification_dismissed() const {
-  return _internal_has_notification_dismissed()
-      ? *_impl_.body_.notification_dismissed_
-      : reinterpret_cast< ::dsa::control::v1::NotificationDismissed&>(::dsa::control::v1::_NotificationDismissed_default_instance_);
-}
-inline const ::dsa::control::v1::NotificationDismissed& Envelope::notification_dismissed() const {
-  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.notification_dismissed)
-  return _internal_notification_dismissed();
-}
-inline ::dsa::control::v1::NotificationDismissed* Envelope::unsafe_arena_release_notification_dismissed() {
-  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.notification_dismissed)
-  if (_internal_has_notification_dismissed()) {
-    clear_has_body();
-    ::dsa::control::v1::NotificationDismissed* temp = _impl_.body_.notification_dismissed_;
-    _impl_.body_.notification_dismissed_ = nullptr;
-    return temp;
-  } else {
-    return nullptr;
-  }
-}
-inline void Envelope::unsafe_arena_set_allocated_notification_dismissed(::dsa::control::v1::NotificationDismissed* notification_dismissed) {
-  clear_body();
-  if (notification_dismissed) {
-    set_has_notification_dismissed();
-    _impl_.body_.notification_dismissed_ = notification_dismissed;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.notification_dismissed)
-}
-inline ::dsa::control::v1::NotificationDismissed* Envelope::_internal_mutable_notification_dismissed() {
-  if (!_internal_has_notification_dismissed()) {
-    clear_body();
-    set_has_notification_dismissed();
-    _impl_.body_.notification_dismissed_ = CreateMaybeMessage< ::dsa::control::v1::NotificationDismissed >(GetArenaForAllocation());
-  }
-  return _impl_.body_.notification_dismissed_;
-}
-inline ::dsa::control::v1::NotificationDismissed* Envelope::mutable_notification_dismissed() {
-  ::dsa::control::v1::NotificationDismissed* _msg = _internal_mutable_notification_dismissed();
-  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.notification_dismissed)
-  return _msg;
-}
-
 inline bool Envelope::has_body() const {
   return body_case() != BODY_NOT_SET;
 }
@@ -14861,6 +14937,8 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
@@ -14960,6 +15038,7 @@ template <> struct is_proto_enum< ::dsa::control::v1::RejectReason> : ::std::tru
 template <> struct is_proto_enum< ::dsa::control::v1::PointerAction> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::PointerTool> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::KeyAction> : ::std::true_type {};
+template <> struct is_proto_enum< ::dsa::control::v1::InstallStatus> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::FileAction> : ::std::true_type {};
 
 PROTOBUF_NAMESPACE_CLOSE

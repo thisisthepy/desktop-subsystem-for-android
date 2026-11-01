@@ -62,6 +62,14 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   it. The agent allows its own listener at start (`MANAGE_NOTIFICATION_LISTENERS`). The
   listener is called over binder in the agent's persistent process, so notifications still
   arrive while the device is in Doze.
+- **APKs from the host.** `InstallApk` opens a `PackageInstaller` session, each `ApkChunk`
+  is written into it in order, and the session is committed once the APK is whole. After
+  each chunk the agent reports how far it got (`InstallProgress`), which paces the host, and
+  it answers with `InstallResult`: a stable reason (incompatible, conflicting signature,
+  invalid APK, insufficient storage, downgrade, blocked, other) and the installer's own
+  message. `INSTALL_PACKAGES` lets the session commit without asking the user; a
+  `CancelInstall`, a broken transfer or a new connection abandons the session. An installed
+  app reaches the host's Start menu through the launcher apps report.
 - **Battery.** The host sends its power (`PowerState`): AC or battery, the charge, whether
   it charges, battery saver. The agent sets the battery service to it (the `battery set`
   shell command) and battery saver with it (`PowerManager.setPowerSaveModeEnabled`). A host
@@ -397,6 +405,7 @@ The release APK, `build/outputs/apk/release/dsa-agent-release-unsigned.apk`, is 
 | `src/main/kotlin/.../agent/power/` | The screen, Doze and the battery, as the host asks |
 | `src/main/kotlin/.../agent/clipboard/` | The clipboard shared with the host |
 | `src/main/kotlin/.../agent/notifications/` | The notifications shown on the host |
+| `src/main/kotlin/.../agent/install/` | Installing the APKs the host sends |
 | `src/main/kotlin/.../agent/platform/` | The framework side: the application, task source, actions, windowing, input injection, the input method, binder channel, power controls |
 | `src/test/` | The unit tests |
 | `hidden-api/` | Compile-only declarations of framework classes outside the SDK |

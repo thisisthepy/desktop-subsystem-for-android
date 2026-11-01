@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use dsa_host_core::apk::{self, InstallStatus};
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::ime::{ImeCursor, ImeEvent};
 use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
@@ -2506,4 +2507,326 @@ fn nfr5_a_malformed_notification_from_the_guest_is_dropped() {
         Body::Notification(guest_notification(CHAT, "Ann")),
     );
     assert_eq!(watch.recv_timeout(WAIT).unwrap(), posted(CHAT, "Ann"));
+}
+
+/// The next message about an install the host sends the guest.
+fn next_install_body(agent: &mut Box<dyn Connection>) -> Body {
+    loop {
+        match next_body(agent) {
+            body @ (Body::InstallApk(_) | Body::ApkChunk(_) | Body::CancelInstall(_)) => {
+                return body
+            }
+            _ => continue,
+        }
+    }
+}
+
+fn install_progress(transfer_id: u32, received: u64) -> Body {
+    Body::InstallProgress(dsa_protocol::control::InstallProgress {
+        transfer_id,
+        received,
+    })
+}
+
+fn install_result(
+    transfer_id: u32,
+    status: dsa_protocol::control::InstallStatus,
+    package_name: &str,
+    message: &str,
+) -> Body {
+    Body::InstallResult(dsa_protocol::control::InstallResult {
+        transfer_id,
+        status: status as i32,
+        package_name: package_name.into(),
+        message: message.into(),
+    })
+}
+
+/// Plays the agent's part of one install: takes the APK chunk by chunk, in order, says how far
+/// it got after each, and returns the transfer, the name and the APK.
+fn receive_apk(agent: &mut Box<dyn Connection>) -> (u32, String, Vec<u8>) {
+    let (transfer_id, name, size) = match next_install_body(agent) {
+        Body::InstallApk(install) => (install.transfer_id, install.name, install.size),
+        other => panic!("expected an install, got {other:?}"),
+    };
+    let mut content = Vec::new();
+    while (content.len() as u64) < size {
+        match next_install_body(agent) {
+            Body::ApkChunk(chunk) => {
+                assert_eq!(chunk.transfer_id, transfer_id);
+                assert_eq!(chunk.offset, content.len() as u64, "chunks arrive in order");
+                assert!(chunk.data.len() <= apk::CHUNK_BYTES);
+                content.extend_from_slice(&chunk.data);
+                send_body(agent, install_progress(transfer_id, content.len() as u64));
+            }
+            other => panic!("expected a piece of the APK, got {other:?}"),
+        }
+    }
+    (transfer_id, name, content)
+}
+
+fn apk_bytes(size: usize) -> Vec<u8> {
+    (0..size).map(|i| (i % 253) as u8).collect()
+}
+
+#[test]
+fn fr11_an_apk_reaches_the_agent_in_paced_chunks_and_its_result_comes_back() {
+    let (session, mut agent, _launcher) = active_session();
+    let session = Arc::new(session);
+    let content = apk_bytes(apk::CHUNK_BYTES * 5 + 77);
+    let installing = {
+        let session = Arc::clone(&session);
+        let content = content.clone();
+        thread::spawn(move || {
+            session.install_apk("notes.apk", content.len() as u64, &mut &content[..])
+        })
+    };
+    let (transfer_id, size) = match next_install_body(&mut agent) {
+        Body::InstallApk(install) => (install.transfer_id, install.size),
+        other => panic!("expected an install, got {other:?}"),
+    };
+    assert_eq!(size, content.len() as u64);
+    // The host sends no more than the window before the agent has said anything.
+    let mut received = Vec::new();
+    for _ in 0..apk::CHUNKS_IN_FLIGHT {
+        match next_install_body(&mut agent) {
+            Body::ApkChunk(chunk) => received.extend_from_slice(&chunk.data),
+            other => panic!("expected a piece of the APK, got {other:?}"),
+        }
+    }
+    nothing_for_the_guest(&mut agent);
+    // From here on, each word of progress lets the next chunk go.
+    while (received.len() as u64) < size {
+        send_body(
+            &mut agent,
+            install_progress(transfer_id, received.len() as u64),
+        );
+        match next_install_body(&mut agent) {
+            Body::ApkChunk(chunk) => {
+                assert_eq!(chunk.offset, received.len() as u64);
+                received.extend_from_slice(&chunk.data);
+            }
+            other => panic!("expected a piece of the APK, got {other:?}"),
+        }
+    }
+    assert!(received == content, "the APK arrived changed");
+    send_body(&mut agent, install_progress(transfer_id, size));
+    send_body(
+        &mut agent,
+        install_result(
+            transfer_id,
+            dsa_protocol::control::InstallStatus::Success,
+            "com.example.notes",
+            "",
+        ),
+    );
+    let outcome = installing.join().unwrap().expect("installed");
+    assert_eq!(outcome.status, InstallStatus::Installed);
+    assert_eq!(outcome.package_name.as_deref(), Some("com.example.notes"));
+}
+
+#[test]
+fn fr11_an_installed_app_reaches_the_start_menu_through_the_installed_apps_report() {
+    let (session, mut agent, _launcher) = active_session();
+    let session = Arc::new(session);
+    let watch = session.watch_tasks();
+    let content = apk_bytes(1000);
+    let installing = {
+        let session = Arc::clone(&session);
+        let content = content.clone();
+        thread::spawn(move || {
+            session.install_apk("notes.apk", content.len() as u64, &mut &content[..])
+        })
+    };
+    let (transfer_id, _, _) = receive_apk(&mut agent);
+    send_body(
+        &mut agent,
+        install_result(
+            transfer_id,
+            dsa_protocol::control::InstallStatus::Success,
+            "com.example.notes",
+            "",
+        ),
+    );
+    assert!(installing.join().unwrap().unwrap().installed());
+    // The agent's launcher apps listener reports the new app as it reports any other, and the
+    // window manager makes Start menu entries from this list.
+    send_body(
+        &mut agent,
+        Body::InstalledApp(dsa_protocol::control::InstalledApp {
+            package_name: "com.example.notes".into(),
+            label: "Notes".into(),
+            icon_png: vec![0x89, b'P', b'N', b'G'],
+        }),
+    );
+    send_body(
+        &mut agent,
+        Body::InstalledApps(dsa_protocol::control::InstalledApps {
+            package_names: vec!["com.example.notes".into()],
+        }),
+    );
+    loop {
+        if let TaskEvent::Installed(apps) = watch.events.recv_timeout(WAIT).expect("the apps") {
+            assert_eq!(apps.len(), 1);
+            assert_eq!(apps[0].package_name, "com.example.notes");
+            assert_eq!(apps[0].label, "Notes");
+            break;
+        }
+    }
+}
+
+#[test]
+fn fr11_a_refusal_from_android_carries_its_reason_and_words() {
+    let (session, mut agent, _launcher) = active_session();
+    let session = Arc::new(session);
+    let installing = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.install_apk("old.apk", 10, &mut &b"0123456789"[..]))
+    };
+    let (transfer_id, name, content) = receive_apk(&mut agent);
+    assert_eq!(name, "old.apk");
+    assert_eq!(content, b"0123456789");
+    send_body(
+        &mut agent,
+        install_result(
+            transfer_id,
+            dsa_protocol::control::InstallStatus::Downgrade,
+            "com.example.notes",
+            "INSTALL_FAILED_VERSION_DOWNGRADE",
+        ),
+    );
+    let outcome = installing.join().unwrap().expect("a refusal is an outcome");
+    assert_eq!(outcome.status, InstallStatus::Downgrade);
+    assert_eq!(outcome.message, "INSTALL_FAILED_VERSION_DOWNGRADE");
+}
+
+/// Gives a few bytes, then fails, as a client that goes away does.
+struct BrokenApk(usize);
+
+impl std::io::Read for BrokenApk {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.0 == 0 {
+            return Err(std::io::Error::other("the client went away"));
+        }
+        let n = buf.len().min(self.0);
+        buf[..n].fill(7);
+        self.0 -= n;
+        Ok(n)
+    }
+}
+
+#[test]
+fn fr11_an_apk_that_does_not_arrive_whole_is_cancelled_in_the_guest() {
+    let (session, mut agent, _launcher) = active_session();
+    let session = Arc::new(session);
+    let installing = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || {
+            session.install_apk(
+                "notes.apk",
+                apk::CHUNK_BYTES as u64 * 3,
+                &mut BrokenApk(100),
+            )
+        })
+    };
+    let transfer_id = match next_install_body(&mut agent) {
+        Body::InstallApk(install) => install.transfer_id,
+        other => panic!("expected an install, got {other:?}"),
+    };
+    match next_install_body(&mut agent) {
+        Body::CancelInstall(cancel) => assert_eq!(cancel.transfer_id, transfer_id),
+        other => panic!("expected the install to be cancelled, got {other:?}"),
+    }
+    send_body(
+        &mut agent,
+        install_result(
+            transfer_id,
+            dsa_protocol::control::InstallStatus::Other,
+            "",
+            "cancelled",
+        ),
+    );
+    match installing.join().unwrap() {
+        Err(SessionError::InstallRefused(why)) => {
+            assert!(why.contains("did not arrive whole"), "{why}")
+        }
+        other => panic!("expected the install to fail, got {other:?}"),
+    }
+    assert_eq!(session.state(), SessionState::Active);
+}
+
+#[test]
+fn fr11_a_second_install_waits_until_the_first_has_ended() {
+    let (session, mut agent, _launcher) = active_session();
+    let session = Arc::new(session);
+    let first = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.install_apk("one.apk", 3, &mut &b"one"[..]))
+    };
+    let (one, name, _) = receive_apk(&mut agent);
+    assert_eq!(name, "one.apk");
+    let second = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.install_apk("two.apk", 3, &mut &b"two"[..]))
+    };
+    // Nothing of the second goes out while the first is under way.
+    nothing_for_the_guest(&mut agent);
+    send_body(
+        &mut agent,
+        install_result(
+            one,
+            dsa_protocol::control::InstallStatus::Success,
+            "a.one",
+            "",
+        ),
+    );
+    assert!(first.join().unwrap().unwrap().installed());
+    let (two, name, _) = receive_apk(&mut agent);
+    assert_eq!(name, "two.apk");
+    assert_ne!(one, two);
+    send_body(
+        &mut agent,
+        install_result(
+            two,
+            dsa_protocol::control::InstallStatus::Success,
+            "a.two",
+            "",
+        ),
+    );
+    assert!(second.join().unwrap().unwrap().installed());
+}
+
+#[test]
+fn fr11_an_install_while_the_guest_is_not_running_says_so() {
+    let (session, _connector) = session_with(FakeLauncher::default(), WAIT);
+    match session.install_apk("notes.apk", 3, &mut &b"apk"[..]) {
+        Err(SessionError::NotActive(SessionState::Stopped)) => {}
+        other => panic!("expected the install to need a running guest, got {other:?}"),
+    }
+}
+
+#[test]
+fn nfr5_word_on_an_install_that_is_not_under_way_is_dropped() {
+    let (session, mut agent, _launcher) = active_session();
+    send_body(&mut agent, install_progress(99, 10));
+    send_body(
+        &mut agent,
+        install_result(99, dsa_protocol::control::InstallStatus::Success, "x.y", ""),
+    );
+    // An install message only the host sends, from the guest, is dropped as well.
+    send_body(
+        &mut agent,
+        Body::ApkChunk(dsa_protocol::control::ApkChunk {
+            transfer_id: 1,
+            offset: 0,
+            data: vec![1, 2, 3],
+        }),
+    );
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(session.state(), SessionState::Active);
+    session
+        .request(TaskRequest::Launch {
+            package_name: "com.example.clock".into(),
+        })
+        .expect("the session goes on");
 }
