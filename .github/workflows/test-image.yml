@@ -195,6 +195,10 @@ jobs:
       # The inputs and the images take about 20 GB; the runner has less free by default.
       - name: Make room
         run: |
+          # aapt2, which builds the framework overlay, is in the SDK this step deletes.
+          tools=$(ls -d /usr/local/lib/android/sdk/build-tools/* | sort -V | tail -1)
+          mkdir -p .scratch
+          cp -r "$tools" .scratch/build-tools
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
 
@@ -284,6 +288,7 @@ jobs:
           args+=(--channeld .scratch/channeld/dsa-channeld)
           args+=(--hwcomposer .scratch/hwcomposer/dsa-hwcomposer)
           args+=(--agent .scratch/agent/DsaAgent.apk)
+          args+=(--aapt2 .scratch/build-tools/aapt2)
           uv run dsa/guest/image/make-image.py "${args[@]}"
 
       - name: Check the image
