@@ -28,8 +28,10 @@ mkdir -p "$out"
 cp "$here/../../target/$target/release/dsa-channeld" "$out/dsa-channeld"
 
 readelf="$bin/llvm-readelf"
-"$readelf" -h "$out/dsa-channeld" | grep -Fq 'Advanced Micro Devices X86-64'
-"$readelf" -l "$out/dsa-channeld" | grep -Fq '/system/bin/linker64'
+# Read whole first: grep -q stops at the first match, and llvm-readelf exits 74 when the pipe it
+# is still writing to closes.
+grep -Fq 'Advanced Micro Devices X86-64' <<<"$("$readelf" -h "$out/dsa-channeld")"
+grep -Fq '/system/bin/linker64' <<<"$("$readelf" -l "$out/dsa-channeld")"
 needed="$("$readelf" -d "$out/dsa-channeld" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | sort | tr '\n' ' ')"
 for lib in $needed; do
     case "$lib" in
