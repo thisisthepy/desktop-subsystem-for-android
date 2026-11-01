@@ -131,9 +131,7 @@ impl InstallStatus {
         match control::InstallStatus::try_from(status) {
             Ok(control::InstallStatus::Success) => InstallStatus::Installed,
             Ok(control::InstallStatus::Incompatible) => InstallStatus::Incompatible,
-            Ok(control::InstallStatus::ConflictingSignature) => {
-                InstallStatus::ConflictingSignature
-            }
+            Ok(control::InstallStatus::ConflictingSignature) => InstallStatus::ConflictingSignature,
             Ok(control::InstallStatus::InvalidApk) => InstallStatus::InvalidApk,
             Ok(control::InstallStatus::InsufficientStorage) => InstallStatus::InsufficientStorage,
             Ok(control::InstallStatus::Downgrade) => InstallStatus::Downgrade,
@@ -251,8 +249,7 @@ impl ApkFile {
             .and_then(|name| name.to_str())
             .ok_or_else(|| format!("{} names no file", path.display()))?;
         check_name(name)?;
-        let file =
-            File::open(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let file = File::open(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         let metadata = file
             .metadata()
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
@@ -321,7 +318,13 @@ mod tests {
         assert!(check_name("NOTES.APK").is_ok());
         assert!(check_name("\u{d55c}\u{ae00}.apk").is_ok());
         for bad in [
-            "", ".apk", "notes.apks", "notes.zip", "a/b.apk", "a\\b.apk", "a\nb.apk",
+            "",
+            ".apk",
+            "notes.apks",
+            "notes.zip",
+            "a/b.apk",
+            "a\\b.apk",
+            "a\nb.apk",
             &format!("{}.apk", "a".repeat(252)),
         ] {
             assert!(check_name(bad).is_err(), "{bad:?} was accepted");
@@ -359,7 +362,10 @@ mod tests {
         let text = outcome.to_string();
         assert!(text.contains("signed with another key"), "{text}");
         assert!(text.contains("com.example.notes"), "{text}");
-        assert!(text.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE"), "{text}");
+        assert!(
+            text.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE"),
+            "{text}"
+        );
     }
 
     #[test]

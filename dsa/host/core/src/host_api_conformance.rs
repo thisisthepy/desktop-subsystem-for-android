@@ -1296,9 +1296,15 @@ pub fn refused_apk_has_its_reason(make: MakeLocal<'_>) {
         .install_apk("broken.apk", content.len() as u64, &mut &content[..])
         .expect("a refusal is an outcome");
     assert_eq!(outcome.status, InstallStatus::InvalidApk);
-    assert!(outcome.message.contains("INSTALL_PARSE_FAILED_NOT_APK"), "{outcome:?}");
+    assert!(
+        outcome.message.contains("INSTALL_PARSE_FAILED_NOT_APK"),
+        "{outcome:?}"
+    );
     // The service goes on.
-    assert_eq!(connect(&mut *connector).status().unwrap().state, SessionState::Active);
+    assert_eq!(
+        connect(&mut *connector).status().unwrap().state,
+        SessionState::Active
+    );
 }
 
 pub fn wrong_file_is_refused_before_it_is_sent(make: MakeLocal<'_>) {
@@ -1320,7 +1326,13 @@ pub fn wrong_file_is_refused_before_it_is_sent(make: MakeLocal<'_>) {
             other => panic!("expected {name} of {size} bytes to be refused, got {other:?}"),
         }
     }
-    assert!(androids.of(&user).unwrap().installs.lock().unwrap().is_empty());
+    assert!(androids
+        .of(&user)
+        .unwrap()
+        .installs
+        .lock()
+        .unwrap()
+        .is_empty());
 }
 
 /// A reader that must never be read.
@@ -1362,7 +1374,10 @@ pub fn installs_run_one_at_a_time(make: MakeLocal<'_>) {
     assert_eq!(steps.len(), 4, "{steps:?}");
     // Each install ends before the next begins, whichever came first.
     assert_eq!(steps[0][1..], steps[1][1..], "{steps:?}");
-    assert!(steps[0].starts_with('+') && steps[1].starts_with('-'), "{steps:?}");
+    assert!(
+        steps[0].starts_with('+') && steps[1].starts_with('-'),
+        "{steps:?}"
+    );
     assert_eq!(steps[2][1..], steps[3][1..], "{steps:?}");
 }
 
@@ -1381,13 +1396,13 @@ pub fn malformed_install_is_refused(make: MakeLocal<'_>) {
         })),
     };
     send(&mut *connection, envelope::Body::Request(request)).unwrap();
-    let answer = |connection: &mut dyn dsa_transport::Connection| {
-        match decode(&connection.recv(Some(WAIT)).expect("an answer")) {
-            Ok(types::Envelope {
-                body: Some(envelope::Body::Response(response)),
-            }) => response,
-            other => panic!("expected an answer, got {other:?}"),
-        }
+    let answer = |connection: &mut dyn dsa_transport::Connection| match decode(
+        &connection.recv(Some(WAIT)).expect("an answer"),
+    ) {
+        Ok(types::Envelope {
+            body: Some(envelope::Body::Response(response)),
+        }) => response,
+        other => panic!("expected an answer, got {other:?}"),
     };
     assert!(matches!(
         answer(&mut *connection).body,
@@ -1396,9 +1411,7 @@ pub fn malformed_install_is_refused(make: MakeLocal<'_>) {
     // Half the APK, then something that is not a piece of it.
     send(
         &mut *connection,
-        envelope::Body::ApkChunk(types::ApkChunk {
-            data: vec![1; 500],
-        }),
+        envelope::Body::ApkChunk(types::ApkChunk { data: vec![1; 500] }),
     )
     .unwrap();
     send(
@@ -1412,11 +1425,22 @@ pub fn malformed_install_is_refused(make: MakeLocal<'_>) {
     assert_eq!(response.id, 7);
     match response.body {
         Some(types::response::Body::Error(error)) => {
-            assert_eq!(error.code, ErrorCode::InstallRefused as i32, "{}", error.detail);
+            assert_eq!(
+                error.code,
+                ErrorCode::InstallRefused as i32,
+                "{}",
+                error.detail
+            );
         }
         other => panic!("expected the install to be refused, got {other:?}"),
     }
-    assert!(androids.of(&user).unwrap().installs.lock().unwrap().is_empty());
+    assert!(androids
+        .of(&user)
+        .unwrap()
+        .installs
+        .lock()
+        .unwrap()
+        .is_empty());
     // The service and the next install go on.
     let content = sample_apk();
     let outcome = connect(&mut *connector)

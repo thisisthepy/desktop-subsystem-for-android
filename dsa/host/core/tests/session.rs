@@ -2153,7 +2153,10 @@ fn fr11_an_apk_reaches_the_agent_in_paced_chunks_and_its_result_comes_back() {
     nothing_for_the_guest(&mut agent);
     // From here on, each word of progress lets the next chunk go.
     while (received.len() as u64) < size {
-        send_body(&mut agent, install_progress(transfer_id, received.len() as u64));
+        send_body(
+            &mut agent,
+            install_progress(transfer_id, received.len() as u64),
+        );
         match next_install_body(&mut agent) {
             Body::ApkChunk(chunk) => {
                 assert_eq!(chunk.offset, received.len() as u64);
@@ -2326,7 +2329,12 @@ fn fr11_a_second_install_waits_until_the_first_has_ended() {
     nothing_for_the_guest(&mut agent);
     send_body(
         &mut agent,
-        install_result(one, dsa_protocol::control::InstallStatus::Success, "a.one", ""),
+        install_result(
+            one,
+            dsa_protocol::control::InstallStatus::Success,
+            "a.one",
+            "",
+        ),
     );
     assert!(first.join().unwrap().unwrap().installed());
     let (two, name, _) = receive_apk(&mut agent);
@@ -2334,7 +2342,12 @@ fn fr11_a_second_install_waits_until_the_first_has_ended() {
     assert_ne!(one, two);
     send_body(
         &mut agent,
-        install_result(two, dsa_protocol::control::InstallStatus::Success, "a.two", ""),
+        install_result(
+            two,
+            dsa_protocol::control::InstallStatus::Success,
+            "a.two",
+            "",
+        ),
     );
     assert!(second.join().unwrap().unwrap().installed());
 }

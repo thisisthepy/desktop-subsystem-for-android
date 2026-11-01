@@ -843,12 +843,18 @@ fn dsa_with_path(endpoint: &str, before: &str, path: &std::path::Path, after: &s
 fn fr11_dsa_install_is_parsed() {
     let install = parse(&args("install notes.apk --json")).unwrap();
     assert_eq!(install.command, Cmd::Install);
-    assert_eq!(install.file.as_deref(), Some(std::path::Path::new("notes.apk")));
+    assert_eq!(
+        install.file.as_deref(),
+        Some(std::path::Path::new("notes.apk"))
+    );
     assert!(install.json);
     assert!(parse(&args("install"))
         .unwrap_err()
         .contains("needs the APK file"));
-    assert!(parse(&args("install a.apk b.apk")).is_err(), "one APK at a time");
+    assert!(
+        parse(&args("install a.apk b.apk")).is_err(),
+        "one APK at a time"
+    );
 }
 
 #[test]
@@ -867,7 +873,11 @@ fn fr11_dsa_install_starts_android_and_installs_the_apk() {
         format!("Installed {INSTALLED_PACKAGE} from My Notes.apk")
     );
     let android = androids.of(&user).unwrap();
-    assert_eq!(android.state(), SessionState::Active, "Android was started first");
+    assert_eq!(
+        android.state(),
+        SessionState::Active,
+        "Android was started first"
+    );
     let installs = android.installs.lock().unwrap();
     assert_eq!(installs.len(), 1);
     assert_eq!(installs[0].0, "My Notes.apk");
@@ -894,7 +904,10 @@ fn fr11_dsa_install_says_why_android_refused_the_apk_and_fails() {
     let output = dsa_with_path(&endpoint, "install", &path, "");
     assert_eq!(output.status.code(), Some(1));
     let error = stderr(&output);
-    assert!(error.starts_with("dsa: not installed (invalid-apk): broken.apk"), "{error}");
+    assert!(
+        error.starts_with("dsa: not installed (invalid-apk): broken.apk"),
+        "{error}"
+    );
     assert!(error.contains("INSTALL_PARSE_FAILED_NOT_APK"), "{error}");
 }
 
@@ -906,10 +919,18 @@ fn fr11_dsa_install_refuses_a_file_that_is_no_apk_before_starting_android() {
     let path = apk_file("notes.zip", b"PK");
     let output = dsa_with_path(&endpoint, "install", &path, "");
     assert_eq!(output.status.code(), Some(1));
-    assert!(stderr(&output).contains("not an APK file"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("not an APK file"),
+        "{}",
+        stderr(&output)
+    );
     let missing = dsa(&endpoint, "install no-such-file.apk");
     assert_eq!(missing.status.code(), Some(1));
-    assert!(stderr(&missing).contains("cannot read"), "{}", stderr(&missing));
+    assert!(
+        stderr(&missing).contains("cannot read"),
+        "{}",
+        stderr(&missing)
+    );
     // Android was not started for either.
     assert!(androids
         .of(&user)
@@ -933,7 +954,17 @@ fn fr11_two_dsa_installs_at_once_both_succeed_one_after_the_other() {
     let first = first.join().unwrap();
     assert!(first.status.success(), "{}", stderr(&first));
     assert!(second.status.success(), "{}", stderr(&second));
-    let steps = androids.of(&user).unwrap().install_steps.lock().unwrap().clone();
+    let steps = androids
+        .of(&user)
+        .unwrap()
+        .install_steps
+        .lock()
+        .unwrap()
+        .clone();
     assert_eq!(steps.len(), 4, "{steps:?}");
-    assert_eq!(steps[0][1..], steps[1][1..], "the installs overlapped: {steps:?}");
+    assert_eq!(
+        steps[0][1..],
+        steps[1][1..],
+        "the installs overlapped: {steps:?}"
+    );
 }

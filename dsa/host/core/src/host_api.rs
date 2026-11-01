@@ -1919,13 +1919,16 @@ impl Read for ApkChunks<'_> {
             if self.left == 0 {
                 return Ok(0);
             }
-            let frame = self.connection.recv(Some(APK_CHUNK_WAIT)).map_err(|error| {
-                eprintln!(
-                    "install: the APK from {} did not arrive whole ({error})",
-                    self.user
-                );
-                io::Error::other(error.to_string())
-            })?;
+            let frame = self
+                .connection
+                .recv(Some(APK_CHUNK_WAIT))
+                .map_err(|error| {
+                    eprintln!(
+                        "install: the APK from {} did not arrive whole ({error})",
+                        self.user
+                    );
+                    io::Error::other(error.to_string())
+                })?;
             match decode(&frame) {
                 Ok(Envelope {
                     body: Some(Body::ApkChunk(chunk)),

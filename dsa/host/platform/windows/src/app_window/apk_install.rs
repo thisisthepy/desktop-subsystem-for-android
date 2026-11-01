@@ -94,7 +94,10 @@ mod tests {
             },
         );
         assert!(good);
-        assert!(text.contains("com.example.notes") && text.contains("Start menu"), "{text}");
+        assert!(
+            text.contains("com.example.notes") && text.contains("Start menu"),
+            "{text}"
+        );
         let (text, good) = result_text(
             "notes.apk",
             &InstallOutcome {
