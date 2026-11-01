@@ -1769,6 +1769,64 @@ fn fr10_a_window_shown_during_a_stall_ends_the_doze_it_interrupted() {
 }
 
 #[test]
+fn fr10_a_freeze_does_not_age_the_wait_for_an_agent_that_has_gone() {
+    let agent_timeout = Duration::from_secs(2);
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = timed_session(
+        launcher.clone(),
+        SessionConfig {
+            agent_timeout,
+            ..SessionConfig::default()
+        },
+    );
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    report_boot(&mut agent, true, false);
+    thread::sleep(Duration::from_millis(100));
+    session.freeze().expect("the guest is frozen");
+    thread::sleep(agent_timeout + Duration::from_millis(200));
+    session.windows_shown(true).unwrap();
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(session.state(), SessionState::Active, "it has time left");
+
+    // The agent is still gone, and what was left of the wait runs out.
+    assert!(session.wait_for(SessionState::Stalled, WAIT));
+}
+
+#[test]
+fn fr10_a_freeze_does_not_age_the_wait_for_a_missing_prerequisite() {
+    let limit = Duration::from_secs(3);
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = timed_session(
+        launcher.clone(),
+        SessionConfig {
+            prerequisite_grace: limit,
+            prerequisite_stop_after: limit,
+            ..SessionConfig::default()
+        },
+    );
+    session.start();
+    let _agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    launcher.0.lock().unwrap().missing = Some("the window manager has gone".into());
+    // Long enough for the session, which looks once a second, to have seen it.
+    thread::sleep(Duration::from_millis(1200));
+    session.freeze().expect("the guest is frozen");
+    thread::sleep(limit + Duration::from_millis(200));
+    session.windows_shown(true).unwrap();
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(session.state(), SessionState::Active, "it has time left");
+    assert_eq!(launcher.processes(), 3);
+
+    launcher.0.lock().unwrap().missing = None;
+}
+
+#[test]
 fn fr10_a_dozing_guest_is_never_frozen_by_default() {
     let (session, mut agent, launcher) = lifecycle_session(None);
     dozing(&session, &mut agent);

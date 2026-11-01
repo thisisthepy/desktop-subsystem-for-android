@@ -587,6 +587,7 @@ impl Session {
             next_diagnosis: Instant::now(),
             guest_is_idle: false,
             stall_doze: None,
+            frozen_at: None,
         };
         let worker = thread::Builder::new()
             .name("dsa-session".into())
@@ -887,6 +888,9 @@ struct Worker {
     /// Set when a stall interrupted Doze with the agent still there: how long the freeze timer
     /// had counted, if it was still counting. Time spent stalled does not count.
     stall_doze: Option<Option<Duration>>,
+    /// When the guest was frozen, while it is. Nothing runs in it then, so that time does not
+    /// count against it.
+    frozen_at: Option<Instant>,
 }
 
 impl Worker {
@@ -1052,6 +1056,9 @@ impl Worker {
                 });
                 return;
             }
+            if let Some(frozen_at) = self.frozen_at.take() {
+                self.discount_frozen_time(frozen_at.elapsed());
+            }
             if std::mem::take(&mut self.power_pending) {
                 if let Some(power) = self.power {
                     self.send_body(Body::PowerState(power.to_control()));
@@ -1067,6 +1074,21 @@ impl Worker {
         self.dozing_since = None;
         if matches!(self.state(), SessionState::Dozing | SessionState::Frozen) {
             self.shared.set(SessionState::Active, None);
+        }
+    }
+
+    /// Moves what the boot timers count from past a freeze of length `frozen`, so a thawed guest
+    /// has the time it had left when it was frozen.
+    fn discount_frozen_time(&mut self, frozen: Duration) {
+        self.started_at += frozen;
+        if let Some(booted) = &mut self.boot_completed_at {
+            *booted += frozen;
+        }
+        if let Some(lost) = &mut self.agent_lost_at {
+            *lost += frozen;
+        }
+        if let Some((since, _)) = &mut self.prerequisite_missing {
+            *since += frozen;
         }
     }
 
@@ -1101,6 +1123,7 @@ impl Worker {
             self.send_body(Body::ScreenState(control::ScreenState { on: false }));
         }
         self.launcher.freeze().map_err(SessionError::FreezeFailed)?;
+        self.frozen_at = Some(Instant::now());
         self.dozing_since = None;
         self.shared.set(SessionState::Frozen, None);
         Ok(())
@@ -1350,6 +1373,7 @@ impl Worker {
         self.prerequisite_missing = None;
         self.guest_is_idle = false;
         self.stall_doze = None;
+        self.frozen_at = None;
         if !self.wait_for_prerequisite() {
             return;
         }
