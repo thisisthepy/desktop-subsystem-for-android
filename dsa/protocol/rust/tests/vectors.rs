@@ -10,14 +10,13 @@ use std::path::PathBuf;
 
 use dsa_protocol::control::{
     envelope::Body, AccessibilityAction, AccessibilityActionResult, AccessibilityNode,
-    AccessibilityTree, AccessibilityWatch, AgentConnected, AppInfo, AuthChallenge, AuthProof, ClipboardSharing,
-    ClipboardText, ClockAnswer, ClockProbe, CloseTask, DeviceIdle, Envelope, FileAction, FileChunk,
-    FileProgress, GuestBoot, GuestMemory, Hello, HelloAccepted, HelloRejected, ImeCommit,
-    ImeComposition, ImeCursor, KeyAction, KeyEvent, LaunchApp, LinkHandling, NodeAction,
-    NodeRange, OpenFile, OpenLink,
-    PointerAction, PointerEvent, PointerTool, PowerState, ProcessMemory, Rect, RejectReason,
-    RequestGuestMemory, ResizeTask, Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved,
-    TaskUpdated,
+    AccessibilityTree, AccessibilityWatch, AgentConnected, AppInfo, AuthChallenge, AuthProof,
+    ClipboardSharing, ClipboardText, ClockAnswer, ClockProbe, CloseTask, DeviceIdle, Envelope,
+    FileAction, FileChunk, FileProgress, GuestBoot, GuestMemory, Hello, HelloAccepted,
+    HelloRejected, ImeCommit, ImeComposition, ImeCursor, KeyAction, KeyEvent, LaunchApp,
+    LinkHandling, NodeAction, NodeRange, OpenFile, OpenLink, PointerAction, PointerEvent,
+    PointerTool, PowerState, ProcessMemory, Rect, RejectReason, RequestGuestMemory, ResizeTask,
+    Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::{decode, encode};
 
