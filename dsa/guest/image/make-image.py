@@ -1588,6 +1588,7 @@ COMPILED_APPS = [
     AGENT_APK,
 ]
 COMPILED_ISA = "x86_64"
+CAPEX_ORIGINAL = "original_apex"
 EMBEDDED_PROFILE = "assets/dexopt/baseline.prof"
 # Where an app's shared libraries are listed when the build left no odex to read them from:
 # the agent declares none.
@@ -1730,7 +1731,8 @@ def dex2oat_command(dex2oat, apk, dex_location, odex, root, bootclasspath, boot_
     jars = bootclasspath.split(":")
     cmd = [
         dex2oat, "--avoid-storing-invocation",
-        "--runtime-arg", "-Xms64m", "--runtime-arg", "-Xmx2g",
+        # The build's own heap size: the heap must fit in the low 4 GiB, and 2 GiB did not.
+        "--runtime-arg", "-Xms64m", "--runtime-arg", "-Xmx512m",
         "--runtime-arg", "-Xbootclasspath:" + ":".join(f"{root}{j}" for j in jars),
         "--runtime-arg", "-Xbootclasspath-locations:" + bootclasspath,
         f"--class-loader-context={host_context}",
@@ -1819,9 +1821,10 @@ def compile_apps(signed, tools_zip, otatools, work, env):
             packed.parent.mkdir(parents=True, exist_ok=True)
             packed.write_bytes(z.read(member))
             if packed.suffix == ".capex":
+                # A compressed APEX is a zip that holds the original one.
                 decompressed = packed.with_suffix(".apex")
-                run(otatools / "bin/apex_compression_tool", "decompress", "--input", packed,
-                    "--output", decompressed, env=env)
+                with zipfile.ZipFile(packed) as capex:
+                    decompressed.write_bytes(capex.read(CAPEX_ORIGINAL))
                 packed = decompressed
             run(otatools / "bin/deapexer", "--debugfs_path", otatools / "bin/debugfs_static",
                 "--fsckerofs_path", otatools / "bin/fsck.erofs", "extract", packed, root / "apex" / apex,

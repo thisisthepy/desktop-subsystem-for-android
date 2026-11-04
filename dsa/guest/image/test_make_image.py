@@ -2288,6 +2288,8 @@ class CompiledSystemAppTests(unittest.TestCase):
         self.assertIn("--boot-image=/r/system/framework/boot.art:/r/system/framework/boot-framework-adservices.art", cmd)
         self.assertIn(f"--stored-class-loader-context={contexts[1]}", cmd)
         self.assertIn("-Xgc:CMC", cmd)
+        # dex2oat's heap must fit in the low 4 GiB: -Xmx2g aborted on the CI runner.
+        self.assertIn("-Xmx512m", cmd)
         self.assertFalse(any(a.startswith("--profile-file") for a in cmd))
         with_profile = make_image.dex2oat_command(
             "dex2oatd64", "/o/D.apk", "/system/priv-app/D/D.apk", "/o/D.odex", Path("/r"), BOOTCLASSPATH,
