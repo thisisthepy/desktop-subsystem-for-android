@@ -3,8 +3,12 @@
     uv run scripts/input-trace.py [log files or folders ...]
 
 With no arguments it reads the host logs (%LOCALAPPDATA%\\DSA\\logs\\*.log) and the service's
-logs, which hold the guest console (C:\\ProgramData\\DSA\\logs\\*.log, among them
+logs, which hold the guest console (the logs folder of the machine's DSA folder,
+%ProgramData%\\DSA\\logs\\*.log unless another data folder was chosen at install, among them
 android-<user>.log).
+
+The trace is a setting: `dsa settings set input-trace on`, run as an administrator, turns it on
+for every DSA process that starts afterwards (`DSA_INPUT_TRACE=1` does it for one process).
 
 Every process on a click's path writes `input-trace stage=... key=value ...` lines. Host
 lines carry `host=`, milliseconds on the host's monotonic clock, which every host process
@@ -237,13 +241,28 @@ def report(evts: list[Event]) -> str:
     return "\n".join(out)
 
 
+def machine_root() -> str:
+    """The machine's DSA folder: the data folder the installer recorded, or %ProgramData%\\DSA."""
+    try:
+        import winreg
+
+        access = winreg.KEY_READ | winreg.KEY_WOW64_64KEY
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\thisisthepy\DSA", 0, access) as key:
+            folder, _ = winreg.QueryValueEx(key, "DataFolder")
+            if folder:
+                return str(folder).rstrip("\\")
+    except (ImportError, OSError):
+        pass
+    return os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "DSA")
+
+
 def default_paths() -> list[str]:
+    """The user's log folder and the machine's, the two places DSA keeps logs."""
     paths = []
     local = os.environ.get("LOCALAPPDATA")
     if local:
         paths.append(os.path.join(local, "DSA", "logs"))
-    program_data = os.environ.get("ProgramData", r"C:\ProgramData")
-    paths.append(os.path.join(program_data, "DSA", "logs"))
+    paths.append(os.path.join(machine_root(), "logs"))
     return paths
 
 

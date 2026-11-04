@@ -16,9 +16,10 @@ use dsa_protocol::control::{
     GuestNotification, Hello, HelloAccepted, HelloRejected, ImeCommit, ImeComposition, ImeCursor,
     InstallApk, InstallProgress, InstallResult, InstallStatus, KeyAction, KeyEvent, LaunchApp,
     LinkHandling, NodeAction, NodeRange, NotificationClicked, NotificationDismissed,
-    NotificationRemoved, OpenFile, OpenLink, PointerAction, PointerEvent, PointerTool, PowerState,
-    ProcessMemory, Rect, RejectReason, RequestGuestMemory, ResizeTask, Role, ScreenState,
-    SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
+    NotificationRemoved, OpenFile, OpenLink, PackageState, PointerAction, PointerEvent,
+    PointerTool, PowerHint, PowerHintKind, PowerState, ProcessMemory, QueryPackage, Rect,
+    RejectReason, RequestGuestMemory, ResizeTask, Role, ScreenState, SetTaskDensity, TaskFrames,
+    TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::control::{
     AddWidget, ListWidgetProviders, RemoveWidget, ResizeWidget, WidgetAdded, WidgetFrame,
@@ -341,6 +342,24 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
             })),
         ),
         (
+            "power_hint_launch_mode",
+            wrap(Body::PowerHint(PowerHint {
+                kind: PowerHintKind::Mode as i32,
+                id: 5,
+                enabled: true,
+                duration_ms: 0,
+            })),
+        ),
+        (
+            "power_hint_interaction_boost",
+            wrap(Body::PowerHint(PowerHint {
+                kind: PowerHintKind::Boost as i32,
+                id: 0,
+                enabled: false,
+                duration_ms: 80,
+            })),
+        ),
+        (
             "device_idle",
             wrap(Body::DeviceIdle(DeviceIdle { idle: true })),
         ),
@@ -412,6 +431,23 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
             wrap(Body::InstallProgress(InstallProgress {
                 transfer_id: 3,
                 received: 131_072,
+            })),
+        ),
+        (
+            "query_package",
+            wrap(Body::QueryPackage(QueryPackage {
+                request_id: 7,
+                package_name: "com.example.notes".into(),
+            })),
+        ),
+        (
+            "package_state_installed",
+            wrap(Body::PackageState(PackageState {
+                request_id: 7,
+                installed: true,
+                version_code: 42,
+                version_name: "1.2".into(),
+                signer_sha256: vec![(0u8..32).collect()],
             })),
         ),
         (

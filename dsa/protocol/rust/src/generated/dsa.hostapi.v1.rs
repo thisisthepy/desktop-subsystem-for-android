@@ -418,6 +418,28 @@ pub struct InstallResult {
     #[prost(string, tag = "3")]
     pub message: ::prost::alloc::string::String,
 }
+/// Asks whether a package is installed in the caller's Android, and at which version and with
+/// which signing certificates. Android must be running; the answer is PackageState.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetPackage {
+    /// An Android package name, such as "com.example.notes".
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+}
+/// The answer to GetPackage.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PackageState {
+    /// False when the package is not installed; the fields below are then empty.
+    #[prost(bool, tag = "1")]
+    pub installed: bool,
+    #[prost(int64, tag = "2")]
+    pub version_code: i64,
+    #[prost(string, tag = "3")]
+    pub version_name: ::prost::alloc::string::String,
+    /// The SHA-256 digest of each certificate the installed package is signed with.
+    #[prost(bytes = "vec", repeated, tag = "4")]
+    pub signer_sha256: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+}
 /// Pointer input in a task's window, sent on a connection that streams input.
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct PointerEvent {
@@ -770,7 +792,7 @@ pub struct SetSettings {
     pub settings: ::core::option::Option<Settings>,
 }
 /// The settings of the caller's DSA. `render_gpu`, `freeze`, `clipboard` and `links_in_android` are
-/// the caller's own; the update settings are the machine's, shared by every user of it.
+/// the caller's own; the update and trace settings are the machine's, shared by every user of it.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Settings {
     /// The GPU the caller's window manager renders on: "display" (the GPU that drives the
@@ -809,10 +831,15 @@ pub struct Settings {
     /// On unless the user turns it off.
     #[prost(bool, tag = "9")]
     pub clipboard: bool,
-    /// The version of the Android image the caller's next start boots, such as
-    /// "17.0.0-16373615-7". Empty when the service does not know it. A client cannot change it.
-    #[prost(string, tag = "11")]
-    pub android_version: ::prost::alloc::string::String,
+    /// Whether every DSA process writes the input trace (a click's path from the host to the app
+    /// and back, on one clock) to its log. Off by default. It applies to the whole computer, so
+    /// only an administrator may change it; a process reads it when it starts.
+    #[prost(bool, tag = "11")]
+    pub input_trace: bool,
+    /// Whether every DSA process writes a line for each stage of each resize, rather than a
+    /// summary at the end of a drag. Off by default; the same rules as input_trace.
+    #[prost(bool, tag = "12")]
+    pub resize_trace: bool,
 }
 /// Turns the connection into the accessibility tree of one of the caller's task windows, for a
 /// host accessibility client (a screen reader, an inspection tool) that reads that window.
@@ -952,7 +979,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 32, 33, 34, 28, 35"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 32, 33, 34, 28, 35, 36"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -1024,6 +1051,8 @@ pub mod request {
         WatchAccessibility(super::WatchAccessibility),
         #[prost(message, tag = "35")]
         WidgetPointer(super::WidgetPointer),
+        #[prost(message, tag = "36")]
+        GetPackage(super::GetPackage),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1032,7 +1061,7 @@ pub struct Response {
     pub id: u64,
     #[prost(
         oneof = "response::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15"
     )]
     pub body: ::core::option::Option<response::Body>,
 }
@@ -1066,6 +1095,8 @@ pub mod response {
         Widget(super::Widget),
         #[prost(message, tag = "14")]
         Widgets(super::Widgets),
+        #[prost(message, tag = "15")]
+        PackageState(super::PackageState),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.

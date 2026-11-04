@@ -11,6 +11,7 @@ import io.github.thisisthepy.dsa.agent.FakeTasks
 import io.github.thisisthepy.dsa.agent.FakeWindowing
 import io.github.thisisthepy.dsa.agent.RecordingLog
 import io.github.thisisthepy.dsa.control.v1.Envelope
+import io.github.thisisthepy.dsa.control.v1.HostMemory
 import io.github.thisisthepy.dsa.control.v1.PowerState
 import io.github.thisisthepy.dsa.control.v1.ScreenState
 import org.junit.Assert.assertEquals
@@ -111,6 +112,19 @@ class LifecycleTest {
     }
 
     @Test
+    fun nfr2_a_host_short_of_memory_ends_cached_apps_even_with_tasks_open() {
+        val lifecycle = Lifecycle(power, { true }, log, hasOpenTasks = { true })
+
+        assertTrue(lifecycle.handle(Envelope.newBuilder().setHostMemory(HostMemory.newBuilder().setLow(true)).build()))
+        assertEquals(1, power.killedCached)
+
+        // The end of the shortage ends nothing more, and the screen is left as it was.
+        assertTrue(lifecycle.handle(Envelope.newBuilder().setHostMemory(HostMemory.newBuilder().setLow(false)).build()))
+        assertEquals(1, power.killedCached)
+        assertEquals(emptyList<String>(), power.calls)
+    }
+
+    @Test
     fun nfr1_a_minimized_task_keeps_cached_apps_alive() {
         val lifecycle = Lifecycle(power, { true }, log, hasOpenTasks = { true })
 
@@ -204,8 +218,31 @@ class LifecycleTest {
         daemon.deliver(Envelope.newBuilder().setPowerState(desktop).build().toByteArray())
         scheduler.runDue()
 
-        assertEquals(listOf(Battery(acOnline = true, present = false, percent = 100, charging = false)), power.batteries)
+        // Plugged in and full, not a missing battery: charging-gated jobs such as background
+        // dexopt wait for exactly this.
+        assertEquals(listOf(Battery(acOnline = true, present = true, percent = 100, charging = false)), power.batteries)
+        assertEquals(BatteryStatus.FULL, power.batteries.single().status)
         assertEquals(false, power.saver)
+    }
+
+    @Test
+    fun fr10_a_host_without_a_battery_reports_ac_power_even_if_the_host_says_otherwise() {
+        started()
+        // Windows may not know the AC line status of a computer without a battery.
+        val desktop = PowerState.newBuilder().setAcOnline(false).setBatteryPresent(false).build()
+        daemon.deliver(Envelope.newBuilder().setPowerState(desktop).build().toByteArray())
+        scheduler.runDue()
+
+        assertEquals(BatteryStatus.FULL, power.batteries.single().status)
+        assertTrue(power.batteries.single().acOnline)
+    }
+
+    @Test
+    fun fr10_a_host_battery_keeps_its_real_status() {
+        assertEquals(BatteryStatus.DISCHARGING, Battery(acOnline = false, present = true, percent = 57, charging = false).status)
+        assertEquals(BatteryStatus.CHARGING, Battery(acOnline = true, present = true, percent = 40, charging = true).status)
+        assertEquals(BatteryStatus.NOT_CHARGING, Battery(acOnline = true, present = true, percent = 80, charging = false).status)
+        assertEquals(BatteryStatus.FULL, Battery(acOnline = true, present = true, percent = 100, charging = false).status)
     }
 
     @Test

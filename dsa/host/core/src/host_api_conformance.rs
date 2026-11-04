@@ -21,7 +21,7 @@ use crate::accessibility::{
     AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, Node, NodeAction,
     TreeUpdate,
 };
-use crate::apk::{self, InstallOutcome, InstallStatus};
+use crate::apk::{self, InstallOutcome, InstallStatus, InstalledPackage};
 use crate::files::{FileAction, FileTransfer, MAX_FILE_BYTES};
 use crate::host_api::{
     running_of, stop_every, ClientError, HostApiClient, HostApiService, InstallError,
@@ -108,6 +108,15 @@ pub struct FakeAndroid {
 /// What the fake Android says of an APK: one whose content starts with [`BAD_APK`] is not an APK
 /// it can read; any other is installed as [`INSTALLED_PACKAGE`].
 pub const BAD_APK: &[u8] = b"not a zip";
+
+/// The package the fake Android has installed already, at [`INSTALLED_VERSION`], signed by
+/// the certificate whose SHA-256 digest is [`INSTALLED_SIGNER`].
+pub const KNOWN_PACKAGE: &str = "com.example.notes";
+/// The version of [`KNOWN_PACKAGE`] the fake Android has installed.
+pub const INSTALLED_VERSION: i64 = 41;
+/// The certificate [`KNOWN_PACKAGE`] is signed with in the fake Android: the one the APK
+/// of `apk_info::fixture::notes_apk` is signed with.
+pub const INSTALLED_SIGNER: &[u8] = b"\x30\x03\x02\x01\x07";
 
 /// The package every APK the fake Android installs turns out to be.
 pub const INSTALLED_PACKAGE: &str = "com.example.installed";
@@ -447,6 +456,15 @@ impl UserAndroid for FakeAndroid {
                 message: String::new(),
             }
         })
+    }
+    fn package_state(&self, package: &str) -> Result<Option<InstalledPackage>, TaskRequestError> {
+        self.running_or().map_err(TaskRequestError::NotRunning)?;
+        use sha2::Digest;
+        Ok((package == KNOWN_PACKAGE).then(|| InstalledPackage {
+            version_code: INSTALLED_VERSION,
+            version_name: "4.1".into(),
+            signer_sha256: vec![sha2::Sha256::digest(INSTALLED_SIGNER).to_vec()],
+        }))
     }
     fn freeze(&self) -> Result<(), TaskRequestError> {
         let mut state = self.state.lock().unwrap();

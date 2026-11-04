@@ -118,6 +118,31 @@ jobs:
       - name: Run the tests and build the agent
         run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
 
+  # The host's APK reader against APKs the Android SDK's own tools make (aapt2, zipalign,
+  # apksigner), not only against the ones its unit tests write.
+  apk-reader:
+    name: Read APKs made by the Android SDK (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make the test APKs
+        run: .github/scripts/apk/make-test-apks.sh .scratch/test-apks
+
+      - name: Build dsa
+        working-directory: dsa
+        run: cargo build -q -p dsa-cli
+
+      - name: Read them with dsa apk-info
+        run: .github/scripts/apk/check-apk-info.sh dsa/target/debug/dsa .scratch/test-apks
+
+      - name: Keep the APKs and what dsa said of them
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-apks
+          path: .scratch/test-apks
+
   protocol:
     name: Check the generated protocol code (ubuntu-latest)
     runs-on: ubuntu-latest
@@ -200,3 +225,19 @@ jobs:
 
       - name: Run the tests
         run: dsa/guest/hwcomposer/test.sh
+
+  power-hal:
+    name: Test the guest power and health HALs' rules (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The channel messages go through the generated protobuf-lite codec, built against the
+      # 3.21 runtime Ubuntu 24.04 ships.
+      - name: Install the protobuf runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libprotobuf-dev g++
+
+      - name: Run the tests
+        run: dsa/guest/power/test.sh

@@ -347,6 +347,39 @@ message PowerState {
   bool power_saver = 5;
 }
 
+// Host to guest: whether the host computer is short of memory. While it is, the guest gives
+// memory back the way a phone's low memory killer would, cheapest first: the agent ends the
+// cached app processes (apps the user is not using), and the control daemon then has the
+// guest drop its clean caches, so free page reporting returns the pages to the host. Sent
+// when it changes, and once after the agent connects while the host is short.
+message HostMemory {
+  bool low = 1;
+}
+
+// What a PowerHint is about.
+enum PowerHintKind {
+  POWER_HINT_KIND_UNSPECIFIED = 0;
+  // A power mode, which stays on until the guest turns it off.
+  POWER_HINT_KIND_MODE = 1;
+  // A boost, which lasts for a while and then ends by itself.
+  POWER_HINT_KIND_BOOST = 2;
+}
+
+// Guest to host, from the guest's power HAL: the framework turned a power mode on or off, or
+// asked for a boost. The host runs the guest's processors faster or more frugally to match.
+// The HAL sends every mode that is on each time it subscribes to the channel, and the
+// channel daemon each time the host connects, so a host that connects again learns them.
+message PowerHint {
+  PowerHintKind kind = 1;
+  // The mode or the boost, by its value in android.hardware.power's Mode or Boost.
+  int32 id = 2;
+  // A mode: whether it is now on.
+  bool enabled = 3;
+  // A boost: how long it lasts, in milliseconds. 0 asks for the host's usual length; a
+  // negative value ends the boost now.
+  int32 duration_ms = 4;
+}
+
 // Guest to host, from the agent: whether the guest's device is in Doze (the device idle
 // controller's deep idle state). The host takes the device not to be in Doze when the agent
 // connects; the agent sends this on each change after that.
@@ -519,6 +552,29 @@ message ApkChunk {
   // Where `data` starts in the APK.
   uint64 offset = 2;
   bytes data = 3;
+}
+
+// Host to guest: asks whether a package is installed, and at which version and with which
+// signing certificates, so the host can tell a new install from an update, a downgrade or an
+// APK signed with another key before it sends the APK. The agent answers with PackageState of
+// the same `request_id`.
+message QueryPackage {
+  uint32 request_id = 1;
+  string package_name = 2;
+}
+
+// Guest to host, from the agent: the answer to QueryPackage.
+message PackageState {
+  uint32 request_id = 1;
+  // False when the package is not installed for the guest's user; the fields below are then
+  // empty.
+  bool installed = 2;
+  // The installed version, as PackageInfo.getLongVersionCode says.
+  int64 version_code = 3;
+  string version_name = 4;
+  // The SHA-256 digest of each certificate the installed package is signed with now, in
+  // the order the package manager lists them.
+  repeated bytes signer_sha256 = 5;
 }
 
 // Guest to host, from the agent: an app in the guest opened a web link, which the host opens
@@ -887,12 +943,16 @@ message Envelope {
     ClockAnswer clock_answer = 29;
     ScreenState screen_state = 40;
     PowerState power_state = 41;
+    PowerHint power_hint = 110;
     DeviceIdle device_idle = 42;
+    HostMemory host_memory = 43;
     InstallApk install_apk = 60;
     ApkChunk apk_chunk = 61;
     CancelInstall cancel_install = 62;
     InstallProgress install_progress = 63;
     InstallResult install_result = 64;
+    QueryPackage query_package = 65;
+    PackageState package_state = 66;
     OpenLink open_link = 50;
     LinkHandling link_handling = 51;
     OpenFile open_file = 52;

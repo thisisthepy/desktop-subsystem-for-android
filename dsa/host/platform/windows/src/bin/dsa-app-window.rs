@@ -29,10 +29,10 @@ fn main() -> std::process::ExitCode {
     };
     use dsa_host_windows::compositor::current_session;
     use dsa_host_windows::compositor::hosts::pipe_name;
-    use dsa_host_windows::compositor::log::{default_log_dir, note, CompositorLogger};
+    use dsa_host_windows::compositor::log::{default_app_window_log_file, note, CompositorLogger};
     use dsa_host_windows::pipe::{NamedPipeConnector, SameUserPipeConnector};
 
-    let logger = CompositorLogger::open(default_log_dir().join("dsa-app-window.log"))
+    let logger = CompositorLogger::open(default_app_window_log_file())
         .ok()
         .map(Arc::new);
     // Its windows show frames and take touches whether or not one has the focus.
@@ -48,6 +48,17 @@ fn main() -> std::process::ExitCode {
         use dsa_host_windows::app_window::apk_install;
         use dsa_host_windows::app_window::launch::tell_user_done;
         const TITLE: &str = "Desktop Subsystem for Android";
+        // The install window shows the APK before installing it; the message box below is
+        // for a machine without it.
+        if let Some(window) = apk_install::install_window(&program) {
+            match run_program(&window, &apk_install::install_window_arguments(&path)) {
+                Ok(()) => return std::process::ExitCode::SUCCESS,
+                Err(why) => note(
+                    logger.as_deref(),
+                    &format!("the APK install window did not start ({why}); installing here"),
+                ),
+            }
+        }
         let name = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
@@ -198,6 +209,16 @@ fn main() -> std::process::ExitCode {
     let window_manager_pipe =
         argument(&args, PIPE_ARGUMENT).unwrap_or_else(|| pipe_name(current_session()));
     let api_pipe = dsa_host_windows::host_config::DEFAULT_PIPE_NAME;
+    // The trace switches are the service's settings, read once before the first trace line.
+    if let Err(why) = dsa_host_windows::compositor::log::read_trace_settings(
+        api_pipe,
+        &format!("dsa-app-window {}", dsa_host_windows::VERSION),
+    ) {
+        note(
+            logger.as_deref(),
+            &format!("the trace settings could not be read ({why}); the traces stay off"),
+        );
+    }
     let title = program
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())

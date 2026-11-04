@@ -39,6 +39,12 @@
 //!   the guest and wakes it.
 //! - The host's power ([`Session::set_power`]) goes to the guest whenever it changes and
 //!   each time the agent connects.
+//! - Whether the host is short of memory ([`Session::host_memory_low`]) goes to the guest
+//!   whenever it changes, and when the agent connects while the host is short. The guest
+//!   then ends its cached app processes and drops its caches, so the host gets memory back.
+//! - The guest's power HAL hints at the performance it needs; each hint goes to every
+//!   [`Session::watch_power_hints`] watcher, and [`GuestPower::Stopped`] when the guest stops,
+//!   which ends every mode and boost it asked for.
 //!
 //! The web links apps in the guest open go to every [`Session::watch_links`] watcher, which
 //! opens them in the host's browser, unless the user lets them open in the guest
@@ -89,7 +95,7 @@ use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 use crate::accessibility::{
     AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, TreeUpdate,
 };
-use crate::apk::{self, InstallOutcome};
+use crate::apk::{self, InstallOutcome, InstalledPackage};
 use crate::clipboard;
 use crate::clock_trace::ClockTrace;
 use crate::files::{self, FileAction, FileTransfer};
@@ -100,6 +106,7 @@ use crate::links::{self, LinkGate};
 use crate::memory::{GuestMemory, GuestMemoryReport};
 use crate::notifications::{self, Notification, NotificationAction, NotificationEvent, RateLimit};
 use crate::power::PowerState;
+use crate::power_hints::PowerHint;
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskTable, TaskWatch};
 use crate::widgets::{
     self, Placement, Widget, WidgetEvent, WidgetFrame, WidgetProvider, WidgetSize,
@@ -449,6 +456,8 @@ pub enum SessionError {
     /// A widget was not placed, or the agent did not answer about widgets; the detail says
     /// why.
     WidgetRefused(String),
+    /// The agent did not answer a question in time; the detail says which.
+    NoAnswer(String),
 }
 
 impl fmt::Display for SessionError {
@@ -461,6 +470,7 @@ impl fmt::Display for SessionError {
             SessionError::InstallRefused(why) => f.write_str(why),
             SessionError::FileRefused(why) => f.write_str(why),
             SessionError::WidgetRefused(why) => f.write_str(why),
+            SessionError::NoAnswer(why) => f.write_str(why),
         }
     }
 }
@@ -476,6 +486,8 @@ enum Command {
     WindowsShown(bool),
     /// The host's power changed.
     Power(PowerState),
+    /// Whether the host is short of memory changed.
+    HostMemoryLow(bool),
     /// Freeze the guest after this long in Doze, or never.
     FreezeAfter(Option<Duration>),
     /// Freeze the guest now.
@@ -532,8 +544,23 @@ struct Shared {
     widget_requests: Mutex<HashMap<u32, Sender<WidgetAnswer>>>,
     /// The ID of the last request about widgets.
     last_widget_request: AtomicU32,
+    /// The questions about installed packages waiting for the agent's answer, by request ID.
+    package_queries: Mutex<HashMap<u32, Sender<Option<InstalledPackage>>>>,
+    /// The ID of the last question about an installed package.
+    last_package_query: AtomicU32,
     /// Who watches each task's accessibility tree.
     accessibility: Mutex<AccessibilityHub>,
+    /// Who hears of the guest's power hints.
+    power_hint_watchers: Mutex<Vec<Sender<GuestPower>>>,
+}
+
+/// What the guest's power HAL asks of the host's processors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestPower {
+    /// One hint, as the guest sent it.
+    Hint(PowerHint),
+    /// The guest stopped: none of its modes or boosts is on any longer.
+    Stopped,
 }
 
 /// What the agent answers about widgets.
@@ -765,6 +792,13 @@ impl Shared {
     }
 
     /// Hands a change to the guest's notifications to every watcher still listening.
+    fn publish_power(&self, event: GuestPower) {
+        self.power_hint_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|watcher| watcher.send(event).is_ok());
+    }
+
     fn publish_notification(&self, event: NotificationEvent) {
         self.notification_watchers
             .lock()
@@ -823,7 +857,10 @@ impl Session {
             widgets: Mutex::new(WidgetHub::default()),
             widget_requests: Mutex::new(HashMap::new()),
             last_widget_request: AtomicU32::new(0),
+            package_queries: Mutex::new(HashMap::new()),
+            last_package_query: AtomicU32::new(0),
             accessibility: Mutex::new(AccessibilityHub::default()),
+            power_hint_watchers: Mutex::new(Vec::new()),
         });
         let freeze_delay = config.freeze_after.unwrap_or(DEFAULT_FREEZE_AFTER);
         let (commands, command_rx) = mpsc::channel();
@@ -845,6 +882,8 @@ impl Session {
             dozing_since: None,
             power: None,
             power_pending: false,
+            host_memory_low: false,
+            host_memory_pending: false,
             started_at: Instant::now(),
             boot_completed_at: None,
             agent_connected: false,
@@ -1202,6 +1241,12 @@ impl Session {
         let _ = self.commands.send(Command::Power(state));
     }
 
+    /// Records whether the host is short of memory. The guest is told now if it is up, and
+    /// when its agent connects while the host is short, so it gives back what it can spare.
+    pub fn host_memory_low(&self, low: bool) {
+        let _ = self.commands.send(Command::HostMemoryLow(low));
+    }
+
     /// Says that the host's clipboard got `text`. It goes to the guest while sharing is on and
     /// the guest is `Active` or `Dozing`; otherwise the latest text waits for the guest to get
     /// there. Taken in every state.
@@ -1221,6 +1266,18 @@ impl Session {
         let (tx, rx) = mpsc::channel();
         self.shared
             .clipboard_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(tx);
+        rx
+    }
+
+    /// The guest's power hints from now on, and each time the guest stops. The watch lasts
+    /// across restarts of the guest.
+    pub fn watch_power_hints(&self) -> Receiver<GuestPower> {
+        let (tx, rx) = mpsc::channel();
+        self.shared
+            .power_hint_watchers
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(tx);
@@ -1534,6 +1591,48 @@ impl Session {
             .remove(&request_id);
     }
 
+    /// What the guest has installed of `package`, if anything: its version and its signing
+    /// certificates, asking the agent and waiting up to `timeout` for its answer. Needs an
+    /// active session.
+    pub fn package_state(
+        &self,
+        package: &str,
+        timeout: Duration,
+    ) -> Result<Option<InstalledPackage>, SessionError> {
+        let request_id = self
+            .shared
+            .last_package_query
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_add(1);
+        let (tx, answer) = mpsc::channel();
+        self.shared
+            .package_queries
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(request_id, tx);
+        let result = self
+            .send(dsa_protocol::encode(&control::Envelope {
+                body: Some(Body::QueryPackage(control::QueryPackage {
+                    request_id,
+                    package_name: package.to_string(),
+                })),
+            }))
+            .and_then(|()| {
+                answer.recv_timeout(timeout).map_err(|_| {
+                    SessionError::NoAnswer(format!(
+                        "Android did not say within {} seconds whether {package} is installed",
+                        timeout.as_secs()
+                    ))
+                })
+            });
+        self.shared
+            .package_queries
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&request_id);
+        result
+    }
+
     /// The widgets the apps in the guest offer, in label order, asking the agent and waiting
     /// up to `timeout` for its whole answer. Needs an active session.
     pub fn widget_providers(&self, timeout: Duration) -> Result<Vec<WidgetProvider>, SessionError> {
@@ -1775,6 +1874,10 @@ struct Worker {
     power: Option<PowerState>,
     /// Set when the power changed while the guest was frozen, so it is told after the thaw.
     power_pending: bool,
+    /// Whether the host is short of memory, as last recorded.
+    host_memory_low: bool,
+    /// Set when that changed while the guest was frozen, so it is told after the thaw.
+    host_memory_pending: bool,
     /// When the guest was started.
     started_at: Instant,
     /// When the guest said it had finished booting.
@@ -1842,6 +1945,7 @@ impl Worker {
                         }
                         Ok(Command::WindowsShown(shown)) => self.set_shown(shown),
                         Ok(Command::Power(state)) => self.set_power(state),
+                        Ok(Command::HostMemoryLow(low)) => self.set_host_memory_low(low),
                         Ok(Command::FreezeAfter(after)) => self.config.freeze_after = after,
                         Ok(Command::LinksInAndroid(on)) => self.set_links_in_android(on),
                         Ok(Command::HostClipboard(text)) => self.host_clipboard(text),
@@ -1868,6 +1972,7 @@ impl Worker {
                         }
                         Ok(Command::WindowsShown(shown)) => self.set_shown(shown),
                         Ok(Command::Power(state)) => self.set_power(state),
+                        Ok(Command::HostMemoryLow(low)) => self.set_host_memory_low(low),
                         Ok(Command::FreezeAfter(after)) => self.config.freeze_after = after,
                         Ok(Command::LinksInAndroid(on)) => self.set_links_in_android(on),
                         Ok(Command::HostClipboard(text)) => self.host_clipboard(text),
@@ -1931,6 +2036,10 @@ impl Worker {
             }
             Command::Power(state) => {
                 self.set_power(state);
+                true
+            }
+            Command::HostMemoryLow(low) => {
+                self.set_host_memory_low(low);
                 true
             }
             Command::LinksInAndroid(on) => {
@@ -2367,6 +2476,10 @@ impl Worker {
                     self.send_body(Body::PowerState(power.to_control()));
                 }
             }
+            if std::mem::take(&mut self.host_memory_pending) {
+                let low = self.host_memory_low;
+                self.send_body(Body::HostMemory(control::HostMemory { low }));
+            }
         }
         if !self.screen_on {
             self.screen_on = true;
@@ -2410,6 +2523,27 @@ impl Worker {
             | SessionState::Active
             | SessionState::Dozing => self.send_body(Body::PowerState(state.to_control())),
             SessionState::Frozen => self.power_pending = true,
+            _ => {}
+        }
+    }
+
+    /// Records whether the host is short of memory and tells a guest that can hear it.
+    fn set_host_memory_low(&mut self, low: bool) {
+        if self.host_memory_low == low {
+            return;
+        }
+        self.host_memory_low = low;
+        if low {
+            eprintln!("lifecycle: the host is short of memory; asking the guest to give some back");
+        }
+        match self.state() {
+            SessionState::Starting
+            | SessionState::Stalled
+            | SessionState::Active
+            | SessionState::Dozing => {
+                self.send_body(Body::HostMemory(control::HostMemory { low }));
+            }
+            SessionState::Frozen => self.host_memory_pending = true,
             _ => {}
         }
     }
@@ -2498,6 +2632,9 @@ impl Worker {
             eprintln!("lifecycle: the agent is connected");
             if let Some(power) = self.power {
                 self.send_body(Body::PowerState(power.to_control()));
+            }
+            if self.host_memory_low {
+                self.send_body(Body::HostMemory(control::HostMemory { low: true }));
             }
             if !self.screen_on {
                 self.send_body(Body::ScreenState(control::ScreenState { on: false }));
@@ -2787,6 +2924,7 @@ impl Worker {
                             self.hidden_since = Instant::now();
                             self.dozing_since = None;
                             self.power_pending = false;
+                            self.host_memory_pending = false;
                             return;
                         }
                         Err(Refusal::NotTheGuest(why)) => {
@@ -2827,6 +2965,10 @@ impl Worker {
             }
             Command::Power(state) => {
                 self.set_power(state);
+                true
+            }
+            Command::HostMemoryLow(low) => {
+                self.set_host_memory_low(low);
                 true
             }
             Command::LinksInAndroid(on) => {
@@ -3052,6 +3194,24 @@ impl Worker {
             ),
             Some(Body::WidgetUpdated(updated)) => self.guest_widget(updated),
             Some(Body::WidgetList(list)) => self.guest_widget_list(list.widget_ids),
+            Some(Body::PackageState(state)) => {
+                let installed = InstalledPackage::from_control(&state);
+                let queries = self
+                    .shared
+                    .package_queries
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                match queries.get(&state.request_id) {
+                    Some(waiting) => {
+                        let _ = waiting.send(installed);
+                    }
+                    None => eprintln!(
+                        "packages: dropped the agent's answer to question {}, which nobody \
+                         waits for",
+                        state.request_id
+                    ),
+                }
+            }
             Some(Body::WidgetFrame(frame)) => self.guest_widget_frame(frame),
             Some(Body::GuestBoot(boot)) => self.guest_boot(boot),
             Some(Body::ClockAnswer(answer)) => self.clock_answered(answer),
@@ -3076,8 +3236,13 @@ impl Worker {
                     GuestAccessibility::ActionResult(ActionResult::from_control(result)),
                 );
             }
+            Some(Body::PowerHint(hint)) => match PowerHint::from_control(&hint) {
+                Ok(hint) => self.shared.publish_power(GuestPower::Hint(hint)),
+                Err(why) => eprintln!("power: dropped a hint from the guest: {why}"),
+            },
             Some(Body::ScreenState(_))
             | Some(Body::PowerState(_))
+            | Some(Body::HostMemory(_))
             | Some(Body::CloseTask(_))
             | Some(Body::LaunchApp(_))
             | Some(Body::ResizeTask(_))
@@ -3095,6 +3260,7 @@ impl Worker {
             | Some(Body::InstallApk(_))
             | Some(Body::ApkChunk(_))
             | Some(Body::CancelInstall(_))
+            | Some(Body::QueryPackage(_))
             | Some(Body::RequestGuestMemory(_))
             | Some(Body::ListWidgetProviders(_))
             | Some(Body::AddWidget(_))
@@ -3141,6 +3307,8 @@ impl Worker {
         self.shared.clear_tasks();
         // So do its notifications.
         self.clear_notifications();
+        // And the modes and boosts its power HAL asked for.
+        self.shared.publish_power(GuestPower::Stopped);
         self.shared.set_guest_memory(None);
         match self.launcher.stop(self.config.stop_timeout) {
             Ok(()) => {

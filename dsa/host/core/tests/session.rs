@@ -12,9 +12,10 @@ use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use dsa_host_core::keys::{keycode, meta, KeyAction, KeyEvent};
 use dsa_host_core::notifications::{Notification, NotificationAction, NotificationEvent};
 use dsa_host_core::power::{PowerHub, PowerState};
+use dsa_host_core::power_hints::{mode, PowerHint};
 use dsa_host_core::session::{
-    BootProblem, GuestLauncher, GuestStall, Session, SessionConfig, SessionError, SessionEvent,
-    SessionState, StopReason,
+    BootProblem, GuestLauncher, GuestPower, GuestStall, Session, SessionConfig, SessionError,
+    SessionEvent, SessionState, StopReason,
 };
 use dsa_host_core::tasks::{Bounds, Task, TaskEvent, TaskRequest};
 use dsa_host_core::widgets::{self, Placement, Widget, WidgetEvent, WidgetSize};
@@ -504,6 +505,31 @@ fn fr2_an_agent_that_connects_again_is_told_the_screen_and_the_power() {
         Body::PowerState(on_battery(40).to_control())
     );
     assert_eq!(next_body(&mut daemon), screen(false));
+}
+
+#[test]
+fn pr4_the_guests_power_hints_reach_the_host_and_end_when_the_guest_stops() {
+    let (session, mut daemon, _launcher) = lifecycle_session(None);
+    let hints = session.watch_power_hints();
+    send_body(
+        &mut daemon,
+        Body::PowerHint(dsa_protocol::control::PowerHint {
+            kind: dsa_protocol::control::PowerHintKind::Mode as i32,
+            id: mode::LAUNCH,
+            enabled: true,
+            duration_ms: 0,
+        }),
+    );
+    assert_eq!(
+        hints.recv_timeout(WAIT),
+        Ok(GuestPower::Hint(PowerHint::Mode {
+            id: mode::LAUNCH,
+            enabled: true,
+        }))
+    );
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(hints.recv_timeout(WAIT), Ok(GuestPower::Stopped));
 }
 
 #[test]
@@ -1706,6 +1732,49 @@ fn fr10_the_power_hub_tells_every_session_and_each_new_one() {
     assert_eq!(hub.latest(), Some(PowerState::MAINS_ONLY));
 }
 
+fn host_memory(low: bool) -> Body {
+    Body::HostMemory(dsa_protocol::control::HostMemory { low })
+}
+
+#[test]
+fn nfr2_a_host_short_of_memory_tells_the_guest_when_it_changes_and_when_the_agent_connects() {
+    let hub = PowerHub::new();
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    let session = Arc::new(session);
+    session.windows_shown(true).unwrap();
+    // Short before the guest runs: told as soon as the agent connects.
+    hub.update_memory(true);
+    hub.attach(&session);
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(next_body(&mut agent), host_memory(true));
+    // The same word again is not news; the end of the shortage is.
+    hub.update_memory(true);
+    hub.update_memory(false);
+    assert_eq!(next_body(&mut agent), host_memory(false));
+    assert!(!hub.memory_low());
+    hub.update_memory(true);
+    assert_eq!(next_body(&mut agent), host_memory(true));
+}
+
+#[test]
+fn nfr2_the_host_is_short_of_memory_below_a_tenth_free_and_recovers_above_a_fifth() {
+    use dsa_host_core::power::MemoryPressure;
+    let total = 16 * 1024 * 1024;
+    let mut pressure = MemoryPressure::new();
+    assert!(!pressure.update(total, total / 2));
+    assert!(!pressure.update(total, total * 11 / 100));
+    assert!(pressure.update(total, total * 9 / 100));
+    // Between the two lines it stays as it was, so it does not flap.
+    assert!(pressure.update(total, total * 15 / 100));
+    assert!(!pressure.update(total, total * 21 / 100));
+    assert!(!pressure.update(total, total * 15 / 100));
+    // An unknown total changes nothing.
+    assert!(!pressure.update(0, 0));
+}
+
 /// An active session in Doze whose prerequisite stalls it soon after going missing.
 fn dozing_session_that_can_stall(
     freeze_after: Option<Duration>,
@@ -2674,6 +2743,59 @@ fn fr11_an_installed_app_reaches_the_start_menu_through_the_installed_apps_repor
             break;
         }
     }
+}
+
+#[test]
+fn fr11_the_install_window_learns_the_installed_version_and_signer_from_the_agent() {
+    let (session, mut agent, _launcher) = active_session();
+    let session = Arc::new(session);
+    let asking = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.package_state("com.example.notes", WAIT))
+    };
+    let request_id = loop {
+        if let Body::QueryPackage(query) = next_body(&mut agent) {
+            assert_eq!(query.package_name, "com.example.notes");
+            break query.request_id;
+        }
+    };
+    send_body(
+        &mut agent,
+        Body::PackageState(dsa_protocol::control::PackageState {
+            request_id,
+            installed: true,
+            version_code: 41,
+            version_name: "4.1".into(),
+            signer_sha256: vec![vec![5u8; 32]],
+        }),
+    );
+    let installed = asking
+        .join()
+        .unwrap()
+        .expect("an answer")
+        .expect("installed");
+    assert_eq!(installed.version_code, 41);
+    assert_eq!(installed.version_name, "4.1");
+    assert_eq!(installed.signer_sha256, vec![vec![5u8; 32]]);
+
+    // A package the guest does not have is answered as not installed.
+    let asking = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.package_state("com.example.missing", WAIT))
+    };
+    let request_id = loop {
+        if let Body::QueryPackage(query) = next_body(&mut agent) {
+            break query.request_id;
+        }
+    };
+    send_body(
+        &mut agent,
+        Body::PackageState(dsa_protocol::control::PackageState {
+            request_id,
+            ..Default::default()
+        }),
+    );
+    assert_eq!(asking.join().unwrap().expect("an answer"), None);
 }
 
 #[test]

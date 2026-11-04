@@ -51,8 +51,7 @@
                     <TextBlock Text="{l:Text UserLogsCard.Description}" Style="{StaticResource CardDescription}" />
                 </StackPanel>
             </ui:CardAction>
-            <ui:CardAction Icon="{ui:SymbolIcon FolderPeople24}" Click="OnOpenServiceLogs"
-                           IsEnabled="{Binding HasLogDir, Mode=OneWay}">
+            <ui:CardAction Icon="{ui:SymbolIcon FolderPeople24}" Click="OnOpenServiceLogs">
                 <StackPanel>
                     <TextBlock Text="{l:Text ServiceLogsCard.Header}" Style="{StaticResource CardTitle}" />
                     <TextBlock Text="{Binding LogDir, Mode=OneWay}" Style="{StaticResource CardDescription}" />

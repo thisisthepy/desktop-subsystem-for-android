@@ -60,7 +60,7 @@ use dsa_transport::{Connection, Connector, TransportError};
 use crate::accessibility::{
     AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, TreeUpdate,
 };
-use crate::apk::{self, InstallOutcome};
+use crate::apk::{self, InstallOutcome, InstalledPackage};
 use crate::files::{self, FileAction, FileTransfer};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{InputEvent, PointerEvent};
@@ -78,6 +78,9 @@ use crate::widgets::{
     WidgetPlacements, WidgetProvider, WidgetSize,
 };
 use dsa_protocol::control;
+
+/// How long the service waits for Android to say whether a package is installed.
+const PACKAGE_QUERY_WAIT: Duration = Duration::from_secs(10);
 
 /// How long the service waits for Android to list its widgets.
 const WIDGET_LIST_WAIT: Duration = Duration::from_secs(20);
@@ -238,6 +241,14 @@ pub trait UserAndroid: Send + Sync {
             "this Android does not install APKs".into(),
         ))
     }
+    /// What this Android has installed of `package`, if anything: its version and signing
+    /// certificates.
+    fn package_state(&self, package: &str) -> Result<Option<InstalledPackage>, TaskRequestError> {
+        let _ = package;
+        Err(TaskRequestError::Failed(
+            "this Android cannot say which apps it has installed".into(),
+        ))
+    }
     /// Watches a task's accessibility tree; Android reads it while any watch of the task
     /// lasts. `None` when this Android does not export its accessibility tree.
     fn watch_accessibility(&self, task_id: i32) -> Option<AccessibilityWatch> {
@@ -378,6 +389,9 @@ impl UserAndroid for Session {
             SessionError::InstallRefused(why) => InstallError::Refused(why),
             other => InstallError::Refused(format!("the APK did not reach Android: {other}")),
         })
+    }
+    fn package_state(&self, package: &str) -> Result<Option<InstalledPackage>, TaskRequestError> {
+        Session::package_state(self, package, PACKAGE_QUERY_WAIT).map_err(request_error)
     }
     fn watch_accessibility(&self, task_id: i32) -> Option<AccessibilityWatch> {
         Some(Session::watch_accessibility(self, task_id))
@@ -864,8 +878,10 @@ impl HostApiService {
         store: Arc<dyn SettingsStore>,
         facts: ServiceFacts,
     ) -> HostApiService {
+        // The resize trace setting turns on the service's per-stage lines too.
+        let detailed = store.machine().resize_trace;
         self.settings = Some((store, facts));
-        self
+        self.with_resize_trace_detail(detailed)
     }
 
     /// Reports the Android image version `source` gives with the settings, in place of the
@@ -1780,6 +1796,29 @@ impl HostApiService {
         }
     }
 
+    fn package_state(&self, peer: &Peer, package: &str) -> response::Body {
+        if !apk::valid_package_name(package) {
+            return error(
+                ErrorCode::UnknownRequest,
+                format!(
+                    "{:?} is not a package name, such as com.example.notes",
+                    package.chars().take(80).collect::<String>()
+                ),
+            );
+        }
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        match android.package_state(package) {
+            Ok(installed) => {
+                response::Body::PackageState(InstalledPackage::to_wire(installed.as_ref()))
+            }
+            Err(TaskRequestError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(TaskRequestError::Failed(why)) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
     fn widget_providers(&self, peer: &Peer) -> response::Body {
         let android = match self.androids.android(&peer.user) {
             Ok(android) => android,
@@ -2131,6 +2170,7 @@ impl HostApiService {
             }
             Some(request::Body::ActOnNotification(act)) => self.act_on_notification(peer, act),
             Some(request::Body::ListWidgetProviders(_)) => self.widget_providers(peer),
+            Some(request::Body::GetPackage(get)) => self.package_state(peer, &get.package_name),
             Some(request::Body::AddWidget(add)) => self.add_widget(peer, add),
             Some(request::Body::RemoveWidget(remove)) => self.remove_widget(peer, remove.widget_id),
             Some(request::Body::ListWidgets(_)) => self.list_widgets(peer),
@@ -2173,6 +2213,7 @@ impl HostApiService {
                         | request::Body::WatchNotifications(_)
                         | request::Body::ActOnNotification(_)
                         | request::Body::ListWidgetProviders(_)
+                        | request::Body::GetPackage(_)
                         | request::Body::AddWidget(_)
                         | request::Body::RemoveWidget(_)
                         | request::Body::ListWidgets(_)
@@ -2322,9 +2363,11 @@ impl HostApiService {
             links_in_android: wanted.links_in_android,
             program_updates: wanted.program_updates,
             image_updates: wanted.image_updates,
+            input_trace: wanted.input_trace,
+            resize_trace: wanted.resize_trace,
         };
-        // The update settings apply to every user of the machine, so only an administrator
-        // may change them; the caller's own settings are theirs to change.
+        // The update and trace settings apply to every user of the machine, so only an
+        // administrator may change them; the caller's own settings are theirs to change.
         let machine = store.machine();
         let changed: Vec<&str> = [
             (
@@ -2335,6 +2378,8 @@ impl HostApiService {
                 "image updates",
                 wanted.image_updates != machine.image_updates,
             ),
+            ("input trace", wanted.input_trace != machine.input_trace),
+            ("resize trace", wanted.resize_trace != machine.resize_trace),
         ]
         .into_iter()
         .filter_map(|(name, changed)| changed.then_some(name))
@@ -2357,16 +2402,23 @@ impl HostApiService {
                     android.share_clipboard(settings.clipboard);
                     android.links_in_android(settings.links_in_android);
                 }
+                if settings.resize_trace != machine.resize_trace {
+                    *self.resize_trace.lock().unwrap_or_else(|e| e.into_inner()) =
+                        ResizeTrace::new(settings.resize_trace, Instant::now());
+                }
                 eprintln!(
                     "local API: {} changed the settings: render GPU {}, freeze {}, clipboard \
-                     {}, links in Android {}, program updates {}, image updates {}",
+                     {}, links in Android {}, program updates {}, image updates {}, input \
+                     trace {}, resize trace {}",
                     peer.user,
                     settings.render_gpu,
                     on_off(settings.freeze),
                     on_off(settings.clipboard),
                     on_off(settings.links_in_android),
                     on_off(settings.program_updates),
-                    on_off(settings.image_updates)
+                    on_off(settings.image_updates),
+                    on_off(settings.input_trace),
+                    on_off(settings.resize_trace)
                 );
                 response::Body::Settings(settings_to_wire(&settings, &self.facts_now(facts)))
             }
@@ -2391,6 +2443,8 @@ fn settings_to_wire(settings: &Settings, facts: &ServiceFacts) -> types::Setting
         program_updates: settings.program_updates,
         image_updates: settings.image_updates,
         clipboard: settings.clipboard,
+        input_trace: settings.input_trace,
+        resize_trace: settings.resize_trace,
         program_updates_available: facts.program_updates_available,
         image_updates_available: facts.image_updates_available,
         version: facts.version.clone(),
@@ -2408,6 +2462,8 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
             clipboard: settings.clipboard,
             program_updates: settings.program_updates,
             image_updates: settings.image_updates,
+            input_trace: settings.input_trace,
+            resize_trace: settings.resize_trace,
         },
         facts: ServiceFacts {
             version: settings.version,
@@ -2963,6 +3019,26 @@ impl HostApiClient {
             key: key.clone(),
             action: kind as i32,
         }))
+    }
+
+    /// What the caller's Android has installed of `package`, if anything. Android must be
+    /// running.
+    pub fn package_state(
+        &mut self,
+        package: &str,
+    ) -> Result<Option<InstalledPackage>, ClientError> {
+        match self.exchange(
+            request::Body::GetPackage(types::GetPackage {
+                package_name: package.to_string(),
+            }),
+            self.timeout
+                .max(PACKAGE_QUERY_WAIT + Duration::from_secs(5)),
+        )? {
+            response::Body::PackageState(state) => Ok(InstalledPackage::from_wire(state)),
+            _ => Err(ClientError::Malformed(
+                "expected what Android has of the package".into(),
+            )),
+        }
     }
 
     /// The widgets the apps in the caller's Android offer, in label order.

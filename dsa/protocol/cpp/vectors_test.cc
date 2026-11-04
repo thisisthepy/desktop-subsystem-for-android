@@ -219,6 +219,18 @@ std::map<std::string, v1::Envelope> Cases() {
     power->set_charging(false);
     power->set_power_saver(true);
   }
+  {
+    v1::PowerHint* hint = cases["power_hint_launch_mode"].mutable_power_hint();
+    hint->set_kind(v1::POWER_HINT_KIND_MODE);
+    hint->set_id(5);
+    hint->set_enabled(true);
+  }
+  {
+    v1::PowerHint* hint = cases["power_hint_interaction_boost"].mutable_power_hint();
+    hint->set_kind(v1::POWER_HINT_KIND_BOOST);
+    hint->set_id(0);
+    hint->set_duration_ms(80);
+  }
   cases["device_idle"].mutable_device_idle()->set_idle(true);
   cases["clipboard_text"].mutable_clipboard_text()->set_text("hello \xec\x95\x88\xeb\x85\x95");
   cases["clipboard_sharing_off"].mutable_clipboard_sharing()->set_on(false);
@@ -257,6 +269,19 @@ std::map<std::string, v1::Envelope> Cases() {
     v1::InstallProgress* progress = cases["install_progress"].mutable_install_progress();
     progress->set_transfer_id(3);
     progress->set_received(131072);
+  }
+  {
+    v1::QueryPackage* query = cases["query_package"].mutable_query_package();
+    query->set_request_id(7);
+    query->set_package_name("com.example.notes");
+  }
+  {
+    v1::PackageState* state = cases["package_state_installed"].mutable_package_state();
+    state->set_request_id(7);
+    state->set_installed(true);
+    state->set_version_code(42);
+    state->set_version_name("1.2");
+    state->add_signer_sha256(Bytes(0x00, 32));
   }
   {
     v1::InstallResult* result = cases["install_result_success"].mutable_install_result();

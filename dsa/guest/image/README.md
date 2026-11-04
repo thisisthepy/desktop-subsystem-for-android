@@ -68,6 +68,14 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
   the two preferences from the compiled `res/xml/sound_settings.xml` in `Settings.apk`
   (`SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH`), and prints each one it removes. Settings is
   re-signed with every other app. They come back with Bluetooth.
+- Settings' accessibility screen loses its hearing devices entry, and two methods in
+  `Settings.apk`'s dex files are edited (`SETTINGS_CODE_WITHOUT_BLUETOOTH`): SettingsLib's
+  `BluetoothUtils.isAudioSharingSupported` returns false, and
+  `AccessibilitySettings.onAttach` no longer hands the fragment manager to the hearing aid
+  controller that cannot exist. Both dereferenced the null Bluetooth adapter, and took
+  Settings down when Connected devices or Accessibility opened. Each edit keeps the method's
+  size, and the dex checksum and signature are written again. `check-image.py` fails an image
+  that still has either.
 - A static overlay (`/vendor/overlay/DsaFrameworkOverlay.apk`) sets the framework's tap
   timeout to 0. A view inside anything that scrolls, which includes every list row, waits that
   long before it shows that it is pressed, in case the touch becomes a scroll, so a mouse
@@ -142,8 +150,12 @@ midpoint.
 
 To take a trace:
 
-1. Turn the host's side on: create the empty file `%LOCALAPPDATA%\DSA\input-trace` (or set
-   `DSA_INPUT_TRACE=1` for the processes in the user's session).
+1. Turn the host's side on: run `dsa settings set input-trace on` as an administrator (or
+   set `DSA_INPUT_TRACE=1` for the processes in the user's session). The setting is the
+   computer's; `dsa settings set input-trace off` turns it off again. The per-stage resize
+   trace is the same kind of setting, `resize-trace`. Earlier releases used empty
+   `input-trace` and `resize-trace` files instead; the service turns any it finds into the
+   settings and removes them.
 2. Turn the guest's side on: add `androidboot.hardware.dsa_input_trace=1` to `kernel_cmdline`
    in the service's configuration. The service probes the clocks only for a guest that boots
    with it.
@@ -155,14 +167,16 @@ To take a trace:
    uv run scripts/input-trace.py
    ```
 
-   With no arguments it reads `%LOCALAPPDATA%\DSA\logs\*.log` and
-   `C:\ProgramData\DSA\logs\*.log` (the service's log, with the `clock` lines, and the guest
-   console, `android-<user>.log`). Files or folders given as arguments are read instead.
+   With no arguments it reads `%LOCALAPPDATA%\DSA\logs\*.log` and the machine's
+   `%ProgramData%\DSA\logs\*.log`, or the `logs` folder of the data folder chosen at install
+   (the service's log, with the `clock` lines, and the guest console, `android-<user>.log`).
+   Files or folders given as arguments are read instead.
    For each press and release it prints the stages that follow on the same task or app,
    until the next press or release, with the time since the press and the gap to the stage
    before.
 
-Turn the trace off again by removing the file and the kernel command line setting. While on,
+Turn the trace off again with `dsa settings set input-trace off` and by removing the kernel
+command line setting. While on,
 it writes a line per stage and the agent reads the app's frame timings after each release.
 
 ## What comes out

@@ -68,7 +68,7 @@
     <value>More</value>
   </data>
   <data name="OpenLogsCard.Header" xml:space="preserve">
-    <value>Open the log folder</value>
+    <value>Open my log folder</value>
   </data>
   <data name="OpenLogsCard.Description" xml:space="preserve">
     <value>The logs of the window manager and the app windows, for reporting a problem.</value>
@@ -346,6 +346,9 @@
   <data name="ServiceLogsCard.Header" xml:space="preserve">
     <value>Open the service's log folder (administrators)</value>
   </data>
+  <data name="ServiceLogsCard.Description" xml:space="preserve">
+    <value>The logs of the DSA service and of Android itself.</value>
+  </data>
   <data name="CommandLineHeader.Text" xml:space="preserve">
     <value>Command line</value>
   </data>
@@ -498,5 +501,179 @@
   </data>
   <data name="Widgets_Removed" xml:space="preserve">
     <value>{0} was removed from your desktop.</value>
+  </data>
+  <data name="ApkWindow_Caption" xml:space="preserve">
+    <value>Install an Android app</value>
+  </data>
+  <data name="ApkWindow_Reading" xml:space="preserve">
+    <value>Reading the file</value>
+  </data>
+  <data name="ApkWindow_Install" xml:space="preserve">
+    <value>Install</value>
+  </data>
+  <data name="ApkWindow_Update" xml:space="preserve">
+    <value>Update</value>
+  </data>
+  <data name="ApkWindow_Reinstall" xml:space="preserve">
+    <value>Install again</value>
+  </data>
+  <data name="ApkWindow_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="ApkWindow_Close" xml:space="preserve">
+    <value>Close</value>
+  </data>
+  <data name="ApkWindow_Open" xml:space="preserve">
+    <value>Open</value>
+  </data>
+  <data name="ApkWindow_VersionChip" xml:space="preserve">
+    <value>Version {0}</value>
+  </data>
+  <data name="ApkWindow_AndroidChip" xml:space="preserve">
+    <value>Android {0} or later</value>
+  </data>
+  <data name="ApkWindow_SummaryNew" xml:space="preserve">
+    <value>{0} will be installed in Android. It then appears in the Start menu.</value>
+  </data>
+  <data name="ApkWindow_SummaryUpdate" xml:space="preserve">
+    <value>{0} is installed already. This updates it from version {1} to version {2}. Its data stays.</value>
+  </data>
+  <data name="ApkWindow_SummaryReinstall" xml:space="preserve">
+    <value>{0} version {1} is installed already. This installs the same version again. Its data stays.</value>
+  </data>
+  <data name="ApkWindow_SummaryDowngrade" xml:space="preserve">
+    <value>{0} version {1} is installed, and this file is the older version {2}. Android does not install an older version over a newer one. To use this file, uninstall the app in Android first.</value>
+  </data>
+  <data name="ApkWindow_SummarySignature" xml:space="preserve">
+    <value>{0} is installed already, signed with another key than this file. Android does not let an app signed by someone else replace it, which keeps the app's data safe. To use this file, uninstall the app in Android first.</value>
+  </data>
+  <data name="ApkWindow_SummaryUnknown" xml:space="preserve">
+    <value>Android is not running. Installing starts it, then checks whether {0} is installed already.</value>
+  </data>
+  <data name="ApkWindow_FactPackage" xml:space="preserve">
+    <value>Package</value>
+  </data>
+  <data name="ApkWindow_FactVersion" xml:space="preserve">
+    <value>Version</value>
+  </data>
+  <data name="ApkWindow_FactInstalled" xml:space="preserve">
+    <value>Installed now</value>
+  </data>
+  <data name="ApkWindow_FactAndroid" xml:space="preserve">
+    <value>Android</value>
+  </data>
+  <data name="ApkWindow_FactSize" xml:space="preserve">
+    <value>Size</value>
+  </data>
+  <data name="ApkWindow_FactAbis" xml:space="preserve">
+    <value>Processor</value>
+  </data>
+  <data name="ApkWindow_FactSigner" xml:space="preserve">
+    <value>Signed by</value>
+  </data>
+  <data name="ApkWindow_AndroidRange" xml:space="preserve">
+    <value>{0} or later, made for {1}</value>
+  </data>
+  <data name="ApkWindow_VersionText" xml:space="preserve">
+    <value>{0} ({1})</value>
+  </data>
+  <data name="ApkWindow_ApiLevel" xml:space="preserve">
+    <value>API level {0}</value>
+  </data>
+  <data name="ApkWindow_AndroidVersion" xml:space="preserve">
+    <value>Android {0} (API {1})</value>
+  </data>
+  <data name="ApkWindow_Signer" xml:space="preserve">
+    <value>SHA-256 {1} ({0} signature)</value>
+  </data>
+  <data name="ApkWindow_Unsigned" xml:space="preserve">
+    <value>Not signed. Android installs only signed apps.</value>
+  </data>
+  <data name="ApkWindow_PermissionsHeader" xml:space="preserve">
+    <value>Permissions it asks for ({0})</value>
+  </data>
+  <data name="ApkWindow_NoPermissions" xml:space="preserve">
+    <value>It asks for no permissions.</value>
+  </data>
+  <data name="ApkWindow_Sensitive" xml:space="preserve">
+    <value>Android asks you first</value>
+  </data>
+  <data name="ApkWindow_StartingTitle" xml:space="preserve">
+    <value>Starting Android</value>
+  </data>
+  <data name="ApkWindow_StartingDetail" xml:space="preserve">
+    <value>Android starts once, then stays ready for your apps.</value>
+  </data>
+  <data name="ApkWindow_CheckingTitle" xml:space="preserve">
+    <value>Checking the app</value>
+  </data>
+  <data name="ApkWindow_CheckingDetail" xml:space="preserve">
+    <value>Checking whether the app is installed already.</value>
+  </data>
+  <data name="ApkWindow_InstallingTitle" xml:space="preserve">
+    <value>Installing {0}</value>
+  </data>
+  <data name="ApkWindow_SendingDetail" xml:space="preserve">
+    <value>Copying the app to Android</value>
+  </data>
+  <data name="ApkWindow_AndroidInstallingDetail" xml:space="preserve">
+    <value>Android is installing the app</value>
+  </data>
+  <data name="ApkWindow_Cancelling" xml:space="preserve">
+    <value>Stopping</value>
+  </data>
+  <data name="ApkWindow_Cancelled" xml:space="preserve">
+    <value>The install was stopped. Nothing was changed.</value>
+  </data>
+  <data name="ApkWindow_DoneTitle" xml:space="preserve">
+    <value>{0} is installed</value>
+  </data>
+  <data name="ApkWindow_UpdatedTitle" xml:space="preserve">
+    <value>{0} is updated</value>
+  </data>
+  <data name="ApkWindow_DoneText" xml:space="preserve">
+    <value>Open it now, or later from the Start menu.</value>
+  </data>
+  <data name="ApkWindow_FailedTitle" xml:space="preserve">
+    <value>Not installed</value>
+  </data>
+  <data name="ApkWindow_NotApkTitle" xml:space="preserve">
+    <value>This file cannot be installed</value>
+  </data>
+  <data name="ApkWindow_NotApkText" xml:space="preserve">
+    <value>{0} is not an APK that Android can install: {1}.</value>
+  </data>
+  <data name="ApkWindow_StartFailed" xml:space="preserve">
+    <value>Android did not start, so the app was not installed. {0}</value>
+  </data>
+  <data name="ApkWindow_NotSent" xml:space="preserve">
+    <value>The app did not reach Android. {0}</value>
+  </data>
+  <data name="ApkWindow_ReasonWithWords" xml:space="preserve">
+    <value>{0} Android said: {1}</value>
+  </data>
+  <data name="ApkWindow_OpenFailed" xml:space="preserve">
+    <value>{0} could not be opened. {1}</value>
+  </data>
+  <data name="ApkWindow_Reason_incompatible" xml:space="preserve">
+    <value>The app does not run on this Android: it needs another processor type, a newer Android version, or a feature this device does not have.</value>
+  </data>
+  <data name="ApkWindow_Reason_conflicting-signature" xml:space="preserve">
+    <value>The app is installed already, signed with another key. Uninstall it in Android first.</value>
+  </data>
+  <data name="ApkWindow_Reason_invalid-apk" xml:space="preserve">
+    <value>The file is not a signed APK that Android can read.</value>
+  </data>
+  <data name="ApkWindow_Reason_insufficient-storage" xml:space="preserve">
+    <value>Android has no room for the app. Free some space in Android and try again.</value>
+  </data>
+  <data name="ApkWindow_Reason_downgrade" xml:space="preserve">
+    <value>A newer version of the app is installed. Uninstall it in Android first.</value>
+  </data>
+  <data name="ApkWindow_Reason_blocked" xml:space="preserve">
+    <value>A policy of this Android does not allow the app.</value>
+  </data>
+  <data name="ApkWindow_Reason_other" xml:space="preserve">
+    <value>Android did not install the app.</value>
   </data>
 </root>

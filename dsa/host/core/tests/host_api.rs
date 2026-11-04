@@ -101,6 +101,34 @@ fn fr17_only_an_administrator_changes_the_machines_update_settings() {
 }
 
 #[test]
+fn fr19_the_trace_switches_are_machine_settings_only_an_administrator_changes() {
+    use dsa_host_core::host_api::ClientError;
+    use dsa_host_core::settings::{Settings, SettingsStore};
+    let (listener, connector) = local::pair();
+    let (_service, store) = settings_service(listener);
+    let traced = Settings {
+        input_trace: true,
+        resize_trace: true,
+        ..Settings::default()
+    };
+    let mut user =
+        HostApiClient::connect(&mut AsAdmin(connector.clone(), "alice", false), "a", WAIT).unwrap();
+    match user.set_settings(&traced) {
+        Err(ClientError::Service { detail, .. }) => {
+            assert!(detail.contains("input trace"), "{detail}");
+        }
+        other => panic!("expected the service to refuse, got {other:?}"),
+    }
+    assert!(!store.machine().input_trace);
+    let mut admin =
+        HostApiClient::connect(&mut AsAdmin(connector, "bob", true), "b", WAIT).unwrap();
+    let changed = admin.set_settings(&traced).unwrap();
+    assert!(changed.settings.input_trace && changed.settings.resize_trace);
+    // Every user reads them, so their processes trace too.
+    assert!(user.settings().unwrap().settings.input_trace);
+}
+
+#[test]
 fn pr5_each_user_reaches_only_their_own_android() {
     let (listener, connector) = local::pair();
     let androids = Arc::new(FakeAndroids::default());

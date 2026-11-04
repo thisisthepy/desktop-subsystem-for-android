@@ -91,6 +91,11 @@ pub fn local_app_data(sid: &str) -> Result<PathBuf, String> {
 
 /// The profile folder of every user Windows has one for.
 pub fn profile_folders() -> Vec<PathBuf> {
+    profiles().into_iter().map(|(_, folder)| folder).collect()
+}
+
+/// The SID and profile folder of every user Windows has one for.
+pub fn profiles() -> Vec<(String, PathBuf)> {
     use windows_sys::Win32::System::Registry::{
         RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, KEY_READ,
     };
@@ -137,8 +142,8 @@ pub fn profile_folders() -> Vec<PathBuf> {
             )
             .ok()
             .flatten()
+            .map(|folder| (sid, PathBuf::from(folder)))
         })
-        .map(PathBuf::from)
         .collect()
 }
 
@@ -158,7 +163,7 @@ fn resolve(profile: &str, moved: Option<&str>) -> PathBuf {
             return PathBuf::from(expanded);
         }
     }
-    PathBuf::from(profile).join("AppData").join("Local")
+    crate::paths::default_local_app_data(std::path::Path::new(profile))
 }
 
 #[cfg(test)]

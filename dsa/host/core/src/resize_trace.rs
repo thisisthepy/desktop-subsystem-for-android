@@ -29,21 +29,17 @@ pub const TAG: &str = "resize-trace";
 /// The environment variable that turns on the per-stage lines: any value but empty or `0`.
 pub const DETAIL_ENV: &str = "DSA_RESIZE_TRACE";
 
-/// The name of the file whose presence turns on the per-stage lines, in the DSA folder the
-/// process keeps its settings in.
-pub const DETAIL_FILE: &str = "resize-trace";
-
 /// The shortest gap between two summary lines of one task.
 pub const SUMMARY_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Whether the per-stage lines are wanted: the environment variable [`DETAIL_ENV`] holds
-/// `env_value`, and the file [`DETAIL_FILE`] exists or not.
-pub fn detail_requested(env_value: Option<&str>, file_exists: bool) -> bool {
+/// `env_value`, and the `resize_trace` setting is `setting`.
+pub fn detail_requested(env_value: Option<&str>, setting: bool) -> bool {
     let env = env_value.is_some_and(|value| {
         let value = value.trim();
         !value.is_empty() && value != "0"
     });
-    env || file_exists
+    env || setting
 }
 
 /// The wall clock as a time since the Unix epoch.

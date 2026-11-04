@@ -232,6 +232,122 @@ impl fmt::Display for InstallOutcome {
     }
 }
 
+/// A package installed in the user's Android, as its package manager describes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledPackage {
+    pub version_code: i64,
+    pub version_name: String,
+    /// The SHA-256 digest of each certificate the installed package is signed with.
+    pub signer_sha256: Vec<Vec<u8>>,
+}
+
+impl InstalledPackage {
+    pub fn from_control(state: &control::PackageState) -> Option<InstalledPackage> {
+        state.installed.then(|| InstalledPackage {
+            version_code: state.version_code,
+            version_name: state.version_name.clone(),
+            signer_sha256: state.signer_sha256.clone(),
+        })
+    }
+
+    pub fn to_wire(installed: Option<&InstalledPackage>) -> types::PackageState {
+        match installed {
+            Some(package) => types::PackageState {
+                installed: true,
+                version_code: package.version_code,
+                version_name: package.version_name.clone(),
+                signer_sha256: package.signer_sha256.clone(),
+            },
+            None => types::PackageState::default(),
+        }
+    }
+
+    pub fn from_wire(state: types::PackageState) -> Option<InstalledPackage> {
+        state.installed.then_some(InstalledPackage {
+            version_code: state.version_code,
+            version_name: state.version_name,
+            signer_sha256: state.signer_sha256,
+        })
+    }
+}
+
+/// Whether `name` can be an Android package name: at most 255 bytes of dot-separated parts,
+/// each of ASCII letters, digits and underscores.
+pub fn valid_package_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 255
+        && name.split('.').all(|part| {
+            !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+}
+
+/// What installing an APK would do, as Android would decide it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InstallKind {
+    /// The app is not installed.
+    New,
+    /// A lower version is installed, signed with the same key.
+    Update,
+    /// The same version is installed, signed with the same key; Android installs it again.
+    Reinstall,
+    /// A higher version is installed. Android refuses to go back to a lower one.
+    Downgrade,
+    /// The installed app is signed with another key. Android refuses to replace it.
+    SignatureMismatch,
+}
+
+impl InstallKind {
+    /// What Android does with an APK of `version_code`, signed by `signers` (the current
+    /// signer, then the earlier ones its proof of rotation names), when `installed` is what
+    /// the user's Android has of its package.
+    pub fn decide(
+        version_code: i64,
+        signers: &[Vec<u8>],
+        installed: Option<&InstalledPackage>,
+    ) -> InstallKind {
+        let Some(installed) = installed else {
+            return InstallKind::New;
+        };
+        // An update must be signed by a key the installed app is signed with now, or by one
+        // its signing history moved on from. An installed app that reports no signer cannot
+        // be compared, and Android has the last word on it.
+        let same_signer = installed.signer_sha256.is_empty()
+            || installed
+                .signer_sha256
+                .iter()
+                .any(|installed| signers.iter().any(|signer| signer == installed));
+        if !same_signer {
+            InstallKind::SignatureMismatch
+        } else if version_code < installed.version_code {
+            InstallKind::Downgrade
+        } else if version_code == installed.version_code {
+            InstallKind::Reinstall
+        } else {
+            InstallKind::Update
+        }
+    }
+
+    /// Whether Android would refuse the install.
+    pub fn blocked(self) -> bool {
+        matches!(
+            self,
+            InstallKind::Downgrade | InstallKind::SignatureMismatch
+        )
+    }
+
+    /// A stable code for programs, such as the install window, that say it in the user's
+    /// language.
+    pub fn code(self) -> &'static str {
+        match self {
+            InstallKind::New => "new",
+            InstallKind::Update => "update",
+            InstallKind::Reinstall => "reinstall",
+            InstallKind::Downgrade => "downgrade",
+            InstallKind::SignatureMismatch => "signature-mismatch",
+        }
+    }
+}
+
 /// An APK on the host, opened to be streamed to Android.
 pub struct ApkFile {
     /// The file's name, without any folder.
@@ -366,6 +482,67 @@ mod tests {
             text.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE"),
             "{text}"
         );
+    }
+
+    fn installed(version_code: i64, signer: u8) -> InstalledPackage {
+        InstalledPackage {
+            version_code,
+            version_name: format!("{version_code}.0"),
+            signer_sha256: vec![vec![signer; 32]],
+        }
+    }
+
+    #[test]
+    fn fr11_an_apk_is_a_new_install_an_update_or_refused_as_android_would() {
+        let signer = vec![vec![1u8; 32]];
+        assert_eq!(InstallKind::decide(5, &signer, None), InstallKind::New);
+        assert_eq!(
+            InstallKind::decide(5, &signer, Some(&installed(4, 1))),
+            InstallKind::Update
+        );
+        assert_eq!(
+            InstallKind::decide(5, &signer, Some(&installed(5, 1))),
+            InstallKind::Reinstall
+        );
+        assert_eq!(
+            InstallKind::decide(5, &signer, Some(&installed(6, 1))),
+            InstallKind::Downgrade
+        );
+        assert_eq!(
+            InstallKind::decide(5, &signer, Some(&installed(4, 2))),
+            InstallKind::SignatureMismatch
+        );
+        assert!(InstallKind::Downgrade.blocked() && InstallKind::SignatureMismatch.blocked());
+        assert!(!InstallKind::Update.blocked() && !InstallKind::New.blocked());
+    }
+
+    #[test]
+    fn fr11_an_update_signed_by_a_rotated_key_whose_history_names_the_old_one_is_taken() {
+        // The APK's current signer, then the older one its proof of rotation names.
+        let signers = vec![vec![9u8; 32], vec![1u8; 32]];
+        assert_eq!(
+            InstallKind::decide(5, &signers, Some(&installed(4, 1))),
+            InstallKind::Update
+        );
+    }
+
+    #[test]
+    fn fr11_an_installed_package_crosses_both_protocols_unchanged() {
+        let package = installed(42, 7);
+        let wire = InstalledPackage::to_wire(Some(&package));
+        assert_eq!(InstalledPackage::from_wire(wire), Some(package.clone()));
+        assert_eq!(
+            InstalledPackage::from_wire(InstalledPackage::to_wire(None)),
+            None
+        );
+        let control = control::PackageState {
+            request_id: 3,
+            installed: true,
+            version_code: 42,
+            version_name: "42.0".into(),
+            signer_sha256: vec![vec![7u8; 32]],
+        };
+        assert_eq!(InstalledPackage::from_control(&control), Some(package));
     }
 
     #[test]

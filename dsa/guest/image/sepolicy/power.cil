@@ -1,0 +1,14 @@
+; Desktop Subsystem for Android (DSA)
+; The guest's power and health HALs (/vendor/bin/hw/dsa-power, /vendor/bin/hw/dsa-health)
+; run in the platform's power and health HAL domains, labelled by vendor_file_contexts. Each
+; reaches the host through dsa-channeld's binder service: the health HAL hears the host's
+; power from it, and the power HAL sends it the framework's power hints. These rules let
+; them find the service and call it, and let the daemon call back their listeners.
+
+(allow hal_power_server dsa_channel_service (service_manager (find)))
+(allow hal_power_server dsa_channeld (binder (call transfer)))
+(allow dsa_channeld hal_power_server (binder (call transfer)))
+
+(allow hal_health_server dsa_channel_service (service_manager (find)))
+(allow hal_health_server dsa_channeld (binder (call transfer)))
+(allow dsa_channeld hal_health_server (binder (call transfer)))

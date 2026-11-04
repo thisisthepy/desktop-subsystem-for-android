@@ -430,6 +430,23 @@ message InstallResult {
   string message = 3;
 }
 
+// Asks whether a package is installed in the caller's Android, and at which version and with
+// which signing certificates. Android must be running; the answer is PackageState.
+message GetPackage {
+  // An Android package name, such as "com.example.notes".
+  string package_name = 1;
+}
+
+// The answer to GetPackage.
+message PackageState {
+  // False when the package is not installed; the fields below are then empty.
+  bool installed = 1;
+  int64 version_code = 2;
+  string version_name = 3;
+  // The SHA-256 digest of each certificate the installed package is signed with.
+  repeated bytes signer_sha256 = 4;
+}
+
 // What a pointer did.
 enum PointerAction {
   POINTER_ACTION_UNSPECIFIED = 0;
@@ -725,7 +742,7 @@ message SetSettings {
 }
 
 // The settings of the caller's DSA. `render_gpu`, `freeze`, `clipboard` and `links_in_android` are
-// the caller's own; the update settings are the machine's, shared by every user of it.
+// the caller's own; the update and trace settings are the machine's, shared by every user of it.
 message Settings {
   // The GPU the caller's window manager renders on: "display" (the GPU that drives the
   // primary monitor, the default), "integrated", "discrete", or part of a GPU's name. The
@@ -755,7 +772,14 @@ message Settings {
   bool clipboard = 9;
   // The version of the Android image the caller's next start boots, such as
   // "17.0.0-16373615-7". Empty when the service does not know it. A client cannot change it.
-  string android_version = 11;
+  string android_version = 13;
+  // Whether every DSA process writes the input trace (a click's path from the host to the app
+  // and back, on one clock) to its log. Off by default. It applies to the whole computer, so
+  // only an administrator may change it; a process reads it when it starts.
+  bool input_trace = 11;
+  // Whether every DSA process writes a line for each stage of each resize, rather than a
+  // summary at the end of a drag. Off by default; the same rules as input_trace.
+  bool resize_trace = 12;
 }
 
 // Turns the connection into the accessibility tree of one of the caller's task windows, for a
@@ -922,6 +946,7 @@ message Request {
     PlaceWidget place_widget = 34;
     WatchAccessibility watch_accessibility = 28;
     WidgetPointer widget_pointer = 35;
+    GetPackage get_package = 36;
   }
 }
 
@@ -941,6 +966,7 @@ message Response {
     WidgetProviders widget_providers = 12;
     Widget widget = 13;
     Widgets widgets = 14;
+    PackageState package_state = 15;
   }
 }
 

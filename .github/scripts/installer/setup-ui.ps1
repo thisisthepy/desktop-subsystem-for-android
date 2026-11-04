@@ -8,8 +8,12 @@ Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.For
 $script:Auto = [System.Windows.Automation.AutomationElement]
 $script:Scope = [System.Windows.Automation.TreeScope]
 
+# The automation id of the window the functions below work on: setup.exe's, unless a test
+# sets another, such as the APK install window's (ApkInstallWindow).
+$script:WindowId = "SetupWindow"
+
 function Find-SetupWindow {
-    $condition = New-Object System.Windows.Automation.PropertyCondition($Auto::AutomationIdProperty, "SetupWindow")
+    $condition = New-Object System.Windows.Automation.PropertyCondition($Auto::AutomationIdProperty, $script:WindowId)
     $Auto::RootElement.FindFirst($Scope::Children, $condition)
 }
 

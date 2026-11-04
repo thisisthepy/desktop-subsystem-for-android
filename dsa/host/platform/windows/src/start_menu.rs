@@ -48,18 +48,12 @@ pub fn app_user_model_id(package: &str) -> String {
 /// The folder of the user's Start menu programs: `%APPDATA%\Microsoft\Windows\Start
 /// Menu\Programs`.
 pub fn default_programs_dir() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").map(|dir| {
-        PathBuf::from(dir)
-            .join("Microsoft")
-            .join("Windows")
-            .join("Start Menu")
-            .join("Programs")
-    })
+    crate::paths::start_menu_programs()
 }
 
 /// The note of the shortcuts the window manager made: `%LOCALAPPDATA%\DSA\start-menu.json`.
 pub fn default_note() -> Option<PathBuf> {
-    std::env::var_os("LOCALAPPDATA").map(|dir| PathBuf::from(dir).join("DSA").join(NOTE_NAME))
+    crate::paths::UserRoot::current().map(|root| root.start_menu_note())
 }
 
 /// The note's file name.

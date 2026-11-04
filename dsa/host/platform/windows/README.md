@@ -40,10 +40,50 @@ Service Control Manager; the installer registers it, and it writes its messages 
 
 - Each caller is identified by the SID Windows reports for the pipe connection, never by
   anything the caller sends. The first request of a user creates their data disk at
-  `<data_dir>\<SID>\data.vhdx` and their VM `<vm_name>-<SID>`; later requests reach the
-  same VM.
-- A user's folder is readable only by SYSTEM, Administrators and Hyper-V's virtual
-  machines, so other users cannot read someone's Android data.
+  `%LOCALAPPDATA%\DSA\android.vhdx` in their own profile and their VM `<vm_name>-<SID>`;
+  later requests reach the same VM. `data_dir` (`<data_dir>\<SID>\data.vhdx`) is for tests
+  and development only; an installation never sets it.
+- A user's profile admits only them, SYSTEM and Administrators, and a `data_dir` folder
+  only SYSTEM, Administrators and Hyper-V's virtual machines, so other users cannot read
+  someone's Android data.
+
+### Where files go
+
+Everything DSA makes at run time is in two folders, and `src/paths.rs` is the one place
+that builds their paths. The settings app and the installer follow the same layout.
+
+| Machine (`%ProgramData%\DSA`, or the data folder chosen at install) | |
+|---|---|
+| `dsa-hostd.json` | the service's configuration |
+| `images\` | the Android image store |
+| `updates\` | downloaded setup files and the update state |
+| `settings\` | the settings users change in DSA Settings, and widget placements |
+| `logs\` | `dsa-hostd.log` and each user's Android console, `android-<SID>.log` |
+| `tmp\` | each boot's initrd while the VM starts; SYSTEM and Administrators only |
+
+| Each user (`%LOCALAPPDATA%\DSA`) | |
+|---|---|
+| `android.vhdx`, `android.image-version` | the user's Android disk and the image it holds |
+| `apps\<package>\` | each app's window program |
+| `notifications\` | the icons notifications show |
+| `logs\` | `dsa-wm.log`, `dsa-app-window.log` |
+| `compositor.json` | the render GPU chosen before DSA Settings kept it |
+| `monitors.txt` | the user's monitors, for sizing the guest display |
+| `start-menu.json` | the Start menu shortcuts the window manager made |
+| `tmp\` | temporary files of the user's processes, when one cannot be avoided |
+
+Outside them DSA writes only the Start menu shortcuts, its key `HKLM\SOFTWARE\thisisthepy\DSA`,
+the `Run` value that starts `dsa-wm`, the `.apk` association and context menu entries, the
+Hyper-V socket service registrations, and in each user's classes the notification protocol
+and each app's AppUserModelID.
+
+- No program uses the system's or the user's temporary folder. The service clears what
+  earlier runs left in the machine's `tmp` when it starts.
+- A disk the first releases kept in `%ProgramData%\DSA\users\<SID>\data.vhdx` moves into the
+  user's profile when their Android is first set up. A disk already there is never replaced:
+  the old one then stays, and the service log says so, as it does when the move fails.
+- Uninstalling removes everything above, for every user, signed in or not, except each
+  user's Android disk (`dsa-hostd remove-machine-data` and `dsa-hostd remove-user-data`).
 - The pipe admits SYSTEM and interactively signed-in users unless `pipe_sddl` says
   otherwise. Remote clients are always refused.
 - Stopping the service stops every user's VM first.
@@ -284,7 +324,7 @@ menu, so Windows search finds it by name and opens it, even while Android is sto
 - When an app is removed from Android, its shortcut goes, and so does its window program
   once it no longer runs.
 - Uninstalling DSA removes the shortcuts the note names in each profile's default Start
-  menu folder (`dsa-hostd remove-start-menu`). A Start menu moved elsewhere by folder
+  menu folder (`dsa-hostd remove-user-data`). A Start menu moved elsewhere by folder
   redirection keeps its shortcuts, because the uninstaller cannot read another user's
   redirection.
 
@@ -364,13 +404,31 @@ sent.
 
 An APK file installs in Android three ways, which all end in the same local API request:
 
-- Opening it in Explorer. The installer associates `.apk` files with `dsa-app-window.exe
-  --install-apk "%1"`, which starts the window manager and Android when they are not running,
-  installs the APK, and says how it went in a message box.
+- Opening it in Explorer. The installer associates `.apk` files with `settings\DsaSettings.exe
+  --install-apk "%1"`, which opens the APK install window (`settings/DsaSettings/ApkInstallWindow.xaml`).
+  It looks like setup, from setup's own styles and colours (`installer/setup-ui/Styles.xaml` and
+  `Palette.cs`, linked into the settings app), in the light or the dark theme. Before Android
+  is started it shows what the file says about the app, read on the host by `dsa apk-info`:
+  its name and icon, package, version, the Android versions it is made for, the permissions it
+  asks for in plain words, and the SHA-256 of its signing certificate. When Android runs, it
+  also says whether the APK is a new install, an update (with the installed and the new
+  version) or a downgrade or an APK signed with another key, which it refuses with the reason,
+  as Android would. Install starts Android first when it is not running, checks again, then
+  shows the APK's progress and ends with Open (the app's window) and Close, or with the reason
+  it failed. `dsa-app-window.exe --install-apk`, which earlier releases associated, hands the
+  APK to the same window.
 - `dsa install <file.apk>`, which prints the result and exits with code 1 when Android refused
-  the APK. Its line then starts with `not installed (<reason>):`.
-- Dropping APK files on the settings app's window. The bar at the top of the window says how
-  each install went, with the reason in the user's language.
+  the APK. Its line then starts with `not installed (<reason>):`. With `--progress` it prints
+  each step first (`stage starting`, `stage sending`, `progress <percent>`,
+  `stage installing`), which the install window shows.
+- Dropping APK files on the settings app's window, or on an install window. Each APK opens in
+  its own install window.
+
+`dsa apk-info <file.apk>` reads an APK without Android: the binary manifest, the resource table
+(for the name in the default language and the icon in the highest density, or an adaptive
+icon's colour and image layers) and the APK Signature Scheme block (v3.1, v3, v2, else the JAR
+signature) are parsed in `dsa/host/core/src/apk_info/`, with no third-party library. When
+Android runs, it asks the agent what the package manager has of the package (`GetPackage`).
 
 The APK streams to the service and on to the agent in chunks, without being held whole in
 memory, and the agent installs it through a `PackageInstaller` session. APKs up to 2 GiB are
@@ -506,3 +564,19 @@ dotnet publish DsaSettings/DsaSettings.csproj -c Release -r win-x64
 
 The installer publishes it self-contained, with the .NET runtime in its folder, into `C:\Program Files\DSA\settings\`, and adds the Start menu shortcut
 "DSA Settings".
+
+## Measuring on a PC
+
+`tools/measure.ps1` measures the signed-in user's Android on a real PC and prints the
+numbers with the environment they were taken in: the memory of a dozing Android (guest PSS,
+the VM, the window processes and the service, against 800 MB), its idle CPU as a share of
+one logical core, how long an app's window takes to show from Dozing (and, with `-Cold`,
+from Stopped), and how long the VM's memory takes to go back to the host after a stop.
+
+```
+pwsh -File tools\measure.ps1 -Part all -Package com.android.settings -Cold
+```
+
+Run it from an elevated prompt: only an administrator may read the VM process's CPU time
+and the service's memory. Without that, those numbers print as `null` and the figure is
+marked incomplete. `-Json` prints one JSON object.

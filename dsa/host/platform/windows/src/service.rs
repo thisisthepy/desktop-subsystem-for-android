@@ -28,7 +28,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dsa_host_core::guest_display::with_display_size;
+use dsa_host_core::guest_display::{display_or_smallest, with_display_size};
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{HostApiService, PerUser, ServiceFacts, UserAndroid, UserAndroids};
 use dsa_host_core::memory::{summary_lines, HostMemory, LOG_INTERVAL};
@@ -73,14 +73,14 @@ pub struct Updates {
 }
 
 /// Sizes the guest's display for the monitors the user's session recorded. This process runs
-/// in session 0 and cannot see them itself.
+/// in session 0 and cannot see them itself. Without a record the display is the smallest
+/// square, so a window can still be taller than the image's default display.
 fn follow_monitors(vm: &mut AndroidVmConfig, sid: &str) {
     let display = local_app_data(sid)
         .ok()
         .and_then(|dir| recorded_display(&dir));
-    if let Some(size) = display {
-        vm.kernel_cmdline = with_display_size(&vm.kernel_cmdline, size);
-    }
+    let size = display.unwrap_or_else(|| display_or_smallest(None));
+    vm.kernel_cmdline = with_display_size(&vm.kernel_cmdline, size);
 }
 
 /// The kernel command line setting that turns the guest's input trace on.
@@ -103,6 +103,21 @@ pub fn create_user_android(
     power: Option<&PowerHub>,
 ) -> Result<Arc<dyn UserAndroid>, String> {
     let user = config.user_vm(sid).map_err(|e| e.to_string())?;
+    if user.disk_in_profile {
+        if let Some(root) = user
+            .config
+            .data_disk
+            .parent()
+            .map(crate::paths::UserRoot::from_dir)
+        {
+            for note in crate::paths::migrate_user_disk(&config.machine_root(), &root, sid) {
+                eprintln!("{build}: {note}");
+            }
+        }
+    }
+    // Earlier releases wrote each boot's initrd to the service's temporary folder; one a
+    // stopped start left there goes.
+    let _ = std::fs::remove_file(crate::paths::old_boot_initrd(&user.vm_name));
     prepare_user_disk_folder(&user.config.data_disk, !user.disk_in_profile)?;
     // With updates the disk is made when the VM first starts, from the image current then:
     // before the first image is downloaded there is nothing to copy it from yet.
@@ -162,7 +177,8 @@ pub fn create_user_android(
             )
         }
     }
-    .with_console_log(console_log);
+    .with_console_log(console_log)
+    .with_boot_dir(config.machine_root().tmp());
     let launcher = if config.keep_window_manager {
         let mut keeper = WindowManagerKeeper::new(UserWindowManager::new(sid));
         launcher.with_prerequisite(Box::new(move || keeper.check(Instant::now())))
@@ -189,6 +205,15 @@ pub fn create_user_android(
     let session = Arc::new(session);
     if let Some(power) = power {
         power.attach(&session);
+    }
+    // The guest's power HAL: its hints set how hard Windows runs the guest's processors.
+    let hints = session.watch_power_hints();
+    let (watched, user_name) = (Arc::downgrade(&session), sid.to_string());
+    if let Err(error) = std::thread::Builder::new()
+        .name("dsa-guest-power".into())
+        .spawn(move || crate::guest_performance::follow(hints, watched, user_name))
+    {
+        eprintln!("{sid}: power: cannot follow Android's power hints: {error}");
     }
     Ok(match updates {
         None => session as Arc<dyn UserAndroid>,
@@ -320,22 +345,61 @@ const FIRST_IMAGE_RETRY: Duration = Duration::from_secs(300);
 /// How soon an update check that the settings turned off looks at them again.
 const SETTINGS_RECHECK: Duration = Duration::from_secs(60);
 
-/// Where the settings are kept when the configuration names no folder.
-fn default_settings_dir() -> std::path::PathBuf {
-    std::env::var_os("ProgramData")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("C:\\ProgramData"))
-        .join("DSA")
-        .join("settings")
+/// Clears what earlier runs left in the machine's `tmp` folder and makes sure only SYSTEM and
+/// Administrators can write there. Problems are logged; the VMs then fail to start with the
+/// reason, rather than the service.
+fn prepare_machine_tmp(config: &HostConfig, build: &str) {
+    let tmp = config.machine_root().tmp();
+    for why in crate::paths::clear_tmp(&tmp) {
+        eprintln!("{build}: {why}");
+    }
+    if let Err(why) = std::fs::create_dir_all(&tmp) {
+        eprintln!("{build}: creating {}: {why}", tmp.display());
+        return;
+    }
+    if let Err(why) = crate::user_disk::protect_folder_as(&tmp, crate::user_disk::MACHINE_TMP_SDDL)
+    {
+        eprintln!("{build}: {why}");
+    }
+}
+
+/// Earlier releases turned the traces on with empty files named `input-trace` and
+/// `resize-trace` in the machine's DSA folder and in each user's. A file that is there turns
+/// its trace setting on, and goes once the setting is saved; if it cannot be saved the files
+/// stay, to be taken over at the next start.
+fn take_old_trace_markers(config: &HostConfig, store: &dyn SettingsStore, build: &str) {
+    use crate::paths::{default_local_app_data, old_trace_markers, UserRoot};
+    let mut markers = config.machine_root().old_trace_markers().to_vec();
+    for (sid, profile) in crate::profile::profiles() {
+        let local = local_app_data(&sid).unwrap_or_else(|_| default_local_app_data(&profile));
+        markers.extend(UserRoot::in_local_app_data(&local).old_trace_markers());
+    }
+    let old = old_trace_markers(&markers);
+    if old.found.is_empty() {
+        return;
+    }
+    let mut machine = store.machine();
+    machine.input_trace |= old.input_trace;
+    machine.resize_trace |= old.resize_trace;
+    if let Err(why) = store.set_machine(machine) {
+        eprintln!("{build}: the trace switch files stay, the settings could not be saved: {why}");
+        return;
+    }
+    for marker in &old.found {
+        match std::fs::remove_file(marker) {
+            Ok(()) => eprintln!(
+                "{build}: {} is now the trace setting, and the file is removed",
+                marker.display()
+            ),
+            Err(why) => eprintln!("{build}: removing {}: {why}", marker.display()),
+        }
+    }
 }
 
 /// The settings in the service's own folder. A user who has never saved settings starts
 /// from the render GPU in their own `compositor.json`, if they chose one there.
 fn settings_store(config: &HostConfig) -> Arc<dyn SettingsStore> {
-    let dir = config
-        .settings_dir
-        .clone()
-        .unwrap_or_else(default_settings_dir);
+    let dir = config.settings_dir();
     Arc::new(
         FileSettings::new(dir).with_previous_render_gpu(Box::new(|sid: &str| {
             crate::profile::local_app_data(sid)
@@ -390,6 +454,7 @@ where
         "{build}: serving the local API on \\\\.\\pipe\\{}",
         config.pipe_name
     );
+    prepare_machine_tmp(&config, build);
     let grace = Duration::from_secs(config.stop_timeout_secs + 15);
     let store = settings_store(&config);
     let updates = match open_updates(&config, build) {
@@ -501,25 +566,13 @@ where
             None => android,
         }
     }));
-    // %ProgramData%\DSA\resize-trace turns on the per-stage resize trace lines.
-    let resize_trace_file = std::env::var_os("ProgramData")
-        .map(|data| {
-            std::path::PathBuf::from(data)
-                .join("DSA")
-                .join(dsa_host_core::resize_trace::DETAIL_FILE)
-                .exists()
-        })
-        .unwrap_or(false);
+    take_old_trace_markers(&config, &*store, build);
     let host_memory: Arc<dyn HostMemory> = Arc::new(WindowsHostMemory);
     let mut service = HostApiService::new(androids.clone(), build)
-        .with_resize_trace_detail(resize_trace_file)
         .with_settings(Arc::clone(&store), facts)
         .with_host_memory(Arc::clone(&host_memory))
         .with_widget_placements(Arc::new(dsa_host_core::widgets::FileWidgetPlacements::new(
-            config
-                .settings_dir
-                .clone()
-                .unwrap_or_else(default_settings_dir),
+            config.settings_dir(),
         )));
     {
         let androids = androids.clone();

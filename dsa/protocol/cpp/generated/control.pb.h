@@ -126,6 +126,9 @@ extern HelloAcceptedDefaultTypeInternal _HelloAccepted_default_instance_;
 class HelloRejected;
 struct HelloRejectedDefaultTypeInternal;
 extern HelloRejectedDefaultTypeInternal _HelloRejected_default_instance_;
+class HostMemory;
+struct HostMemoryDefaultTypeInternal;
+extern HostMemoryDefaultTypeInternal _HostMemory_default_instance_;
 class ImeCommit;
 struct ImeCommitDefaultTypeInternal;
 extern ImeCommitDefaultTypeInternal _ImeCommit_default_instance_;
@@ -180,15 +183,24 @@ extern OpenFileDefaultTypeInternal _OpenFile_default_instance_;
 class OpenLink;
 struct OpenLinkDefaultTypeInternal;
 extern OpenLinkDefaultTypeInternal _OpenLink_default_instance_;
+class PackageState;
+struct PackageStateDefaultTypeInternal;
+extern PackageStateDefaultTypeInternal _PackageState_default_instance_;
 class PointerEvent;
 struct PointerEventDefaultTypeInternal;
 extern PointerEventDefaultTypeInternal _PointerEvent_default_instance_;
+class PowerHint;
+struct PowerHintDefaultTypeInternal;
+extern PowerHintDefaultTypeInternal _PowerHint_default_instance_;
 class PowerState;
 struct PowerStateDefaultTypeInternal;
 extern PowerStateDefaultTypeInternal _PowerState_default_instance_;
 class ProcessMemory;
 struct ProcessMemoryDefaultTypeInternal;
 extern ProcessMemoryDefaultTypeInternal _ProcessMemory_default_instance_;
+class QueryPackage;
+struct QueryPackageDefaultTypeInternal;
+extern QueryPackageDefaultTypeInternal _QueryPackage_default_instance_;
 class Rect;
 struct RectDefaultTypeInternal;
 extern RectDefaultTypeInternal _Rect_default_instance_;
@@ -271,6 +283,7 @@ template<> ::dsa::control::v1::GuestNotification* Arena::CreateMaybeMessage<::ds
 template<> ::dsa::control::v1::Hello* Arena::CreateMaybeMessage<::dsa::control::v1::Hello>(Arena*);
 template<> ::dsa::control::v1::HelloAccepted* Arena::CreateMaybeMessage<::dsa::control::v1::HelloAccepted>(Arena*);
 template<> ::dsa::control::v1::HelloRejected* Arena::CreateMaybeMessage<::dsa::control::v1::HelloRejected>(Arena*);
+template<> ::dsa::control::v1::HostMemory* Arena::CreateMaybeMessage<::dsa::control::v1::HostMemory>(Arena*);
 template<> ::dsa::control::v1::ImeCommit* Arena::CreateMaybeMessage<::dsa::control::v1::ImeCommit>(Arena*);
 template<> ::dsa::control::v1::ImeComposition* Arena::CreateMaybeMessage<::dsa::control::v1::ImeComposition>(Arena*);
 template<> ::dsa::control::v1::ImeCursor* Arena::CreateMaybeMessage<::dsa::control::v1::ImeCursor>(Arena*);
@@ -289,9 +302,12 @@ template<> ::dsa::control::v1::NotificationDismissed* Arena::CreateMaybeMessage<
 template<> ::dsa::control::v1::NotificationRemoved* Arena::CreateMaybeMessage<::dsa::control::v1::NotificationRemoved>(Arena*);
 template<> ::dsa::control::v1::OpenFile* Arena::CreateMaybeMessage<::dsa::control::v1::OpenFile>(Arena*);
 template<> ::dsa::control::v1::OpenLink* Arena::CreateMaybeMessage<::dsa::control::v1::OpenLink>(Arena*);
+template<> ::dsa::control::v1::PackageState* Arena::CreateMaybeMessage<::dsa::control::v1::PackageState>(Arena*);
 template<> ::dsa::control::v1::PointerEvent* Arena::CreateMaybeMessage<::dsa::control::v1::PointerEvent>(Arena*);
+template<> ::dsa::control::v1::PowerHint* Arena::CreateMaybeMessage<::dsa::control::v1::PowerHint>(Arena*);
 template<> ::dsa::control::v1::PowerState* Arena::CreateMaybeMessage<::dsa::control::v1::PowerState>(Arena*);
 template<> ::dsa::control::v1::ProcessMemory* Arena::CreateMaybeMessage<::dsa::control::v1::ProcessMemory>(Arena*);
+template<> ::dsa::control::v1::QueryPackage* Arena::CreateMaybeMessage<::dsa::control::v1::QueryPackage>(Arena*);
 template<> ::dsa::control::v1::Rect* Arena::CreateMaybeMessage<::dsa::control::v1::Rect>(Arena*);
 template<> ::dsa::control::v1::RemoveWidget* Arena::CreateMaybeMessage<::dsa::control::v1::RemoveWidget>(Arena*);
 template<> ::dsa::control::v1::RequestGuestMemory* Arena::CreateMaybeMessage<::dsa::control::v1::RequestGuestMemory>(Arena*);
@@ -455,6 +471,28 @@ inline const std::string& KeyAction_Name(T enum_t_value) {
 }
 bool KeyAction_Parse(
     ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, KeyAction* value);
+enum PowerHintKind : int {
+  POWER_HINT_KIND_UNSPECIFIED = 0,
+  POWER_HINT_KIND_MODE = 1,
+  POWER_HINT_KIND_BOOST = 2,
+  PowerHintKind_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
+  PowerHintKind_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
+};
+bool PowerHintKind_IsValid(int value);
+constexpr PowerHintKind PowerHintKind_MIN = POWER_HINT_KIND_UNSPECIFIED;
+constexpr PowerHintKind PowerHintKind_MAX = POWER_HINT_KIND_BOOST;
+constexpr int PowerHintKind_ARRAYSIZE = PowerHintKind_MAX + 1;
+
+const std::string& PowerHintKind_Name(PowerHintKind value);
+template<typename T>
+inline const std::string& PowerHintKind_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, PowerHintKind>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function PowerHintKind_Name.");
+  return PowerHintKind_Name(static_cast<PowerHintKind>(enum_t_value));
+}
+bool PowerHintKind_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, PowerHintKind* value);
 enum InstallStatus : int {
   INSTALL_STATUS_UNSPECIFIED = 0,
   INSTALL_STATUS_SUCCESS = 1,
@@ -4195,6 +4233,299 @@ class PowerState final :
 };
 // -------------------------------------------------------------------
 
+class HostMemory final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.HostMemory) */ {
+ public:
+  inline HostMemory() : HostMemory(nullptr) {}
+  ~HostMemory() override;
+  explicit PROTOBUF_CONSTEXPR HostMemory(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  HostMemory(const HostMemory& from);
+  HostMemory(HostMemory&& from) noexcept
+    : HostMemory() {
+    *this = ::std::move(from);
+  }
+
+  inline HostMemory& operator=(const HostMemory& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline HostMemory& operator=(HostMemory&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const HostMemory& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const HostMemory* internal_default_instance() {
+    return reinterpret_cast<const HostMemory*>(
+               &_HostMemory_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    23;
+
+  friend void swap(HostMemory& a, HostMemory& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(HostMemory* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(HostMemory* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  HostMemory* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<HostMemory>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const HostMemory& from);
+  void MergeFrom(const HostMemory& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(HostMemory* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.HostMemory";
+  }
+  protected:
+  explicit HostMemory(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kLowFieldNumber = 1,
+  };
+  // bool low = 1;
+  void clear_low();
+  bool low() const;
+  void set_low(bool value);
+  private:
+  bool _internal_low() const;
+  void _internal_set_low(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.HostMemory)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    bool low_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class PowerHint final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.PowerHint) */ {
+ public:
+  inline PowerHint() : PowerHint(nullptr) {}
+  ~PowerHint() override;
+  explicit PROTOBUF_CONSTEXPR PowerHint(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  PowerHint(const PowerHint& from);
+  PowerHint(PowerHint&& from) noexcept
+    : PowerHint() {
+    *this = ::std::move(from);
+  }
+
+  inline PowerHint& operator=(const PowerHint& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline PowerHint& operator=(PowerHint&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const PowerHint& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const PowerHint* internal_default_instance() {
+    return reinterpret_cast<const PowerHint*>(
+               &_PowerHint_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    24;
+
+  friend void swap(PowerHint& a, PowerHint& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(PowerHint* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(PowerHint* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  PowerHint* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<PowerHint>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const PowerHint& from);
+  void MergeFrom(const PowerHint& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(PowerHint* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.PowerHint";
+  }
+  protected:
+  explicit PowerHint(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kKindFieldNumber = 1,
+    kIdFieldNumber = 2,
+    kEnabledFieldNumber = 3,
+    kDurationMsFieldNumber = 4,
+  };
+  // .dsa.control.v1.PowerHintKind kind = 1;
+  void clear_kind();
+  ::dsa::control::v1::PowerHintKind kind() const;
+  void set_kind(::dsa::control::v1::PowerHintKind value);
+  private:
+  ::dsa::control::v1::PowerHintKind _internal_kind() const;
+  void _internal_set_kind(::dsa::control::v1::PowerHintKind value);
+  public:
+
+  // int32 id = 2;
+  void clear_id();
+  int32_t id() const;
+  void set_id(int32_t value);
+  private:
+  int32_t _internal_id() const;
+  void _internal_set_id(int32_t value);
+  public:
+
+  // bool enabled = 3;
+  void clear_enabled();
+  bool enabled() const;
+  void set_enabled(bool value);
+  private:
+  bool _internal_enabled() const;
+  void _internal_set_enabled(bool value);
+  public:
+
+  // int32 duration_ms = 4;
+  void clear_duration_ms();
+  int32_t duration_ms() const;
+  void set_duration_ms(int32_t value);
+  private:
+  int32_t _internal_duration_ms() const;
+  void _internal_set_duration_ms(int32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.PowerHint)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    int kind_;
+    int32_t id_;
+    bool enabled_;
+    int32_t duration_ms_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class DeviceIdle final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.DeviceIdle) */ {
  public:
@@ -4234,7 +4565,7 @@ class DeviceIdle final :
                &_DeviceIdle_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    23;
+    25;
 
   friend void swap(DeviceIdle& a, DeviceIdle& b) {
     a.Swap(&b);
@@ -4364,7 +4695,7 @@ class ClipboardText final :
                &_ClipboardText_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    24;
+    26;
 
   friend void swap(ClipboardText& a, ClipboardText& b) {
     a.Swap(&b);
@@ -4499,7 +4830,7 @@ class ClipboardSharing final :
                &_ClipboardSharing_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    25;
+    27;
 
   friend void swap(ClipboardSharing& a, ClipboardSharing& b) {
     a.Swap(&b);
@@ -4629,7 +4960,7 @@ class GuestNotification final :
                &_GuestNotification_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    26;
+    28;
 
   friend void swap(GuestNotification& a, GuestNotification& b) {
     a.Swap(&b);
@@ -4888,7 +5219,7 @@ class NotificationRemoved final :
                &_NotificationRemoved_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    27;
+    29;
 
   friend void swap(NotificationRemoved& a, NotificationRemoved& b) {
     a.Swap(&b);
@@ -5023,7 +5354,7 @@ class NotificationClicked final :
                &_NotificationClicked_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    28;
+    30;
 
   friend void swap(NotificationClicked& a, NotificationClicked& b) {
     a.Swap(&b);
@@ -5158,7 +5489,7 @@ class NotificationDismissed final :
                &_NotificationDismissed_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    29;
+    31;
 
   friend void swap(NotificationDismissed& a, NotificationDismissed& b) {
     a.Swap(&b);
@@ -5293,7 +5624,7 @@ class RequestGuestMemory final :
                &_RequestGuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    30;
+    32;
 
   friend void swap(RequestGuestMemory& a, RequestGuestMemory& b) {
     a.Swap(&b);
@@ -5410,7 +5741,7 @@ class ProcessMemory final :
                &_ProcessMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    31;
+    33;
 
   friend void swap(ProcessMemory& a, ProcessMemory& b) {
     a.Swap(&b);
@@ -5578,7 +5909,7 @@ class GuestMemory final :
                &_GuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    32;
+    34;
 
   friend void swap(GuestMemory& a, GuestMemory& b) {
     a.Swap(&b);
@@ -5860,7 +6191,7 @@ class AgentConnected final :
                &_AgentConnected_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    33;
+    35;
 
   friend void swap(AgentConnected& a, AgentConnected& b) {
     a.Swap(&b);
@@ -5977,7 +6308,7 @@ class GuestBoot final :
                &_GuestBoot_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    34;
+    36;
 
   friend void swap(GuestBoot& a, GuestBoot& b) {
     a.Swap(&b);
@@ -6118,7 +6449,7 @@ class InstallApk final :
                &_InstallApk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    35;
+    37;
 
   friend void swap(InstallApk& a, InstallApk& b) {
     a.Swap(&b);
@@ -6275,7 +6606,7 @@ class ApkChunk final :
                &_ApkChunk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    36;
+    38;
 
   friend void swap(ApkChunk& a, ApkChunk& b) {
     a.Swap(&b);
@@ -6393,6 +6724,346 @@ class ApkChunk final :
 };
 // -------------------------------------------------------------------
 
+class QueryPackage final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.QueryPackage) */ {
+ public:
+  inline QueryPackage() : QueryPackage(nullptr) {}
+  ~QueryPackage() override;
+  explicit PROTOBUF_CONSTEXPR QueryPackage(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  QueryPackage(const QueryPackage& from);
+  QueryPackage(QueryPackage&& from) noexcept
+    : QueryPackage() {
+    *this = ::std::move(from);
+  }
+
+  inline QueryPackage& operator=(const QueryPackage& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline QueryPackage& operator=(QueryPackage&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const QueryPackage& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const QueryPackage* internal_default_instance() {
+    return reinterpret_cast<const QueryPackage*>(
+               &_QueryPackage_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    39;
+
+  friend void swap(QueryPackage& a, QueryPackage& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(QueryPackage* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(QueryPackage* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  QueryPackage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<QueryPackage>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const QueryPackage& from);
+  void MergeFrom(const QueryPackage& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(QueryPackage* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.QueryPackage";
+  }
+  protected:
+  explicit QueryPackage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kPackageNameFieldNumber = 2,
+    kRequestIdFieldNumber = 1,
+  };
+  // string package_name = 2;
+  void clear_package_name();
+  const std::string& package_name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_package_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_package_name();
+  PROTOBUF_NODISCARD std::string* release_package_name();
+  void set_allocated_package_name(std::string* package_name);
+  private:
+  const std::string& _internal_package_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_package_name(const std::string& value);
+  std::string* _internal_mutable_package_name();
+  public:
+
+  // uint32 request_id = 1;
+  void clear_request_id();
+  uint32_t request_id() const;
+  void set_request_id(uint32_t value);
+  private:
+  uint32_t _internal_request_id() const;
+  void _internal_set_request_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.QueryPackage)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr package_name_;
+    uint32_t request_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class PackageState final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.PackageState) */ {
+ public:
+  inline PackageState() : PackageState(nullptr) {}
+  ~PackageState() override;
+  explicit PROTOBUF_CONSTEXPR PackageState(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  PackageState(const PackageState& from);
+  PackageState(PackageState&& from) noexcept
+    : PackageState() {
+    *this = ::std::move(from);
+  }
+
+  inline PackageState& operator=(const PackageState& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline PackageState& operator=(PackageState&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const PackageState& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const PackageState* internal_default_instance() {
+    return reinterpret_cast<const PackageState*>(
+               &_PackageState_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    40;
+
+  friend void swap(PackageState& a, PackageState& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(PackageState* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(PackageState* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  PackageState* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<PackageState>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const PackageState& from);
+  void MergeFrom(const PackageState& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(PackageState* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.PackageState";
+  }
+  protected:
+  explicit PackageState(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kSignerSha256FieldNumber = 5,
+    kVersionNameFieldNumber = 4,
+    kRequestIdFieldNumber = 1,
+    kInstalledFieldNumber = 2,
+    kVersionCodeFieldNumber = 3,
+  };
+  // repeated bytes signer_sha256 = 5;
+  int signer_sha256_size() const;
+  private:
+  int _internal_signer_sha256_size() const;
+  public:
+  void clear_signer_sha256();
+  const std::string& signer_sha256(int index) const;
+  std::string* mutable_signer_sha256(int index);
+  void set_signer_sha256(int index, const std::string& value);
+  void set_signer_sha256(int index, std::string&& value);
+  void set_signer_sha256(int index, const char* value);
+  void set_signer_sha256(int index, const void* value, size_t size);
+  std::string* add_signer_sha256();
+  void add_signer_sha256(const std::string& value);
+  void add_signer_sha256(std::string&& value);
+  void add_signer_sha256(const char* value);
+  void add_signer_sha256(const void* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& signer_sha256() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_signer_sha256();
+  private:
+  const std::string& _internal_signer_sha256(int index) const;
+  std::string* _internal_add_signer_sha256();
+  public:
+
+  // string version_name = 4;
+  void clear_version_name();
+  const std::string& version_name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_version_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_version_name();
+  PROTOBUF_NODISCARD std::string* release_version_name();
+  void set_allocated_version_name(std::string* version_name);
+  private:
+  const std::string& _internal_version_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_version_name(const std::string& value);
+  std::string* _internal_mutable_version_name();
+  public:
+
+  // uint32 request_id = 1;
+  void clear_request_id();
+  uint32_t request_id() const;
+  void set_request_id(uint32_t value);
+  private:
+  uint32_t _internal_request_id() const;
+  void _internal_set_request_id(uint32_t value);
+  public:
+
+  // bool installed = 2;
+  void clear_installed();
+  bool installed() const;
+  void set_installed(bool value);
+  private:
+  bool _internal_installed() const;
+  void _internal_set_installed(bool value);
+  public:
+
+  // int64 version_code = 3;
+  void clear_version_code();
+  int64_t version_code() const;
+  void set_version_code(int64_t value);
+  private:
+  int64_t _internal_version_code() const;
+  void _internal_set_version_code(int64_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.PackageState)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> signer_sha256_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr version_name_;
+    uint32_t request_id_;
+    bool installed_;
+    int64_t version_code_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class OpenLink final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.OpenLink) */ {
  public:
@@ -6432,7 +7103,7 @@ class OpenLink final :
                &_OpenLink_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    37;
+    41;
 
   friend void swap(OpenLink& a, OpenLink& b) {
     a.Swap(&b);
@@ -6567,7 +7238,7 @@ class LinkHandling final :
                &_LinkHandling_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    38;
+    42;
 
   friend void swap(LinkHandling& a, LinkHandling& b) {
     a.Swap(&b);
@@ -6697,7 +7368,7 @@ class OpenFile final :
                &_OpenFile_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    39;
+    43;
 
   friend void swap(OpenFile& a, OpenFile& b) {
     a.Swap(&b);
@@ -6865,7 +7536,7 @@ class FileChunk final :
                &_FileChunk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    40;
+    44;
 
   friend void swap(FileChunk& a, FileChunk& b) {
     a.Swap(&b);
@@ -7022,7 +7693,7 @@ class CancelInstall final :
                &_CancelInstall_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    41;
+    45;
 
   friend void swap(CancelInstall& a, CancelInstall& b) {
     a.Swap(&b);
@@ -7152,7 +7823,7 @@ class InstallProgress final :
                &_InstallProgress_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    42;
+    46;
 
   friend void swap(InstallProgress& a, InstallProgress& b) {
     a.Swap(&b);
@@ -7293,7 +7964,7 @@ class InstallResult final :
                &_InstallResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    43;
+    47;
 
   friend void swap(InstallResult& a, InstallResult& b) {
     a.Swap(&b);
@@ -7466,7 +8137,7 @@ class FileProgress final :
                &_FileProgress_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    44;
+    48;
 
   friend void swap(FileProgress& a, FileProgress& b) {
     a.Swap(&b);
@@ -7623,7 +8294,7 @@ class ClockProbe final :
                &_ClockProbe_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    45;
+    49;
 
   friend void swap(ClockProbe& a, ClockProbe& b) {
     a.Swap(&b);
@@ -7753,7 +8424,7 @@ class ClockAnswer final :
                &_ClockAnswer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    46;
+    50;
 
   friend void swap(ClockAnswer& a, ClockAnswer& b) {
     a.Swap(&b);
@@ -7894,7 +8565,7 @@ class ListWidgetProviders final :
                &_ListWidgetProviders_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    47;
+    51;
 
   friend void swap(ListWidgetProviders& a, ListWidgetProviders& b) {
     a.Swap(&b);
@@ -8024,7 +8695,7 @@ class WidgetProvider final :
                &_WidgetProvider_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    48;
+    52;
 
   friend void swap(WidgetProvider& a, WidgetProvider& b) {
     a.Swap(&b);
@@ -8295,7 +8966,7 @@ class WidgetProviders final :
                &_WidgetProviders_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    49;
+    53;
 
   friend void swap(WidgetProviders& a, WidgetProviders& b) {
     a.Swap(&b);
@@ -8456,7 +9127,7 @@ class AddWidget final :
                &_AddWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    50;
+    54;
 
   friend void swap(AddWidget& a, AddWidget& b) {
     a.Swap(&b);
@@ -8602,7 +9273,7 @@ class WidgetAdded final :
                &_WidgetAdded_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    51;
+    55;
 
   friend void swap(WidgetAdded& a, WidgetAdded& b) {
     a.Swap(&b);
@@ -8759,7 +9430,7 @@ class WidgetUpdated final :
                &_WidgetUpdated_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    52;
+    56;
 
   friend void swap(WidgetUpdated& a, WidgetUpdated& b) {
     a.Swap(&b);
@@ -8909,7 +9580,7 @@ class WidgetList final :
                &_WidgetList_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    53;
+    57;
 
   friend void swap(WidgetList& a, WidgetList& b) {
     a.Swap(&b);
@@ -9053,7 +9724,7 @@ class RemoveWidget final :
                &_RemoveWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    54;
+    58;
 
   friend void swap(RemoveWidget& a, RemoveWidget& b) {
     a.Swap(&b);
@@ -9183,7 +9854,7 @@ class ResizeWidget final :
                &_ResizeWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    55;
+    59;
 
   friend void swap(ResizeWidget& a, ResizeWidget& b) {
     a.Swap(&b);
@@ -9368,7 +10039,7 @@ class WidgetFrame final :
                &_WidgetFrame_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    56;
+    60;
 
   friend void swap(WidgetFrame& a, WidgetFrame& b) {
     a.Swap(&b);
@@ -9536,7 +10207,7 @@ class WidgetPointer final :
                &_WidgetPointer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    57;
+    61;
 
   friend void swap(WidgetPointer& a, WidgetPointer& b) {
     a.Swap(&b);
@@ -9710,7 +10381,7 @@ class AccessibilityWatch final :
                &_AccessibilityWatch_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    58;
+    62;
 
   friend void swap(AccessibilityWatch& a, AccessibilityWatch& b) {
     a.Swap(&b);
@@ -9851,7 +10522,7 @@ class NodeRange final :
                &_NodeRange_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    59;
+    63;
 
   friend void swap(NodeRange& a, NodeRange& b) {
     a.Swap(&b);
@@ -10003,7 +10674,7 @@ class AccessibilityNode final :
                &_AccessibilityNode_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    60;
+    64;
 
   friend void swap(AccessibilityNode& a, AccessibilityNode& b) {
     a.Swap(&b);
@@ -10446,7 +11117,7 @@ class AccessibilityTree final :
                &_AccessibilityTree_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    61;
+    65;
 
   friend void swap(AccessibilityTree& a, AccessibilityTree& b) {
     a.Swap(&b);
@@ -10679,7 +11350,7 @@ class AccessibilityAction final :
                &_AccessibilityAction_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    62;
+    66;
 
   friend void swap(AccessibilityAction& a, AccessibilityAction& b) {
     a.Swap(&b);
@@ -10869,7 +11540,7 @@ class AccessibilityActionResult final :
                &_AccessibilityActionResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    63;
+    67;
 
   friend void swap(AccessibilityActionResult& a, AccessibilityActionResult& b) {
     a.Swap(&b);
@@ -11063,12 +11734,16 @@ class Envelope final :
     kClockAnswer = 29,
     kScreenState = 40,
     kPowerState = 41,
+    kPowerHint = 110,
     kDeviceIdle = 42,
+    kHostMemory = 43,
     kInstallApk = 60,
     kApkChunk = 61,
     kCancelInstall = 62,
     kInstallProgress = 63,
     kInstallResult = 64,
+    kQueryPackage = 65,
+    kPackageState = 66,
     kOpenLink = 50,
     kLinkHandling = 51,
     kOpenFile = 52,
@@ -11100,7 +11775,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    64;
+    68;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -11194,12 +11869,16 @@ class Envelope final :
     kClockAnswerFieldNumber = 29,
     kScreenStateFieldNumber = 40,
     kPowerStateFieldNumber = 41,
+    kPowerHintFieldNumber = 110,
     kDeviceIdleFieldNumber = 42,
+    kHostMemoryFieldNumber = 43,
     kInstallApkFieldNumber = 60,
     kApkChunkFieldNumber = 61,
     kCancelInstallFieldNumber = 62,
     kInstallProgressFieldNumber = 63,
     kInstallResultFieldNumber = 64,
+    kQueryPackageFieldNumber = 65,
+    kPackageStateFieldNumber = 66,
     kOpenLinkFieldNumber = 50,
     kLinkHandlingFieldNumber = 51,
     kOpenFileFieldNumber = 52,
@@ -11764,6 +12443,24 @@ class Envelope final :
       ::dsa::control::v1::PowerState* power_state);
   ::dsa::control::v1::PowerState* unsafe_arena_release_power_state();
 
+  // .dsa.control.v1.PowerHint power_hint = 110;
+  bool has_power_hint() const;
+  private:
+  bool _internal_has_power_hint() const;
+  public:
+  void clear_power_hint();
+  const ::dsa::control::v1::PowerHint& power_hint() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::PowerHint* release_power_hint();
+  ::dsa::control::v1::PowerHint* mutable_power_hint();
+  void set_allocated_power_hint(::dsa::control::v1::PowerHint* power_hint);
+  private:
+  const ::dsa::control::v1::PowerHint& _internal_power_hint() const;
+  ::dsa::control::v1::PowerHint* _internal_mutable_power_hint();
+  public:
+  void unsafe_arena_set_allocated_power_hint(
+      ::dsa::control::v1::PowerHint* power_hint);
+  ::dsa::control::v1::PowerHint* unsafe_arena_release_power_hint();
+
   // .dsa.control.v1.DeviceIdle device_idle = 42;
   bool has_device_idle() const;
   private:
@@ -11781,6 +12478,24 @@ class Envelope final :
   void unsafe_arena_set_allocated_device_idle(
       ::dsa::control::v1::DeviceIdle* device_idle);
   ::dsa::control::v1::DeviceIdle* unsafe_arena_release_device_idle();
+
+  // .dsa.control.v1.HostMemory host_memory = 43;
+  bool has_host_memory() const;
+  private:
+  bool _internal_has_host_memory() const;
+  public:
+  void clear_host_memory();
+  const ::dsa::control::v1::HostMemory& host_memory() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::HostMemory* release_host_memory();
+  ::dsa::control::v1::HostMemory* mutable_host_memory();
+  void set_allocated_host_memory(::dsa::control::v1::HostMemory* host_memory);
+  private:
+  const ::dsa::control::v1::HostMemory& _internal_host_memory() const;
+  ::dsa::control::v1::HostMemory* _internal_mutable_host_memory();
+  public:
+  void unsafe_arena_set_allocated_host_memory(
+      ::dsa::control::v1::HostMemory* host_memory);
+  ::dsa::control::v1::HostMemory* unsafe_arena_release_host_memory();
 
   // .dsa.control.v1.InstallApk install_apk = 60;
   bool has_install_apk() const;
@@ -11871,6 +12586,42 @@ class Envelope final :
   void unsafe_arena_set_allocated_install_result(
       ::dsa::control::v1::InstallResult* install_result);
   ::dsa::control::v1::InstallResult* unsafe_arena_release_install_result();
+
+  // .dsa.control.v1.QueryPackage query_package = 65;
+  bool has_query_package() const;
+  private:
+  bool _internal_has_query_package() const;
+  public:
+  void clear_query_package();
+  const ::dsa::control::v1::QueryPackage& query_package() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::QueryPackage* release_query_package();
+  ::dsa::control::v1::QueryPackage* mutable_query_package();
+  void set_allocated_query_package(::dsa::control::v1::QueryPackage* query_package);
+  private:
+  const ::dsa::control::v1::QueryPackage& _internal_query_package() const;
+  ::dsa::control::v1::QueryPackage* _internal_mutable_query_package();
+  public:
+  void unsafe_arena_set_allocated_query_package(
+      ::dsa::control::v1::QueryPackage* query_package);
+  ::dsa::control::v1::QueryPackage* unsafe_arena_release_query_package();
+
+  // .dsa.control.v1.PackageState package_state = 66;
+  bool has_package_state() const;
+  private:
+  bool _internal_has_package_state() const;
+  public:
+  void clear_package_state();
+  const ::dsa::control::v1::PackageState& package_state() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::PackageState* release_package_state();
+  ::dsa::control::v1::PackageState* mutable_package_state();
+  void set_allocated_package_state(::dsa::control::v1::PackageState* package_state);
+  private:
+  const ::dsa::control::v1::PackageState& _internal_package_state() const;
+  ::dsa::control::v1::PackageState* _internal_mutable_package_state();
+  public:
+  void unsafe_arena_set_allocated_package_state(
+      ::dsa::control::v1::PackageState* package_state);
+  ::dsa::control::v1::PackageState* unsafe_arena_release_package_state();
 
   // .dsa.control.v1.OpenLink open_link = 50;
   bool has_open_link() const;
@@ -12321,12 +13072,16 @@ class Envelope final :
   void set_has_clock_answer();
   void set_has_screen_state();
   void set_has_power_state();
+  void set_has_power_hint();
   void set_has_device_idle();
+  void set_has_host_memory();
   void set_has_install_apk();
   void set_has_apk_chunk();
   void set_has_cancel_install();
   void set_has_install_progress();
   void set_has_install_result();
+  void set_has_query_package();
+  void set_has_package_state();
   void set_has_open_link();
   void set_has_link_handling();
   void set_has_open_file();
@@ -12391,12 +13146,16 @@ class Envelope final :
       ::dsa::control::v1::ClockAnswer* clock_answer_;
       ::dsa::control::v1::ScreenState* screen_state_;
       ::dsa::control::v1::PowerState* power_state_;
+      ::dsa::control::v1::PowerHint* power_hint_;
       ::dsa::control::v1::DeviceIdle* device_idle_;
+      ::dsa::control::v1::HostMemory* host_memory_;
       ::dsa::control::v1::InstallApk* install_apk_;
       ::dsa::control::v1::ApkChunk* apk_chunk_;
       ::dsa::control::v1::CancelInstall* cancel_install_;
       ::dsa::control::v1::InstallProgress* install_progress_;
       ::dsa::control::v1::InstallResult* install_result_;
+      ::dsa::control::v1::QueryPackage* query_package_;
+      ::dsa::control::v1::PackageState* package_state_;
       ::dsa::control::v1::OpenLink* open_link_;
       ::dsa::control::v1::LinkHandling* link_handling_;
       ::dsa::control::v1::OpenFile* open_file_;
@@ -14784,6 +15543,114 @@ inline void PowerState::set_power_saver(bool value) {
 
 // -------------------------------------------------------------------
 
+// HostMemory
+
+// bool low = 1;
+inline void HostMemory::clear_low() {
+  _impl_.low_ = false;
+}
+inline bool HostMemory::_internal_low() const {
+  return _impl_.low_;
+}
+inline bool HostMemory::low() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.HostMemory.low)
+  return _internal_low();
+}
+inline void HostMemory::_internal_set_low(bool value) {
+  
+  _impl_.low_ = value;
+}
+inline void HostMemory::set_low(bool value) {
+  _internal_set_low(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.HostMemory.low)
+}
+
+// -------------------------------------------------------------------
+
+// PowerHint
+
+// .dsa.control.v1.PowerHintKind kind = 1;
+inline void PowerHint::clear_kind() {
+  _impl_.kind_ = 0;
+}
+inline ::dsa::control::v1::PowerHintKind PowerHint::_internal_kind() const {
+  return static_cast< ::dsa::control::v1::PowerHintKind >(_impl_.kind_);
+}
+inline ::dsa::control::v1::PowerHintKind PowerHint::kind() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PowerHint.kind)
+  return _internal_kind();
+}
+inline void PowerHint::_internal_set_kind(::dsa::control::v1::PowerHintKind value) {
+  
+  _impl_.kind_ = value;
+}
+inline void PowerHint::set_kind(::dsa::control::v1::PowerHintKind value) {
+  _internal_set_kind(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PowerHint.kind)
+}
+
+// int32 id = 2;
+inline void PowerHint::clear_id() {
+  _impl_.id_ = 0;
+}
+inline int32_t PowerHint::_internal_id() const {
+  return _impl_.id_;
+}
+inline int32_t PowerHint::id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PowerHint.id)
+  return _internal_id();
+}
+inline void PowerHint::_internal_set_id(int32_t value) {
+  
+  _impl_.id_ = value;
+}
+inline void PowerHint::set_id(int32_t value) {
+  _internal_set_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PowerHint.id)
+}
+
+// bool enabled = 3;
+inline void PowerHint::clear_enabled() {
+  _impl_.enabled_ = false;
+}
+inline bool PowerHint::_internal_enabled() const {
+  return _impl_.enabled_;
+}
+inline bool PowerHint::enabled() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PowerHint.enabled)
+  return _internal_enabled();
+}
+inline void PowerHint::_internal_set_enabled(bool value) {
+  
+  _impl_.enabled_ = value;
+}
+inline void PowerHint::set_enabled(bool value) {
+  _internal_set_enabled(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PowerHint.enabled)
+}
+
+// int32 duration_ms = 4;
+inline void PowerHint::clear_duration_ms() {
+  _impl_.duration_ms_ = 0;
+}
+inline int32_t PowerHint::_internal_duration_ms() const {
+  return _impl_.duration_ms_;
+}
+inline int32_t PowerHint::duration_ms() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PowerHint.duration_ms)
+  return _internal_duration_ms();
+}
+inline void PowerHint::_internal_set_duration_ms(int32_t value) {
+  
+  _impl_.duration_ms_ = value;
+}
+inline void PowerHint::set_duration_ms(int32_t value) {
+  _internal_set_duration_ms(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PowerHint.duration_ms)
+}
+
+// -------------------------------------------------------------------
+
 // DeviceIdle
 
 // bool idle = 1;
@@ -16086,6 +16953,269 @@ inline void ApkChunk::set_allocated_data(std::string* data) {
   }
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.ApkChunk.data)
+}
+
+// -------------------------------------------------------------------
+
+// QueryPackage
+
+// uint32 request_id = 1;
+inline void QueryPackage::clear_request_id() {
+  _impl_.request_id_ = 0u;
+}
+inline uint32_t QueryPackage::_internal_request_id() const {
+  return _impl_.request_id_;
+}
+inline uint32_t QueryPackage::request_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.QueryPackage.request_id)
+  return _internal_request_id();
+}
+inline void QueryPackage::_internal_set_request_id(uint32_t value) {
+  
+  _impl_.request_id_ = value;
+}
+inline void QueryPackage::set_request_id(uint32_t value) {
+  _internal_set_request_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.QueryPackage.request_id)
+}
+
+// string package_name = 2;
+inline void QueryPackage::clear_package_name() {
+  _impl_.package_name_.ClearToEmpty();
+}
+inline const std::string& QueryPackage::package_name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.QueryPackage.package_name)
+  return _internal_package_name();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void QueryPackage::set_package_name(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.package_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.QueryPackage.package_name)
+}
+inline std::string* QueryPackage::mutable_package_name() {
+  std::string* _s = _internal_mutable_package_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.QueryPackage.package_name)
+  return _s;
+}
+inline const std::string& QueryPackage::_internal_package_name() const {
+  return _impl_.package_name_.Get();
+}
+inline void QueryPackage::_internal_set_package_name(const std::string& value) {
+  
+  _impl_.package_name_.Set(value, GetArenaForAllocation());
+}
+inline std::string* QueryPackage::_internal_mutable_package_name() {
+  
+  return _impl_.package_name_.Mutable(GetArenaForAllocation());
+}
+inline std::string* QueryPackage::release_package_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.QueryPackage.package_name)
+  return _impl_.package_name_.Release();
+}
+inline void QueryPackage::set_allocated_package_name(std::string* package_name) {
+  if (package_name != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.package_name_.SetAllocated(package_name, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.package_name_.IsDefault()) {
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.QueryPackage.package_name)
+}
+
+// -------------------------------------------------------------------
+
+// PackageState
+
+// uint32 request_id = 1;
+inline void PackageState::clear_request_id() {
+  _impl_.request_id_ = 0u;
+}
+inline uint32_t PackageState::_internal_request_id() const {
+  return _impl_.request_id_;
+}
+inline uint32_t PackageState::request_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PackageState.request_id)
+  return _internal_request_id();
+}
+inline void PackageState::_internal_set_request_id(uint32_t value) {
+  
+  _impl_.request_id_ = value;
+}
+inline void PackageState::set_request_id(uint32_t value) {
+  _internal_set_request_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PackageState.request_id)
+}
+
+// bool installed = 2;
+inline void PackageState::clear_installed() {
+  _impl_.installed_ = false;
+}
+inline bool PackageState::_internal_installed() const {
+  return _impl_.installed_;
+}
+inline bool PackageState::installed() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PackageState.installed)
+  return _internal_installed();
+}
+inline void PackageState::_internal_set_installed(bool value) {
+  
+  _impl_.installed_ = value;
+}
+inline void PackageState::set_installed(bool value) {
+  _internal_set_installed(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PackageState.installed)
+}
+
+// int64 version_code = 3;
+inline void PackageState::clear_version_code() {
+  _impl_.version_code_ = int64_t{0};
+}
+inline int64_t PackageState::_internal_version_code() const {
+  return _impl_.version_code_;
+}
+inline int64_t PackageState::version_code() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PackageState.version_code)
+  return _internal_version_code();
+}
+inline void PackageState::_internal_set_version_code(int64_t value) {
+  
+  _impl_.version_code_ = value;
+}
+inline void PackageState::set_version_code(int64_t value) {
+  _internal_set_version_code(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PackageState.version_code)
+}
+
+// string version_name = 4;
+inline void PackageState::clear_version_name() {
+  _impl_.version_name_.ClearToEmpty();
+}
+inline const std::string& PackageState::version_name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PackageState.version_name)
+  return _internal_version_name();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void PackageState::set_version_name(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.version_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PackageState.version_name)
+}
+inline std::string* PackageState::mutable_version_name() {
+  std::string* _s = _internal_mutable_version_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.PackageState.version_name)
+  return _s;
+}
+inline const std::string& PackageState::_internal_version_name() const {
+  return _impl_.version_name_.Get();
+}
+inline void PackageState::_internal_set_version_name(const std::string& value) {
+  
+  _impl_.version_name_.Set(value, GetArenaForAllocation());
+}
+inline std::string* PackageState::_internal_mutable_version_name() {
+  
+  return _impl_.version_name_.Mutable(GetArenaForAllocation());
+}
+inline std::string* PackageState::release_version_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.PackageState.version_name)
+  return _impl_.version_name_.Release();
+}
+inline void PackageState::set_allocated_version_name(std::string* version_name) {
+  if (version_name != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.version_name_.SetAllocated(version_name, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.version_name_.IsDefault()) {
+    _impl_.version_name_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.PackageState.version_name)
+}
+
+// repeated bytes signer_sha256 = 5;
+inline int PackageState::_internal_signer_sha256_size() const {
+  return _impl_.signer_sha256_.size();
+}
+inline int PackageState::signer_sha256_size() const {
+  return _internal_signer_sha256_size();
+}
+inline void PackageState::clear_signer_sha256() {
+  _impl_.signer_sha256_.Clear();
+}
+inline std::string* PackageState::add_signer_sha256() {
+  std::string* _s = _internal_add_signer_sha256();
+  // @@protoc_insertion_point(field_add_mutable:dsa.control.v1.PackageState.signer_sha256)
+  return _s;
+}
+inline const std::string& PackageState::_internal_signer_sha256(int index) const {
+  return _impl_.signer_sha256_.Get(index);
+}
+inline const std::string& PackageState::signer_sha256(int index) const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PackageState.signer_sha256)
+  return _internal_signer_sha256(index);
+}
+inline std::string* PackageState::mutable_signer_sha256(int index) {
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.PackageState.signer_sha256)
+  return _impl_.signer_sha256_.Mutable(index);
+}
+inline void PackageState::set_signer_sha256(int index, const std::string& value) {
+  _impl_.signer_sha256_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PackageState.signer_sha256)
+}
+inline void PackageState::set_signer_sha256(int index, std::string&& value) {
+  _impl_.signer_sha256_.Mutable(index)->assign(std::move(value));
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PackageState.signer_sha256)
+}
+inline void PackageState::set_signer_sha256(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  _impl_.signer_sha256_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:dsa.control.v1.PackageState.signer_sha256)
+}
+inline void PackageState::set_signer_sha256(int index, const void* value, size_t size) {
+  _impl_.signer_sha256_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:dsa.control.v1.PackageState.signer_sha256)
+}
+inline std::string* PackageState::_internal_add_signer_sha256() {
+  return _impl_.signer_sha256_.Add();
+}
+inline void PackageState::add_signer_sha256(const std::string& value) {
+  _impl_.signer_sha256_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:dsa.control.v1.PackageState.signer_sha256)
+}
+inline void PackageState::add_signer_sha256(std::string&& value) {
+  _impl_.signer_sha256_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:dsa.control.v1.PackageState.signer_sha256)
+}
+inline void PackageState::add_signer_sha256(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  _impl_.signer_sha256_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:dsa.control.v1.PackageState.signer_sha256)
+}
+inline void PackageState::add_signer_sha256(const void* value, size_t size) {
+  _impl_.signer_sha256_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:dsa.control.v1.PackageState.signer_sha256)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+PackageState::signer_sha256() const {
+  // @@protoc_insertion_point(field_list:dsa.control.v1.PackageState.signer_sha256)
+  return _impl_.signer_sha256_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+PackageState::mutable_signer_sha256() {
+  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.PackageState.signer_sha256)
+  return &_impl_.signer_sha256_;
 }
 
 // -------------------------------------------------------------------
@@ -21571,6 +22701,80 @@ inline ::dsa::control::v1::PowerState* Envelope::mutable_power_state() {
   return _msg;
 }
 
+// .dsa.control.v1.PowerHint power_hint = 110;
+inline bool Envelope::_internal_has_power_hint() const {
+  return body_case() == kPowerHint;
+}
+inline bool Envelope::has_power_hint() const {
+  return _internal_has_power_hint();
+}
+inline void Envelope::set_has_power_hint() {
+  _impl_._oneof_case_[0] = kPowerHint;
+}
+inline void Envelope::clear_power_hint() {
+  if (_internal_has_power_hint()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.power_hint_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::PowerHint* Envelope::release_power_hint() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.power_hint)
+  if (_internal_has_power_hint()) {
+    clear_has_body();
+    ::dsa::control::v1::PowerHint* temp = _impl_.body_.power_hint_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.power_hint_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::PowerHint& Envelope::_internal_power_hint() const {
+  return _internal_has_power_hint()
+      ? *_impl_.body_.power_hint_
+      : reinterpret_cast< ::dsa::control::v1::PowerHint&>(::dsa::control::v1::_PowerHint_default_instance_);
+}
+inline const ::dsa::control::v1::PowerHint& Envelope::power_hint() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.power_hint)
+  return _internal_power_hint();
+}
+inline ::dsa::control::v1::PowerHint* Envelope::unsafe_arena_release_power_hint() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.power_hint)
+  if (_internal_has_power_hint()) {
+    clear_has_body();
+    ::dsa::control::v1::PowerHint* temp = _impl_.body_.power_hint_;
+    _impl_.body_.power_hint_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_power_hint(::dsa::control::v1::PowerHint* power_hint) {
+  clear_body();
+  if (power_hint) {
+    set_has_power_hint();
+    _impl_.body_.power_hint_ = power_hint;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.power_hint)
+}
+inline ::dsa::control::v1::PowerHint* Envelope::_internal_mutable_power_hint() {
+  if (!_internal_has_power_hint()) {
+    clear_body();
+    set_has_power_hint();
+    _impl_.body_.power_hint_ = CreateMaybeMessage< ::dsa::control::v1::PowerHint >(GetArenaForAllocation());
+  }
+  return _impl_.body_.power_hint_;
+}
+inline ::dsa::control::v1::PowerHint* Envelope::mutable_power_hint() {
+  ::dsa::control::v1::PowerHint* _msg = _internal_mutable_power_hint();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.power_hint)
+  return _msg;
+}
+
 // .dsa.control.v1.DeviceIdle device_idle = 42;
 inline bool Envelope::_internal_has_device_idle() const {
   return body_case() == kDeviceIdle;
@@ -21642,6 +22846,80 @@ inline ::dsa::control::v1::DeviceIdle* Envelope::_internal_mutable_device_idle()
 inline ::dsa::control::v1::DeviceIdle* Envelope::mutable_device_idle() {
   ::dsa::control::v1::DeviceIdle* _msg = _internal_mutable_device_idle();
   // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.device_idle)
+  return _msg;
+}
+
+// .dsa.control.v1.HostMemory host_memory = 43;
+inline bool Envelope::_internal_has_host_memory() const {
+  return body_case() == kHostMemory;
+}
+inline bool Envelope::has_host_memory() const {
+  return _internal_has_host_memory();
+}
+inline void Envelope::set_has_host_memory() {
+  _impl_._oneof_case_[0] = kHostMemory;
+}
+inline void Envelope::clear_host_memory() {
+  if (_internal_has_host_memory()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.host_memory_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::HostMemory* Envelope::release_host_memory() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.host_memory)
+  if (_internal_has_host_memory()) {
+    clear_has_body();
+    ::dsa::control::v1::HostMemory* temp = _impl_.body_.host_memory_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.host_memory_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::HostMemory& Envelope::_internal_host_memory() const {
+  return _internal_has_host_memory()
+      ? *_impl_.body_.host_memory_
+      : reinterpret_cast< ::dsa::control::v1::HostMemory&>(::dsa::control::v1::_HostMemory_default_instance_);
+}
+inline const ::dsa::control::v1::HostMemory& Envelope::host_memory() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.host_memory)
+  return _internal_host_memory();
+}
+inline ::dsa::control::v1::HostMemory* Envelope::unsafe_arena_release_host_memory() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.host_memory)
+  if (_internal_has_host_memory()) {
+    clear_has_body();
+    ::dsa::control::v1::HostMemory* temp = _impl_.body_.host_memory_;
+    _impl_.body_.host_memory_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_host_memory(::dsa::control::v1::HostMemory* host_memory) {
+  clear_body();
+  if (host_memory) {
+    set_has_host_memory();
+    _impl_.body_.host_memory_ = host_memory;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.host_memory)
+}
+inline ::dsa::control::v1::HostMemory* Envelope::_internal_mutable_host_memory() {
+  if (!_internal_has_host_memory()) {
+    clear_body();
+    set_has_host_memory();
+    _impl_.body_.host_memory_ = CreateMaybeMessage< ::dsa::control::v1::HostMemory >(GetArenaForAllocation());
+  }
+  return _impl_.body_.host_memory_;
+}
+inline ::dsa::control::v1::HostMemory* Envelope::mutable_host_memory() {
+  ::dsa::control::v1::HostMemory* _msg = _internal_mutable_host_memory();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.host_memory)
   return _msg;
 }
 
@@ -22012,6 +23290,154 @@ inline ::dsa::control::v1::InstallResult* Envelope::_internal_mutable_install_re
 inline ::dsa::control::v1::InstallResult* Envelope::mutable_install_result() {
   ::dsa::control::v1::InstallResult* _msg = _internal_mutable_install_result();
   // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.install_result)
+  return _msg;
+}
+
+// .dsa.control.v1.QueryPackage query_package = 65;
+inline bool Envelope::_internal_has_query_package() const {
+  return body_case() == kQueryPackage;
+}
+inline bool Envelope::has_query_package() const {
+  return _internal_has_query_package();
+}
+inline void Envelope::set_has_query_package() {
+  _impl_._oneof_case_[0] = kQueryPackage;
+}
+inline void Envelope::clear_query_package() {
+  if (_internal_has_query_package()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.query_package_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::QueryPackage* Envelope::release_query_package() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.query_package)
+  if (_internal_has_query_package()) {
+    clear_has_body();
+    ::dsa::control::v1::QueryPackage* temp = _impl_.body_.query_package_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.query_package_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::QueryPackage& Envelope::_internal_query_package() const {
+  return _internal_has_query_package()
+      ? *_impl_.body_.query_package_
+      : reinterpret_cast< ::dsa::control::v1::QueryPackage&>(::dsa::control::v1::_QueryPackage_default_instance_);
+}
+inline const ::dsa::control::v1::QueryPackage& Envelope::query_package() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.query_package)
+  return _internal_query_package();
+}
+inline ::dsa::control::v1::QueryPackage* Envelope::unsafe_arena_release_query_package() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.query_package)
+  if (_internal_has_query_package()) {
+    clear_has_body();
+    ::dsa::control::v1::QueryPackage* temp = _impl_.body_.query_package_;
+    _impl_.body_.query_package_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_query_package(::dsa::control::v1::QueryPackage* query_package) {
+  clear_body();
+  if (query_package) {
+    set_has_query_package();
+    _impl_.body_.query_package_ = query_package;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.query_package)
+}
+inline ::dsa::control::v1::QueryPackage* Envelope::_internal_mutable_query_package() {
+  if (!_internal_has_query_package()) {
+    clear_body();
+    set_has_query_package();
+    _impl_.body_.query_package_ = CreateMaybeMessage< ::dsa::control::v1::QueryPackage >(GetArenaForAllocation());
+  }
+  return _impl_.body_.query_package_;
+}
+inline ::dsa::control::v1::QueryPackage* Envelope::mutable_query_package() {
+  ::dsa::control::v1::QueryPackage* _msg = _internal_mutable_query_package();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.query_package)
+  return _msg;
+}
+
+// .dsa.control.v1.PackageState package_state = 66;
+inline bool Envelope::_internal_has_package_state() const {
+  return body_case() == kPackageState;
+}
+inline bool Envelope::has_package_state() const {
+  return _internal_has_package_state();
+}
+inline void Envelope::set_has_package_state() {
+  _impl_._oneof_case_[0] = kPackageState;
+}
+inline void Envelope::clear_package_state() {
+  if (_internal_has_package_state()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.package_state_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::PackageState* Envelope::release_package_state() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.package_state)
+  if (_internal_has_package_state()) {
+    clear_has_body();
+    ::dsa::control::v1::PackageState* temp = _impl_.body_.package_state_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.package_state_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::PackageState& Envelope::_internal_package_state() const {
+  return _internal_has_package_state()
+      ? *_impl_.body_.package_state_
+      : reinterpret_cast< ::dsa::control::v1::PackageState&>(::dsa::control::v1::_PackageState_default_instance_);
+}
+inline const ::dsa::control::v1::PackageState& Envelope::package_state() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.package_state)
+  return _internal_package_state();
+}
+inline ::dsa::control::v1::PackageState* Envelope::unsafe_arena_release_package_state() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.package_state)
+  if (_internal_has_package_state()) {
+    clear_has_body();
+    ::dsa::control::v1::PackageState* temp = _impl_.body_.package_state_;
+    _impl_.body_.package_state_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_package_state(::dsa::control::v1::PackageState* package_state) {
+  clear_body();
+  if (package_state) {
+    set_has_package_state();
+    _impl_.body_.package_state_ = package_state;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.package_state)
+}
+inline ::dsa::control::v1::PackageState* Envelope::_internal_mutable_package_state() {
+  if (!_internal_has_package_state()) {
+    clear_body();
+    set_has_package_state();
+    _impl_.body_.package_state_ = CreateMaybeMessage< ::dsa::control::v1::PackageState >(GetArenaForAllocation());
+  }
+  return _impl_.body_.package_state_;
+}
+inline ::dsa::control::v1::PackageState* Envelope::mutable_package_state() {
+  ::dsa::control::v1::PackageState* _msg = _internal_mutable_package_state();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.package_state)
   return _msg;
 }
 
@@ -23857,6 +25283,14 @@ inline Envelope::BodyCase Envelope::body_case() const {
 
 // -------------------------------------------------------------------
 
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 
 // @@protoc_insertion_point(namespace_scope)
 
@@ -23872,6 +25306,7 @@ template <> struct is_proto_enum< ::dsa::control::v1::RejectReason> : ::std::tru
 template <> struct is_proto_enum< ::dsa::control::v1::PointerAction> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::PointerTool> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::KeyAction> : ::std::true_type {};
+template <> struct is_proto_enum< ::dsa::control::v1::PowerHintKind> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::InstallStatus> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::FileAction> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::NodeAction> : ::std::true_type {};

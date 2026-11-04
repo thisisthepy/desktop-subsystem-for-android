@@ -5,7 +5,7 @@
 It fails when the shell apps are still there, when the build is still debuggable, when an
 app is not signed with one of the keys in the key folder, when the framework overlay or the
 trace script is missing, when the agent is missing or not signed with the platform key, when
-Settings still has the preferences that crash it without the Bluetooth service, when the files
+Settings still has the preferences or code that crash it without Bluetooth, when the files
 do not match image.json, or when the ramdisk lacks the directories and links Android's first
 stage init needs.
 
@@ -110,6 +110,14 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
                 if left:
                     problems.append(f"{name}:{xml} still has {', '.join(left)}, which crash Settings "
                                     "without the Bluetooth service")
+            for dex in sorted(f for f in files if re.fullmatch(r"classes\d*\.dex", f)):
+                content = apk.read(dex)
+                if content[:4] != b"dex\n":
+                    continue
+                _, left = make_image.edit_dex(content, make_image.SETTINGS_CODE_WITHOUT_BLUETOOTH)
+                if left:
+                    problems.append(f"{name}:{dex} still has the code in {', '.join(sorted(set(left)))} "
+                                    "that crashes Settings without the Bluetooth adapter")
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
     if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:
@@ -200,6 +208,24 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
             problems.append(f"{apex} is still in the image and would serve the composer HAL too")
     if "META/file_contexts.bin" in names and b"/vendor/bin/hw/dsa-hwcomposer" not in z.read("META/file_contexts.bin"):
         problems.append("META/file_contexts.bin does not label dsa-hwcomposer, so init refuses to start it")
+
+    # DSA's power and health HALs: without them the host never hears the guest's power hints,
+    # and the guest's battery is Cuttlefish's made-up one.
+    for name, what in [("dsa-power", "IPower/default"), ("dsa-health", "IHealth/default")]:
+        if f"VENDOR/bin/hw/{name}" not in names:
+            problems.append(f"VENDOR/bin/hw/{name} is missing from the image")
+        if f"VENDOR/etc/init/{name}.rc" not in names:
+            problems.append(f"VENDOR/etc/init/{name}.rc is missing, so init never starts {name}")
+        hal_manifest = f"VENDOR/etc/vintf/manifest/{name}.xml"
+        if hal_manifest not in names:
+            problems.append(f"{hal_manifest} is missing, so its HAL is not declared")
+        elif f"<fqname>{what}</fqname>" not in z.read(hal_manifest).decode():
+            problems.append(f"{name}.xml does not declare {what}")
+        if "META/file_contexts.bin" in names and f"/vendor/bin/hw/{name}".encode() not in z.read("META/file_contexts.bin"):
+            problems.append(f"META/file_contexts.bin does not label {name}, so init refuses to start it")
+    for apex in ["com.android.hardware.power", "com.google.cf.health"]:
+        if f"VENDOR/apex/{apex}.apex" in names:
+            problems.append(f"{apex} is still in the image and would serve its HAL too")
 
     if "VENDOR/etc/selinux/vendor_file_contexts" in names:
         vendor_fc = z.read("VENDOR/etc/selinux/vendor_file_contexts").decode()

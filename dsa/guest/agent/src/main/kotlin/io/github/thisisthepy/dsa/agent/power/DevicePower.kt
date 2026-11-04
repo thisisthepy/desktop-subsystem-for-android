@@ -10,7 +10,26 @@ data class Battery(
     val percent: Int,
     /** Whether the battery is charging. */
     val charging: Boolean,
-)
+) {
+    /** The status the battery service reports for this battery. */
+    val status: BatteryStatus
+        get() = when {
+            !present -> BatteryStatus.UNKNOWN
+            charging -> BatteryStatus.CHARGING
+            acOnline && percent >= 100 -> BatteryStatus.FULL
+            acOnline -> BatteryStatus.NOT_CHARGING
+            else -> BatteryStatus.DISCHARGING
+        }
+}
+
+/** The battery service's status, as `BatteryManager.EXTRA_STATUS` reports it. */
+enum class BatteryStatus {
+    UNKNOWN,
+    CHARGING,
+    DISCHARGING,
+    NOT_CHARGING,
+    FULL,
+}
 
 /** The framework's power controls the agent uses: the screen, Doze and the battery. */
 interface DevicePower {
