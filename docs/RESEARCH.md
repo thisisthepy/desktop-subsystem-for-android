@@ -732,3 +732,65 @@ INTENT 제안:
 - Electron 기준값의 이 PC 실측.
 - 위 절감량 전부. system_server의 서비스별 비용은 `dumpsys meminfo`로 나뉘지 않으므로, 서비스를 하나씩 끈 이미지로 차이를 재야 한다.
 - WSA, Waydroid의 대기 메모리 공개 실측.
+
+## R9. ARM 앱 번역 계층: 안드로이드의 네이티브 브리지와 오픈 소스 후보 (PROJECT Q3)
+
+**기준.** 2026-11-05, 공개 자료와 소스 저장소를 읽었다. 이 조사에서 빌드하거나 실행하지 않았다. 게스트는 x86_64 전용이고 32비트 zygote가 없다.
+
+### 안드로이드의 네이티브 브리지
+
+- zygote는 `ro.dalvik.vm.native.bridge`가 비어 있지 않고 `0`이 아니면 그 이름의 라이브러리를 브리지로 쓴다(ART의 `-XX:NativeBridge`). 이름은 경로가 아니라 파일 이름이다(`NativeBridgeNameAcceptable`이 검사한다). 라이브러리는 기본 링커 이름 공간(`/system/lib64` 등)에서 찾는다. DSA는 영숫자, `.`, `_`, `-`로 된 `.so` 이름만 받는다.
+- 브리지는 `NativeBridgeItf` 심볼로 `NativeBridgeCallbacks` 표를 내보낸다. AOSP `art/libnativebridge/include/nativebridge/native_bridge.h`(main)의 주석으로 보면, 버전이 오를 때마다 함수가 붙었다: 호환성 확인과 신호 처리(v2), 링커 이름 공간과 `unloadLibrary`(v3), 내보낸 이름 공간(v5, Android 10), `getTrampoline`을 대신하는 `getTrampolineWithJNICallType`(v7), `isNativeBridgeFunctionPointer`(v8). v4, v6과 `preZygoteFork`, `getTrampolineForFunctionPointer`가 붙은 버전은 주석에 없다. Android 16과 17이 받는 최고 버전은 그 가지의 헤더로 확인해야 한다. 브리지는 자기가 만든 버전을 알리고, 런타임은 그보다 새 함수를 부르지 않는다.
+- 앱이 ARM 라이브러리만 담고 있으면, 패키지 관리자는 `ro.product.cpu.abilist`(앞이 우선)에 있는 ABI만 고른다. 목록에 `arm64-v8a`가 없으면 설치가 `INSTALL_FAILED_NO_MATCHING_ABIS`로 실패한다. 목록은 init이 부팅 때 파티션별 `ro.<파티션>.product.cpu.abilist{,32,64}`에서 만들고, 그 뒤에는 바꿀 수 없다(`ro.*`).
+- 앱 프로세스는 `ro.dalvik.vm.isa.arm64=x86_64`로 ARM64 명령 집합이 x86_64 위에서 번역된다는 것을 안다.
+- ARM 실행 파일(앱이 `exec`하는 것)은 `ro.enable.native.bridge.exec=1`과 binfmt_misc 처리기(`/proc/sys/fs/binfmt_misc/register`에 ELF 머리와 번역기 실행 파일을 등록)로 돈다.
+- 번역기는 ARM64 게스트 라이브러리(`libc.so`, `libm.so` 같은 bionic, `/system/lib64/arm64/`)와 그 링커 구성, 그리고 호스트 라이브러리로 넘기는 프록시 라이브러리를 함께 필요로 한다.
+- 32비트 ARM(`armeabi-v7a`)은 32비트 zygote(`app_process32`)가 있어야 한다. DSA 게스트는 64비트 전용이므로 `armeabi-v7a` 전용 앱은 번역 계층이 있어도 돌지 않는다.
+
+### 다른 제품이 하는 일 (설명만, 코드는 가져오지 않는다)
+
+| 제품 | 방식 | 라이선스 |
+|---|---|---|
+| WSA | Intel Bridge Technology(Houdini 계열). 이미지에 들어 있었다 | 독점 |
+| ChromeOS ARCVM | Intel PC는 Houdini, AMD PC는 Google의 libndk_translation | 독점 |
+| BlueStacks | 자체 번역기를 이미지에 넣는다 | 독점 |
+| Android Emulator(Google APIs x86_64, Android 14-17) | `ro.dalvik.vm.native.bridge=libndk_translation.so`. Berberis를 바탕으로 한 닫힌 ARM64 백엔드 | 독점 |
+| Waydroid | 이미지에는 없다. 별도 스크립트(GPL-3.0)가 사용자 PC에서 Houdini나 libndk_translation을 받아 시스템 오버레이에 넣고 속성을 고친다 | 번역기는 독점 |
+| Anbox(옛 오픈 소스판) | ARM 번역 없음 | |
+
+공통점은 둘이다. 번역기가 모두 독점이고, 속성과 라이브러리를 부팅 전에 이미지(또는 오버레이)에 넣는다. Waydroid의 방식, 곧 사용자가 가져온 번역기를 시스템 위에 얹는 구조가 DSA의 플러그인 구조와 가장 가깝다.
+
+### 오픈 소스 후보
+
+| 후보 | 방향 | 라이선스 | Apache-2.0 옆 배포 | 안드로이드 앱 | 상태 |
+|---|---|---|---|---|---|
+| Berberis(AOSP `platform/frameworks/libs/binary_translation`) | riscv64 → x86_64 | Apache-2.0 | 된다 | riscv64 앱만. 저장소에 ARM 게스트가 없다 | Google이 유지. README는 CTS와 일부 앱이 돈다고 한다 |
+| Digitalis(`github.com/DigitalisX64/digitalis`) | arm64 → x86_64 | Apache-2.0(Berberis 수정판) | 된다 | ARM64 앱 | 활발함(마지막 푸시 2026-10-30, 별 20개). `android16`과 `android17` 가지. 배포판 없음. 자체 보고: 해석기, 가벼운 JIT, 최적화 JIT, 프록시 라이브러리 21개, 호스트 테스트 3600개 이상, 예제 앱 159개 |
+| FEX-Emu | x86/x86_64 → arm64 | MIT | 된다 | 방향이 반대다 | |
+| box64, box86 | x86 → arm64, riscv64 | MIT | 된다 | 방향이 반대다 | |
+| QEMU 사용자 모드 | arm64 → x86_64 | GPL-2.0 | 별도 실행 파일로는 되지만 브리지 라이브러리에 넣으면 GPL이 된다 | 프로세스 전체를 번역한다. 네이티브 브리지가 아니므로 ART 전체를 ARM으로 돌려야 하고, 느리고 ARM 시스템 이미지가 따로 필요하다 | |
+| Darling | macOS 바이너리 → Linux | GPL-3.0 | | 명령 집합 번역이 아니다 | |
+| libhoudini, libndk_translation | arm → x86 | 독점 | 안 된다 | | 배포 금지 |
+
+Digitalis의 배포 묶음(`docker/build-digitalis.sh`)은 번역기(`libberberis_arm64.so`), `libberberis_exec_region.so`, 프록시 라이브러리, `berberis_program_runner_arm64`와 binfmt_misc 처리기, ARM64 게스트 라이브러리(`system/lib64/arm64/`), `app_process64`와 `linker64`의 ARM64판, `ld.config.arm64.txt`, binfmt_misc 규칙을 담는다. 속성은 `ro.dalvik.vm.native.bridge=libberberis_arm64.so`, `ro.dalvik.vm.isa.arm64=x86_64`, `ro.enable.native.bridge.exec=1`이다.
+
+### 결정
+
+1. **플러그인 구조를 먼저 둔다.** 번역기는 이미지와 별도인 묶음 하나(읽기 전용 erofs 이미지와 그 설명 파일)로 받는다. 게스트는 그 묶음이 사용자 디스크에 있고 설정이 켜져 있을 때만 부팅 때 속성을 정하고 파일을 시스템 위에 얹는다. 묶음이 없으면 이미지는 지금과 같다(`x86_64`만 알린다).
+2. **기본 번역기로 Digitalis를 후보로 둔다.** 라이선스는 Apache-2.0이라 함께 배포할 수 있다. 다만 지금 기본으로 넣지는 못한다. 이유는 셋이다.
+   - 빌드 비용: Berberis는 Soong 안에서만 빌드되고, Digitalis의 묶음은 AOSP 트리 전체(`repo sync` 수백 GB, 이미지 조립까지 한 `out/`)에서 나온다. GitHub 호스트 러너(디스크 약 14 GB, 작업 6시간)로는 못 한다. 큰 자체 호스트 러너가 있거나 Digitalis가 배포판을 내야 한다.
+   - 버전: DSA 게스트는 Android 17이다. Digitalis는 `android17` 가지가 있지만 배포 묶음 문서는 Android 16 트리를 기준으로 한다. 번역기와 게스트 라이브러리는 같은 플랫폼에서 나와야 한다.
+   - 검증: 호환성 수치는 자체 보고뿐이다. DSA에서 ARM64 전용 앱으로 실측해야 한다.
+3. 저장소는 Digitalis를 받아 묶음을 만드는 스크립트(`dsa/guest/arm-translation/`)를 둔다. 받는 것은 `.scratch/` 아래로만 받고, 코드를 들여오지 않는다. 큰 PC에서 그 스크립트로 만든 묶음을 `dsa arm-translation install`로 넣어 시험할 수 있다.
+
+### 대가
+
+- 번역기를 시스템 위에 얹으려면 게스트 커널에 overlayfs와 loop 장치, binfmt_misc가 있어야 한다.
+- 묶음은 사용자 디스크(`/data/vendor`)에 들어가므로 사용자마다 한 벌이다(수십에서 100여 MB).
+- `ro.product.cpu.abilist`는 부팅 때만 정해지므로, 묶음을 넣거나 빼면 안드로이드를 다시 시작해야 한다.
+
+### 확인하지 못한 것
+
+- Digitalis 묶음이 Android 17 DSA 게스트에서 실제로 돌고, 어떤 앱이 도는지.
+- 번역된 앱의 성능(시작 시간, 프레임 시간). 공개된 수치가 없다.
+- 오버레이 위의 라이브러리를 앱 프로세스가 SELinux 거부 없이 읽는지. PC에서 `dmesg`로 확인한다.
