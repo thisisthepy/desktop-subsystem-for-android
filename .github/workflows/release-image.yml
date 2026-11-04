@@ -48,6 +48,7 @@ jobs:
     name: Build the guest Hyper-V graphics transport
     if: inputs.rebuild_images
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -117,6 +118,7 @@ jobs:
     name: Build the guest control daemon
     if: inputs.rebuild_images
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -142,6 +144,7 @@ jobs:
     name: Build the guest hwcomposer
     if: inputs.rebuild_images
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -168,6 +171,7 @@ jobs:
     name: Build the guest codec HAL
     if: inputs.rebuild_images
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -194,6 +198,7 @@ jobs:
     name: Build the guest power and health HALs
     if: inputs.rebuild_images
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -222,6 +227,7 @@ jobs:
     name: Build the guest agent
     if: inputs.rebuild_images
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -423,6 +429,7 @@ jobs:
     needs: image
     if: inputs.rebuild_images
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       public_key: ${{ steps.sign.outputs.public_key }}
       newest_major: ${{ steps.write.outputs.newest_major }}
@@ -487,6 +494,7 @@ jobs:
     name: Take the kernel and the trust key from the published images
     if: ${{ !inputs.rebuild_images }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       public_key: ${{ steps.list.outputs.public_key }}
       newest_major: ${{ steps.list.outputs.newest_major }}
@@ -544,10 +552,12 @@ jobs:
           (needs.list.result == 'success' || needs.published.result == 'success') }}
     needs: [kernel, list, published]
     runs-on: windows-latest
+    timeout-minutes: 30
     permissions:
       contents: write
       pull-requests: read
       issues: read
+      actions: read
     env:
       GH_TOKEN: ${{ github.token }}
     defaults:
@@ -561,6 +571,18 @@ jobs:
           name: guest-kernel
           path: .scratch/kernel-out
 
+      # The host graphics renderer is built by the graphics workflow; the newest build that
+      # passed is the one shipped.
+      - name: Take the graphics library from the newest graphics build
+        run: |
+          $run = gh run list --repo ${{ github.repository }} --workflow test-graphics.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId'
+          if (-not $run) { throw "no graphics build has succeeded, so there is no gfxstream_backend.dll to ship" }
+          gh run download $run --repo ${{ github.repository }} --name host-gfxstream-windows --dir .scratch\host-gfxstream
+          if ($LASTEXITCODE -ne 0) { throw "downloading host-gfxstream-windows from run $run failed" }
+          $dll = Get-ChildItem -Recurse -File .scratch\host-gfxstream -Filter gfxstream_backend.dll | Select-Object -First 1
+          if (-not $dll -or $dll.Length -eq 0) { throw "run $run has no usable gfxstream_backend.dll" }
+          "GFXSTREAM_DLL=$($dll.FullName)" >> $env:GITHUB_ENV
+
       - name: Install WiX 5
         run: dotnet tool install --global wix --version 5.0.2
 
@@ -568,7 +590,7 @@ jobs:
       - name: Build the package and setup.exe
         run: >
           dsa/host/platform/windows/installer/build.ps1 -Version ${{ inputs.installer_version }}
-          -Kernel .scratch/kernel-out/bzImage
+          -Kernel .scratch/kernel-out/bzImage -GfxstreamBackend $env:GFXSTREAM_DLL
           -ListUrl https://github.com/${{ github.repository }}/releases/download/images/images.json
           -TrustedKey ${{ needs.list.outputs.public_key || needs.published.outputs.public_key }}
           -AndroidMajor ${{ needs.list.outputs.newest_major || needs.published.outputs.newest_major }}

@@ -2,7 +2,7 @@
 <!--
   setup.exe: the DSA package behind this project's own setup screens (setup-ui\).
 
-  Build variables (-d): Version, MsiPath, SetupUiDir (the built setup-ui\ program), and
+  Build variables (-d): Version, ProductName, MsiPath, SetupUiDir (the built setup-ui\ program), and
   optionally AndroidMajor (the newest Android the release supports, shown on the first
   screen) and BundledImage (1 when the package carries an Android image).
 
@@ -18,7 +18,7 @@
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
-    <Bundle Name="Desktop Subsystem for Android"
+    <Bundle Name="$(ProductName)"
             Manufacturer="Thisisthepy"
             Version="$(Version)"
             UpgradeCode="706723c3-776c-4ab2-8402-780943fda74c"

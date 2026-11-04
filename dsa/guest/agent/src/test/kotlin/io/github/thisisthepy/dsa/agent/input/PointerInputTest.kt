@@ -167,6 +167,18 @@ class PointerInputTest {
     }
 
     @Test
+    fun fr5_a_hover_and_a_click_at_one_point_reach_the_same_display_point() {
+        input.handle(event(PointerAction.POINTER_ACTION_HOVER_MOVE, 87f, 54f))
+        input.handle(event(PointerAction.POINTER_ACTION_DOWN, 87f, 54f, buttons = MotionEvent.BUTTON_PRIMARY))
+
+        val hover = injector.injected.first { it.action == MotionEvent.ACTION_HOVER_MOVE }
+        val down = injector.injected.first { it.action == MotionEvent.ACTION_DOWN }
+        assertEquals(187f to 104f, hover.pointers.single().let { it.x to it.y })
+        assertEquals(hover.pointers.single().let { it.x to it.y }, down.pointers.single().let { it.x to it.y })
+        assertEquals(InputDevice.SOURCE_MOUSE, hover.source)
+    }
+
+    @Test
     fun fr5_the_wheel_scrolls_at_the_mouses_place() {
         val scroll = PointerEvent.newBuilder(event(PointerAction.POINTER_ACTION_SCROLL, 20f, 30f))
             .setScrollY(-1f)

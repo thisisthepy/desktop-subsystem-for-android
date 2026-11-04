@@ -952,10 +952,10 @@ pub struct Settings {
     /// summary at the end of a drag. Off by default; the same rules as input_trace.
     #[prost(bool, tag = "12")]
     pub resize_trace: bool,
-    /// The most memory the caller's Android may have, in MiB. 0, the default, sizes it to the
-    /// computer: its memory less what the host's own system keeps for itself. It takes effect
+    /// The most memory the caller's Android may have, in MiB. 0, the default, is automatic: the
+    /// service's default size. It takes effect
     /// the next time Android starts.
-    #[prost(uint32, tag = "13")]
+    #[prost(uint32, tag = "14")]
     pub memory_limit_mb: u32,
 }
 /// Turns the connection into the accessibility tree of one of the caller's task windows, for a

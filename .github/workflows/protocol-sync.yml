@@ -1,0 +1,104 @@
+# Keeps the generated protocol code of open pull requests in step with their definitions,
+# so nobody has to run the generator by hand, fetch a patch from a failed run, or resolve a
+# conflict in generated files.
+#
+# On a pull request from a branch of this repository, it regenerates that branch. After a
+# push to develop, it does the same for every open pull request into develop, which is when
+# their generated files start to conflict or go stale. Forks are never touched: their
+# token cannot push, and their code is not run with a token that can.
+#
+# What it does to one branch is .github/scripts/protocol/regenerate.sh. A push made with the
+# workflow token starts no workflow, so after pushing it starts the test workflows on the
+# branch itself. Those runs are not pull request events, so they never start this workflow
+# again; and a pull request whose last commit is already a regeneration is skipped.
+
+name: Protocol sync
+
+on:
+  pull_request:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+concurrency:
+  group: protocol-sync-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+  pull-requests: read
+
+jobs:
+  regenerate:
+    name: Regenerate the protocol code on pull request branches
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The scripts come from develop (or the pull request's base), never from the branch
+          # being regenerated.
+          ref: ${{ github.event.pull_request.base.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: List the branches
+        id: list
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            last="$(gh api "repos/$REPO/commits/${{ github.event.pull_request.head.sha }}" --jq .commit.message | head -1)"
+            if [[ "$last" == "Chore: Regenerate the protocol code"* ]]; then
+              echo "the last commit is already a regeneration"
+              : > "$RUNNER_TEMP/branches"
+            else
+              printf '%s %s\n' "${{ github.head_ref }}" "${{ github.base_ref }}" > "$RUNNER_TEMP/branches"
+            fi
+          else
+            gh pr list --repo "$REPO" --base develop --state open --limit 100 \
+              --json headRefName,baseRefName,isCrossRepository \
+              --jq '.[] | select(.isCrossRepository | not) | "\(.headRefName) \(.baseRefName)"' \
+              > "$RUNNER_TEMP/branches"
+          fi
+          cat "$RUNNER_TEMP/branches"
+          if [[ -s "$RUNNER_TEMP/branches" ]]; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install protoc
+        if: steps.list.outputs.any == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends protobuf-compiler
+          protoc --version
+
+      - name: Regenerate each branch
+        if: steps.list.outputs.any == 'true'
+        run: |
+          if [[ ! -f .github/scripts/protocol/regenerate.sh ]]; then
+            # The pull request that adds this workflow: its base has no script yet.
+            echo "::notice::the base has no regenerate.sh yet; nothing to do"
+            exit 0
+          fi
+          cp .github/scripts/protocol/regenerate.sh "$RUNNER_TEMP/regenerate.sh"
+          git config user.name "dsa-ci"
+          git config user.email "dsa-ci@users.noreply.github.com"
+          failed=0
+          while read -r branch base; do
+            echo "::group::$branch"
+            if result="$(bash "$RUNNER_TEMP/regenerate.sh" "$branch" "$base" | tail -1)"; then
+              if [[ "$result" == pushed ]]; then
+                for workflow in test.yml test-image.yml test-installer.yml; do
+                  gh workflow run "$workflow" --repo "$REPO" --ref "$branch"
+                done
+              fi
+            else
+              echo "::warning::regenerating $branch failed"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done < "$RUNNER_TEMP/branches"
+          exit "$failed"
