@@ -1013,7 +1013,10 @@ impl<F: Fn(&str)> std::io::Read for Progress<'_, F> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let read = self.inner.read(buf)?;
         self.sent += read as u64;
-        let percent = (self.sent * 100).checked_div(self.size).unwrap_or(100).min(100);
+        let percent = (self.sent * 100)
+            .checked_div(self.size)
+            .unwrap_or(100)
+            .min(100);
         if self.shown != Some(percent) {
             self.shown = Some(percent);
             (self.step)(&format!("progress {percent}"));
@@ -1175,9 +1178,10 @@ fn apk_info(invocation: &Invocation, connector: &mut dyn Connector) -> Result<St
     let mut kind = None;
     if let Ok(mut client) = connect(connector, None, false, Duration::from_secs(5)) {
         android = "stopped";
-        if client.status().is_ok_and(|status| {
-            matches!(status.state, SessionState::Active | SessionState::Dozing)
-        }) {
+        if client
+            .status()
+            .is_ok_and(|status| matches!(status.state, SessionState::Active | SessionState::Dozing))
+        {
             if let Ok(state) = client.package_state(&info.package) {
                 android = "running";
                 kind = Some(InstallKind::decide(

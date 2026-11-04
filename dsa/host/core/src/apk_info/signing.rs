@@ -270,7 +270,10 @@ mod tests {
     #[test]
     fn fr11_the_signer_is_read_from_the_apk_signing_block() {
         let certificate = b"\x30\x03\x02\x01\x07".to_vec();
-        let block = signing_block(&[(0x4242_4242, &b"padding"[..]), (V2, &v2_value(&certificate)[..])]);
+        let block = signing_block(&[
+            (0x4242_4242, &b"padding"[..]),
+            (V2, &v2_value(&certificate)[..]),
+        ]);
         let data = archive(&[("AndroidManifest.xml", &b"m"[..])], &block);
         let mut zip = Archive::open(Cursor::new(data)).unwrap();
         let signer = signer(&mut zip).expect("a signer");
@@ -283,7 +286,9 @@ mod tests {
     fn fr11_the_signer_of_an_apk_with_only_a_jar_signature_is_read() {
         let certificate = [0x30u8, 0x03, 0x02, 0x01, 0x07];
         // SignedData { version 1, digestAlgorithms {}, contentInfo { data }, [0] { cert } }
-        let mut signed = vec![0x02, 0x01, 0x01, 0x31, 0x00, 0x30, 0x02, 0x06, 0x00, 0xa0, 0x05];
+        let mut signed = vec![
+            0x02, 0x01, 0x01, 0x31, 0x00, 0x30, 0x02, 0x06, 0x00, 0xa0, 0x05,
+        ];
         signed.extend_from_slice(&certificate);
         let mut signed_data = vec![0x30, signed.len() as u8];
         signed_data.extend_from_slice(&signed);

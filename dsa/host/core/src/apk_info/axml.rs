@@ -233,10 +233,7 @@ pub fn parse(data: &[u8]) -> Result<Document, String> {
                     let raw = u32_at(data, a + 8)?;
                     attributes.push(Attribute {
                         name: pool.get(name_index).unwrap_or_default().to_string(),
-                        resource_id: resource_ids
-                            .get(name_index as usize)
-                            .copied()
-                            .unwrap_or(0),
+                        resource_id: resource_ids.get(name_index as usize).copied().unwrap_or(0),
                         raw: (raw != u32::MAX)
                             .then(|| pool.get(raw).map(str::to_string))
                             .flatten(),

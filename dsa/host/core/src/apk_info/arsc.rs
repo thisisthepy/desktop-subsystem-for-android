@@ -130,7 +130,9 @@ impl ResourceTable {
             } else {
                 let value_at = at + usize::from(entry_size);
                 Value {
-                    kind: *data.get(value_at + 3).ok_or("a resource entry is damaged")?,
+                    kind: *data
+                        .get(value_at + 3)
+                        .ok_or("a resource entry is damaged")?,
                     data: u32_at(data, value_at + 4)?,
                 }
             };

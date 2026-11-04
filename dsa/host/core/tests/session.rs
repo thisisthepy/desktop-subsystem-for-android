@@ -2700,7 +2700,11 @@ fn fr11_the_install_window_learns_the_installed_version_and_signer_from_the_agen
             signer_sha256: vec![vec![5u8; 32]],
         }),
     );
-    let installed = asking.join().unwrap().expect("an answer").expect("installed");
+    let installed = asking
+        .join()
+        .unwrap()
+        .expect("an answer")
+        .expect("installed");
     assert_eq!(installed.version_code, 41);
     assert_eq!(installed.version_name, "4.1");
     assert_eq!(installed.signer_sha256, vec![vec![5u8; 32]]);

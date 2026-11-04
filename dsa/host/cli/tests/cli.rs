@@ -915,7 +915,11 @@ fn fr11_dsa_apk_info_and_install_progress_are_parsed() {
     assert!(parse(&args("apk-info"))
         .unwrap_err()
         .contains("needs the APK file"));
-    assert!(parse(&args("install notes.apk --progress")).unwrap().progress);
+    assert!(
+        parse(&args("install notes.apk --progress"))
+            .unwrap()
+            .progress
+    );
     assert!(parse(&args("status --progress")).is_err());
 }
 
@@ -963,7 +967,11 @@ fn fr11_dsa_apk_info_refuses_a_file_that_is_not_an_apk() {
     let path = apk_file("broken.apk", b"PK\x03\x04 not really");
     let output = dsa_with_path(&endpoint, "apk-info", &path, "--json");
     assert!(!output.status.success());
-    assert!(stderr(&output).contains("not a ZIP archive"), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("not a ZIP archive"),
+        "{}",
+        stderr(&output)
+    );
 }
 
 #[test]
@@ -979,7 +987,10 @@ fn fr11_dsa_install_progress_says_each_step() {
     assert_eq!(lines[0], "stage starting", "{text}");
     assert_eq!(lines[1], "stage sending", "{text}");
     assert!(lines.contains(&"progress 100"), "{text}");
-    let installing = lines.iter().position(|l| *l == "stage installing").expect(&text);
+    let installing = lines
+        .iter()
+        .position(|l| *l == "stage installing")
+        .expect(&text);
     let result: serde_json::Value = serde_json::from_str(lines[installing + 1]).expect(&text);
     assert_eq!(result["installed"], true);
 }

@@ -316,7 +316,12 @@ pub fn notes_apk() -> Vec<u8> {
             "uses-sdk",
             vec![
                 Attr::Typed("minSdkVersion", attr::MIN_SDK_VERSION, TYPE_INT_DEC, 26),
-                Attr::Typed("targetSdkVersion", attr::TARGET_SDK_VERSION, TYPE_INT_DEC, 34),
+                Attr::Typed(
+                    "targetSdkVersion",
+                    attr::TARGET_SDK_VERSION,
+                    TYPE_INT_DEC,
+                    34,
+                ),
             ],
             true,
         ),
@@ -399,7 +404,10 @@ pub fn notes_apk() -> Vec<u8> {
         &[
             ("AndroidManifest.xml", &manifest[..]),
             ("resources.arsc", &resources[..]),
-            ("res/mipmap-mdpi/ic_launcher.png", &b"\x89PNG\r\n\x1a\nmdpi"[..]),
+            (
+                "res/mipmap-mdpi/ic_launcher.png",
+                &b"\x89PNG\r\n\x1a\nmdpi"[..],
+            ),
             ("res/mipmap-xxxhdpi/ic_launcher.png", PNG),
             ("lib/x86_64/libnotes.so", &b"elf"[..]),
             ("lib/arm64-v8a/libnotes.so", &b"elf"[..]),

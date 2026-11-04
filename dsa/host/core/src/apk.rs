@@ -329,7 +329,10 @@ impl InstallKind {
 
     /// Whether Android would refuse the install.
     pub fn blocked(self) -> bool {
-        matches!(self, InstallKind::Downgrade | InstallKind::SignatureMismatch)
+        matches!(
+            self,
+            InstallKind::Downgrade | InstallKind::SignatureMismatch
+        )
     }
 
     /// A stable code for programs, such as the install window, that say it in the user's

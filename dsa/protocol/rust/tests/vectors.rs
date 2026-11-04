@@ -16,9 +16,9 @@ use dsa_protocol::control::{
     GuestNotification, Hello, HelloAccepted, HelloRejected, ImeCommit, ImeComposition, ImeCursor,
     InstallApk, InstallProgress, InstallResult, InstallStatus, KeyAction, KeyEvent, LaunchApp,
     LinkHandling, NodeAction, NodeRange, NotificationClicked, NotificationDismissed,
-    NotificationRemoved, OpenFile, OpenLink, PointerAction, PointerEvent, PointerTool, PowerState,
-    PackageState, ProcessMemory, QueryPackage, Rect, RejectReason, RequestGuestMemory, ResizeTask, Role, ScreenState,
-    SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
+    NotificationRemoved, OpenFile, OpenLink, PackageState, PointerAction, PointerEvent,
+    PointerTool, PowerState, ProcessMemory, QueryPackage, Rect, RejectReason, RequestGuestMemory,
+    ResizeTask, Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::control::{
     AddWidget, ListWidgetProviders, RemoveWidget, ResizeWidget, WidgetAdded, WidgetFrame,

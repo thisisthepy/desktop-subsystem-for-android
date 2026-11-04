@@ -2988,7 +2988,8 @@ impl HostApiClient {
             request::Body::GetPackage(types::GetPackage {
                 package_name: package.to_string(),
             }),
-            self.timeout.max(PACKAGE_QUERY_WAIT + Duration::from_secs(5)),
+            self.timeout
+                .max(PACKAGE_QUERY_WAIT + Duration::from_secs(5)),
         )? {
             response::Body::PackageState(state) => Ok(InstalledPackage::from_wire(state)),
             _ => Err(ClientError::Malformed(

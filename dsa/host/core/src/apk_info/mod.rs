@@ -65,7 +65,10 @@ pub enum Icon {
     Image(Vec<u8>),
     /// An adaptive icon: a background and a foreground of 108 dp, of which the middle 72 dp
     /// show, masked to the launcher's shape.
-    Adaptive { background: Layer, foreground: Layer },
+    Adaptive {
+        background: Layer,
+        foreground: Layer,
+    },
 }
 
 /// What an APK says about itself.
@@ -110,7 +113,8 @@ impl ApkInfo {
             .cloned()
             .ok_or("the file has no AndroidManifest.xml, so it is not an APK")?;
         let manifest = archive.read(&manifest_entry, MAX_MANIFEST)?;
-        let manifest = axml::parse(&manifest).map_err(|why| format!("AndroidManifest.xml: {why}"))?;
+        let manifest =
+            axml::parse(&manifest).map_err(|why| format!("AndroidManifest.xml: {why}"))?;
         let table = match archive.entry("resources.arsc").cloned() {
             Some(entry) => {
                 let data = archive.read(&entry, MAX_RESOURCES)?;
@@ -128,9 +132,17 @@ impl ApkInfo {
             .filter(|package| crate::apk::valid_package_name(package))
             .ok_or("AndroidManifest.xml names no valid package")?;
         let version_code = i64::from(root.integer(attr::VERSION_CODE, "versionCode").unwrap_or(0))
-            | (i64::from(root.integer(attr::VERSION_CODE_MAJOR, "versionCodeMajor").unwrap_or(0))
-                << 32);
-        let version_name = text(root, attr::VERSION_NAME, "versionName", &manifest.pool, &table);
+            | (i64::from(
+                root.integer(attr::VERSION_CODE_MAJOR, "versionCodeMajor")
+                    .unwrap_or(0),
+            ) << 32);
+        let version_name = text(
+            root,
+            attr::VERSION_NAME,
+            "versionName",
+            &manifest.pool,
+            &table,
+        );
         let children = || manifest.elements.iter().filter(|e| e.depth == 1);
         let uses_sdk = children().find(|e| e.name == "uses-sdk");
         let min_sdk = uses_sdk
@@ -255,7 +267,11 @@ fn best(mut candidates: Vec<(u16, String)>) -> Option<String> {
     candidates.into_iter().next().map(|(_, path)| path)
 }
 
-fn read_file<R: Read + Seek>(archive: &mut Archive<R>, path: &str, limit: usize) -> Option<Vec<u8>> {
+fn read_file<R: Read + Seek>(
+    archive: &mut Archive<R>,
+    path: &str,
+    limit: usize,
+) -> Option<Vec<u8>> {
     let entry = archive.entry(path)?.clone();
     archive.read(&entry, limit).ok()
 }
@@ -287,7 +303,10 @@ fn icon<R: Read + Seek>(archive: &mut Archive<R>, table: &ResourceTable, id: u32
         let Some(element) = document.elements.iter().find(|e| e.name == name) else {
             return Layer::Unknown;
         };
-        match element.attribute(attr::DRAWABLE, "drawable").map(|a| a.value) {
+        match element
+            .attribute(attr::DRAWABLE, "drawable")
+            .map(|a| a.value)
+        {
             Some(Value { kind, data }) if (TYPE_FIRST_COLOR..=TYPE_LAST_COLOR).contains(&kind) => {
                 Layer::Color(color(kind, data))
             }
@@ -344,9 +363,7 @@ fn color(kind: u8, data: u32) -> u32 {
     let expand = |nibble: u32| (nibble & 0xf) * 0x11;
     match kind {
         // #rgb and #argb keep four bits a channel.
-        0x1f => {
-            0xff00_0000 | (expand(data >> 8) << 16) | (expand(data >> 4) << 8) | expand(data)
-        }
+        0x1f => 0xff00_0000 | (expand(data >> 8) << 16) | (expand(data >> 4) << 8) | expand(data),
         0x1e => {
             (expand(data >> 12) << 24)
                 | (expand(data >> 8) << 16)
