@@ -1309,6 +1309,21 @@ fn fr5_pointer_input_reaches_the_guest_as_one_message_per_event() {
 }
 
 #[test]
+fn fr5_a_press_and_a_shown_window_reach_the_power_watcher_before_the_guest() {
+    let (session, _agent, _launcher) = active_session();
+    let hints = session.watch_power_hints();
+    let down = pointer_down(7);
+    let mut moved = down;
+    moved.action = PointerAction::Move;
+    session.pointer(&moved).expect("the move is sent");
+    session.pointer(&down).expect("the down is sent");
+    assert_eq!(hints.recv_timeout(WAIT), Ok(GuestPower::HostInput));
+    session.windows_shown(true).expect("the session takes it");
+    assert_eq!(hints.recv_timeout(WAIT), Ok(GuestPower::WindowsShown(true)));
+    assert!(hints.try_recv().is_err(), "a move is not a boost");
+}
+
+#[test]
 fn fr5_pointer_input_while_the_guest_is_not_running_says_so() {
     let (session, _connector) = session_with(FakeLauncher::default(), WAIT);
     assert_eq!(

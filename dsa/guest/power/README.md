@@ -11,8 +11,10 @@ Android's power manager sets power modes (an app launching, a game, low power, t
 off) and asks for short boosts when the user touches the screen. `dsa-power` sends each mode
 change and each boost to the host as a `PowerHint`. The host keeps them and runs the guest's
 virtual processors to match: at full speed while a performance mode or a boost is on,
-frugally while the display is off, the guest is in Doze or low power is on, and otherwise as
-any program. On Windows that is the power throttling and priority of the VM's `vmmem`
+frugally while the display is off, the guest is in Doze or low power is on and no task
+window is shown, and otherwise as any program. The host also boosts on its own for 1.5
+seconds each time it passes a press, a release, a scroll or a key to the guest, since it
+hears of the input before Android does. On Windows that is the power throttling and priority of the VM's `vmmem`
 process, whose threads are the guest's processors.
 
 Only the modes and boosts the host acts on are reported as supported, so the framework sends
@@ -44,5 +46,6 @@ APEXes. `sepolicy/power.cil` lets both reach the daemon.
 - `logcat -s dsa-power dsa-health` shows `serving android.hardware.power.IPower/default` and
   `serving android.hardware.health.IHealth/default`, then `subscribed to the control channel`.
 - `dumpsys battery` shows the host's charge and whether it runs on AC power.
-- The service's log on the host shows `power: running Android's processors at full speed`
-  the first time an app launches.
+- The service's log on the host shows each change, with its UTC time and what caused it:
+  `power: 2026-11-04T12:14:03.120Z running Android's processors at full speed (the user's
+  input, a window shown; took 85 us)` on a click, and `as any program` once the boost ends.

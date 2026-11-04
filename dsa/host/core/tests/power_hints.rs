@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use dsa_host_core::power_hints::{
-    boost, mode, Performance, PowerHint, PowerHints, DEFAULT_BOOST, MAX_BOOST,
+    boost, mode, Performance, PowerHint, PowerHints, DEFAULT_BOOST, HOST_INPUT_BOOST, MAX_BOOST,
 };
 use dsa_protocol::control::{self, PowerHintKind};
 
@@ -13,6 +13,60 @@ fn on(id: i32) -> PowerHint {
 
 fn off(id: i32) -> PowerHint {
     PowerHint::Mode { id, enabled: false }
+}
+
+#[test]
+fn fr5_a_shown_window_never_runs_the_guest_frugally() {
+    let now = Instant::now();
+    for id in [mode::LOW_POWER, mode::DEVICE_IDLE, mode::DISPLAY_INACTIVE] {
+        let mut hints = PowerHints::new();
+        hints.hint(on(id), now);
+        hints.windows_shown(true);
+        assert_eq!(hints.performance(now), Performance::Normal, "mode {id}");
+        hints.windows_shown(false);
+        assert_eq!(hints.performance(now), Performance::Efficient, "mode {id}");
+    }
+}
+
+#[test]
+fn fr5_the_hosts_input_runs_the_guest_at_full_speed_at_once_and_then_ends() {
+    let now = Instant::now();
+    let mut hints = PowerHints::new();
+    hints.hint(on(mode::DISPLAY_INACTIVE), now);
+    hints.host_input(now);
+    assert_eq!(hints.performance(now), Performance::Full);
+    assert_eq!(hints.next_change(now), Some(now + HOST_INPUT_BOOST));
+    assert!(hints.explain(now).contains("the user's input"));
+    let later = now + HOST_INPUT_BOOST;
+    assert_eq!(hints.performance(later), Performance::Efficient);
+}
+
+#[test]
+fn fr5_the_hosts_input_outlasts_a_shorter_guest_boost() {
+    let now = Instant::now();
+    let mut hints = PowerHints::new();
+    hints.host_input(now);
+    hints.hint(
+        PowerHint::Boost {
+            id: boost::INTERACTION,
+            duration_ms: 10,
+        },
+        now,
+    );
+    assert_eq!(
+        hints.performance(now + Duration::from_millis(500)),
+        Performance::Full
+    );
+}
+
+#[test]
+fn fr5_a_shown_window_outlives_the_guest_stopping() {
+    let now = Instant::now();
+    let mut hints = PowerHints::new();
+    hints.windows_shown(true);
+    hints.clear();
+    hints.hint(on(mode::DISPLAY_INACTIVE), now);
+    assert_eq!(hints.performance(now), Performance::Normal);
 }
 
 #[test]
