@@ -560,6 +560,38 @@ Davey는 이 로그에 2건뿐이고 둘 다 액티비티 전환이다. 리플�
 - 클릭마다 `power: <UTC> running Android's processors at full speed (the user's input, ...; took N us)`가 누름 시각(`app.pointer`)과 1 ms 안에 나오고, 약 1.5초 뒤 `as any program`으로 돌아오는지.
 - 같은 15회 클릭에서 첫 화면 변화의 p50과 p90, `Displayed SubSettings`의 시간이 줄었는지.
 
+## 뒤로 버튼의 호버 표시가 왼쪽으로 어긋나 보이는 문제 (FR-5)
+
+**확인 대상**: 소유자 보고(Windows 11, 2880x1800 모니터 200%, Intel Arc, develop dcbb771). Settings 창의 Network & internet에서 툴바의 뒤로 화살표 위에 마우스를 올리면 호버 표시가 실제 버튼보다 조금 왼쪽에 보인다. 입력 좌표가 어긋났다는 가설(dp, DPI, 창 테두리)을 포인터 경로 전체를 읽어 검증했다. 같은 빌드에서 클릭 지연을 잴 때 찍은 `SetWindowPos(300, 150, 900, 1100)` 창 캡처(`.scratch/test-dcbb771/touch1/opened-network.png`)를 픽셀 단위로 읽었다.
+
+**경로 (코드를 읽은 결과)**
+
+1. **Win32 메시지**: `dsa-app-window`의 창 스레드는 창을 만들기 전에 `PER_MONITOR_AWARE_V2`를 켠다(`app_window/window.rs`). `WM_MOUSEMOVE`와 버튼 메시지의 `lParam`은 클라이언트 좌표의 실제 픽셀이고, 휠과 `WM_POINTER*`는 화면 좌표를 `ScreenToClient`로 바꾼다(`app_window/pointer.rs`). 창 테두리, DWM의 보이지 않는 크기 조절 테두리, 캡션은 클라이언트 밖이라 매핑에 들어오지 않는다. 창 직사각형(`GetWindowRect`)을 쓰는 곳은 포인터 경로에 없다.
+2. **호스트 매핑**: `WindowGeometry::to_guest`는 클라이언트 좌표에 `작업 크기 / GetClientRect 크기`를 곱한다. 창의 클라이언트는 작업 크기와 같게 맞춰지므로(`apply_size`, 게스트 픽셀 하나가 창 픽셀 하나) 정상 상태의 비율은 정확히 1이다. 호버(`MouseMove`)와 클릭(`MouseButton`)은 같은 `message_point`와 같은 `to_guest`를 지난다.
+3. **에이전트 주입**: `PointerInput`은 호버와 누름 모두 `bounds.left + x`, `bounds.top + y`에 `SOURCE_MOUSE`로 주입한다. `bounds`는 에이전트가 호스트에 알린 작업 경계이고, hwcomposer도 같은 `TaskUpdated`로 작업 경계를 받아 레이어를 그 원점 기준으로 합성한다(`compose_request.cpp`의 `relativeTo`). 입력과 화면의 원점이 같은 값에서 나온다.
+4. **화면 쪽**: 각 프레임은 대상 버퍼의 왼쪽 위 작업 크기 영역을 채우고(gfxstream `CompositorVk`는 대상 이미지 크기로 정규화한다), 호스트는 `SetSourceSize`와 비주얼 배율(`visual_scale`)로 그 영역을 클라이언트 전체에 맞춘다. 자르기나 오프셋은 없다.
+
+**실측 (캡처의 픽셀)**
+
+- 카드의 왼쪽 끝은 x=45, 오른쪽 끝은 x=855다. 보이는 창 테두리는 12와 888이므로 양쪽 여백이 33픽셀로 같다. 화면이 가로로 밀려 그려지지 않는다.
+- 뒤로 버튼의 원형 배경은 x 61~140, y 74~153(중심 100.5, 113.5)이고, 화살표는 x 85~116, y 98~128(중심 100.5, 113)이다. 원과 화살표의 중심이 같다.
+
+**찾은 것**
+
+1. **호스트, 프로토콜, 에이전트의 포인터 경로에는 일정한 오프셋도 비율 오차도 없다.** 정상 상태에서 클라이언트 픽셀 (x, y)는 작업 픽셀 (x, y)에 정확히 닿는다. 호버와 클릭은 같은 변환을 지나므로 서로 다를 수 없다.
+2. **호버 표시의 위치로는 입력 오프셋을 알 수 없다.** 호버 상태는 포인터 아래의 뷰가 자기 경계에 그린다. 입력이 몇 픽셀 어긋나면 표시가 켜지는 커서 위치가 달라질 뿐, 표시가 그려지는 자리는 그대로다. 그러므로 "표시가 버튼보다 왼쪽에 그려진다"는 관찰은 입력 경로가 아니라 앱이 그린 것이다.
+3. **남은 후보는 Settings의 그리기다(추론, 게스트에서 확인하지 않음).** Android 16 Settings의 툴바 뒤로 버튼은 원형 배경이 따로 있고, 호버 상태 레이어는 버튼 뷰(최소 56dp 폭) 전체나 리플의 핫스팟 영역에 그려진다. 둘의 중심이 다르면 휴대폰에서 마우스를 써도 같은 모습이 된다. 확인하려면 게스트에서 `adb shell uiautomator dump`나 레이아웃 검사기로 뒤로 버튼 `ImageButton`의 경계와 원형 배경의 경계를 비교한다.
+4. **늘어난 프레임에서의 작은 편향**: 크기 조절 중 게스트가 새 크기를 그리기 전에는 이전 프레임이 늘어나 보이고, 매핑은 같은 비율을 따른다. 매핑은 픽셀 중심이 아닌 픽셀 인덱스를 비율로 곱하므로 늘린 비율 r에서 최대 r/2 게스트 픽셀만큼 왼쪽 위로 치우친다. 1:1인 정상 상태에서는 0이고, 한 픽셀 미만이라 보고된 증상의 원인이 아니다.
+
+**고친 것**
+
+- 코드 결함을 찾지 못했으므로 동작은 바꾸지 않았다. 대신 실제 기하로 회귀를 막는 테스트를 더했다. `fr5_at_200_percent_every_client_pixel_lands_on_the_same_task_pixel`(200%, 869x1031처럼 320 dpi에서 정수 dp가 아닌 크기의 모든 클라이언트 픽셀), `fr5_at_200_percent_a_hover_and_a_click_on_the_back_button_land_on_the_same_point`, `fr5_a_frame_stretched_by_a_non_integer_ratio_has_no_offset_that_grows_across_it`(호스트), `fr5_a_hover_and_a_click_at_one_point_reach_the_same_display_point`(에이전트).
+
+**실제 PC에서 확인할 것**
+
+- 뒤로 버튼 위에서 커서를 천천히 왼쪽에서 오른쪽으로 옮기며 호버 표시가 켜지는 x와 꺼지는 x를 적는다. 그 구간이 화살표 중심에 대해 좌우 대칭이면 입력은 맞고, 차이는 앱의 그리기다.
+- 게스트에서 `adb shell settings put system pointer_location 1`로 포인터 위치 표시를 켠다. 이 표시는 시스템 서버가 그리는 오버레이라 SystemUI가 없어도 나온다. 주입된 호버의 십자선이 Windows 커서 끝과 겹치면 입력은 맞다. 끝나면 `0`으로 끈다.
+
 ## R7. 앱 하나를 연 비용을 Electron 앱 하나 수준으로 (NFR-1, NFR-2)
 
 소유자 목표: "안드로이드 앱 하나를 연 비용이 Electron 앱 하나를 연 비용과 비슷해야 한다." 이를 위해 프레임워크, system_server, zygote, ART 설정, init을 고쳐도 된다고 했다. 이 절은 공개 자료와 지금까지의 실측을 대조한 조사다. 절감량은 모두 추정치이고, 하드웨어에서 새로 측정하지 않았다.

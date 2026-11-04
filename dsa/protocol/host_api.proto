@@ -847,6 +847,13 @@ message Settings {
   // Whether every DSA process writes a line for each stage of each resize, rather than a
   // summary at the end of a drag. Off by default; the same rules as input_trace.
   bool resize_trace = 12;
+  // Whether the caller's Android takes adb connections: the service then listens on
+  // 127.0.0.1:adb_port and bridges each connection to the guest's adbd. Off by default, and
+  // the caller's own. It applies at once, without restarting Android.
+  bool developer_mode = 14;
+  // The loopback port adb connects to while developer mode is on. 58526 unless the user
+  // chooses another; 0 in a request means the default.
+  uint32 adb_port = 15;
 }
 
 // Turns the connection into the accessibility tree of one of the caller's task windows, for a

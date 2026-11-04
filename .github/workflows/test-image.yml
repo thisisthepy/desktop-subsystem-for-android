@@ -57,6 +57,7 @@ jobs:
   guest-graphics:
     name: Build the guest Hyper-V graphics transport
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -99,6 +100,7 @@ jobs:
   channeld:
     name: Build the guest control daemon
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -123,6 +125,7 @@ jobs:
   hwcomposer:
     name: Build the guest hwcomposer
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -156,6 +159,7 @@ jobs:
   codec2:
     name: Build the guest codec HAL
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -190,6 +194,7 @@ jobs:
   power-hal:
     name: Build the guest power and health HALs
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -226,6 +231,7 @@ jobs:
   agent:
     name: Build the guest agent
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -255,6 +261,7 @@ jobs:
     name: Make and check the guest image (ubuntu-latest, Android ${{ matrix.android }})
     needs: [guest-graphics, channeld, hwcomposer, power-hal, codec2, agent]
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

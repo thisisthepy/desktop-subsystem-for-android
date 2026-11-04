@@ -77,6 +77,7 @@ pub mod host_memory;
 pub mod https;
 #[cfg(windows)]
 pub mod hvsocket;
+pub mod installer_actions;
 pub mod monitors;
 pub mod paths;
 #[cfg(windows)]

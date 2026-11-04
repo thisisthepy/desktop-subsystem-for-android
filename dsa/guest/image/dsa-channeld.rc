@@ -43,3 +43,17 @@ on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
 on property:vendor.dsa.memory.trim=1
     write /sys/fs/cgroup/memory.reclaim 64M
     setprop vendor.dsa.memory.trim 0
+
+# Developer mode. dsa-channeld sets vendor.dsa.adb as the host says: 1 while the user's
+# developer mode is on, 0 when it is off. adbd then listens on vsock only
+# (service.adb.listen_addrs), which the host bridges to its loopback address. The USB
+# configuration is "none", and init.usb.rc stops adbd each time that is set, so adbd is
+# started again after that while developer mode is on.
+on property:vendor.dsa.adb=1
+    start adbd
+
+on property:vendor.dsa.adb=0
+    stop adbd
+
+on property:sys.usb.config=none && property:vendor.dsa.adb=1
+    start adbd

@@ -1,0 +1,7 @@
+# Written by dsa-protocol-codegen, never by hand. A conflict in these files is never
+# resolved by editing them: take either side and run the generator, or leave it to the
+# "Protocol sync" workflow, which merges the base and regenerates them on the branch.
+*.sha256 linguist-generated=true
+rust/src/generated/** linguist-generated=true
+java/src/main/java/** linguist-generated=true
+cpp/generated/** linguist-generated=true

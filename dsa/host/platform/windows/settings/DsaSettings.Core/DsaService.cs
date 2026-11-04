@@ -101,7 +101,9 @@ public sealed class DsaService
         OptionalString(json, "log_dir"),
         Bool(json, "clipboard", missing: true),
         Bool(json, "links_in_android"),
-        OptionalString(json, "android_version"));
+        OptionalString(json, "android_version"),
+        Bool(json, "developer_mode"),
+        Int(json, "adb_port") is > 0 and var port ? port : SettingsInfo.DefaultAdbPort);
 
     public async Task<SettingsInfo> SettingsAsync() =>
         ReadSettings(await RunJsonAsync("settings").ConfigureAwait(true));
@@ -116,6 +118,11 @@ public sealed class DsaService
     public Task<SettingsInfo> SetLinksInAndroidAsync(bool on) => SetAsync("links-in-android", on ? "on" : "off");
 
     public Task<SettingsInfo> SetClipboardAsync(bool on) => SetAsync("clipboard", on ? "on" : "off");
+
+    public Task<SettingsInfo> SetDeveloperModeAsync(bool on) => SetAsync("developer-mode", on ? "on" : "off");
+
+    public Task<SettingsInfo> SetAdbPortAsync(int port) =>
+        SetAsync("adb-port", port.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
     public Task<SettingsInfo> SetProgramUpdatesAsync(bool on) => SetAsync("program-updates", on ? "on" : "off");
 

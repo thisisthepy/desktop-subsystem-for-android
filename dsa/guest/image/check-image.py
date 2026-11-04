@@ -2,7 +2,8 @@
 
     uv run dsa/guest/image/check-image.py dsa/target/image/17.0.0-16373615 .scratch/image-keys
 
-It fails when the shell apps are still there, when the build is still debuggable, when an
+It fails when the shell apps are still there, when the build is still debuggable, when adbd
+could start without developer mode, listen on TCP or ask for an authorisation, when an
 app is not signed with one of the keys in the key folder, when the framework overlay or the
 trace script is missing, when the agent is missing or not signed with the platform key, when
 Settings still has the preferences or code that crash it without Bluetooth, when a system
@@ -56,6 +57,32 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     props = z.read("SYSTEM/build.prop").decode()
     if "ro.debuggable=1" in props or "ro.build.type=userdebug" in props:
         problems.append("the system is still a debuggable build")
+    # adb: present but stopped until the user turns developer mode on, never authorised on
+    # the device (there is no SystemUI to ask), and listening on vsock only, never on TCP.
+    lines = props.splitlines()
+    if "ro.debuggable=0" not in lines:
+        problems.append("SYSTEM/build.prop does not say ro.debuggable=0")
+    if "ro.adb.secure=0" not in lines:
+        problems.append("adbd would ask for an authorisation no screen can give (ro.adb.secure is not 0)")
+    if f"service.adb.listen_addrs=vsock:{make_image.ADB_VSOCK_PORT}" not in lines:
+        problems.append(f"adbd does not listen on vsock port {make_image.ADB_VSOCK_PORT} alone")
+    if "persist.sys.usb.config=none" not in lines:
+        problems.append("the USB configuration would start adbd without developer mode")
+    for prop_file in make_image.PROP_FILES:
+        if prop_file in names:
+            text = z.read(prop_file).decode(errors="replace")
+            for key in make_image.DROPPED_PROPS:
+                if re.search(rf"^{re.escape(key)}=", text, re.M):
+                    problems.append(f"{prop_file} still has {key}, so adbd would listen on TCP")
+    channeld_rc = make_image.CHANNELD_RC
+    if channeld_rc in names:
+        rc = z.read(channeld_rc).decode()
+        for trigger in ["on property:vendor.dsa.adb=1", "on property:vendor.dsa.adb=0"]:
+            if trigger not in rc:
+                problems.append(f"{channeld_rc} lacks '{trigger}', so developer mode cannot switch adbd")
+    property_contexts = make_image.VENDOR_PROPERTY_CONTEXTS
+    if property_contexts not in names or make_image.ADB_PROPERTY_CONTEXT not in z.read(property_contexts).decode():
+        problems.append(f"{make_image.ADB_PROPERTY} has no property context, so dsa-channeld cannot set it")
     if "test-keys" in props:
         problems.append("the build still says test-keys")
     presigned = set(re.findall(r'name="([^"]+)" certificate="PRESIGNED"', z.read("META/apkcerts.txt").decode()))

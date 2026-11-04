@@ -1464,6 +1464,7 @@ class GuestMemoryTests(unittest.TestCase):
             make_image.RECLAIM_PROPERTY_CONTEXT + "\n"
             + make_image.TRIM_PROPERTY_CONTEXT + "\n"
             + make_image.BOOT_PROPERTY_CONTEXT + "\n"
+            + make_image.ADB_PROPERTY_CONTEXT + "\n"
         )
         self.assertEqual(make_image.update_vendor_property_contexts(all_of_them), all_of_them)
 
@@ -2156,6 +2157,51 @@ class BootLogTests(unittest.TestCase):
         self.assertNotIn("(allow ", policy)
         source = Path(make_image.__file__).read_text()
         self.assertIn('plat_patched += "\\n" + KERNEL_POLICY.read_text()', source)
+
+
+class DeveloperModeTests(unittest.TestCase):
+    def test_fr20_the_image_stays_a_user_build_whose_adbd_needs_no_authorisation(self):
+        props = make_image.edit_props("ro.debuggable=1\nro.adb.secure=1\nro.build.type=userdebug\n").splitlines()
+        self.assertIn("ro.debuggable=0", props)
+        self.assertIn("ro.adb.secure=0", props)
+        self.assertIn("ro.build.type=user", props)
+
+    def test_fr20_adbd_listens_on_vsock_only_and_the_usb_configuration_does_not_start_it(self):
+        props = make_image.edit_props(
+            "persist.adb.tcp.port=5555\nservice.adb.tcp.port=5555\npersist.sys.usb.config=adb\n"
+        ).splitlines()
+        self.assertIn("service.adb.listen_addrs=vsock:5555", props)
+        self.assertIn("persist.sys.usb.config=none", props)
+        self.assertFalse([p for p in props if p.startswith(("persist.adb.tcp.port=", "service.adb.tcp.port="))])
+
+    def test_fr20_developer_mode_starts_and_stops_adbd_through_a_property_only_the_daemon_sets(self):
+        rc = (Path(__file__).with_name("dsa-channeld.rc")).read_text()
+        self.assertIn("on property:vendor.dsa.adb=1\n    start adbd", rc)
+        self.assertIn("on property:vendor.dsa.adb=0\n    stop adbd", rc)
+        self.assertIn("on property:sys.usb.config=none && property:vendor.dsa.adb=1\n    start adbd", rc)
+        contexts = make_image.update_vendor_property_contexts("")
+        self.assertIn("vendor.dsa.adb u:object_r:dsa_adb_prop:s0 exact bool", contexts)
+        channeld = (Path(__file__).parent / "sepolicy/channeld.cil").read_text()
+        self.assertIn("(allow dsa_channeld dsa_adb_prop (property_service (set)))", channeld)
+        adb = (Path(__file__).parent / "sepolicy/adb.cil").read_text()
+        self.assertNotRegex(adb, r"\(allow (?!vendor_init)\S+ dsa_adb_prop \(property_service")
+
+    def test_fr20_adbd_may_listen_on_vsock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n(type adbd)\n")
+                archive.writestr("SYSTEM/build.prop", "persist.adb.tcp.port=5555\n")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+            with zipfile.ZipFile(modified) as archive:
+                policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+                self.assertIn("(allow adbd self (vsock_socket (create bind listen accept", policy)
+                self.assertIn("(type dsa_adb_prop)", policy)
+                props = archive.read("SYSTEM/build.prop").decode()
+                self.assertNotIn("persist.adb.tcp.port", props)
+                self.assertIn("service.adb.listen_addrs=vsock:5555", props)
 
 
 BOOTCLASSPATH = ("/apex/com.android.art/javalib/core-oj.jar:/system/framework/framework.jar:"

@@ -99,6 +99,9 @@ extern CloseTaskDefaultTypeInternal _CloseTask_default_instance_;
 class CollectDiagnostics;
 struct CollectDiagnosticsDefaultTypeInternal;
 extern CollectDiagnosticsDefaultTypeInternal _CollectDiagnostics_default_instance_;
+class DeveloperMode;
+struct DeveloperModeDefaultTypeInternal;
+extern DeveloperModeDefaultTypeInternal _DeveloperMode_default_instance_;
 class DeviceIdle;
 struct DeviceIdleDefaultTypeInternal;
 extern DeviceIdleDefaultTypeInternal _DeviceIdle_default_instance_;
@@ -328,6 +331,7 @@ template<> ::dsa::control::v1::ClockAnswer* Arena::CreateMaybeMessage<::dsa::con
 template<> ::dsa::control::v1::ClockProbe* Arena::CreateMaybeMessage<::dsa::control::v1::ClockProbe>(Arena*);
 template<> ::dsa::control::v1::CloseTask* Arena::CreateMaybeMessage<::dsa::control::v1::CloseTask>(Arena*);
 template<> ::dsa::control::v1::CollectDiagnostics* Arena::CreateMaybeMessage<::dsa::control::v1::CollectDiagnostics>(Arena*);
+template<> ::dsa::control::v1::DeveloperMode* Arena::CreateMaybeMessage<::dsa::control::v1::DeveloperMode>(Arena*);
 template<> ::dsa::control::v1::DeviceIdle* Arena::CreateMaybeMessage<::dsa::control::v1::DeviceIdle>(Arena*);
 template<> ::dsa::control::v1::DiagnosticsDone* Arena::CreateMaybeMessage<::dsa::control::v1::DiagnosticsDone>(Arena*);
 template<> ::dsa::control::v1::DiagnosticsFile* Arena::CreateMaybeMessage<::dsa::control::v1::DiagnosticsFile>(Arena*);
@@ -5304,6 +5308,136 @@ class ClipboardSharing final :
 };
 // -------------------------------------------------------------------
 
+class DeveloperMode final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.DeveloperMode) */ {
+ public:
+  inline DeveloperMode() : DeveloperMode(nullptr) {}
+  ~DeveloperMode() override;
+  explicit PROTOBUF_CONSTEXPR DeveloperMode(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  DeveloperMode(const DeveloperMode& from);
+  DeveloperMode(DeveloperMode&& from) noexcept
+    : DeveloperMode() {
+    *this = ::std::move(from);
+  }
+
+  inline DeveloperMode& operator=(const DeveloperMode& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline DeveloperMode& operator=(DeveloperMode&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const DeveloperMode& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const DeveloperMode* internal_default_instance() {
+    return reinterpret_cast<const DeveloperMode*>(
+               &_DeveloperMode_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    30;
+
+  friend void swap(DeveloperMode& a, DeveloperMode& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(DeveloperMode* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(DeveloperMode* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  DeveloperMode* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<DeveloperMode>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const DeveloperMode& from);
+  void MergeFrom(const DeveloperMode& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(DeveloperMode* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.DeveloperMode";
+  }
+  protected:
+  explicit DeveloperMode(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kOnFieldNumber = 1,
+  };
+  // bool on = 1;
+  void clear_on();
+  bool on() const;
+  void set_on(bool value);
+  private:
+  bool _internal_on() const;
+  void _internal_set_on(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.DeveloperMode)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    bool on_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class GuestNotification final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.GuestNotification) */ {
  public:
@@ -5343,7 +5477,7 @@ class GuestNotification final :
                &_GuestNotification_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    30;
+    31;
 
   friend void swap(GuestNotification& a, GuestNotification& b) {
     a.Swap(&b);
@@ -5602,7 +5736,7 @@ class NotificationRemoved final :
                &_NotificationRemoved_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    31;
+    32;
 
   friend void swap(NotificationRemoved& a, NotificationRemoved& b) {
     a.Swap(&b);
@@ -5737,7 +5871,7 @@ class NotificationClicked final :
                &_NotificationClicked_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    32;
+    33;
 
   friend void swap(NotificationClicked& a, NotificationClicked& b) {
     a.Swap(&b);
@@ -5872,7 +6006,7 @@ class NotificationDismissed final :
                &_NotificationDismissed_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    33;
+    34;
 
   friend void swap(NotificationDismissed& a, NotificationDismissed& b) {
     a.Swap(&b);
@@ -6007,7 +6141,7 @@ class RequestGuestMemory final :
                &_RequestGuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    34;
+    35;
 
   friend void swap(RequestGuestMemory& a, RequestGuestMemory& b) {
     a.Swap(&b);
@@ -6124,7 +6258,7 @@ class ProcessMemory final :
                &_ProcessMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    35;
+    36;
 
   friend void swap(ProcessMemory& a, ProcessMemory& b) {
     a.Swap(&b);
@@ -6292,7 +6426,7 @@ class GuestMemory final :
                &_GuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    36;
+    37;
 
   friend void swap(GuestMemory& a, GuestMemory& b) {
     a.Swap(&b);
@@ -6574,7 +6708,7 @@ class AgentConnected final :
                &_AgentConnected_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    37;
+    38;
 
   friend void swap(AgentConnected& a, AgentConnected& b) {
     a.Swap(&b);
@@ -6691,7 +6825,7 @@ class GuestBoot final :
                &_GuestBoot_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    38;
+    39;
 
   friend void swap(GuestBoot& a, GuestBoot& b) {
     a.Swap(&b);
@@ -6832,7 +6966,7 @@ class InstallApk final :
                &_InstallApk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    39;
+    40;
 
   friend void swap(InstallApk& a, InstallApk& b) {
     a.Swap(&b);
@@ -6989,7 +7123,7 @@ class ApkChunk final :
                &_ApkChunk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    40;
+    41;
 
   friend void swap(ApkChunk& a, ApkChunk& b) {
     a.Swap(&b);
@@ -7146,7 +7280,7 @@ class QueryPackage final :
                &_QueryPackage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    41;
+    42;
 
   friend void swap(QueryPackage& a, QueryPackage& b) {
     a.Swap(&b);
@@ -7292,7 +7426,7 @@ class PackageState final :
                &_PackageState_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    42;
+    43;
 
   friend void swap(PackageState& a, PackageState& b) {
     a.Swap(&b);
@@ -7486,7 +7620,7 @@ class OpenLink final :
                &_OpenLink_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    43;
+    44;
 
   friend void swap(OpenLink& a, OpenLink& b) {
     a.Swap(&b);
@@ -7621,7 +7755,7 @@ class LinkHandling final :
                &_LinkHandling_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    44;
+    45;
 
   friend void swap(LinkHandling& a, LinkHandling& b) {
     a.Swap(&b);
@@ -7751,7 +7885,7 @@ class OpenFile final :
                &_OpenFile_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    45;
+    46;
 
   friend void swap(OpenFile& a, OpenFile& b) {
     a.Swap(&b);
@@ -7919,7 +8053,7 @@ class FileChunk final :
                &_FileChunk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    46;
+    47;
 
   friend void swap(FileChunk& a, FileChunk& b) {
     a.Swap(&b);
@@ -8076,7 +8210,7 @@ class CancelInstall final :
                &_CancelInstall_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    47;
+    48;
 
   friend void swap(CancelInstall& a, CancelInstall& b) {
     a.Swap(&b);
@@ -8206,7 +8340,7 @@ class InstallProgress final :
                &_InstallProgress_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    48;
+    49;
 
   friend void swap(InstallProgress& a, InstallProgress& b) {
     a.Swap(&b);
@@ -8347,7 +8481,7 @@ class InstallResult final :
                &_InstallResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    49;
+    50;
 
   friend void swap(InstallResult& a, InstallResult& b) {
     a.Swap(&b);
@@ -8520,7 +8654,7 @@ class FileProgress final :
                &_FileProgress_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    50;
+    51;
 
   friend void swap(FileProgress& a, FileProgress& b) {
     a.Swap(&b);
@@ -8677,7 +8811,7 @@ class ClockProbe final :
                &_ClockProbe_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    51;
+    52;
 
   friend void swap(ClockProbe& a, ClockProbe& b) {
     a.Swap(&b);
@@ -8807,7 +8941,7 @@ class VideoCodecSupport final :
                &_VideoCodecSupport_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    52;
+    53;
 
   friend void swap(VideoCodecSupport& a, VideoCodecSupport& b) {
     a.Swap(&b);
@@ -8959,7 +9093,7 @@ class VideoCapabilities final :
                &_VideoCapabilities_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    53;
+    54;
 
   friend void swap(VideoCapabilities& a, VideoCapabilities& b) {
     a.Swap(&b);
@@ -9098,7 +9232,7 @@ class VideoDecoderOpen final :
                &_VideoDecoderOpen_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    54;
+    55;
 
   friend void swap(VideoDecoderOpen& a, VideoDecoderOpen& b) {
     a.Swap(&b);
@@ -9250,7 +9384,7 @@ class VideoDecoderOpened final :
                &_VideoDecoderOpened_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    55;
+    56;
 
   friend void swap(VideoDecoderOpened& a, VideoDecoderOpened& b) {
     a.Swap(&b);
@@ -9396,7 +9530,7 @@ class VideoPacket final :
                &_VideoPacket_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    56;
+    57;
 
   friend void swap(VideoPacket& a, VideoPacket& b) {
     a.Swap(&b);
@@ -9575,7 +9709,7 @@ class VideoFrame final :
                &_VideoFrame_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    57;
+    58;
 
   friend void swap(VideoFrame& a, VideoFrame& b) {
     a.Swap(&b);
@@ -9776,7 +9910,7 @@ class VideoFlush final :
                &_VideoFlush_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    58;
+    59;
 
   friend void swap(VideoFlush& a, VideoFlush& b) {
     a.Swap(&b);
@@ -9893,7 +10027,7 @@ class VideoFlushed final :
                &_VideoFlushed_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    59;
+    60;
 
   friend void swap(VideoFlushed& a, VideoFlushed& b) {
     a.Swap(&b);
@@ -10010,7 +10144,7 @@ class VideoError final :
                &_VideoError_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    60;
+    61;
 
   friend void swap(VideoError& a, VideoError& b) {
     a.Swap(&b);
@@ -10145,7 +10279,7 @@ class ClockAnswer final :
                &_ClockAnswer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    61;
+    62;
 
   friend void swap(ClockAnswer& a, ClockAnswer& b) {
     a.Swap(&b);
@@ -10286,7 +10420,7 @@ class ListWidgetProviders final :
                &_ListWidgetProviders_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    62;
+    63;
 
   friend void swap(ListWidgetProviders& a, ListWidgetProviders& b) {
     a.Swap(&b);
@@ -10416,7 +10550,7 @@ class WidgetProvider final :
                &_WidgetProvider_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    63;
+    64;
 
   friend void swap(WidgetProvider& a, WidgetProvider& b) {
     a.Swap(&b);
@@ -10703,7 +10837,7 @@ class WidgetProviders final :
                &_WidgetProviders_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    64;
+    65;
 
   friend void swap(WidgetProviders& a, WidgetProviders& b) {
     a.Swap(&b);
@@ -10864,7 +10998,7 @@ class AddWidget final :
                &_AddWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    65;
+    66;
 
   friend void swap(AddWidget& a, AddWidget& b) {
     a.Swap(&b);
@@ -11010,7 +11144,7 @@ class WidgetAdded final :
                &_WidgetAdded_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    66;
+    67;
 
   friend void swap(WidgetAdded& a, WidgetAdded& b) {
     a.Swap(&b);
@@ -11167,7 +11301,7 @@ class WidgetUpdated final :
                &_WidgetUpdated_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    67;
+    68;
 
   friend void swap(WidgetUpdated& a, WidgetUpdated& b) {
     a.Swap(&b);
@@ -11317,7 +11451,7 @@ class WidgetList final :
                &_WidgetList_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    68;
+    69;
 
   friend void swap(WidgetList& a, WidgetList& b) {
     a.Swap(&b);
@@ -11461,7 +11595,7 @@ class RemoveWidget final :
                &_RemoveWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    69;
+    70;
 
   friend void swap(RemoveWidget& a, RemoveWidget& b) {
     a.Swap(&b);
@@ -11591,7 +11725,7 @@ class ResizeWidget final :
                &_ResizeWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    70;
+    71;
 
   friend void swap(ResizeWidget& a, ResizeWidget& b) {
     a.Swap(&b);
@@ -11776,7 +11910,7 @@ class WidgetFrame final :
                &_WidgetFrame_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    71;
+    72;
 
   friend void swap(WidgetFrame& a, WidgetFrame& b) {
     a.Swap(&b);
@@ -11944,7 +12078,7 @@ class WidgetPointer final :
                &_WidgetPointer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    72;
+    73;
 
   friend void swap(WidgetPointer& a, WidgetPointer& b) {
     a.Swap(&b);
@@ -12118,7 +12252,7 @@ class AccessibilityWatch final :
                &_AccessibilityWatch_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    73;
+    74;
 
   friend void swap(AccessibilityWatch& a, AccessibilityWatch& b) {
     a.Swap(&b);
@@ -12259,7 +12393,7 @@ class NodeRange final :
                &_NodeRange_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    74;
+    75;
 
   friend void swap(NodeRange& a, NodeRange& b) {
     a.Swap(&b);
@@ -12411,7 +12545,7 @@ class AccessibilityNode final :
                &_AccessibilityNode_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    75;
+    76;
 
   friend void swap(AccessibilityNode& a, AccessibilityNode& b) {
     a.Swap(&b);
@@ -12854,7 +12988,7 @@ class AccessibilityTree final :
                &_AccessibilityTree_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    76;
+    77;
 
   friend void swap(AccessibilityTree& a, AccessibilityTree& b) {
     a.Swap(&b);
@@ -13087,7 +13221,7 @@ class AccessibilityAction final :
                &_AccessibilityAction_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    77;
+    78;
 
   friend void swap(AccessibilityAction& a, AccessibilityAction& b) {
     a.Swap(&b);
@@ -13277,7 +13411,7 @@ class AccessibilityActionResult final :
                &_AccessibilityActionResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    78;
+    79;
 
   friend void swap(AccessibilityActionResult& a, AccessibilityActionResult& b) {
     a.Swap(&b);
@@ -13445,7 +13579,7 @@ class LogStream final :
                &_LogStream_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    79;
+    80;
 
   friend void swap(LogStream& a, LogStream& b) {
     a.Swap(&b);
@@ -13608,7 +13742,7 @@ class LogDump final :
                &_LogDump_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    80;
+    81;
 
   friend void swap(LogDump& a, LogDump& b) {
     a.Swap(&b);
@@ -13760,7 +13894,7 @@ class LogRecord final :
                &_LogRecord_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    81;
+    82;
 
   friend void swap(LogRecord& a, LogRecord& b) {
     a.Swap(&b);
@@ -13988,7 +14122,7 @@ class LogRecords final :
                &_LogRecords_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    82;
+    83;
 
   friend void swap(LogRecords& a, LogRecords& b) {
     a.Swap(&b);
@@ -14165,7 +14299,7 @@ class CollectDiagnostics final :
                &_CollectDiagnostics_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    83;
+    84;
 
   friend void swap(CollectDiagnostics& a, CollectDiagnostics& b) {
     a.Swap(&b);
@@ -14295,7 +14429,7 @@ class DiagnosticsFile final :
                &_DiagnosticsFile_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    84;
+    85;
 
   friend void swap(DiagnosticsFile& a, DiagnosticsFile& b) {
     a.Swap(&b);
@@ -14468,7 +14602,7 @@ class DiagnosticsDone final :
                &_DiagnosticsDone_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    85;
+    86;
 
   friend void swap(DiagnosticsDone& a, DiagnosticsDone& b) {
     a.Swap(&b);
@@ -14641,6 +14775,7 @@ class Envelope final :
     kScreenState = 40,
     kPowerState = 41,
     kPowerHint = 110,
+    kDeveloperMode = 140,
     kDeviceIdle = 42,
     kHostMemory = 43,
     kHostSleep = 44,
@@ -14697,7 +14832,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    86;
+    87;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -14792,6 +14927,7 @@ class Envelope final :
     kScreenStateFieldNumber = 40,
     kPowerStateFieldNumber = 41,
     kPowerHintFieldNumber = 110,
+    kDeveloperModeFieldNumber = 140,
     kDeviceIdleFieldNumber = 42,
     kHostMemoryFieldNumber = 43,
     kHostSleepFieldNumber = 44,
@@ -15398,6 +15534,24 @@ class Envelope final :
   void unsafe_arena_set_allocated_power_hint(
       ::dsa::control::v1::PowerHint* power_hint);
   ::dsa::control::v1::PowerHint* unsafe_arena_release_power_hint();
+
+  // .dsa.control.v1.DeveloperMode developer_mode = 140;
+  bool has_developer_mode() const;
+  private:
+  bool _internal_has_developer_mode() const;
+  public:
+  void clear_developer_mode();
+  const ::dsa::control::v1::DeveloperMode& developer_mode() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::DeveloperMode* release_developer_mode();
+  ::dsa::control::v1::DeveloperMode* mutable_developer_mode();
+  void set_allocated_developer_mode(::dsa::control::v1::DeveloperMode* developer_mode);
+  private:
+  const ::dsa::control::v1::DeveloperMode& _internal_developer_mode() const;
+  ::dsa::control::v1::DeveloperMode* _internal_mutable_developer_mode();
+  public:
+  void unsafe_arena_set_allocated_developer_mode(
+      ::dsa::control::v1::DeveloperMode* developer_mode);
+  ::dsa::control::v1::DeveloperMode* unsafe_arena_release_developer_mode();
 
   // .dsa.control.v1.DeviceIdle device_idle = 42;
   bool has_device_idle() const;
@@ -16299,6 +16453,7 @@ class Envelope final :
   void set_has_screen_state();
   void set_has_power_state();
   void set_has_power_hint();
+  void set_has_developer_mode();
   void set_has_device_idle();
   void set_has_host_memory();
   void set_has_host_sleep();
@@ -16389,6 +16544,7 @@ class Envelope final :
       ::dsa::control::v1::ScreenState* screen_state_;
       ::dsa::control::v1::PowerState* power_state_;
       ::dsa::control::v1::PowerHint* power_hint_;
+      ::dsa::control::v1::DeveloperMode* developer_mode_;
       ::dsa::control::v1::DeviceIdle* device_idle_;
       ::dsa::control::v1::HostMemory* host_memory_;
       ::dsa::control::v1::HostSleep* host_sleep_;
@@ -19055,6 +19211,30 @@ inline void ClipboardSharing::_internal_set_on(bool value) {
 inline void ClipboardSharing::set_on(bool value) {
   _internal_set_on(value);
   // @@protoc_insertion_point(field_set:dsa.control.v1.ClipboardSharing.on)
+}
+
+// -------------------------------------------------------------------
+
+// DeveloperMode
+
+// bool on = 1;
+inline void DeveloperMode::clear_on() {
+  _impl_.on_ = false;
+}
+inline bool DeveloperMode::_internal_on() const {
+  return _impl_.on_;
+}
+inline bool DeveloperMode::on() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.DeveloperMode.on)
+  return _internal_on();
+}
+inline void DeveloperMode::_internal_set_on(bool value) {
+  
+  _impl_.on_ = value;
+}
+inline void DeveloperMode::set_on(bool value) {
+  _internal_set_on(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.DeveloperMode.on)
 }
 
 // -------------------------------------------------------------------
@@ -27515,6 +27695,80 @@ inline ::dsa::control::v1::PowerHint* Envelope::mutable_power_hint() {
   return _msg;
 }
 
+// .dsa.control.v1.DeveloperMode developer_mode = 140;
+inline bool Envelope::_internal_has_developer_mode() const {
+  return body_case() == kDeveloperMode;
+}
+inline bool Envelope::has_developer_mode() const {
+  return _internal_has_developer_mode();
+}
+inline void Envelope::set_has_developer_mode() {
+  _impl_._oneof_case_[0] = kDeveloperMode;
+}
+inline void Envelope::clear_developer_mode() {
+  if (_internal_has_developer_mode()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.developer_mode_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::DeveloperMode* Envelope::release_developer_mode() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.developer_mode)
+  if (_internal_has_developer_mode()) {
+    clear_has_body();
+    ::dsa::control::v1::DeveloperMode* temp = _impl_.body_.developer_mode_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.developer_mode_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::DeveloperMode& Envelope::_internal_developer_mode() const {
+  return _internal_has_developer_mode()
+      ? *_impl_.body_.developer_mode_
+      : reinterpret_cast< ::dsa::control::v1::DeveloperMode&>(::dsa::control::v1::_DeveloperMode_default_instance_);
+}
+inline const ::dsa::control::v1::DeveloperMode& Envelope::developer_mode() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.developer_mode)
+  return _internal_developer_mode();
+}
+inline ::dsa::control::v1::DeveloperMode* Envelope::unsafe_arena_release_developer_mode() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.developer_mode)
+  if (_internal_has_developer_mode()) {
+    clear_has_body();
+    ::dsa::control::v1::DeveloperMode* temp = _impl_.body_.developer_mode_;
+    _impl_.body_.developer_mode_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_developer_mode(::dsa::control::v1::DeveloperMode* developer_mode) {
+  clear_body();
+  if (developer_mode) {
+    set_has_developer_mode();
+    _impl_.body_.developer_mode_ = developer_mode;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.developer_mode)
+}
+inline ::dsa::control::v1::DeveloperMode* Envelope::_internal_mutable_developer_mode() {
+  if (!_internal_has_developer_mode()) {
+    clear_body();
+    set_has_developer_mode();
+    _impl_.body_.developer_mode_ = CreateMaybeMessage< ::dsa::control::v1::DeveloperMode >(GetArenaForAllocation());
+  }
+  return _impl_.body_.developer_mode_;
+}
+inline ::dsa::control::v1::DeveloperMode* Envelope::mutable_developer_mode() {
+  ::dsa::control::v1::DeveloperMode* _msg = _internal_mutable_developer_mode();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.developer_mode)
+  return _msg;
+}
+
 // .dsa.control.v1.DeviceIdle device_idle = 42;
 inline bool Envelope::_internal_has_device_idle() const {
   return body_case() == kDeviceIdle;
@@ -31079,6 +31333,8 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

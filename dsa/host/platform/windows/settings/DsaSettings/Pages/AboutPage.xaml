@@ -1,5 +1,6 @@
 <Page
     x:Class="Dsa.Settings.Pages.AboutPage"
+    ScrollViewer.CanContentScroll="False"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
@@ -13,7 +14,7 @@
                     <StackPanel Orientation="Horizontal">
                         <Image Source="pack://application:,,,/Assets/logo.png" Width="32" Height="32" Margin="0,0,16,0" />
                         <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="{l:Text AboutProductCard.Header}" Style="{StaticResource CardTitle}" FontWeight="SemiBold" />
+                            <TextBlock Text="{l:Text AboutProductCard.Header}" Style="{StaticResource CardTitle}" />
                             <TextBlock Text="{l:Text AboutProductCard.Description}" Style="{StaticResource CardDescription}" />
                         </StackPanel>
                     </StackPanel>

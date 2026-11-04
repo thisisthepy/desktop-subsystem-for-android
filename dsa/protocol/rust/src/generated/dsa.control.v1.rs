@@ -408,6 +408,16 @@ pub struct ClipboardSharing {
     #[prost(bool, tag = "1")]
     pub on: bool,
 }
+/// Host to guest: whether the user turned developer mode on. While it is on, the guest's adbd
+/// listens on vsock port 5555, which the host bridges to a port on its loopback address;
+/// while it is off, adbd is stopped. A guest boots with it off; the host says so when it is on,
+/// each time the agent connects, and on every change after that. The control daemon handles it,
+/// not the agent.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeveloperMode {
+    #[prost(bool, tag = "1")]
+    pub on: bool,
+}
 /// Guest to host, from the agent: a notification an app posted, or a new version of one it
 /// posted before under the same key, which replaces it. Only notifications a person would see
 /// come: not the ongoing notice of a foreground service, and not a group's summary, whose
@@ -1216,7 +1226,7 @@ pub struct DiagnosticsDone {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 110, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 120, 121, 122, 123, 124, 125, 126, 127, 130, 131, 132, 133, 134, 135"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 110, 140, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 120, 121, 122, 123, 124, 125, 126, 127, 130, 131, 132, 133, 134, 135"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -1286,6 +1296,8 @@ pub mod envelope {
         PowerState(super::PowerState),
         #[prost(message, tag = "110")]
         PowerHint(super::PowerHint),
+        #[prost(message, tag = "140")]
+        DeveloperMode(super::DeveloperMode),
         #[prost(message, tag = "42")]
         DeviceIdle(super::DeviceIdle),
         #[prost(message, tag = "43")]

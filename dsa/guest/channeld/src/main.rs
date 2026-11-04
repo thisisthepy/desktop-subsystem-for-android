@@ -210,6 +210,24 @@ mod daemon {
     #[cfg(not(target_os = "android"))]
     fn watch_boot(_router: Arc<Router>) {}
 
+    /// Has init start adbd (developer mode on) or stop it (`dsa-channeld.rc`). Only init may
+    /// start a service; the daemon sets the property it watches.
+    #[cfg(target_os = "android")]
+    fn switch_adb(on: bool) {
+        let value = if on { "1" } else { "0" };
+        match set_property("vendor.dsa.adb", value) {
+            Ok(()) => say!(
+                "developer mode is {}",
+                if on { "on: adbd starts" } else { "off" }
+            ),
+            Err(why) => say!("could not switch adbd for developer mode: {why}"),
+        }
+    }
+
+    /// Off Android there is no adbd to switch.
+    #[cfg(not(target_os = "android"))]
+    fn switch_adb(_on: bool) {}
+
     /// Hands idle memory back to the host: every so often, decides whether the guest should
     /// reclaim now (see `reclaim`), and has init do it. Only init may write the
     /// kernel's memory controls; the daemon only asks.
@@ -301,7 +319,7 @@ mod daemon {
         // The guest's clients (the agent and the hwcomposer) reach the daemon over binder.
         // Frames they send go to the host through `to_host`; the host's frames go to them.
         let (to_host, from_guest) = mpsc::channel::<Vec<u8>>();
-        let router = Arc::new(Router::new(to_host, check_agent));
+        let router = Arc::new(Router::new(to_host, check_agent).on_developer_mode(switch_adb));
         let (to_guest, from_host) = mpsc::channel::<Vec<u8>>();
         // The guest's log goes on a port of its own, past the same handshake as the control
         // channel, and only while the host asks for it.

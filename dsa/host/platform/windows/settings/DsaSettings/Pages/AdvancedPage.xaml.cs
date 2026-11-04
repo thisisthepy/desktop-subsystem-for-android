@@ -21,6 +21,20 @@ public partial class AdvancedPage : Page
     private async void OnClipboardToggled(object sender, RoutedEventArgs e) =>
         await ViewModel.SetClipboardAsync(ClipboardSwitch.IsChecked == true);
 
+    private async void OnDeveloperModeToggled(object sender, RoutedEventArgs e) =>
+        await ViewModel.SetDeveloperModeAsync(DeveloperModeSwitch.IsChecked == true);
+
+    private async void OnAdbPortChanged(object sender, RoutedEventArgs e) =>
+        await ViewModel.SetAdbPortAsync(AdbPortBox.Text);
+
+    private async void OnAdbPortKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter)
+        {
+            await ViewModel.SetAdbPortAsync(AdbPortBox.Text);
+        }
+    }
+
     private async void OnFreezeToggled(object sender, RoutedEventArgs e) =>
         await ViewModel.SetFreezeAsync(FreezeSwitch.IsChecked == true);
 
