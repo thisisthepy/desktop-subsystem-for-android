@@ -676,4 +676,61 @@
   <data name="ApkWindow_Reason_other" xml:space="preserve">
     <value>Android가 앱을 설치하지 않았습니다.</value>
   </data>
+  <data name="NavLogs.Content" xml:space="preserve">
+    <value>Android 로그</value>
+  </data>
+  <data name="LogsTitle.Text" xml:space="preserve">
+    <value>Android 로그</value>
+  </data>
+  <data name="LogsNote.Text" xml:space="preserve">
+    <value>이 화면이 열려 있는 동안에만 Android가 로그를 보내고, 디스크에는 아무것도 쓰지 않습니다. 진단 정보 저장은 문제를 알릴 때 필요한 것을 zip 파일 하나로 모읍니다.</value>
+  </data>
+  <data name="LogsSaveButton.Content" xml:space="preserve">
+    <value>진단 정보 저장</value>
+  </data>
+  <data name="LogsFilter.PlaceholderText" xml:space="preserve">
+    <value>태그나 내용으로 거르기</value>
+  </data>
+  <data name="LogsPause.Content" xml:space="preserve">
+    <value>일시 정지</value>
+  </data>
+  <data name="LogsErrorBar.Title" xml:space="preserve">
+    <value>로그를 읽을 수 없습니다</value>
+  </data>
+  <data name="LogsStatusBar.Title" xml:space="preserve">
+    <value>진단 정보</value>
+  </data>
+  <data name="Logs_Paused" xml:space="preserve">
+    <value>일시 정지했습니다. 새 줄 {0}개가 기다리고 있습니다.</value>
+  </data>
+  <data name="Logs_Saving" xml:space="preserve">
+    <value>진단 정보를 모으고 있습니다. 1분 넘게 걸립니다.</value>
+  </data>
+  <data name="Logs_Saved" xml:space="preserve">
+    <value>진단 정보를 {0}에 저장했습니다.</value>
+  </data>
+  <data name="Logs_SaveDialogTitle" xml:space="preserve">
+    <value>진단 정보 저장</value>
+  </data>
+  <data name="Logs_SaveDialogFilter" xml:space="preserve">
+    <value>Zip 압축 파일</value>
+  </data>
+  <data name="Logs_Priority_V" xml:space="preserve">
+    <value>자세히</value>
+  </data>
+  <data name="Logs_Priority_D" xml:space="preserve">
+    <value>디버그</value>
+  </data>
+  <data name="Logs_Priority_I" xml:space="preserve">
+    <value>정보</value>
+  </data>
+  <data name="Logs_Priority_W" xml:space="preserve">
+    <value>경고</value>
+  </data>
+  <data name="Logs_Priority_E" xml:space="preserve">
+    <value>오류</value>
+  </data>
+  <data name="Logs_Priority_F" xml:space="preserve">
+    <value>치명적 오류</value>
+  </data>
 </root>

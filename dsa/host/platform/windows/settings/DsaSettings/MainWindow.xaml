@@ -57,6 +57,8 @@
                                        Icon="{ui:SymbolIcon ArrowSync24}" />
                 <ui:NavigationViewItem Content="{l:Text NavAdvanced.Content}" TargetPageType="{x:Type pages:AdvancedPage}"
                                        Icon="{ui:SymbolIcon Settings24}" />
+                <ui:NavigationViewItem Content="{l:Text NavLogs.Content}" TargetPageType="{x:Type pages:LogsPage}"
+                                       Icon="{ui:SymbolIcon DocumentText24}" />
             </ui:NavigationView.MenuItems>
             <ui:NavigationView.FooterMenuItems>
                 <ui:NavigationViewItem Content="{l:Text NavAbout.Content}" TargetPageType="{x:Type pages:AboutPage}"

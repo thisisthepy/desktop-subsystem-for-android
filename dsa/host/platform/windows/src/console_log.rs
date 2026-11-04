@@ -7,7 +7,9 @@
 //!
 //! The file is bounded: a boot that finds it over [`ROTATE_AT_BYTES`] first renames it to
 //! `<name>.1`, replacing the copy before, so at most two boots' worth of a noisy guest are
-//! kept.
+//! kept. One boot writes at most [`BOOT_LIMIT_BYTES`] to it: past that the file says the rest
+//! is not kept, and only the last lines stay in memory. The console carries the kernel's early
+//! boot and a panic; Android's log is read on demand, never kept here.
 //!
 //! Nothing here touches the pipe the console arrives on (`console_pipe`, Windows only), so
 //! it is tested on every platform.
@@ -20,6 +22,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// A log over this size at the start of a boot is moved aside to `<name>.1`.
 pub const ROTATE_AT_BYTES: u64 = 4 * 1024 * 1024;
+/// The most bytes of console output one boot writes to the log.
+pub const BOOT_LIMIT_BYTES: u64 = 2 * 1024 * 1024;
 /// How many of the last non-empty console lines a failed start reports.
 pub const TAIL_LINES: usize = 20;
 /// Longer console lines are cut to this many characters in the report (not in the file).
@@ -147,6 +151,20 @@ impl ConsoleSigns {
     /// nothing about the disk.
     pub fn agent_refused_for_keys(&self) -> bool {
         self.channel_denials > 0 && self.denied_domain.as_deref() == Some("priv_app")
+    }
+
+    /// Adds what the signs of `other` count, as for a boot read from two sources.
+    pub fn merge(&mut self, other: &ConsoleSigns) {
+        self.channel_denials += other.channel_denials;
+        self.renderer_unreachable += other.renderer_unreachable;
+        if other.denied_domain.is_some() {
+            self.denied_domain = other.denied_domain.clone();
+        }
+    }
+
+    /// Reads one line of the boot's console or of Android's log.
+    pub fn read_line(&mut self, line: &str) {
+        self.read(line)
     }
 
     fn read(&mut self, line: &str) {
@@ -293,16 +311,27 @@ pub struct ConsoleLog {
     file: Option<File>,
     tail: ConsoleTail,
     write_error: Option<String>,
+    /// The console bytes this boot has written to the file.
+    written: u64,
+    /// The most this boot writes.
+    limit: u64,
 }
 
 impl ConsoleLog {
     /// Starts a boot in the log at `path`: moves a large log aside, then appends `header`.
     pub fn begin_boot(path: &Path, header: &str) -> ConsoleLog {
+        Self::begin_boot_with_limit(path, header, BOOT_LIMIT_BYTES)
+    }
+
+    /// [`begin_boot`](Self::begin_boot) writing at most `limit` bytes of this boot's console.
+    pub fn begin_boot_with_limit(path: &Path, header: &str, limit: u64) -> ConsoleLog {
         let mut log = ConsoleLog {
             path: path.to_path_buf(),
             file: None,
             tail: ConsoleTail::new(TAIL_LINES),
             write_error: None,
+            written: 0,
+            limit,
         };
         let opened = (|| {
             if let Some(folder) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -343,8 +372,25 @@ impl ConsoleLog {
     /// Records the next piece of console output.
     pub fn record(&mut self, bytes: &[u8]) {
         self.tail.push(bytes);
+        if self.written >= self.limit {
+            return;
+        }
+        let room = (self.limit - self.written).min(bytes.len() as u64) as usize;
+        self.written += room as u64;
+        let full = self.written >= self.limit;
         if let Some(file) = self.file.as_mut() {
-            if let Err(error) = file.write_all(bytes) {
+            let mut written = file.write_all(&bytes[..room]);
+            if written.is_ok() && full {
+                written = file.write_all(
+                    format!(
+                        "\n==== the rest of this boot's console is not kept: it passed {} MiB. \
+                         Android's log is read with `dsa logcat`.\n",
+                        self.limit / (1024 * 1024)
+                    )
+                    .as_bytes(),
+                );
+            }
+            if let Err(error) = written {
                 self.fail(&error);
             }
         }

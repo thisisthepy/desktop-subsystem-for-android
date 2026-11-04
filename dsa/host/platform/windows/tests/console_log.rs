@@ -7,7 +7,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use dsa_host_windows::console_log::{
     boot_header, clean_line, explain_unfinished_boot, explain_unreachable_agent, failure_report,
     old_copy_path, rotate_if_large, utc_timestamp, ConsoleLog, ConsoleSigns, ConsoleTail,
-    ROTATE_AT_BYTES, TAIL_LINES,
+    BOOT_LIMIT_BYTES, ROTATE_AT_BYTES, TAIL_LINES,
 };
 
 fn scratch(name: &str) -> PathBuf {
@@ -267,4 +267,38 @@ fn fr2_a_log_that_cannot_be_written_still_keeps_the_last_lines() {
     let report = log.failure_report();
     assert!(report.contains("Kernel panic"), "{report}");
     assert!(report.contains("cannot be written"), "{report}");
+}
+
+#[test]
+fn fr21_one_boot_writes_at_most_its_limit_to_the_console_log() {
+    let dir = scratch("boot-limit");
+    let path = dir.join("android-S-1-5-21-1.log");
+    let mut log = ConsoleLog::begin_boot_with_limit(&path, "==== boot\n", 100);
+    for _ in 0..50 {
+        log.record(b"0123456789\n");
+    }
+    let text = read(&path);
+    let console = text.trim_start_matches("==== boot\n");
+    assert!(console.starts_with(&"0123456789\n".repeat(9)), "{text}");
+    assert!(
+        text.contains("the rest of this boot's console is not kept"),
+        "{text}"
+    );
+    assert!(text.len() < 100 + 400, "{} bytes", text.len());
+    // The last lines are still kept for a start that fails.
+    assert_eq!(log.tail().last().map(String::as_str), Some("0123456789"));
+    assert_eq!(BOOT_LIMIT_BYTES, 2 * 1024 * 1024);
+}
+
+#[test]
+fn fr21_signs_from_the_guest_log_add_to_the_consoles() {
+    let mut console = ConsoleSigns::default();
+    let mut log = ConsoleSigns::default();
+    log.read_line(
+        "servicemanager: avc: denied { find } for pid=1 \
+         name=io.github.thisisthepy.dsa.channel.IChannel/default \
+         scontext=u:r:priv_app:s0:c512,c768 tcontext=u:object_r:dsa_channel_service:s0",
+    );
+    console.merge(&log);
+    assert!(console.agent_refused_for_keys());
 }

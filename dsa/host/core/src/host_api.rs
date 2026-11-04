@@ -61,7 +61,9 @@ use crate::accessibility::{
     AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, TreeUpdate,
 };
 use crate::apk::{self, InstallOutcome, InstalledPackage};
+use crate::diagnostics::HostFile;
 use crate::files::{self, FileAction, FileTransfer};
+use crate::guest_log::{DiagnosticsEvent, LogDumpEvent, LogEntry, LogFilter, LogWatch};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{InputEvent, PointerEvent};
 use crate::keys::KeyEvent;
@@ -267,6 +269,30 @@ pub trait UserAndroid: Send + Sync {
             "this Android does not export its accessibility tree".into(),
         ))
     }
+    /// Reads this Android's log: the records the host holds that pass `filter`, then each new
+    /// one. This Android reads its log only while a watch lasts. `None` when it cannot send
+    /// its log.
+    fn watch_log(&self, filter: LogFilter) -> Option<LogWatch> {
+        let _ = filter;
+        None
+    }
+    /// Asks this Android for everything its log holds now that passes `filter`.
+    fn dump_log(&self, filter: LogFilter) -> Result<Receiver<LogDumpEvent>, TaskRequestError> {
+        let _ = filter;
+        Err(TaskRequestError::Failed(
+            "this Android cannot send its log".into(),
+        ))
+    }
+    /// The records of this Android's log the host holds now, oldest first.
+    fn recent_log(&self) -> Vec<LogEntry> {
+        Vec::new()
+    }
+    /// Asks this Android for its diagnostics.
+    fn collect_diagnostics(&self) -> Result<Receiver<DiagnosticsEvent>, TaskRequestError> {
+        Err(TaskRequestError::Failed(
+            "this Android cannot gather its diagnostics".into(),
+        ))
+    }
 }
 
 /// Why an APK did not reach Android.
@@ -306,6 +332,18 @@ impl UserAndroid for Session {
     }
     fn watch_tasks(&self) -> Option<TaskWatch> {
         Some(Session::watch_tasks(self))
+    }
+    fn watch_log(&self, filter: LogFilter) -> Option<LogWatch> {
+        Some(Session::watch_log(self, filter))
+    }
+    fn dump_log(&self, filter: LogFilter) -> Result<Receiver<LogDumpEvent>, TaskRequestError> {
+        Session::dump_log(self, filter).map_err(request_error)
+    }
+    fn recent_log(&self) -> Vec<LogEntry> {
+        Session::recent_log(self)
+    }
+    fn collect_diagnostics(&self) -> Result<Receiver<DiagnosticsEvent>, TaskRequestError> {
+        Session::collect_diagnostics(self).map_err(request_error)
     }
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
         Session::request(self, request).map_err(request_error)
@@ -812,7 +850,13 @@ pub struct HostApiService {
     memory_wait: Duration,
     /// Where each user's widget windows are.
     placements: Arc<dyn WidgetPlacements>,
+    /// The host's logs that go in a user's diagnostics, by user.
+    host_logs: Option<HostLogs>,
 }
+
+/// Names the host's log files that go in a user's diagnostics archive: the service's own and
+/// those of the processes in that user's session, never another user's.
+pub type HostLogs = Arc<dyn Fn(&str) -> Vec<HostFile> + Send + Sync>;
 
 impl HostApiService {
     pub fn new(androids: Arc<dyn UserAndroids>, build: &str) -> HostApiService {
@@ -830,7 +874,14 @@ impl HostApiService {
             host_memory: None,
             memory_wait: MEMORY_WAIT,
             placements: Arc::new(MemoryWidgetPlacements::default()),
+            host_logs: None,
         }
+    }
+
+    /// Puts the host log files `host_logs` names for a user in that user's diagnostics.
+    pub fn with_host_logs(mut self, host_logs: HostLogs) -> HostApiService {
+        self.host_logs = Some(host_logs);
+        self
     }
 
     /// Keeps where each user's widget windows are in `placements`, which outlives the
@@ -965,6 +1016,27 @@ impl HostApiService {
             };
             if let Some(request::Body::WatchTasks(_)) = request.body {
                 return self.watch_tasks(connection, &peer, request.id);
+            }
+            if let Some(request::Body::WatchLog(watch)) = &request.body {
+                let android = self.androids.android(&peer.user);
+                return crate::guest_log_api::serve_watch_log(
+                    connection, android, request.id, watch,
+                );
+            }
+            if let Some(request::Body::CollectDiagnostics(_)) = request.body {
+                let android = self.androids.android(&peer.user);
+                let host_files = self
+                    .host_logs
+                    .as_ref()
+                    .map(|files| files(&peer.user))
+                    .unwrap_or_default();
+                return crate::guest_log_api::serve_collect_diagnostics(
+                    connection,
+                    android,
+                    request.id,
+                    &host_files,
+                    &self.hello.build,
+                );
             }
             if let Some(request::Body::StreamInput(_)) = request.body {
                 return self.stream_input(connection, &peer, request.id);
@@ -2184,6 +2256,10 @@ impl HostApiService {
                     Err(TaskRequestError::Failed(why)) => error(ErrorCode::Unavailable, why),
                 },
             },
+            Some(request::Body::WatchLog(_)) | Some(request::Body::CollectDiagnostics(_)) => error(
+                ErrorCode::UnknownRequest,
+                "the log and the diagnostics are read on a connection of their own".into(),
+            ),
             Some(body) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => {
@@ -2220,7 +2296,9 @@ impl HostApiService {
                         | request::Body::WatchWidgets(_)
                         | request::Body::PlaceWidget(_)
                         | request::Body::WidgetPointer(_)
-                        | request::Body::WatchAccessibility(_) => unreachable!("answered above"),
+                        | request::Body::WatchAccessibility(_)
+                        | request::Body::WatchLog(_)
+                        | request::Body::CollectDiagnostics(_) => unreachable!("answered above"),
                     }
                     status(android.as_ref())
                 }
@@ -2823,6 +2901,43 @@ impl HostApiClient {
                 current: tasks_from_wire(tasks),
             }),
             _ => Err(ClientError::Malformed("expected the list of tasks".into())),
+        }
+    }
+
+    /// Reads the guest log of the caller's Android: the records the service holds that pass
+    /// `filter`, then each new one; with `dump`, what Android's log holds now, then the end.
+    /// The connection carries nothing else from here on, so the client is used up.
+    pub fn watch_log(
+        mut self,
+        filter: &LogFilter,
+        dump: bool,
+    ) -> Result<crate::guest_log_api::LogReader, ClientError> {
+        match self.exchange(
+            request::Body::WatchLog(filter.to_host_api(dump)),
+            self.timeout,
+        )? {
+            response::Body::Done(_) => Ok(crate::guest_log_api::LogReader::new(self.connection)),
+            _ => Err(ClientError::Malformed(
+                "expected the answer that the log is sent".into(),
+            )),
+        }
+    }
+
+    /// Gathers the diagnostics of the caller's Android and of DSA on this computer into one
+    /// zip archive. The connection carries nothing else from here on, so the client is used up.
+    pub fn collect_diagnostics(
+        mut self,
+    ) -> Result<crate::guest_log_api::DiagnosticsReader, ClientError> {
+        match self.exchange(
+            request::Body::CollectDiagnostics(types::CollectDiagnostics {}),
+            self.timeout,
+        )? {
+            response::Body::Done(_) => Ok(crate::guest_log_api::DiagnosticsReader::new(
+                self.connection,
+            )),
+            _ => Err(ClientError::Malformed(
+                "expected the answer that the diagnostics are gathered".into(),
+            )),
         }
     }
 

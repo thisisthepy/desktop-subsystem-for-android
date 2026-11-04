@@ -105,12 +105,47 @@ class AndroidKernelConfigTests(unittest.TestCase):
         ]:
             self.assertIn(option, config)
 
+    def test_fr21_the_kernel_keeps_its_last_log_in_pstore_ramoops(self):
+        config = CONFIG.read_text()
+        for option in [
+            "CONFIG_PSTORE=y",
+            "CONFIG_PSTORE_CONSOLE=y",
+            "CONFIG_PSTORE_PMSG=y",
+            "CONFIG_PSTORE_RAM=y",
+        ]:
+            self.assertIn(option, config)
+
     def test_fr1_vmbus_root_device_is_platform_device_patch(self):
         patch = (PATCHES / "vmbus-platform-device.patch").read_text()
         self.assertIn("drivers/hv/vmbus_drv.c", patch)
         self.assertIn("vmbus_root_device = &pdev->dev;", patch)
         self.assertIn('device_rename(&pdev->dev, "vmbus")', patch)
         self.assertIn("device_move(&pdev->dev, &platform_bus, DPM_ORDER_NONE)", patch)
+
+    def test_fr10_wakeup_sources_live_where_android_labels_them(self):
+        # Android's suspend service reads every wakeup source's statistics. The platform
+        # policy labels /sys/devices/virtual/wakeup, but a device's own wakeup source sits
+        # below that device, whose Hyper-V path no fixed label can name; the service was
+        # refused each read and logged it thousands of times.
+        self.assertIn("CONFIG_PM_WAKELOCKS=y", CONFIG.read_text())
+        patch = (PATCHES / "wakeup-sources-virtual.patch").read_text()
+        self.assertIn("drivers/base/power/wakeup_stats.c", patch)
+        self.assertIn("-\tdev->parent = parent;", patch)
+        self.assertIn("+\tdev->parent = NULL;", patch)
+
+    def test_fr5_system_server_may_move_apps_between_scheduling_cgroups(self):
+        # The cpu, cpuset and blkio controllers are cgroup v1 hierarchies, where only root
+        # or the task's own user may move a task. Android's kernels also let CAP_SYS_NICE
+        # move it; without that system_server cannot put a foreground app in its groups,
+        # and libprocessgroup logs "Failed to add task into cgroup" for each attempt.
+        config = CONFIG.read_text()
+        for option in ["CONFIG_CGROUPS=y", "CONFIG_CGROUP_SCHED=y", "CONFIG_FAIR_GROUP_SCHED=y",
+                       "CONFIG_UCLAMP_TASK_GROUP=y", "CONFIG_CPUSETS=y", "CONFIG_BLK_CGROUP=y",
+                       "CONFIG_CGROUP_FREEZER=y", "CONFIG_MEMCG=y"]:
+            self.assertIn(option, config)
+        patch = (PATCHES / "cgroup-v1-sys-nice.patch").read_text()
+        self.assertIn("kernel/cgroup/cgroup-v1.c", patch)
+        self.assertIn("+\t    !file_ns_capable(of->file, tcred->user_ns, CAP_SYS_NICE))", patch)
 
 
 if __name__ == "__main__":

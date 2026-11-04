@@ -117,6 +117,73 @@ class InputTraceTest(unittest.TestCase):
         self.assertTrue(paths[0].startswith(r"C:\Users\me\AppData\Local"))
         self.assertTrue(paths[1].startswith(r"C:\ProgramData"))
 
+    def test_fr21_the_guest_stages_come_from_dsa_logcat_not_a_log_file(self):
+        self.assertEqual(trace.guest_command(), ["dsa", "logcat", "-d", "-b", "all"])
+        asked = []
+
+        class Done:
+            returncode = 0
+            stdout = (
+                "2026-11-04 10:00:00.000  1234  1240 I DsaAgent: "
+                "input-trace stage=agent.inject task=7 mono=1000.0\n"
+                "2026-11-04 10:00:00.001  1234  1240 I Other: not a trace line\n"
+            )
+            stderr = ""
+
+        def run(command, **_):
+            asked.append(command)
+            return Done()
+
+        lines = trace.guest_lines(run)
+        self.assertEqual(asked, [trace.guest_command()])
+        self.assertEqual([line.stage for line in lines], ["agent.inject"])
+        self.assertEqual(lines[0].source, "dsa logcat")
+
+
+class ClickLatencyTest(unittest.TestCase):
+    """A click is measured twice: to its first visible feedback and to the next screen."""
+
+    def line(self, stage, host, **fields):
+        line = trace.Line(stage, {k: str(v) for k, v in fields.items()}, "test")
+        line.host = host
+        return line
+
+    def clicks(self):
+        return [
+            self.line("sf.frame", 900.0, layer="com.android.settings/com.android.settings.Settings#1"),
+            self.line("app.pointer", 1000.0, task="7", mouse_down="true"),
+            self.line("sf.frame", 1033.0, layer="com.android.settings/com.android.settings.Settings#1"),
+            self.line("app.shown", 1040.0, task="7"),
+            self.line("app.pointer", 1080.0, task="7", mouse_down="false"),
+            self.line("sf.frame", 1250.0, layer="com.android.settings/com.android.settings.SubSettings#4"),
+            self.line("app.shown", 1258.0, task="7"),
+        ]
+
+    def test_fr5_feedback_is_the_first_app_frame_after_the_press_as_shown(self):
+        [click] = trace.click_latencies(self.clicks(), 1500.0)
+        self.assertAlmostEqual(click.feedback, 40.0)
+
+    def test_fr5_next_screen_is_the_first_frame_of_a_new_layer_past_the_release(self):
+        [click] = trace.click_latencies(self.clicks(), 1500.0)
+        self.assertAlmostEqual(click.next_screen, 258.0)
+
+    def test_fr5_a_click_without_a_new_screen_has_no_next_screen_time(self):
+        [click] = trace.click_latencies(self.clicks()[:5], 1500.0)
+        self.assertIsNone(click.next_screen)
+        self.assertIn("next screen: none", trace.latency_report([click], []))
+
+    def test_fr5_displayed_lines_are_read_in_milliseconds(self):
+        texts = ["I ActivityTaskManager: Displayed com.android.settings/.SubSettings for user 0: +1s218ms",
+                 "I ActivityTaskManager: Displayed com.android.settings/.SubSettings: +314ms"]
+        self.assertEqual(trace.displayed_ms(texts), [1218.0, 314.0])
+
+    def test_fr5_the_report_gives_median_and_p90_of_both_numbers(self):
+        clicks = [trace.Click(self.line("app.pointer", 0.0, task="7"), float(v), float(v) * 5)
+                  for v in range(1, 11)]
+        report = trace.latency_report(clicks, [])
+        self.assertIn("feedback: 10 times, median", report)
+        self.assertIn("next screen: 10 times", report)
+
 
 if __name__ == "__main__":
     unittest.main()

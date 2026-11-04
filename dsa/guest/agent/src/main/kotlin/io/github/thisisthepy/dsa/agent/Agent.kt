@@ -7,6 +7,8 @@ import io.github.thisisthepy.dsa.agent.channel.ChannelClient
 import io.github.thisisthepy.dsa.agent.channel.ChannelLocator
 import io.github.thisisthepy.dsa.agent.clipboard.ClipboardSync
 import io.github.thisisthepy.dsa.agent.clipboard.GuestClipboard
+import io.github.thisisthepy.dsa.agent.diagnostics.DiagnosticsCollector
+import io.github.thisisthepy.dsa.agent.diagnostics.DiagnosticsSource
 import io.github.thisisthepy.dsa.agent.input.EditorConnection
 import io.github.thisisthepy.dsa.agent.install.ApkInstaller
 import io.github.thisisthepy.dsa.agent.install.PackageInfoPort
@@ -83,6 +85,8 @@ import io.github.thisisthepy.dsa.control.v1.PointerAction
  * agent's accessibility service is on and the task's accessibility tree goes to the host
  * ([AccessibilityExport]); otherwise the service is off. The widgets the user placed on the
  * host's desktop are hosted and drawn here, and their images go to the host ([WidgetManager]).
+ * When the host gathers diagnostics, the agent sends its part: the system services' state and
+ * the dropbox ([DiagnosticsCollector]).
  */
 class Agent(
     private val ownPackage: String,
@@ -117,6 +121,8 @@ class Agent(
     widgetStore: WidgetStore = WidgetStore.memory(),
     accessibility: AccessibilitySource = AccessibilitySource.NONE,
     clock: () -> Long = { System.nanoTime() / 1_000_000 },
+    diagnostics: DiagnosticsSource = DiagnosticsSource.NONE,
+    diagnosticsRunner: (Runnable) -> Unit = { Thread(it, "dsa-diagnostics").start() },
 ) {
     private val channel = ChannelClient(
         locator = locator,
@@ -165,6 +171,7 @@ class Agent(
         MemoryReporter(it, scheduler, log, isConnected = { channel.connected }, send = { frame -> channel.send(frame) })
     }
     private val clipboardSync = ClipboardSync(clipboard, { frame -> channel.send(frame) }, log, isConnected = { channel.connected })
+    private val diagnosticsCollector = DiagnosticsCollector(diagnostics, { frame -> channel.send(frame) }, log, diagnosticsRunner)
     private val notificationForwarder = NotificationForwarder(
         ownPackage,
         notifications,
@@ -222,7 +229,9 @@ class Agent(
             lifecycle.start { work -> scheduler.post(work) }
             clipboardSync.start { work -> scheduler.post(work) }
             notificationForwarder.start { work -> scheduler.post(work) }
-            widgetManager.start { work -> scheduler.post(work) }
+            widgetManager.start(later = { work -> scheduler.postDelayed(RETRY_MILLIS, work) }) { work ->
+                scheduler.post(work)
+            }
             listenToApps()
             channel.start()
             requestRefresh()
@@ -299,6 +308,7 @@ class Agent(
     private fun onFrame(frame: ByteArray) {
         if (input(frame)) return
         if (memoryRequest(frame)) return
+        if (diagnosticsCollector.handle(frame)) return
         if (linksOrFiles(frame)) return
         val result = try {
             requests.handle(frame)

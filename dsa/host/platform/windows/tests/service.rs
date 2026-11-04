@@ -523,6 +523,13 @@ fn fr3_serve_registers_graphics_service_guids_at_startup() {
         read_service_element_name_under(RegistryHive::CurrentUser, &test_key, pipe_guid).as_deref(),
         Some(GRAPHICS_PROCESS_PIPE_ELEMENT_NAME)
     );
+    // The video port, which the window manager serves as well.
+    let video_guid = Guid::vsock_service(dsa_host_core::video::VIDEO_PORT);
+    assert_eq!(
+        read_service_element_name_under(RegistryHive::CurrentUser, &test_key, video_guid)
+            .as_deref(),
+        Some(dsa_host_windows::guest_communication_services::VIDEO_ELEMENT_NAME)
+    );
 
     stop.store(true, Ordering::Relaxed);
     let res = server.join().unwrap();
@@ -530,6 +537,7 @@ fn fr3_serve_registers_graphics_service_guids_at_startup() {
 
     let _ = unregister_service_guid_under(RegistryHive::CurrentUser, &test_key, command_guid);
     let _ = unregister_service_guid_under(RegistryHive::CurrentUser, &test_key, pipe_guid);
+    let _ = unregister_service_guid_under(RegistryHive::CurrentUser, &test_key, video_guid);
 }
 
 #[test]

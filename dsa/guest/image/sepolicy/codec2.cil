@@ -1,0 +1,11 @@
+; Desktop Subsystem for Android (DSA)
+; The guest's Codec 2.0 HAL for video decoding on the host's GPU (/vendor/bin/hw/dsa-codec2)
+; runs in the vendor codec domain, mediacodec, labelled by vendor_file_contexts. It serves
+; android.hardware.media.c2.IComponentStore/default (vendor_service_contexts labels it
+; hal_codec2_service, which the domain may register), reaches the host's video port over
+; vsock, and writes the pictures the host decodes into graphics buffers, which it maps through
+; the DRM card the allocator hands out (graphics-vsock.cil labels the cards gpu_device).
+
+(allow mediacodec self (vsock_socket (create connect read write getattr setopt getopt shutdown)))
+(allow mediacodec gpu_device (dir (search)))
+(allow mediacodec gpu_device (chr_file (open read write ioctl getattr map)))

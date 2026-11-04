@@ -583,26 +583,36 @@ class ImageLayoutTests(unittest.TestCase):
                 self.assertIn("libOpenglSystemCommon\\.so", fc)
 
 
-    def test_fr2_android_log_reaches_the_vm_console_log(self):
+    def test_fr21_android_log_stays_in_memory_and_the_console_quiets_after_boot(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "target-files.zip"
+            ueventd_text = "# seriallogging\n/dev/hvc2 0660 system logd\n"
             with zipfile.ZipFile(source, "w") as archive:
-                archive.writestr("VENDOR/etc/ueventd.rc", "# seriallogging\n/dev/hvc2 0660 system logd\n")
+                archive.writestr("VENDOR/etc/ueventd.rc", ueventd_text)
                 archive.writestr("META/vendor_filesystem_config.txt", "vendor/etc/ueventd.rc 0 0 644 capabilities=0x0\n")
+                archive.writestr("META/filesystem_config.txt", "system/etc 0 0 755 capabilities=0x0\n")
 
             modified = root / "modified.zip"
             make_image.modify(source, modified)
 
             with zipfile.ZipFile(modified) as archive:
-                rc = archive.read("VENDOR/etc/init/dsa-console-logcat.rc").decode()
-                self.assertIn("/system/bin/logcat -b main,system,crash -v threadtime -f /dev/ttyS0 *:I", rc)
-                self.assertIn("seclabel u:r:logpersist:s0", rc)
-                self.assertIn("user logd", rc)
-                ueventd = archive.read("VENDOR/etc/ueventd.rc").decode()
-                self.assertTrue(ueventd.splitlines()[-1].split() == ["/dev/ttyS0", "0660", "system", "logd"])
-                fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
-                self.assertIn("vendor/etc/init/dsa-console-logcat.rc 0 0 644 capabilities=0x0", fs_config)
+                names = archive.namelist()
+                # Nothing writes Android's log to the serial console or to a file.
+                self.assertFalse(any("console-logcat" in name for name in names), names)
+                for name in names:
+                    if name.endswith(".rc"):
+                        self.assertNotIn("/system/bin/logcat", archive.read(name).decode(), name)
+                self.assertEqual(archive.read("VENDOR/etc/ueventd.rc").decode(), ueventd_text)
+                console = archive.read("SYSTEM/etc/init/dsa-console.rc").decode()
+                self.assertIn("on property:sys.boot_completed=1", console)
+                self.assertIn("write /proc/sys/kernel/printk 1", console)
+                fs_config = archive.read("META/filesystem_config.txt").decode()
+                self.assertIn("system/etc/init/dsa-console.rc 0 0 644 capabilities=0x0", fs_config)
+                vendor_fs = archive.read("META/vendor_filesystem_config.txt").decode()
+                self.assertNotIn("console-logcat", vendor_fs)
+        # logd keeps the kernel's log, which `dsa logcat -b kernel` reads.
+        self.assertIn("ro.logd.kernel=true", make_image.edit_props("").splitlines())
 
     def test_pr6_the_control_daemon_is_installed_in_its_own_domain(self):
         # The daemon reads the boot's secret from /proc/bootconfig, so it needs a domain
@@ -1019,6 +1029,50 @@ class ImageLayoutTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 make_image.modify(source, root / "modified.zip", power_hal=root)
 
+    def test_pr4_the_codec_hal_is_installed_with_its_decoders_and_policy(self):
+        # The host decodes the guest's video on its GPU: the image carries the codec HAL, the
+        # list of its decoders, its service's label, and keeps codec buffers out of pools.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            codec2 = root / "dsa-codec2"
+            codec2.write_bytes(b"\x7fELF codec2")
+            channeld = root / "dsa-channeld"
+            channeld.write_bytes(b"\x7fELF channeld")
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+                archive.writestr("VENDOR/build.prop", "ro.debuggable=1\n")
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+                archive.writestr("VENDOR/etc/selinux/vendor_file_contexts", "/vendor/bin/sh u:object_r:vendor_shell_exec:s0\n")
+                archive.writestr("VENDOR/etc/selinux/vendor_service_contexts", "")
+
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, channeld=channeld, codec2=codec2)
+
+            with zipfile.ZipFile(modified) as archive:
+                self.assertEqual(archive.read("VENDOR/bin/hw/dsa-codec2"), b"\x7fELF codec2")
+                self.assertIn("service vendor.dsa-codec2 /vendor/bin/hw/dsa-codec2",
+                              archive.read("VENDOR/etc/init/dsa-codec2.rc").decode())
+                manifest = archive.read("VENDOR/etc/vintf/manifest/dsa-codec2.xml").decode()
+                self.assertIn("<name>android.hardware.media.c2</name>", manifest)
+                self.assertIn("<fqname>IComponentStore/default</fqname>", manifest)
+                codecs = archive.read("VENDOR/etc/media_codecs_c2.xml").decode()
+                for name in ["c2.dsa.avc.decoder", "c2.dsa.hevc.decoder", "c2.dsa.vp9.decoder", "c2.dsa.av1.decoder"]:
+                    self.assertIn(f'name="{name}"', codecs)
+                fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
+                self.assertIn("vendor/bin/hw/dsa-codec2 0 2000 755 capabilities=0x0", fs_config)
+                self.assertIn("vendor/etc/media_codecs_c2.xml 0 0 644 capabilities=0x0", fs_config)
+                self.assertIn("/vendor/bin/hw/dsa-codec2 u:object_r:mediacodec_exec:s0",
+                              archive.read("VENDOR/etc/selinux/vendor_file_contexts").decode())
+                self.assertIn("android.hardware.media.c2.IComponentStore/default u:object_r:hal_codec2_service:s0",
+                              archive.read("VENDOR/etc/selinux/vendor_service_contexts").decode())
+                self.assertIn("(allow mediacodec self (vsock_socket",
+                              archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode())
+                self.assertIn("debug.stagefright.c2-poolmask=262144", archive.read("VENDOR/build.prop").decode())
+
+    def test_pr4_without_the_codec_hal_codec_buffers_stay_pooled(self):
+        self.assertNotIn("debug.stagefright.c2-poolmask", make_image.edit_props("ro.debuggable=1\n"))
+
     def test_fr3_without_the_dsa_hwcomposer_the_cuttlefish_composer_stays(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1203,6 +1257,8 @@ class ImageLayoutTests(unittest.TestCase):
             # Without DSA's power and health HALs the host never hears the guest's power hints.
             self.assertIn("VENDOR/bin/hw/dsa-power is missing", proc.stdout)
             self.assertIn("VENDOR/bin/hw/dsa-health is missing", proc.stdout)
+            # Without the codec HAL every video decodes on the guest's processors.
+            self.assertIn("VENDOR/bin/hw/dsa-codec2 is missing", proc.stdout)
             self.assertIn("androidboot.dsa.display_width", proc.stdout)
 
     def test_fr3_check_image_rejects_the_wifi_trace_setup(self):
@@ -2003,6 +2059,103 @@ class TouchLatencyTests(unittest.TestCase):
         for missing in ["DsaFrameworkOverlay.apk is missing", "dsa-trace.rc is missing"]:
             self.assertIn(missing, outputs[0])
             self.assertNotIn(missing, outputs[1])
+
+    def test_fr10_check_image_rejects_a_policy_that_leaves_wakeup_sources_unlabelled(self):
+        # The suspend service reads each wakeup source's statistics; unlabelled, every read
+        # is refused and logged, thousands of lines a boot.
+        check_script = Path(__file__).with_name("check-image.py")
+        labelled = (
+            '(genfscon sysfs "/devices/virtual/wakeup" (u object_r sysfs_wakeup ((s0) (s0))))\n'
+            '(genfscon sysfs "/class/wakeup" (u object_r sysfs_wakeup ((s0) (s0))))\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_dir = root / "image"
+            img_dir.mkdir()
+            keys_dir = root / "keys"
+            keys_dir.mkdir()
+            (img_dir / "image.json").write_text(json.dumps({"files": {}, "kernel_cmdline": ""}))
+            (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
+            outputs = []
+            for policy in ["", labelled]:
+                with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                    archive.writestr("META/apkcerts.txt", "")
+                    archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
+                    archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", policy)
+                outputs.append(subprocess.run(
+                    [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                    capture_output=True, text=True,
+                ).stdout)
+        for path in ["/devices/virtual/wakeup", "/class/wakeup"]:
+            missing = f"does not label sysfs {path} sysfs_wakeup"
+            self.assertIn(missing, outputs[0])
+            self.assertNotIn(missing, outputs[1])
+
+
+class BootLogTests(unittest.TestCase):
+    """What a normal boot logs: no refused property, audit flood or stale package state."""
+
+    SYSTEM_PROPS = (
+        "ro.build.version.incremental=15581820\n"
+        "ro.system.build.version.incremental=15581820\n"
+        "ro.system.build.fingerprint=generic/aosp_cf/vsoc:16/BP4A/15581820:userdebug/test-keys\n"
+        "ro.build.id=BP4A\n"
+    )
+
+    def test_fr14_a_new_image_changes_every_fingerprint(self):
+        # PackageManager reparses the apps, compiles them again and grants new permissions
+        # only when a partition's fingerprint changes.
+        props = make_image.edit_props(self.SYSTEM_PROPS, build_tag="dsa0123456789ab").splitlines()
+        self.assertIn("ro.build.version.incremental=15581820.dsa0123456789ab", props)
+        self.assertIn("ro.system.build.version.incremental=15581820.dsa0123456789ab", props)
+        self.assertIn("ro.system.build.fingerprint="
+                      "generic/aosp_cf/vsoc:16/BP4A/15581820.dsa0123456789ab:userdebug/test-keys", props)
+        self.assertIn("ro.build.id=BP4A", props)
+
+    def test_fr14_vendor_fingerprint_carries_the_same_tag(self):
+        vendor = ("ro.vendor.build.fingerprint=generic/aosp_cf/vsoc:16/BP4A/15581820:userdebug/test-keys\n"
+                  "ro.vendor.build.version.incremental=15581820\n")
+        props = make_image.edit_props(vendor, vendor=True, build_tag="dsaab").splitlines()
+        self.assertIn("ro.vendor.build.fingerprint=generic/aosp_cf/vsoc:16/BP4A/15581820.dsaab:userdebug/test-keys", props)
+        self.assertIn("ro.vendor.build.version.incremental=15581820.dsaab", props)
+
+    def test_fr14_the_build_tag_follows_the_image_content(self):
+        one = make_image.image_build_tag([b"agent 1", None])
+        self.assertEqual(one, make_image.image_build_tag([b"agent 1", None]))
+        self.assertNotEqual(one, make_image.image_build_tag([b"agent 2", None]))
+        self.assertRegex(one, r"^dsa[0-9a-f]{12}$")
+
+    def test_fr14_props_are_unchanged_without_a_build_tag(self):
+        props = make_image.edit_props(self.SYSTEM_PROPS)
+        self.assertIn("ro.build.version.incremental=15581820\n", props)
+
+    def test_fr1_vendor_build_props_set_only_what_vendor_init_may(self):
+        # init reads the vendor and odm build.prop as vendor_init, which may not set these;
+        # each line was a denial on every boot.
+        props = make_image.edit_props("ro.debuggable=1\nro.adb.secure=0\n", vendor=True)
+        for key in ("ro.debuggable", "ro.secure", "ro.adb.secure", "ro.force.debuggable", "sys.use_memfd"):
+            self.assertNotIn(f"{key}=", props)
+        self.assertIn("ro.hardware.egl=angle\n", props)
+        self.assertIn("ro.vulkan.apex=\n", props)
+        self.assertIn("ro.lmk.use_psi=true\n", props)
+        self.assertEqual(make_image.VENDOR_PROP_FILES, {"VENDOR/build.prop", "ODM/etc/build.prop"})
+
+    def test_fr1_system_build_prop_keeps_the_user_build_settings(self):
+        props = make_image.edit_props("ro.debuggable=1\n")
+        self.assertIn("ro.debuggable=0\n", props)
+        self.assertIn("sys.use_memfd=true\n", props)
+
+    def test_fr1_kernel_does_not_audit_every_syscall(self):
+        # audit=1 made the kernel audit each iptables change and BPF program load, with
+        # syscall records, and overflow its queue for auditd before logd started.
+        self.assertNotIn("audit=1", make_image.kernel_cmdline("blkdevparts=sda:1@0(misc)").split())
+
+    def test_fr1_unused_devtmpfs_nodes_are_not_logged_as_denials(self):
+        policy = make_image.KERNEL_POLICY.read_text()
+        self.assertIn("(dontaudit kernel device (dir (write add_name create search)))", policy)
+        self.assertNotIn("(allow ", policy)
+        source = Path(make_image.__file__).read_text()
+        self.assertIn('plat_patched += "\\n" + KERNEL_POLICY.read_text()', source)
 
 
 if __name__ == "__main__":

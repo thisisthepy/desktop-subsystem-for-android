@@ -291,6 +291,39 @@ class WidgetManagerTest {
     }
 
     @Test
+    fun fr12_widgets_start_once_the_user_is_unlocked_and_the_host_keeps_them_meanwhile() {
+        var unlocked = false
+        val locked = object : WidgetPlatform by platform {
+            override fun start(frame: (Int, Int, Int, ByteArray) -> Unit, changed: () -> Unit) {
+                check(unlocked) { "User 0 must be unlocked for widgets to be available" }
+                platform.start(frame, changed)
+            }
+            override fun placedIds(): List<Int> {
+                check(unlocked) { "User 0 must be unlocked for widgets to be available" }
+                return platform.placedIds()
+            }
+        }
+        platform.offered += clock()
+        platform.bound[3] = "com.example.clock/.ClockWidget"
+        val retries = mutableListOf<() -> Unit>()
+        val manager = WidgetManager(locked, store, { frame -> sent += decode(frame); true }, log, { connected })
+        manager.start(later = { retries += it }) { it() }
+        manager.connected()
+        // Locked: no list, which the host would take as every widget removed.
+        assertTrue(sent.isEmpty())
+        assertEquals(1, retries.size)
+        retries.removeAt(0)()
+        assertEquals(1, retries.size)
+        assertEquals(1, log.lines.size)
+        unlocked = true
+        retries.removeAt(0)()
+        assertTrue(retries.isEmpty())
+        assertEquals(listOf(3), platform.shown.map { it.first })
+        assertEquals(listOf(Envelope.BodyCase.WIDGET_UPDATED, Envelope.BodyCase.WIDGET_LIST), sent.map { it.bodyCase })
+        assertEquals(listOf(3), sent[1].widgetList.widgetIdsList)
+    }
+
+    @Test
     fun nfr5_a_broken_widget_framework_does_not_stop_the_agent() {
         val broken = object : WidgetPlatform by FakeWidgetPlatform() {
             override fun providers(): List<WidgetInfo> = error("binder died")

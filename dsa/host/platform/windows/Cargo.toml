@@ -65,6 +65,8 @@ windows = { version = "0.62", features = [
     "Win32_Graphics_DirectComposition",
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
+    # Decoding the guest's video on the GPU (Media Foundation with Direct3D 11).
+    "Win32_Media_MediaFoundation",
     "Win32_Security",
     # Start menu shortcuts: the shell's ShellLink object and its properties.
     "Win32_Storage_FileSystem",

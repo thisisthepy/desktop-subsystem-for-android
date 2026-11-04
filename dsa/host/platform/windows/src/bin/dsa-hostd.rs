@@ -230,6 +230,13 @@ mod windows_host {
                 HvSocketListener::bind(vm_id, service).map(|l| Box::new(l) as Box<dyn Listener>)
             }),
         );
+        let log_service = Guid::vsock_service(config.log_port);
+        let log_listener = VmBoundListener::new(
+            launcher.vm_id_slot(),
+            Box::new(move |vm_id| {
+                HvSocketListener::bind(vm_id, log_service).map(|l| Box::new(l) as Box<dyn Listener>)
+            }),
+        );
         let session_config = config.session_config();
         let build = build();
         let handshake = ControlHandshake::new(&build, session_config.connect_timeout);
@@ -239,6 +246,9 @@ mod windows_host {
             handshake,
             session_config,
         ));
+        // Android's log, read with `dsa logcat` through the local API when the service runs it;
+        // here the port is served so the guest's daemon finds the host there.
+        session.serve_log_port(Box::new(log_listener), &build);
         session.set_clock_trace(Some(dsa_host_core::clock_trace::ClockTrace::new(
             Arc::new(AtomicBool::new(traces_input)),
             Arc::new(dsa_host_windows::compositor::log::PerformanceCounterClock),
@@ -252,6 +262,10 @@ mod windows_host {
             let (power, stop) = (Arc::clone(&power), Arc::clone(&power_stop));
             thread::spawn(move || dsa_host_windows::power::follow(power, stop));
         }
+        // And the computer's sleep, for as long as this runs.
+        let _sleep_watch = dsa_host_windows::power::watch_sleep(Arc::clone(&power))
+            .map_err(|why| eprintln!("Android will not hear when the computer sleeps: {why}"))
+            .ok();
 
         let events = session.events();
         thread::spawn(move || {
