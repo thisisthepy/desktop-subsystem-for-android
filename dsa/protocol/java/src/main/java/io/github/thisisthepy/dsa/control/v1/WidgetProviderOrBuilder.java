@@ -130,4 +130,24 @@ public interface WidgetProviderOrBuilder extends
    * @return The needsConfiguration.
    */
   boolean getNeedsConfiguration();
+
+  /**
+   * <pre>
+   * The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+   * </pre>
+   *
+   * <code>string app_label = 13;</code>
+   * @return The appLabel.
+   */
+  java.lang.String getAppLabel();
+  /**
+   * <pre>
+   * The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+   * </pre>
+   *
+   * <code>string app_label = 13;</code>
+   * @return The bytes for appLabel.
+   */
+  com.google.protobuf.ByteString
+      getAppLabelBytes();
 }

@@ -158,8 +158,8 @@ pub fn show(
     use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         AppendMenuW, CreatePopupMenu, DestroyMenu, PostMessageW, SetForegroundWindow,
-        TrackPopupMenu, MF_CHECKED, MF_POPUP, MF_SEPARATOR, MF_STRING, TPM_NONOTIFY,
-        TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_NULL,
+        TrackPopupMenu, MF_CHECKED, MF_POPUP, MF_SEPARATOR, MF_STRING, TPM_NONOTIFY, TPM_RETURNCMD,
+        TPM_RIGHTBUTTON, WM_NULL,
     };
 
     fn wide(text: &str) -> Vec<u16> {

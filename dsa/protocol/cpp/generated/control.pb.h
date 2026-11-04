@@ -10484,6 +10484,7 @@ class WidgetProvider final :
     kPackageNameFieldNumber = 2,
     kLabelFieldNumber = 3,
     kPreviewPngFieldNumber = 4,
+    kAppLabelFieldNumber = 13,
     kMinWidthDpFieldNumber = 5,
     kMinHeightDpFieldNumber = 6,
     kDefaultWidthDpFieldNumber = 7,
@@ -10547,6 +10548,20 @@ class WidgetProvider final :
   const std::string& _internal_preview_png() const;
   inline PROTOBUF_ALWAYS_INLINE void _internal_set_preview_png(const std::string& value);
   std::string* _internal_mutable_preview_png();
+  public:
+
+  // string app_label = 13;
+  void clear_app_label();
+  const std::string& app_label() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_app_label(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_app_label();
+  PROTOBUF_NODISCARD std::string* release_app_label();
+  void set_allocated_app_label(std::string* app_label);
+  private:
+  const std::string& _internal_app_label() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_app_label(const std::string& value);
+  std::string* _internal_mutable_app_label();
   public:
 
   // uint32 min_width_dp = 5;
@@ -10633,6 +10648,7 @@ class WidgetProvider final :
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr package_name_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr label_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr preview_png_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr app_label_;
     uint32_t min_width_dp_;
     uint32_t min_height_dp_;
     uint32_t default_width_dp_;
@@ -22170,6 +22186,56 @@ inline void WidgetProvider::_internal_set_needs_configuration(bool value) {
 inline void WidgetProvider::set_needs_configuration(bool value) {
   _internal_set_needs_configuration(value);
   // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProvider.needs_configuration)
+}
+
+// string app_label = 13;
+inline void WidgetProvider::clear_app_label() {
+  _impl_.app_label_.ClearToEmpty();
+}
+inline const std::string& WidgetProvider::app_label() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.WidgetProvider.app_label)
+  return _internal_app_label();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void WidgetProvider::set_app_label(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.app_label_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.WidgetProvider.app_label)
+}
+inline std::string* WidgetProvider::mutable_app_label() {
+  std::string* _s = _internal_mutable_app_label();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.WidgetProvider.app_label)
+  return _s;
+}
+inline const std::string& WidgetProvider::_internal_app_label() const {
+  return _impl_.app_label_.Get();
+}
+inline void WidgetProvider::_internal_set_app_label(const std::string& value) {
+  
+  _impl_.app_label_.Set(value, GetArenaForAllocation());
+}
+inline std::string* WidgetProvider::_internal_mutable_app_label() {
+  
+  return _impl_.app_label_.Mutable(GetArenaForAllocation());
+}
+inline std::string* WidgetProvider::release_app_label() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.WidgetProvider.app_label)
+  return _impl_.app_label_.Release();
+}
+inline void WidgetProvider::set_allocated_app_label(std::string* app_label) {
+  if (app_label != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.app_label_.SetAllocated(app_label, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.app_label_.IsDefault()) {
+    _impl_.app_label_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.WidgetProvider.app_label)
 }
 
 // -------------------------------------------------------------------

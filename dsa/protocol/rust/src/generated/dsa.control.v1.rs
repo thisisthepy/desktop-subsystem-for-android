@@ -854,6 +854,9 @@ pub struct WidgetProvider {
     /// Whether the app asks the user to set the widget up when it is placed.
     #[prost(bool, tag = "12")]
     pub needs_configuration: bool,
+    /// The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+    #[prost(string, tag = "13")]
+    pub app_label: ::prost::alloc::string::String,
 }
 /// Guest to host, from the agent: part of the answer to ListWidgetProviders. Each message is
 /// kept under 256 KiB, so a long list comes in several; `complete` marks the last.

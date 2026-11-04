@@ -255,6 +255,9 @@ pub struct WidgetProvider {
     /// Whether the app asks the user to set the widget up when it is placed.
     #[prost(bool, tag = "12")]
     pub needs_configuration: bool,
+    /// The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+    #[prost(string, tag = "13")]
+    pub app_label: ::prost::alloc::string::String,
 }
 /// The answer to ListWidgetProviders, in label order.
 #[derive(Clone, PartialEq, ::prost::Message)]

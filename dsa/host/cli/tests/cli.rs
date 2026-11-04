@@ -1296,9 +1296,11 @@ fn fr12_widgets_watch_prints_one_json_line_per_change_with_the_app_name() {
             height_dp: 110,
         },
     };
-    let first: serde_json::Value =
-        serde_json::from_str(&dsa_cli::widgets_now_line(std::slice::from_ref(&widget), true))
-            .unwrap();
+    let first: serde_json::Value = serde_json::from_str(&dsa_cli::widgets_now_line(
+        std::slice::from_ref(&widget),
+        true,
+    ))
+    .unwrap();
     assert_eq!(first["event"], "widgets");
     assert_eq!(first["widgets"][0]["id"], 3);
     assert_eq!(first["widgets"][0]["app"], "Clock App");

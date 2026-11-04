@@ -20,6 +20,7 @@ public  final class WidgetProvider extends
     packageName_ = "";
     label_ = "";
     previewPng_ = com.google.protobuf.ByteString.EMPTY;
+    appLabel_ = "";
   }
   public static final int PROVIDER_FIELD_NUMBER = 1;
   private java.lang.String provider_;
@@ -489,6 +490,73 @@ public  final class WidgetProvider extends
   private void clearNeedsConfiguration() {
     
     needsConfiguration_ = false;
+  }
+
+  public static final int APP_LABEL_FIELD_NUMBER = 13;
+  private java.lang.String appLabel_;
+  /**
+   * <pre>
+   * The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+   * </pre>
+   *
+   * <code>string app_label = 13;</code>
+   * @return The appLabel.
+   */
+  @java.lang.Override
+  public java.lang.String getAppLabel() {
+    return appLabel_;
+  }
+  /**
+   * <pre>
+   * The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+   * </pre>
+   *
+   * <code>string app_label = 13;</code>
+   * @return The bytes for appLabel.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getAppLabelBytes() {
+    return com.google.protobuf.ByteString.copyFromUtf8(appLabel_);
+  }
+  /**
+   * <pre>
+   * The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+   * </pre>
+   *
+   * <code>string app_label = 13;</code>
+   * @param value The appLabel to set.
+   */
+  private void setAppLabel(
+      java.lang.String value) {
+    java.lang.Class<?> valueClass = value.getClass();
+  
+    appLabel_ = value;
+  }
+  /**
+   * <pre>
+   * The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+   * </pre>
+   *
+   * <code>string app_label = 13;</code>
+   */
+  private void clearAppLabel() {
+    
+    appLabel_ = getDefaultInstance().getAppLabel();
+  }
+  /**
+   * <pre>
+   * The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+   * </pre>
+   *
+   * <code>string app_label = 13;</code>
+   * @param value The bytes for appLabel to set.
+   */
+  private void setAppLabelBytes(
+      com.google.protobuf.ByteString value) {
+    checkByteStringIsUtf8(value);
+    appLabel_ = value.toStringUtf8();
+    
   }
 
   public static io.github.thisisthepy.dsa.control.v1.WidgetProvider parseFrom(
@@ -1083,6 +1151,75 @@ public  final class WidgetProvider extends
       return this;
     }
 
+    /**
+     * <pre>
+     * The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+     * </pre>
+     *
+     * <code>string app_label = 13;</code>
+     * @return The appLabel.
+     */
+    @java.lang.Override
+    public java.lang.String getAppLabel() {
+      return instance.getAppLabel();
+    }
+    /**
+     * <pre>
+     * The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+     * </pre>
+     *
+     * <code>string app_label = 13;</code>
+     * @return The bytes for appLabel.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getAppLabelBytes() {
+      return instance.getAppLabelBytes();
+    }
+    /**
+     * <pre>
+     * The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+     * </pre>
+     *
+     * <code>string app_label = 13;</code>
+     * @param value The appLabel to set.
+     * @return This builder for chaining.
+     */
+    public Builder setAppLabel(
+        java.lang.String value) {
+      copyOnWrite();
+      instance.setAppLabel(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+     * </pre>
+     *
+     * <code>string app_label = 13;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearAppLabel() {
+      copyOnWrite();
+      instance.clearAppLabel();
+      return this;
+    }
+    /**
+     * <pre>
+     * The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+     * </pre>
+     *
+     * <code>string app_label = 13;</code>
+     * @param value The bytes for appLabel to set.
+     * @return This builder for chaining.
+     */
+    public Builder setAppLabelBytes(
+        com.google.protobuf.ByteString value) {
+      copyOnWrite();
+      instance.setAppLabelBytes(value);
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.WidgetProvider)
   }
   @java.lang.Override
@@ -1111,11 +1248,12 @@ public  final class WidgetProvider extends
             "maxHeightDp_",
             "resizeMode_",
             "needsConfiguration_",
+            "appLabel_",
           };
           java.lang.String info =
-              "\u0000\f\u0000\u0000\u0001\f\f\u0000\u0000\u0000\u0001\u0208\u0002\u0208\u0003\u0208" +
+              "\u0000\r\u0000\u0000\u0001\r\r\u0000\u0000\u0000\u0001\u0208\u0002\u0208\u0003\u0208" +
               "\u0004\n\u0005\u000b\u0006\u000b\u0007\u000b\b\u000b\t\u000b\n\u000b\u000b\u000b" +
-              "\f\u0007";
+              "\f\u0007\r\u0208";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

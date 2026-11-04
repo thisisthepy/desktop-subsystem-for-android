@@ -304,7 +304,10 @@ fn send_reports(
                 y,
             } => client.widget_pointer(widget_id, action, 0, x, y),
             WindowReport::Remove { widget_id } => {
-                note(logger, &format!("removing widget {widget_id} from its menu"));
+                note(
+                    logger,
+                    &format!("removing widget {widget_id} from its menu"),
+                );
                 client.remove_widget(widget_id)
             }
         };
