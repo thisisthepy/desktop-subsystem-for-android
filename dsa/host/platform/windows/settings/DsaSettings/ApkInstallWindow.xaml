@@ -195,10 +195,11 @@
             </Grid>
         </DockPanel>
 
-        <!-- Footer: its own layer, buttons on the right. -->
+        <!-- Footer: its own layer, the trademark notice on the left, buttons on the right. -->
         <Border Grid.Row="2" BorderThickness="0,1,0,0" Padding="24"
                 Background="{DynamicResource LayerFill}" BorderBrush="{DynamicResource LayerStroke}">
-            <StackPanel x:Name="Footer" Orientation="Horizontal" HorizontalAlignment="Right">
+            <DockPanel LastChildFill="True">
+            <StackPanel x:Name="Footer" DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button x:Name="CancelButton" Style="{StaticResource Button}" Margin="8,0,0,0"
                         Click="OnCancel" AutomationProperties.AutomationId="CancelButton" />
                 <Button x:Name="CloseButton" Style="{StaticResource Button}" Margin="8,0,0,0"
@@ -208,6 +209,10 @@
                 <Button x:Name="InstallButton" Style="{StaticResource AccentButton}" Margin="8,0,0,0"
                         Click="OnInstall" AutomationProperties.AutomationId="InstallButton" />
             </StackPanel>
+            <TextBlock x:Name="TrademarkText" Style="{StaticResource Caption}" Foreground="{DynamicResource TextSecondary}"
+                       VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0"
+                       AutomationProperties.AutomationId="TrademarkText" />
+            </DockPanel>
         </Border>
     </Grid>
 </Window>

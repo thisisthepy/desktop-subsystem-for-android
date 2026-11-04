@@ -47,6 +47,9 @@
         <MajorUpgrade Schedule="afterInstallExecute"
                       AllowSameVersionUpgrades="yes"
                       DowngradeErrorMessage="A newer Desktop Subsystem for Android is already installed." />
+        <!-- The trademark and independence notice, shown in Installed apps (the support
+             information). The licence bundle below carries it too, in NOTICE.txt. -->
+        <Property Id="ARPCOMMENTS" Value="Desktop Subsystem for Android is an independent open source project, not affiliated with, endorsed by or sponsored by Microsoft or Google. Android is a trademark of Google LLC." />
         <Media Id="1" Cabinet="dsa.cab" EmbedCab="yes" />
         <?ifdef ImageVersion ?>
         <!-- An MSI holds at most 2 GB and an image comes close to that, so the image's
@@ -310,6 +313,12 @@
             </Component>
             <Component Id="LicMit" Guid="*">
                 <File Id="LicMit" Source="$(SourceDir)\licenses\mit.txt" KeyPath="yes" />
+            </Component>
+            <Component Id="LicThirdParty" Guid="*">
+                <File Id="LicThirdParty" Source="$(SourceDir)\licenses\third-party-components.txt" KeyPath="yes" />
+            </Component>
+            <Component Id="LicKernelOffer" Guid="*">
+                <File Id="LicKernelOffer" Source="$(SourceDir)\licenses\kernel-source-offer.txt" KeyPath="yes" />
             </Component>
         </ComponentGroup>
 

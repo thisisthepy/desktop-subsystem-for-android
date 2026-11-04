@@ -39,6 +39,7 @@ public partial class ApkInstallWindow : Window
         Resources["SensitiveText"] = App.Text.Get("ApkWindow_Sensitive");
         Title = App.Text.Get("ApkWindow_Caption");
         CaptionTitle.Text = Title;
+        TrademarkText.Text = App.Text.Get("AboutTrademark.Text");
         ReadingText.Text = App.Text.Get("ApkWindow_Reading");
         CancelButton.Content = App.Text.Get("ApkWindow_Cancel");
         CloseButton.Content = App.Text.Get("ApkWindow_Close");

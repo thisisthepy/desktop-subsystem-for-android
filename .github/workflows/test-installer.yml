@@ -626,7 +626,7 @@ jobs:
           $noticeFile = Join-Path $env:PROGRAM_DIR "NOTICE.txt"
           if (-not (Test-Path $licDir)) { throw "no licenses folder in $env:PROGRAM_DIR" }
           if (-not (Test-Path $noticeFile)) { throw "no NOTICE.txt in $env:PROGRAM_DIR" }
-          foreach ($name in @("NOTICE.txt", "rust-crates.txt", "kernel-GPL-2.0.txt", "wix-MS-RL.txt", "setup-ui.txt", "settings-app.txt", "gfxstream.txt", "aosp-notice.txt")) {
+          foreach ($name in @("NOTICE.txt", "rust-crates.txt", "kernel-GPL-2.0.txt", "wix-MS-RL.txt", "setup-ui.txt", "settings-app.txt", "gfxstream.txt", "aosp-notice.txt", "third-party-components.txt", "kernel-source-offer.txt")) {
             if (-not (Test-Path (Join-Path $licDir $name))) { throw "licence bundle is missing $name" }
           }
           $bundle = Get-Content -Raw (Join-Path $licDir "rust-crates.txt")

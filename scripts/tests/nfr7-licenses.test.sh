@@ -19,6 +19,9 @@ if [[ ! -f "dsa/deny.toml" ]]; then
     exit 1
 fi
 
+# 0. The licence rule for the components Cargo does not list (dsa/third-party.toml)
+run_py scripts/tests/nfr7_components_test.py
+
 # 1. Check licence policy against allow-list
 run_py dsa/host/platform/windows/installer/generate-licenses.py \
     --workspace dsa --check-only
@@ -34,7 +37,7 @@ run_py dsa/host/platform/windows/installer/generate-licenses.py \
     --master-notice "$out_dir/NOTICE.txt"
 
 # 3. Verify required licence files
-for file in NOTICE.txt rust-crates.txt kernel-GPL-2.0.txt wix-MS-RL.txt setup-ui.txt settings-app.txt gfxstream.txt aosp-notice.txt apache-2.0.txt mit.txt; do
+for file in NOTICE.txt rust-crates.txt kernel-GPL-2.0.txt wix-MS-RL.txt setup-ui.txt settings-app.txt gfxstream.txt aosp-notice.txt apache-2.0.txt mit.txt third-party-components.txt kernel-source-offer.txt; do
     if [[ ! -f "$out_dir/licenses/$file" ]]; then
         echo "licence bundle missing expected file: $file" >&2
         rm -rf "$out_dir"

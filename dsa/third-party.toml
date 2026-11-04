@@ -1,0 +1,182 @@
+# Every third-party component DSA ships that Cargo does not list.
+#
+# Rust crates come from Cargo.lock and are checked against deny.toml. Everything else that
+# goes into the installer, the settings app, the setup program or the guest image is listed
+# here, with its licence (an SPDX expression), its source and how it is shipped.
+# installer/generate-licenses.py checks this file and writes the notices from it, and CI
+# fails when a component's licence is not allowed or a package reference in a .csproj or
+# the agent's build.gradle.kts is missing from this list.
+#
+# The licence rule:
+# - A component that is linked into, or built into, a DSA program must carry only licences
+#   from `policy.allow` (permissive licences that can be distributed beside Apache-2.0).
+# - A licence from `policy.weak_copyleft` (file-level reciprocal licences) is allowed for a
+#   component DSA ships unmodified, with `modified = false` and a `source` to get it from.
+# - A licence from `policy.separate_program` (GPL) is allowed only for a program that runs
+#   on its own and is not linked with DSA code (`distribution = "separate-program"`), with
+#   a written source offer (`source_offer`). The guest kernel is the one such component:
+#   it runs in its own virtual machine, and DSA talks to it only through system calls and
+#   devices, never by linking.
+
+[policy]
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "Zlib",
+]
+weak_copyleft = ["MS-RL"]
+separate_program = ["GPL-2.0-only", "GPL-2.0-only WITH Linux-syscall-note"]
+
+# The setup program (setup.exe and DsaSetup.exe).
+
+[[component]]
+name = "WiX Toolset Burn engine and bootstrapper runtime"
+package = "WixToolset.BootstrapperApplicationApi"
+version = "5.0.2"
+license = "MS-RL"
+part = "setup"
+distribution = "linked"
+modified = false
+source = "https://github.com/wixtoolset/wix"
+
+[[component]]
+name = ".NET Framework reference assemblies (build time only)"
+package = "Microsoft.NETFramework.ReferenceAssemblies"
+version = "1.0.3"
+license = "MIT"
+part = "setup"
+distribution = "build-only"
+source = "https://github.com/microsoft/dotnet"
+
+# The settings app (settings\DsaSettings.exe).
+
+[[component]]
+name = "WPF UI"
+package = "WPF-UI"
+version = "3.0.5"
+license = "MIT"
+part = "settings"
+distribution = "linked"
+source = "https://github.com/lepoco/wpfui"
+
+[[component]]
+name = ".NET runtime and WPF"
+version = "8.0"
+license = "MIT"
+part = "settings"
+distribution = "linked"
+source = "https://github.com/dotnet/runtime"
+
+# The host graphics path (gfxstream_backend.dll), from dsa/graphics/fetch.sh.
+
+[[component]]
+name = "gfxstream"
+version = "d047a57228332d995d36600792fa9ccc26cf8ae6"
+license = "Apache-2.0"
+part = "graphics"
+distribution = "linked"
+source = "https://android.googlesource.com/platform/hardware/google/gfxstream"
+
+[[component]]
+name = "aemu"
+license = "Apache-2.0"
+part = "graphics"
+distribution = "linked"
+source = "https://android.googlesource.com/platform/hardware/google/aemu"
+
+[[component]]
+name = "Mesa 3D"
+version = "224e91e39836d3ca31f80df2e0379e55c70574f8"
+license = "MIT"
+part = "graphics"
+distribution = "linked"
+source = "https://android.googlesource.com/platform/external/mesa3d"
+
+[[component]]
+name = "libdrm"
+license = "MIT"
+part = "graphics"
+distribution = "linked"
+source = "https://gitlab.freedesktop.org/mesa/drm"
+
+[[component]]
+name = "minigbm"
+license = "BSD-3-Clause"
+part = "graphics"
+distribution = "linked"
+source = "https://android.googlesource.com/platform/external/minigbm"
+
+[[component]]
+name = "ANGLE"
+license = "BSD-3-Clause"
+part = "graphics"
+distribution = "linked"
+source = "https://android.googlesource.com/platform/external/angle"
+
+[[component]]
+name = "AOSP libhardware, libbase, system/core, system/logging, frameworks/native headers"
+license = "Apache-2.0"
+part = "graphics"
+distribution = "linked"
+source = "https://android.googlesource.com/"
+
+# The guest image: AOSP, DSA's own guest programs and what they are built from.
+
+[[component]]
+name = "Android Open Source Project system image"
+license = "Apache-2.0"
+part = "guest"
+distribution = "aggregate"
+notice = "Each guest image carries the AOSP NOTICE file (NOTICE.xml.gz) that its build produced, listing every AOSP module and its licence."
+source = "https://android.googlesource.com/"
+
+[[component]]
+name = "Guest kernel (WSL2 Linux kernel with DSA's configuration)"
+license = "GPL-2.0-only WITH Linux-syscall-note"
+part = "guest"
+distribution = "separate-program"
+source = "https://github.com/microsoft/WSL2-Linux-Kernel"
+source_offer = "kernel-source-offer.txt"
+
+[[component]]
+name = "Protocol Buffers C++ runtime (dsa-hwcomposer, dsa-codec2, dsa power HAL)"
+version = "3.21.12"
+license = "BSD-3-Clause"
+part = "guest"
+distribution = "linked"
+source = "https://github.com/protocolbuffers/protobuf"
+
+[[component]]
+name = "AOSP hardware/interfaces, frameworks/native and frameworks/av generated code (DSA guest HALs)"
+license = "Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://android.googlesource.com/"
+
+[[component]]
+name = "Protocol Buffers Java lite runtime (DSA agent)"
+package = "com.google.protobuf:protobuf-javalite"
+version = "3.21.12"
+license = "BSD-3-Clause"
+part = "guest"
+distribution = "linked"
+source = "https://github.com/protocolbuffers/protobuf"
+
+[[component]]
+name = "Kotlin standard library (DSA agent)"
+version = "2.2.20"
+license = "Apache-2.0"
+part = "guest"
+distribution = "linked"
+source = "https://github.com/JetBrains/kotlin"

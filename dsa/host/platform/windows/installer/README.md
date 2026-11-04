@@ -125,3 +125,22 @@ layout are this project's own.
   `WixToolset.BootstrapperApplicationApi.dll` and `mbanative.dll`): Microsoft Reciprocal
   License.
 - `Microsoft.NETFramework.ReferenceAssemblies` (used only to build): MIT.
+
+### The licence rule
+
+`generate-licenses.py` writes the licence bundle and fails the build when a shipped
+component breaks this rule:
+
+- Rust crates come from `dsa/Cargo.lock` and must carry a licence from `dsa/deny.toml`.
+- Every other component (the .NET packages, WiX, gfxstream and its dependencies, the guest
+  image and DSA's guest programs) is listed in `dsa/third-party.toml`. A package that a
+  shipped `.csproj` or the agent's `build.gradle.kts` references but that file does not
+  list fails the check.
+- A component linked into a DSA program must carry a permissive licence from the allow list
+  there. A file-level reciprocal licence (MS-RL) is allowed only for a component shipped
+  unmodified. A GPL licence is allowed only for a separate program with a written source
+  offer: the guest kernel, which runs in its own virtual machine and is never linked with
+  DSA code. Its offer is `licenses\kernel-source-offer.txt`.
+
+The bundle also has `third-party-components.txt`, which lists those components with their
+licences and sources. The settings app's About page opens the bundle's folder.
