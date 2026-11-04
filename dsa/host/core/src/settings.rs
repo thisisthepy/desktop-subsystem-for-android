@@ -2,16 +2,18 @@
 //!
 //! Four of them are the user's own: the GPU their window manager renders on, whether their
 //! Android may be frozen when idle, whether their clipboard is shared with it, and whether web
-//! links open in apps in their Android instead of the host's browser. Two are the machine's,
-//! shared by every user: whether the service updates DSA itself and whether it downloads new
-//! Android images.
+//! links open in apps in their Android instead of the host's browser. The others are the
+//! machine's, shared by every user: whether the service updates DSA itself, whether it
+//! downloads new Android images, and whether DSA's processes write the input trace and the
+//! per-stage resize trace to their logs.
 //!
 //! Clients read and change them through the local API only. The service keeps them in its
 //! own folder, which users cannot write to, so the values a client sees are the values the
 //! service acts on.
 //!
 //! ```text
-//! <dir>/machine.json          {"program_updates": true, "image_updates": true}
+//! <dir>/machine.json          {"program_updates": true, "image_updates": true,
+//!                              "input_trace": false, "resize_trace": false}
 //! <dir>/users/<user>.json     {"render_gpu": "display", "freeze": false, "clipboard": true,
 //!                              "links_in_android": false}
 //! ```
@@ -45,6 +47,12 @@ pub struct Settings {
     pub program_updates: bool,
     /// Whether the service downloads new Android images.
     pub image_updates: bool,
+    /// Whether every DSA process writes the input trace to its log. The machine's; off by
+    /// default.
+    pub input_trace: bool,
+    /// Whether every DSA process writes each stage of each resize to its log. The machine's;
+    /// off by default.
+    pub resize_trace: bool,
 }
 
 impl Default for Settings {
@@ -56,6 +64,8 @@ impl Default for Settings {
             clipboard: true,
             program_updates: true,
             image_updates: true,
+            input_trace: false,
+            resize_trace: false,
         }
     }
 }
@@ -67,6 +77,10 @@ pub struct MachineSettings {
     pub program_updates: bool,
     #[serde(default = "yes")]
     pub image_updates: bool,
+    #[serde(default)]
+    pub input_trace: bool,
+    #[serde(default)]
+    pub resize_trace: bool,
 }
 
 impl Default for MachineSettings {
@@ -74,6 +88,8 @@ impl Default for MachineSettings {
         MachineSettings {
             program_updates: true,
             image_updates: true,
+            input_trace: false,
+            resize_trace: false,
         }
     }
 }
@@ -160,6 +176,9 @@ pub trait SettingsStore: Send + Sync {
     fn set(&self, user: &str, settings: &Settings) -> Result<Settings, String>;
     /// The machine's settings, for the update loops. The defaults when they cannot be read.
     fn machine(&self) -> MachineSettings;
+    /// Replaces the machine's settings alone, as the service does itself (bringing over a
+    /// choice an earlier release kept elsewhere), with no user to act for.
+    fn set_machine(&self, machine: MachineSettings) -> Result<(), String>;
 }
 
 /// Finds the render GPU a user chose before they first saved settings, if any.
@@ -241,19 +260,36 @@ pub(crate) fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), Str
     std::fs::rename(&partial, path).map_err(|e| format!("replacing {}: {e}", path.display()))
 }
 
+/// A user's settings and the machine's, as a client sees them together.
+fn combine(mine: UserSettings, machine: MachineSettings) -> Settings {
+    Settings {
+        render_gpu: mine.render_gpu,
+        freeze: mine.freeze,
+        links_in_android: mine.links_in_android,
+        clipboard: mine.clipboard,
+        program_updates: machine.program_updates,
+        image_updates: machine.image_updates,
+        input_trace: machine.input_trace,
+        resize_trace: machine.resize_trace,
+    }
+}
+
+/// The machine's share of `settings`.
+fn machine_part(settings: &Settings) -> MachineSettings {
+    MachineSettings {
+        program_updates: settings.program_updates,
+        image_updates: settings.image_updates,
+        input_trace: settings.input_trace,
+        resize_trace: settings.resize_trace,
+    }
+}
+
 impl SettingsStore for FileSettings {
     fn get(&self, user: &str) -> Result<Settings, String> {
         let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         let mine = self.read_user(user)?;
         let machine = self.read_machine()?;
-        Ok(Settings {
-            render_gpu: mine.render_gpu,
-            freeze: mine.freeze,
-            links_in_android: mine.links_in_android,
-            clipboard: mine.clipboard,
-            program_updates: machine.program_updates,
-            image_updates: machine.image_updates,
-        })
+        Ok(combine(mine, machine))
     }
 
     fn set(&self, user: &str, settings: &Settings) -> Result<Settings, String> {
@@ -269,13 +305,7 @@ impl SettingsStore for FileSettings {
                 clipboard: settings.clipboard,
             },
         )?;
-        write_json(
-            &self.machine_file(),
-            &MachineSettings {
-                program_updates: settings.program_updates,
-                image_updates: settings.image_updates,
-            },
-        )?;
+        write_json(&self.machine_file(), &machine_part(settings))?;
         Ok(Settings {
             render_gpu,
             ..settings.clone()
@@ -288,6 +318,11 @@ impl SettingsStore for FileSettings {
             eprintln!("settings: {why}; using the defaults");
             MachineSettings::default()
         })
+    }
+
+    fn set_machine(&self, machine: MachineSettings) -> Result<(), String> {
+        let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        write_json(&self.machine_file(), &machine)
     }
 }
 
@@ -307,15 +342,7 @@ impl SettingsStore for MemorySettings {
             .get(user)
             .cloned()
             .unwrap_or_default();
-        let machine = self.machine();
-        Ok(Settings {
-            render_gpu: mine.render_gpu,
-            freeze: mine.freeze,
-            links_in_android: mine.links_in_android,
-            clipboard: mine.clipboard,
-            program_updates: machine.program_updates,
-            image_updates: machine.image_updates,
-        })
+        Ok(combine(mine, self.machine()))
     }
 
     fn set(&self, user: &str, settings: &Settings) -> Result<Settings, String> {
@@ -329,10 +356,7 @@ impl SettingsStore for MemorySettings {
                 clipboard: settings.clipboard,
             },
         );
-        *self.machine.lock().unwrap_or_else(|e| e.into_inner()) = MachineSettings {
-            program_updates: settings.program_updates,
-            image_updates: settings.image_updates,
-        };
+        *self.machine.lock().unwrap_or_else(|e| e.into_inner()) = machine_part(settings);
         Ok(Settings {
             render_gpu,
             ..settings.clone()
@@ -341,6 +365,11 @@ impl SettingsStore for MemorySettings {
 
     fn machine(&self) -> MachineSettings {
         *self.machine.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn set_machine(&self, machine: MachineSettings) -> Result<(), String> {
+        *self.machine.lock().unwrap_or_else(|e| e.into_inner()) = machine;
+        Ok(())
     }
 }
 
@@ -383,6 +412,8 @@ mod tests {
                     clipboard: false,
                     program_updates: false,
                     image_updates: true,
+                    input_trace: true,
+                    resize_trace: false,
                 },
             )
             .unwrap();
@@ -476,6 +507,33 @@ mod tests {
             )
             .unwrap();
         assert!(!FileSettings::new(&dir).get("uid:1000").unwrap().clipboard);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr19_trace_switches_are_machine_settings_off_by_default() {
+        let dir = scratch("traces");
+        let store = FileSettings::new(&dir);
+        let settings = store.get("uid:1000").unwrap();
+        assert!(!settings.input_trace && !settings.resize_trace);
+        // A file saved before the switches existed keeps them off.
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("machine.json"), r#"{"program_updates": true}"#).unwrap();
+        assert!(!store.machine().input_trace);
+        store
+            .set(
+                "uid:1000",
+                &Settings {
+                    input_trace: true,
+                    resize_trace: true,
+                    ..Settings::default()
+                },
+            )
+            .unwrap();
+        let again = FileSettings::new(&dir);
+        assert!(again.machine().input_trace && again.machine().resize_trace);
+        // The machine's: another user sees them on too.
+        assert!(again.get("uid:1001").unwrap().input_trace);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -110,17 +110,40 @@ pub fn input_trace_to(logger: Option<Arc<CompositorLogger>>) {
     }
 }
 
+/// The trace settings this process read from the service: (input trace, resize trace).
+static TRACE_SETTINGS: OnceLock<(bool, bool)> = OnceLock::new();
+
+/// Takes the `input_trace` and `resize_trace` settings the service reported, before the first
+/// trace line. Without them only the environment variables turn the traces on.
+pub fn use_trace_settings(input: bool, resize: bool) {
+    let _ = TRACE_SETTINGS.set((input, resize));
+}
+
+/// Asks the service on the pipe `pipe_name` for the trace settings and takes them
+/// ([`use_trace_settings`]). A service that cannot be asked leaves the traces off.
+pub fn read_trace_settings(pipe_name: &str, build: &str) -> Result<(), String> {
+    let mut connector = crate::pipe::NamedPipeConnector {
+        name: pipe_name.to_string(),
+    };
+    let mut client = dsa_host_core::host_api::HostApiClient::connect(
+        &mut connector,
+        build,
+        Duration::from_secs(5),
+    )
+    .map_err(|e| e.to_string())?;
+    let report = client.settings().map_err(|e| e.to_string())?;
+    use_trace_settings(report.settings.input_trace, report.settings.resize_trace);
+    Ok(())
+}
+
 /// Whether this process writes the input trace: the environment variable `DSA_INPUT_TRACE` is
-/// set, or the file `%LOCALAPPDATA%\DSA\input-trace` exists when the process first asks.
+/// set, or the `input_trace` setting was on when the process started.
 pub fn input_trace_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
-        let file = default_log_dir()
-            .parent()
-            .map(|dsa| dsa.join(input_trace_line::DETAIL_FILE).exists())
-            .unwrap_or(false);
+        let setting = TRACE_SETTINGS.get().is_some_and(|(input, _)| *input);
         let env = std::env::var(input_trace_line::DETAIL_ENV).ok();
-        resize_trace::detail_requested(env.as_deref(), file)
+        resize_trace::detail_requested(env.as_deref(), setting)
     })
 }
 
@@ -179,18 +202,15 @@ pub fn input_trace(stage: &str, task_id: i32, detail: &str) {
 }
 
 /// The resize trace of this process. Its per-stage lines are on when the environment
-/// variable `DSA_RESIZE_TRACE` is set, or the file `%LOCALAPPDATA%\DSA\resize-trace` exists
-/// when the process first traces.
+/// variable `DSA_RESIZE_TRACE` is set, or the `resize_trace` setting was on when the process
+/// started.
 fn resize_trace() -> &'static Mutex<ResizeTrace> {
     static TRACE: OnceLock<Mutex<ResizeTrace>> = OnceLock::new();
     TRACE.get_or_init(|| {
-        let file = default_log_dir()
-            .parent()
-            .map(|dsa| dsa.join(resize_trace::DETAIL_FILE).exists())
-            .unwrap_or(false);
+        let setting = TRACE_SETTINGS.get().is_some_and(|(_, resize)| *resize);
         let env = std::env::var(resize_trace::DETAIL_ENV).ok();
         Mutex::new(ResizeTrace::new(
-            resize_trace::detail_requested(env.as_deref(), file),
+            resize_trace::detail_requested(env.as_deref(), setting),
             Instant::now(),
         ))
     })

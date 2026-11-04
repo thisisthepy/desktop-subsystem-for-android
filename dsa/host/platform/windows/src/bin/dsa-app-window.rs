@@ -198,6 +198,16 @@ fn main() -> std::process::ExitCode {
     let window_manager_pipe =
         argument(&args, PIPE_ARGUMENT).unwrap_or_else(|| pipe_name(current_session()));
     let api_pipe = dsa_host_windows::host_config::DEFAULT_PIPE_NAME;
+    // The trace switches are the service's settings, read once before the first trace line.
+    if let Err(why) = dsa_host_windows::compositor::log::read_trace_settings(
+        api_pipe,
+        &format!("dsa-app-window {}", dsa_host_windows::VERSION),
+    ) {
+        note(
+            logger.as_deref(),
+            &format!("the trace settings could not be read ({why}); the traces stay off"),
+        );
+    }
     let title = program
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())

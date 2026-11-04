@@ -108,7 +108,14 @@ fn main() {
         .map_err(|e| e.to_string())?;
         client
             .settings()
-            .map(|report| report.settings.render_gpu)
+            .map(|report| {
+                // The trace switches too, before the first trace line.
+                dsa_host_windows::compositor::log::use_trace_settings(
+                    report.settings.input_trace,
+                    report.settings.resize_trace,
+                );
+                report.settings.render_gpu
+            })
             .map_err(|e| e.to_string())
     })();
     let (render_gpu, notes) = render_gpu_setting(from_service, || {

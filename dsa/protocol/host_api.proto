@@ -725,7 +725,7 @@ message SetSettings {
 }
 
 // The settings of the caller's DSA. `render_gpu`, `freeze`, `clipboard` and `links_in_android` are
-// the caller's own; the update settings are the machine's, shared by every user of it.
+// the caller's own; the update and trace settings are the machine's, shared by every user of it.
 message Settings {
   // The GPU the caller's window manager renders on: "display" (the GPU that drives the
   // primary monitor, the default), "integrated", "discrete", or part of a GPU's name. The
@@ -753,6 +753,13 @@ message Settings {
   // Whether text copied on the host can be pasted in the caller's Android, and the reverse.
   // On unless the user turns it off.
   bool clipboard = 9;
+  // Whether every DSA process writes the input trace (a click's path from the host to the app
+  // and back, on one clock) to its log. Off by default. It applies to the whole computer, so
+  // only an administrator may change it; a process reads it when it starts.
+  bool input_trace = 11;
+  // Whether every DSA process writes a line for each stage of each resize, rather than a
+  // summary at the end of a drag. Off by default; the same rules as input_trace.
+  bool resize_trace = 12;
 }
 
 // Turns the connection into the accessibility tree of one of the caller's task windows, for a

@@ -354,6 +354,39 @@ fn prepare_machine_tmp(config: &HostConfig, build: &str) {
     }
 }
 
+/// Earlier releases turned the traces on with empty files named `input-trace` and
+/// `resize-trace` in the machine's DSA folder and in each user's. A file that is there turns
+/// its trace setting on, and goes once the setting is saved; if it cannot be saved the files
+/// stay, to be taken over at the next start.
+fn take_old_trace_markers(config: &HostConfig, store: &dyn SettingsStore, build: &str) {
+    use crate::paths::{default_local_app_data, old_trace_markers, UserRoot};
+    let mut markers = config.machine_root().old_trace_markers().to_vec();
+    for (sid, profile) in crate::profile::profiles() {
+        let local = local_app_data(&sid).unwrap_or_else(|_| default_local_app_data(&profile));
+        markers.extend(UserRoot::in_local_app_data(&local).old_trace_markers());
+    }
+    let old = old_trace_markers(&markers);
+    if old.found.is_empty() {
+        return;
+    }
+    let mut machine = store.machine();
+    machine.input_trace |= old.input_trace;
+    machine.resize_trace |= old.resize_trace;
+    if let Err(why) = store.set_machine(machine) {
+        eprintln!("{build}: the trace switch files stay, the settings could not be saved: {why}");
+        return;
+    }
+    for marker in &old.found {
+        match std::fs::remove_file(marker) {
+            Ok(()) => eprintln!(
+                "{build}: {} is now the trace setting, and the file is removed",
+                marker.display()
+            ),
+            Err(why) => eprintln!("{build}: removing {}: {why}", marker.display()),
+        }
+    }
+}
+
 /// The settings in the service's own folder. A user who has never saved settings starts
 /// from the render GPU in their own `compositor.json`, if they chose one there.
 fn settings_store(config: &HostConfig) -> Arc<dyn SettingsStore> {
@@ -515,11 +548,9 @@ where
             None => android,
         }
     }));
-    // %ProgramData%\DSA\resize-trace turns on the per-stage resize trace lines.
-    let resize_trace_file = config.machine_root().old_trace_markers()[1].exists();
+    take_old_trace_markers(&config, &*store, build);
     let host_memory: Arc<dyn HostMemory> = Arc::new(WindowsHostMemory);
     let mut service = HostApiService::new(androids.clone(), build)
-        .with_resize_trace_detail(resize_trace_file)
         .with_settings(Arc::clone(&store), facts)
         .with_host_memory(Arc::clone(&host_memory))
         .with_widget_placements(Arc::new(dsa_host_core::widgets::FileWidgetPlacements::new(

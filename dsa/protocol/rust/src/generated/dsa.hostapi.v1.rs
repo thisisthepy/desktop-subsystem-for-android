@@ -770,7 +770,7 @@ pub struct SetSettings {
     pub settings: ::core::option::Option<Settings>,
 }
 /// The settings of the caller's DSA. `render_gpu`, `freeze`, `clipboard` and `links_in_android` are
-/// the caller's own; the update settings are the machine's, shared by every user of it.
+/// the caller's own; the update and trace settings are the machine's, shared by every user of it.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Settings {
     /// The GPU the caller's window manager renders on: "display" (the GPU that drives the
@@ -809,6 +809,15 @@ pub struct Settings {
     /// On unless the user turns it off.
     #[prost(bool, tag = "9")]
     pub clipboard: bool,
+    /// Whether every DSA process writes the input trace (a click's path from the host to the app
+    /// and back, on one clock) to its log. Off by default. It applies to the whole computer, so
+    /// only an administrator may change it; a process reads it when it starts.
+    #[prost(bool, tag = "11")]
+    pub input_trace: bool,
+    /// Whether every DSA process writes a line for each stage of each resize, rather than a
+    /// summary at the end of a drag. Off by default; the same rules as input_trace.
+    #[prost(bool, tag = "12")]
+    pub resize_trace: bool,
 }
 /// Turns the connection into the accessibility tree of one of the caller's task windows, for a
 /// host accessibility client (a screen reader, an inspection tool) that reads that window.
