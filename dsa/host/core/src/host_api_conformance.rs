@@ -31,6 +31,7 @@ use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use crate::keys::{keycode, meta, KeyAction, KeyEvent};
 use crate::notifications::{Notification, NotificationAction, NotificationEvent};
+use crate::print::{PrintEvent, PrintJob, PrintOutcome, PrintSettings};
 use crate::session::SessionState;
 use crate::settings::{MemorySettings, Settings, SettingsStore};
 use crate::tasks::{Bounds, Task, TaskEvent, TaskRequest, TaskRequestError, TaskTable, TaskWatch};
@@ -88,6 +89,9 @@ pub struct FakeAndroid {
     /// What the user did with its notifications on the host, in order.
     pub notification_actions: Mutex<Vec<NotificationAction>>,
     notification_watchers: Mutex<Vec<Sender<NotificationEvent>>>,
+    /// What became of its print jobs, as the host said, in order.
+    pub print_results: Mutex<Vec<(u32, PrintOutcome)>>,
+    print_watchers: Mutex<Vec<Sender<PrintEvent>>>,
     /// The APKs it installed or refused, by name, with their whole content, in order.
     pub installs: Mutex<Vec<(String, Vec<u8>)>>,
     /// When each install began and ended, by name, in order: `+name` and `-name`.
@@ -157,6 +161,8 @@ impl FakeAndroid {
             clipboard_watchers: Mutex::new(Vec::new()),
             notification_actions: Mutex::new(Vec::new()),
             notification_watchers: Mutex::new(Vec::new()),
+            print_results: Mutex::new(Vec::new()),
+            print_watchers: Mutex::new(Vec::new()),
             installs: Mutex::new(Vec::new()),
             install_steps: Mutex::new(Vec::new()),
             install_time: Mutex::new(Duration::ZERO),
@@ -205,6 +211,29 @@ impl FakeAndroid {
             .lock()
             .unwrap()
             .retain(|watcher| watcher.send(event.clone()).is_ok());
+    }
+
+    /// Prints as an app in this Android would: hands the job to the first print watcher still
+    /// listening, or withdraws a job from every watcher. False when a job reached nobody.
+    pub fn print(&self, event: PrintEvent) -> bool {
+        let mut watchers = self.print_watchers.lock().unwrap();
+        match event {
+            PrintEvent::Job(_) => {
+                let mut delivered = false;
+                watchers.retain(|watcher| {
+                    if delivered {
+                        return true;
+                    }
+                    delivered = watcher.send(event.clone()).is_ok();
+                    delivered
+                });
+                delivered
+            }
+            PrintEvent::Withdrawn { .. } => {
+                watchers.retain(|watcher| watcher.send(event.clone()).is_ok());
+                true
+            }
+        }
     }
 
     /// Opens `url` as an app in this Android would, and tells the link watchers.
@@ -345,6 +374,20 @@ impl UserAndroid for FakeAndroid {
         let (tx, rx) = mpsc::channel();
         self.notification_watchers.lock().unwrap().push(tx);
         Some(rx)
+    }
+    fn watch_print_jobs(&self) -> Option<mpsc::Receiver<PrintEvent>> {
+        let (tx, rx) = mpsc::channel();
+        self.print_watchers.lock().unwrap().push(tx);
+        Some(rx)
+    }
+    fn print_result(&self, job_id: u32, outcome: &PrintOutcome) -> Result<(), TaskRequestError> {
+        // As a session does, it takes an outcome in any state: one for a job it no longer has
+        // is left alone there.
+        self.print_results
+            .lock()
+            .unwrap()
+            .push((job_id, outcome.clone()));
+        Ok(())
     }
     fn notification_action(&self, action: NotificationAction) -> Result<(), TaskRequestError> {
         if !matches!(
@@ -873,6 +916,18 @@ macro_rules! host_api_conformance {
         #[test]
         fn nfr5_a_malformed_action_on_a_notification_is_refused() {
             $crate::host_api_conformance::malformed_notification_action_is_refused(&mut || $make);
+        }
+        #[test]
+        fn fr26_a_print_job_of_the_callers_android_reaches_one_watcher_whole() {
+            $crate::host_api_conformance::print_job_reaches_one_watcher(&mut || $make);
+        }
+        #[test]
+        fn fr26_what_became_of_a_print_job_reaches_the_callers_android() {
+            $crate::host_api_conformance::print_outcome_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn nfr5_a_malformed_print_outcome_is_refused() {
+            $crate::host_api_conformance::malformed_print_outcome_is_refused(&mut || $make);
         }
         #[test]
         fn nfr5_a_notification_watcher_that_sends_something_is_disconnected() {
@@ -2446,6 +2501,127 @@ pub fn notifications_reach_a_watcher(make: MakeLocal<'_>) {
     assert_eq!(
         watch.next(WAIT).unwrap(),
         Some(NotificationEvent::Removed { key: posted.key })
+    );
+}
+
+/// A print job with a document of `size` bytes that starts as a PDF does.
+pub fn sample_print_job(job_id: u32, size: usize) -> PrintJob {
+    let mut pdf = b"%PDF-1.7\n".to_vec();
+    pdf.extend((0..size.saturating_sub(pdf.len())).map(|i| (i % 251) as u8));
+    PrintJob {
+        job_id,
+        package_name: "com.example.docs".into(),
+        app_label: "Docs".into(),
+        document_name: "Quarterly report".into(),
+        settings: PrintSettings {
+            page_count: 3,
+            copies: 2,
+            color: true,
+            duplex: true,
+            landscape: false,
+            media_width_mils: 8268,
+            media_height_mils: 11693,
+        },
+        pdf: Arc::new(pdf),
+    }
+}
+
+pub fn print_job_reaches_one_watcher(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut first = connect(&mut *connector)
+        .watch_print_jobs()
+        .expect("watching print jobs");
+    let mut second = connect(&mut *connector)
+        .watch_print_jobs()
+        .expect("watching print jobs");
+    let android = androids.of(&user).expect("the caller's Android");
+    assert_eq!(first.next(Duration::from_millis(50)).unwrap(), None);
+    // Larger than one piece, so it crosses in several.
+    let job = sample_print_job(5, crate::print::PIECE_BYTES * 2 + 17);
+    assert!(android.print(PrintEvent::Job(job.clone())));
+    assert_eq!(first.next(WAIT).unwrap(), Some(PrintEvent::Job(job)));
+    assert_eq!(
+        second.next(Duration::from_millis(200)).unwrap(),
+        None,
+        "one dialog per job"
+    );
+    android.print(PrintEvent::Withdrawn { job_id: 5 });
+    assert_eq!(
+        first.next(WAIT).unwrap(),
+        Some(PrintEvent::Withdrawn { job_id: 5 })
+    );
+}
+
+pub fn print_outcome_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut client = connect(&mut *connector);
+    client.start().unwrap();
+    client
+        .report_print_job(1, &PrintOutcome::Printed)
+        .expect("printed");
+    client
+        .report_print_job(2, &PrintOutcome::Canceled)
+        .expect("canceled");
+    client
+        .report_print_job(3, &PrintOutcome::Failed("the printer is offline".into()))
+        .expect("failed");
+    assert_eq!(
+        *androids.of(&user).unwrap().print_results.lock().unwrap(),
+        vec![
+            (1, PrintOutcome::Printed),
+            (2, PrintOutcome::Canceled),
+            (3, PrintOutcome::Failed("the printer is offline".into())),
+        ]
+    );
+}
+
+pub fn malformed_print_outcome_is_refused(make: MakeLocal<'_>) {
+    use dsa_protocol::host_api::types::{
+        envelope::Body, request, response, Envelope, ReportPrintJob, Request,
+    };
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let mut connection = connector.connect(WAIT).unwrap();
+    client_connect(&mut *connection, &local_hello(Role::Client, "client"), WAIT).unwrap();
+    for (id, outcome) in [0, 77].into_iter().enumerate() {
+        let request = Request {
+            id: id as u64 + 1,
+            body: Some(request::Body::ReportPrintJob(ReportPrintJob {
+                job_id: 1,
+                outcome,
+                message: String::new(),
+            })),
+        };
+        dsa_protocol::host_api::send(&mut *connection, Body::Request(request)).unwrap();
+        let frame = connection.recv(Some(WAIT)).expect("an answer");
+        match dsa_protocol::host_api::decode(&frame) {
+            Ok(Envelope {
+                body:
+                    Some(Body::Response(dsa_protocol::host_api::types::Response {
+                        body: Some(response::Body::Error(_)),
+                        ..
+                    })),
+            }) => {}
+            other => panic!("expected the outcome to be refused, got {other:?}"),
+        }
+    }
+    assert!(androids
+        .of(&user)
+        .unwrap()
+        .print_results
+        .lock()
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        connect(&mut *connector).status().unwrap().state,
+        SessionState::Active,
+        "the service goes on"
     );
 }
 

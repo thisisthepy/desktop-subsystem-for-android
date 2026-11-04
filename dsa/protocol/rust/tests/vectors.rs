@@ -30,6 +30,7 @@ use dsa_protocol::control::{
     LogRecords, LogStream, VideoCapabilities, VideoCodec, VideoCodecSupport, VideoDecoderOpen,
     VideoFlush, VideoFrame, VideoPacket,
 };
+use dsa_protocol::control::{PrintJob, PrintJobCancel, PrintJobChunk, PrintJobResult, PrintOutcome};
 use dsa_protocol::{decode, encode};
 
 /// The key of the notification in the notification cases.
@@ -910,6 +911,43 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
             wrap(Body::DiagnosticsDone(DiagnosticsDone {
                 request_id: 3,
                 error: "the agent did not answer".into(),
+            })),
+        ),
+        (
+            "print_job",
+            wrap(Body::PrintJob(PrintJob {
+                job_id: 5,
+                package_name: "com.example.docs".into(),
+                app_label: "Docs".into(),
+                document_name: "Report".into(),
+                size: 1000,
+                page_count: 3,
+                copies: 2,
+                color: true,
+                duplex: true,
+                landscape: false,
+                media_width_mils: 8268,
+                media_height_mils: 11693,
+            })),
+        ),
+        (
+            "print_job_chunk",
+            wrap(Body::PrintJobChunk(PrintJobChunk {
+                job_id: 5,
+                offset: 262_144,
+                data: vec![1, 2, 3],
+            })),
+        ),
+        (
+            "print_job_cancel",
+            wrap(Body::PrintJobCancel(PrintJobCancel { job_id: 5 })),
+        ),
+        (
+            "print_job_result",
+            wrap(Body::PrintJobResult(PrintJobResult {
+                job_id: 5,
+                outcome: PrintOutcome::Failed as i32,
+                message: "out of paper".into(),
             })),
         ),
     ])

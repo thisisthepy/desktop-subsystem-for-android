@@ -139,6 +139,7 @@ fn fr19_every_file_has_its_place_in_one_of_the_two_roots() {
     assert_eq!(user.monitors(), under("monitors.txt"));
     assert_eq!(user.start_menu_note(), under("start-menu.json"));
     assert_eq!(user.tmp(), under("tmp"));
+    assert_eq!(user.print_spool(), under(r"tmp\print"));
     assert_eq!(
         UserRoot::in_profile(Path::new(r"C:\Users\alice")),
         user,

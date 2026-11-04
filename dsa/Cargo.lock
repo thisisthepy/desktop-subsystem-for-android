@@ -238,6 +238,7 @@ dependencies = [
  "sha2 0.11.1",
  "windows",
  "windows-core",
+ "windows-future",
  "windows-numerics",
  "windows-sys",
 ]

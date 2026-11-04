@@ -524,6 +524,33 @@ std::map<std::string, v1::Envelope> Cases() {
     done->set_error("the agent did not answer");
   }
   {
+    v1::PrintJob* job = cases["print_job"].mutable_print_job();
+    job->set_job_id(5);
+    job->set_package_name("com.example.docs");
+    job->set_app_label("Docs");
+    job->set_document_name("Report");
+    job->set_size(1000);
+    job->set_page_count(3);
+    job->set_copies(2);
+    job->set_color(true);
+    job->set_duplex(true);
+    job->set_media_width_mils(8268);
+    job->set_media_height_mils(11693);
+  }
+  {
+    v1::PrintJobChunk* chunk = cases["print_job_chunk"].mutable_print_job_chunk();
+    chunk->set_job_id(5);
+    chunk->set_offset(262144);
+    chunk->set_data(std::string("\x01\x02\x03", 3));
+  }
+  cases["print_job_cancel"].mutable_print_job_cancel()->set_job_id(5);
+  {
+    v1::PrintJobResult* result = cases["print_job_result"].mutable_print_job_result();
+    result->set_job_id(5);
+    result->set_outcome(v1::PRINT_OUTCOME_FAILED);
+    result->set_message("out of paper");
+  }
+  {
     const std::string provider = "com.example.clock/.ClockWidget";
     auto clock = [&](v1::WidgetProvider* p) {
       p->set_provider(provider);

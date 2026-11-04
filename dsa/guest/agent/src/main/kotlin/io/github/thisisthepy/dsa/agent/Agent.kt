@@ -36,6 +36,8 @@ import io.github.thisisthepy.dsa.agent.memory.MemoryReporter
 import io.github.thisisthepy.dsa.agent.memory.MemorySource
 import io.github.thisisthepy.dsa.agent.notifications.NotificationForwarder
 import io.github.thisisthepy.dsa.agent.notifications.NotificationSource
+import io.github.thisisthepy.dsa.agent.print.HostPrinter
+import io.github.thisisthepy.dsa.agent.print.QueuedPrintJob
 import io.github.thisisthepy.dsa.agent.requests.HostRequests
 import io.github.thisisthepy.dsa.agent.requests.RequestResult
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
@@ -88,7 +90,8 @@ import io.github.thisisthepy.dsa.control.v1.PointerAction
  * ([AccessibilityExport]); otherwise the service is off. The widgets the user placed on the
  * host's desktop are hosted and drawn here, and their images go to the host ([WidgetManager]).
  * When the host gathers diagnostics, the agent sends its part: the system services' state and
- * the dropbox ([DiagnosticsCollector]).
+ * the dropbox ([DiagnosticsCollector]). Documents apps print to the agent's print service go
+ * to the host, which prints them on its printers ([HostPrinter]).
  */
 class Agent(
     private val ownPackage: String,
@@ -189,7 +192,13 @@ class Agent(
         post = { work -> scheduler.post(work) },
         onInstalled = { requestAppsRefresh() },
     )
-    private val packageQueries = PackageQueries(packages, { frame -> channel.send(frame) }, log)
+    private val printer = HostPrinter(
+        { frame -> channel.send(frame) },
+        log,
+        isConnected = { channel.connected },
+        post = { work -> scheduler.post(work) },
+    )
+    private val packageQueries =PackageQueries(packages, { frame -> channel.send(frame) }, log)
     private val widgetManager = WidgetManager(
         widgets,
         widgetStore,
@@ -309,6 +318,7 @@ class Agent(
         notificationForwarder.connected()
         widgetManager.connected()
         apkInstaller.connected()
+        printer.connected()
         installed.resend()
         memoryReporter?.connected()
         links.connected()
@@ -382,6 +392,7 @@ class Agent(
         if (notificationForwarder.handle(envelope)) return true
         if (apkInstaller.handle(envelope)) return true
         if (packageQueries.handle(envelope)) return true
+        if (printer.handle(envelope)) return true
         when (envelope.bodyCase) {
             Envelope.BodyCase.KEY_EVENT -> try {
                 keys.handle(envelope.keyEvent)
@@ -425,6 +436,19 @@ class Agent(
      */
     fun openLink(url: String?) {
         scheduler.post { links.open(url, channel.connected) }
+    }
+
+    /**
+     * The print service was given [job]: it goes to the host, which prints it. Called from any
+     * thread.
+     */
+    fun print(job: QueuedPrintJob) {
+        scheduler.post { printer.queued(job) }
+    }
+
+    /** Android canceled a job the print service was given. Called from any thread. */
+    fun cancelPrint(job: QueuedPrintJob) {
+        scheduler.post { printer.cancelRequested(job) }
     }
 
     /** Reports the guest's memory if the frame asks for it. False for any other frame. */

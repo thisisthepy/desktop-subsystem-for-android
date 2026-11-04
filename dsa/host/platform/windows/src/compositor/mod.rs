@@ -16,7 +16,8 @@
 //! clipboard, and opens the web links apps in Android open in the user's default browser
 //! ([`links`]). It shows the notifications of the user's Android as toasts, and passes the
 //! user's dismissals back ([`notifications`]). It shows the widgets the user placed on the
-//! desktop, each in a borderless window of its own on the desktop ([`widgets`]).
+//! desktop, each in a borderless window of its own on the desktop ([`widgets`]). It prints the documents apps in Android print on the user's
+//! printers, through the Windows print dialog ([`print`]).
 
 pub mod adapter;
 pub mod clipboard;
@@ -27,6 +28,7 @@ pub mod links;
 pub mod log;
 pub mod notifications;
 pub mod present;
+pub mod print;
 pub mod shutdown;
 pub mod single_instance;
 pub mod tasks;
@@ -124,6 +126,8 @@ pub struct Compositor {
     show_notifications: bool,
     /// Whether the widgets of the user's Android are shown on the desktop.
     show_widgets: bool,
+    /// Whether the documents the user's Android prints are printed here.
+    print_jobs: bool,
 }
 
 /// The installed apps an event from the watch of the tasks carries, if it carries them.
@@ -208,6 +212,7 @@ impl Compositor {
             share_clipboard: true,
             show_notifications: true,
             show_widgets: true,
+            print_jobs: true,
         }
     }
 
@@ -238,6 +243,7 @@ impl Compositor {
             share_clipboard: false,
             show_notifications: false,
             show_widgets: false,
+            print_jobs: false,
         }
     }
 
@@ -340,6 +346,7 @@ impl Compositor {
         let notifications_thread = self.start_notifications(&stop);
         let widgets_thread = self.start_widgets(&stop);
         let video_thread = self.start_video(&stop);
+        let print_thread = self.start_print(&stop);
 
         // 1. Monitor thread that tracks the VM ID and state via the local API.
         let monitor_stop = Arc::clone(&stop);
@@ -535,6 +542,9 @@ impl Compositor {
         if let Some(thread) = video_thread {
             let _ = thread.join();
         }
+        if let Some(thread) = print_thread {
+            let _ = thread.join();
+        }
 
         if let Some(logger) = &self.logger {
             logger.log("dsa-wm stopped cleanly");
@@ -640,6 +650,32 @@ impl Compositor {
                 note(
                     failed.as_deref(),
                     &format!("could not start the widgets' thread: {e}"),
+                )
+            })
+            .ok()
+    }
+
+    /// Starts printing the documents the user's Android prints, on a thread of its own that
+    /// ends with `stop`. Each job's dialog runs on a thread of its own besides.
+    fn start_print(&self, stop: &Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
+        if !self.print_jobs {
+            return None;
+        }
+        let connector = (self.local_api_connector)();
+        let stop = Arc::clone(stop);
+        let logger = self.logger.clone();
+        let failed = self.logger.clone();
+        thread::Builder::new()
+            .name("dsa-wm-print-jobs".into())
+            .spawn(move || {
+                let printer = Arc::new(print::WindowsPrinter);
+                let spool = print::default_spool_dir();
+                print::serve(connector, printer, spool, stop, logger);
+            })
+            .map_err(|e| {
+                note(
+                    failed.as_deref(),
+                    &format!("could not start the print jobs' thread: {e}"),
                 )
             })
             .ok()

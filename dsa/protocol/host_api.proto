@@ -273,6 +273,66 @@ message ActOnNotification {
   NotificationAction action = 2;
 }
 
+// Turns the connection into a watch of the print jobs of the caller's Android: after the
+// answer (Done), the service sends a PrintJobOffer for each document an app prints, followed
+// by its PrintJobData pieces, and a PrintJobWithdrawn when a job is canceled in Android or
+// Android stops before the job is answered. Each job goes to one watcher only. The client
+// answers each job with ReportPrintJob, on another connection, and sends nothing on this
+// one. The watch lasts across restarts of the Android.
+message WatchPrintJobs {}
+
+// A print job of the caller's Android, on a connection that watches them. Its PDF document of
+// `size` bytes follows in PrintJobData pieces, in order. The settings are what the user chose
+// in Android's print dialog.
+message PrintJobOffer {
+  // The service's number for the job, unique while the service runs.
+  uint32 job_id = 1;
+  string package_name = 2;
+  string app_label = 3;
+  string document_name = 4;
+  uint64 size = 5;
+  // 0 when the app did not say.
+  uint32 page_count = 6;
+  uint32 copies = 7;
+  bool color = 8;
+  bool duplex = 9;
+  bool landscape = 10;
+  // The paper's size, in thousandths of an inch; 0 when unknown.
+  uint32 media_width_mils = 11;
+  uint32 media_height_mils = 12;
+}
+
+// One piece of a print job's document, at most 1 MiB. The piece that reaches the job's size
+// ends it.
+message PrintJobData {
+  uint32 job_id = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+}
+
+// The job is gone from Android, canceled there or ended with it; it is not to be printed.
+message PrintJobWithdrawn {
+  uint32 job_id = 1;
+}
+
+// What became of a print job on the host.
+enum PrintOutcome {
+  PRINT_OUTCOME_UNSPECIFIED = 0;
+  PRINT_OUTCOME_PRINTED = 1;
+  // The user canceled the print dialog.
+  PRINT_OUTCOME_CANCELED = 2;
+  // It could not be printed; the message says why.
+  PRINT_OUTCOME_FAILED = 3;
+}
+
+// Tells the caller's Android what became of one of its print jobs. Answered with Done, also
+// for a job Android no longer has.
+message ReportPrintJob {
+  uint32 job_id = 1;
+  PrintOutcome outcome = 2;
+  string message = 3;
+}
+
 // Asks for the widgets the apps in the caller's Android offer. The answer is WidgetProviders.
 // Needs the caller's Android to be running.
 message ListWidgetProviders {}
@@ -1044,6 +1104,8 @@ message Request {
     WatchLog watch_log = 70;
     CollectDiagnostics collect_diagnostics = 71;
     StopApp stop_app = 37;
+    WatchPrintJobs watch_print_jobs = 120;
+    ReportPrintJob report_print_job = 121;
   }
 }
 
@@ -1092,5 +1154,8 @@ message Envelope {
     WidgetEvent widget_event = 20;
     LogEntries log_entries = 50;
     DiagnosticsData diagnostics_data = 51;
+    PrintJobOffer print_job_offer = 120;
+    PrintJobData print_job_data = 121;
+    PrintJobWithdrawn print_job_withdrawn = 122;
   }
 }

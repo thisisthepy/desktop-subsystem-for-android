@@ -11,7 +11,8 @@
   notifications to the host. An accessibility service (platform/HostAccessibilityService.kt)
   is enabled only while a host accessibility client watches a task. It is also the guest's
   widget host (platform/AndroidWidgets.kt), which draws the widgets the user placed on the
-  host's desktop.
+  host's desktop. Its print service (platform/HostPrintService.kt) sends what apps print to the
+  host's printers.
   Every permission here is also in privapp-permissions-dsa-agent.xml.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -184,6 +185,22 @@
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!--
+          The guest's print service: it offers the host's printers in Android's print dialog
+          and hands each job's PDF to the agent, which sends it to the host, where the host's
+          print dialog picks the printer (platform/HostPrintService.kt). Only the print spooler
+          may bind it, and it runs in the agent's process.
+        -->
+        <service
+            android:name=".platform.HostPrintService"
+            android:exported="true"
+            android:label="@string/print_service_name"
+            android:permission="android.permission.BIND_PRINT_SERVICE">
+            <intent-filter>
+                <action android:name="android.printservice.PrintService" />
             </intent-filter>
         </service>
 

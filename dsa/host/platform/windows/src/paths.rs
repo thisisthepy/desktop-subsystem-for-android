@@ -191,6 +191,10 @@ impl UserRoot {
     pub fn tmp(&self) -> PathBuf {
         join(&self.0, &["tmp"])
     }
+    /// Where the window manager keeps the document it is printing, for as long as it prints.
+    pub fn print_spool(&self) -> PathBuf {
+        join(&self.0, &["tmp", "print"])
+    }
     /// The empty files that turned traces on before they were settings.
     pub fn old_trace_markers(&self) -> [PathBuf; 2] {
         [

@@ -53,7 +53,12 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Input_Pointer",
     "Win32_UI_Input_Touch",
+    # Printing the documents of the user's Android: the print dialog and the printer's jobs.
+    "Win32_UI_Controls_Dialogs",
+    "Win32_Storage_Xps",
 ] }
+# Waiting on the PDF renderer's WinRT operations.
+windows-future = "0.3"
 # Direct3D 11, DXGI and DirectComposition, which present each task's frames in its window.
 # They are COM interfaces, which windows-sys does not describe.
 windows-numerics = "0.3"
@@ -86,6 +91,11 @@ windows = { version = "0.62", features = [
     "UI_Notifications",
     # Decoding the PNG frames of the widgets on the desktop.
     "Win32_Graphics_Imaging",
+    # Printing the documents of the user's Android: Windows' PDF renderer reads them.
+    "Data_Pdf",
+    "Storage",
+    "Storage_Streams",
+    "Win32_System_WinRT",
 ] }
 
 [build-dependencies]

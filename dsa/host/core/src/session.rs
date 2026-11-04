@@ -90,6 +90,12 @@
 //! never queue behind or ahead of the control channel's messages, and they are kept only in
 //! a small ring in memory ([`crate::guest_log`]). A one-off dump ([`Session::dump_log`]) and
 //! the guest's diagnostics ([`Session::collect_diagnostics`]) come the same way.
+//!
+//! The documents apps in the guest print come from the agent's print service in pieces, are
+//! put together and checked ([`crate::print`]), and go whole to one
+//! [`Session::watch_print_jobs`] watcher, which prints them on the host. Its outcome
+//! ([`Session::print_result`]) goes back to the guest. A job canceled in the guest, or one the
+//! guest's agent no longer has because it went away, is withdrawn from the watcher.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -124,6 +130,7 @@ use crate::memory::{GuestMemory, GuestMemoryReport};
 use crate::notifications::{self, Notification, NotificationAction, NotificationEvent, RateLimit};
 use crate::power::PowerState;
 use crate::power_hints::PowerHint;
+use crate::print::{self, PrintEvent, PrintJob, PrintOutcome};
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskTable, TaskWatch};
 use crate::widgets::{
     self, Placement, Widget, WidgetEvent, WidgetFrame, WidgetProvider, WidgetSize,
@@ -553,6 +560,10 @@ struct Shared {
     clipboard_watchers: Mutex<Vec<Sender<String>>>,
     /// Who hears of the guest's notifications.
     notification_watchers: Mutex<Vec<Sender<NotificationEvent>>>,
+    /// Who prints the documents the guest prints.
+    print_watchers: Mutex<Vec<Sender<PrintEvent>>>,
+    /// The guest's print jobs on their way, and those a watcher has.
+    prints: Mutex<print::Assembler>,
     /// The install under way, by its transfer ID, with who waits for the agent's word on it.
     installs: Mutex<HashMap<u32, Sender<InstallEvent>>>,
     /// The transfer ID of the last install.
@@ -837,6 +848,32 @@ impl Shared {
             .retain(|watcher| watcher.send(event).is_ok());
     }
 
+    /// Hands a whole print job to the first watcher still listening, and only to it, so one
+    /// dialog shows for it. False when nobody listens.
+    fn hand_print_job(&self, job: PrintJob) -> bool {
+        let mut delivered = false;
+        self.print_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|watcher| {
+                if delivered {
+                    return true;
+                }
+                let sent = watcher.send(PrintEvent::Job(job.clone())).is_ok();
+                delivered = sent;
+                sent
+            });
+        delivered
+    }
+
+    /// Tells every watcher a print job is gone; only the one that has it acts on it.
+    fn withdraw_print_job(&self, job_id: u32) {
+        self.print_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|watcher| watcher.send(PrintEvent::Withdrawn { job_id }).is_ok());
+    }
+
     fn publish_notification(&self, event: NotificationEvent) {
         self.notification_watchers
             .lock()
@@ -893,6 +930,8 @@ impl Session {
             clock_trace: Mutex::new(None),
             clipboard_watchers: Mutex::new(Vec::new()),
             notification_watchers: Mutex::new(Vec::new()),
+            print_watchers: Mutex::new(Vec::new()),
+            prints: Mutex::new(print::Assembler::new()),
             installs: Mutex::new(HashMap::new()),
             last_install: AtomicU32::new(0),
             install_turn: Mutex::new(()),
@@ -1432,6 +1471,37 @@ impl Session {
             .unwrap_or_else(|e| e.into_inner())
             .push(tx);
         rx
+    }
+
+    /// The documents the guest prints from now on, each whole job to one watcher only, and
+    /// each job withdrawn from the guest. The watch lasts across restarts of the guest.
+    pub fn watch_print_jobs(&self) -> Receiver<PrintEvent> {
+        let (tx, rx) = mpsc::channel();
+        self.shared
+            .print_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(tx);
+        rx
+    }
+
+    /// Tells the guest what became of a print job a watcher was given, so it ends the job in
+    /// its print spooler the same way. A job the guest no longer has (it was withdrawn) is
+    /// left alone.
+    pub fn print_result(&self, job_id: u32, outcome: &PrintOutcome) -> Result<(), SessionError> {
+        let guest_id = self
+            .shared
+            .prints
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .answered(job_id);
+        let Some(guest_id) = guest_id else {
+            eprintln!("print: the outcome of job {job_id} came after Android let go of it");
+            return Ok(());
+        };
+        self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::PrintJobResult(outcome.to_control(guest_id))),
+        }))
     }
 
     /// The guest's notifications from now on: each one posted or changed, and each one gone.
@@ -2574,6 +2644,47 @@ impl Worker {
         }));
     }
 
+    fn prints(&self) -> std::sync::MutexGuard<'_, print::Assembler> {
+        let prints = &self.shared.prints;
+        prints.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Acts on what the print assembler made of a message from the guest.
+    fn print_step(&mut self, step: print::Step) {
+        match step {
+            print::Step::Wait => {}
+            print::Step::Complete(job) => {
+                let job_id = job.job_id;
+                let bytes = job.pdf.len();
+                eprintln!("print: an app sent a document of {bytes} bytes to print");
+                if !self.shared.hand_print_job(job) {
+                    let guest_id = self.prints().answered(job_id);
+                    if let Some(guest_id) = guest_id {
+                        let outcome = PrintOutcome::Failed(
+                            "no desktop session is open to show the print dialog in".into(),
+                        );
+                        self.send_body(Body::PrintJobResult(outcome.to_control(guest_id)));
+                    }
+                }
+            }
+            print::Step::Refuse { guest_id, why } => {
+                eprintln!("print: refused print job {guest_id} from the guest: {why}");
+                let outcome = PrintOutcome::Failed(why);
+                self.send_body(Body::PrintJobResult(outcome.to_control(guest_id)));
+            }
+            print::Step::Withdraw { job_id } => self.shared.withdraw_print_job(job_id),
+        }
+    }
+
+    /// Ends every print job of the agent that was connected: the ones on their way are
+    /// dropped, and the ones a watcher has are withdrawn.
+    fn end_print_jobs(&mut self) {
+        let gone = self.prints().clear();
+        for job_id in gone {
+            self.shared.withdraw_print_job(job_id);
+        }
+    }
+
     /// Takes a notification the guest posted or changed, and hands it to the watchers when its
     /// turn comes. One the same as what the watchers have is not handed again.
     fn guest_notification(&mut self, message: control::GuestNotification) {
@@ -3129,6 +3240,8 @@ impl Worker {
             return;
         }
         self.agent_connected = boot.agent_connected;
+        // The jobs of the agent that was there end with it.
+        self.end_print_jobs();
         // A new agent takes the screen to be on, so what the last one said of Doze is over.
         self.guest_is_idle = false;
         self.stall_doze = None;
@@ -3772,6 +3885,18 @@ impl Worker {
                     GuestAccessibility::ActionResult(ActionResult::from_control(result)),
                 );
             }
+            Some(Body::PrintJob(job)) => {
+                let step = self.prints().start(job);
+                self.print_step(step);
+            }
+            Some(Body::PrintJobChunk(chunk)) => {
+                let step = self.prints().chunk(chunk);
+                self.print_step(step);
+            }
+            Some(Body::PrintJobCancel(cancel)) => {
+                let step = self.prints().cancel(cancel.job_id);
+                self.print_step(step);
+            }
             Some(Body::PowerHint(hint)) => match PowerHint::from_control(&hint) {
                 Ok(hint) => self.shared.publish_power(GuestPower::Hint(hint)),
                 Err(why) => eprintln!("power: dropped a hint from the guest: {why}"),
@@ -3798,6 +3923,7 @@ impl Worker {
             | Some(Body::InstallApk(_))
             | Some(Body::ApkChunk(_))
             | Some(Body::CancelInstall(_))
+            | Some(Body::PrintJobResult(_))
             | Some(Body::QueryPackage(_))
             | Some(Body::RequestGuestMemory(_))
             | Some(Body::StopApp(_))
@@ -3860,6 +3986,8 @@ impl Worker {
         }
         // The guest's tasks end with it, so their windows close even when it died.
         self.shared.clear_tasks();
+        // So do its print jobs.
+        self.end_print_jobs();
         // So do its notifications.
         self.clear_notifications();
         // And the modes and boosts its power HAL asked for.

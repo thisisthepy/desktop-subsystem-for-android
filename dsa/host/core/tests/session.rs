@@ -13,6 +13,7 @@ use dsa_host_core::keys::{keycode, meta, KeyAction, KeyEvent};
 use dsa_host_core::notifications::{Notification, NotificationAction, NotificationEvent};
 use dsa_host_core::power::{PowerHub, PowerState};
 use dsa_host_core::power_hints::{mode, PowerHint};
+use dsa_host_core::print::{PrintEvent, PrintJob, PrintOutcome};
 use dsa_host_core::session::{
     BootProblem, GuestLauncher, GuestPower, GuestStall, Session, SessionConfig, SessionError,
     SessionEvent, SessionState, StopReason,
@@ -3640,4 +3641,183 @@ fn fr20_developer_mode_stays_off_without_a_way_to_reach_adbd() {
     assert!(session.developer_mode(true, 0).is_err());
     assert_eq!(session.adb_address(), None);
     nothing_for_the_guest(&mut agent);
+}
+
+const REPORT: &[u8] = b"%PDF-1.7\n1 0 obj << /Type /Catalog >> endobj\n%%EOF\n";
+
+fn print_job(job_id: u32, size: u64) -> Body {
+    Body::PrintJob(dsa_protocol::control::PrintJob {
+        job_id,
+        package_name: "com.example.docs".into(),
+        app_label: "Docs".into(),
+        document_name: "Report".into(),
+        size,
+        page_count: 1,
+        copies: 2,
+        color: true,
+        duplex: false,
+        landscape: true,
+        media_width_mils: 8500,
+        media_height_mils: 11000,
+    })
+}
+
+fn print_piece(job_id: u32, offset: u64, data: &[u8]) -> Body {
+    Body::PrintJobChunk(dsa_protocol::control::PrintJobChunk {
+        job_id,
+        offset,
+        data: data.to_vec(),
+    })
+}
+
+/// The next print job result the guest is sent, past anything else it is sent.
+fn next_print_result(agent: &mut Box<dyn Connection>) -> dsa_protocol::control::PrintJobResult {
+    loop {
+        if let Body::PrintJobResult(result) = next_body(agent) {
+            return result;
+        }
+    }
+}
+
+/// Sends a whole print job from the agent, and returns what the watcher was given.
+fn print_from_guest(
+    agent: &mut Box<dyn Connection>,
+    watch: &Receiver<PrintEvent>,
+    guest_id: u32,
+) -> PrintJob {
+    send_body(agent, print_job(guest_id, REPORT.len() as u64));
+    send_body(agent, print_piece(guest_id, 0, &REPORT[..10]));
+    send_body(agent, print_piece(guest_id, 10, &REPORT[10..]));
+    match watch.recv_timeout(WAIT).expect("a print job") {
+        PrintEvent::Job(job) => job,
+        other => panic!("expected a print job, got {other:?}"),
+    }
+}
+
+#[test]
+fn fr26_a_document_the_guest_prints_reaches_the_watcher_whole() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_print_jobs();
+    let job = print_from_guest(&mut agent, &watch, 7);
+    assert_eq!(*job.pdf, REPORT);
+    assert_eq!(job.document_name, "Report");
+    assert_eq!(job.app_label, "Docs");
+    assert_eq!(job.settings.copies, 2);
+    assert!(job.settings.landscape);
+    session
+        .print_result(job.job_id, &PrintOutcome::Printed)
+        .expect("told");
+    let result = next_print_result(&mut agent);
+    assert_eq!(result.job_id, 7, "the guest's own number for the job");
+    assert_eq!(
+        result.outcome,
+        dsa_protocol::control::PrintOutcome::Printed as i32
+    );
+}
+
+#[test]
+fn fr26_canceling_the_hosts_print_dialog_cancels_the_job_in_the_guest() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_print_jobs();
+    let job = print_from_guest(&mut agent, &watch, 3);
+    session
+        .print_result(job.job_id, &PrintOutcome::Canceled)
+        .expect("told");
+    let result = next_print_result(&mut agent);
+    assert_eq!(result.job_id, 3);
+    assert_eq!(
+        result.outcome,
+        dsa_protocol::control::PrintOutcome::Canceled as i32
+    );
+}
+
+#[test]
+fn fr26_a_failure_on_the_host_reaches_the_guest_with_its_reason() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_print_jobs();
+    let job = print_from_guest(&mut agent, &watch, 4);
+    session
+        .print_result(
+            job.job_id,
+            &PrintOutcome::Failed("the printer is offline".into()),
+        )
+        .expect("told");
+    let result = next_print_result(&mut agent);
+    assert_eq!(
+        result.outcome,
+        dsa_protocol::control::PrintOutcome::Failed as i32
+    );
+    assert_eq!(result.message, "the printer is offline");
+}
+
+#[test]
+fn fr26_a_job_nobody_on_the_host_can_print_fails_in_the_guest() {
+    let (_session, mut agent, _launcher) = active_session();
+    send_body(&mut agent, print_job(9, REPORT.len() as u64));
+    send_body(&mut agent, print_piece(9, 0, REPORT));
+    let result = next_print_result(&mut agent);
+    assert_eq!(result.job_id, 9);
+    assert_eq!(
+        result.outcome,
+        dsa_protocol::control::PrintOutcome::Failed as i32
+    );
+    assert!(!result.message.is_empty());
+}
+
+#[test]
+fn nfr5_a_bad_print_job_fails_in_the_guest_and_the_session_goes_on() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_print_jobs();
+    send_body(
+        &mut agent,
+        print_job(1, dsa_host_core::print::MAX_PRINT_BYTES + 1),
+    );
+    assert_eq!(
+        next_print_result(&mut agent).outcome,
+        dsa_protocol::control::PrintOutcome::Failed as i32
+    );
+    send_body(&mut agent, print_job(2, 4));
+    send_body(&mut agent, print_piece(2, 0, b"MZ\0\0"));
+    let result = next_print_result(&mut agent);
+    assert_eq!(result.job_id, 2);
+    assert_eq!(
+        result.outcome,
+        dsa_protocol::control::PrintOutcome::Failed as i32
+    );
+    assert!(watch.recv_timeout(Duration::from_millis(300)).is_err());
+    assert_eq!(session.state(), SessionState::Active);
+}
+
+#[test]
+fn fr26_a_job_canceled_in_the_guest_is_withdrawn_from_the_watcher() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_print_jobs();
+    let job = print_from_guest(&mut agent, &watch, 5);
+    send_body(
+        &mut agent,
+        Body::PrintJobCancel(dsa_protocol::control::PrintJobCancel { job_id: 5 }),
+    );
+    assert_eq!(
+        watch.recv_timeout(WAIT).unwrap(),
+        PrintEvent::Withdrawn { job_id: job.job_id }
+    );
+    // Its outcome no longer goes to the guest.
+    session
+        .print_result(job.job_id, &PrintOutcome::Canceled)
+        .expect("taken");
+    nothing_for_the_guest(&mut agent);
+}
+
+#[test]
+fn fr26_a_guest_that_stops_withdraws_the_jobs_the_watcher_has() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_print_jobs();
+    let job = print_from_guest(&mut agent, &watch, 6);
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(
+        watch.recv_timeout(WAIT).unwrap(),
+        PrintEvent::Withdrawn { job_id: job.job_id }
+    );
+    drop(agent);
 }

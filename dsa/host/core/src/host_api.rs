@@ -31,6 +31,11 @@
 //! does with one on the host goes back with [`HostApiClient::act_on_notification`], on any
 //! connection.
 //!
+//! A client that watches print jobs ([`HostApiClient::watch_print_jobs`]) receives the
+//! documents apps in the caller's Android print, each whole job to one watcher only, and prints
+//! them on the host. It says what became of each with [`HostApiClient::report_print_job`], on
+//! any connection, and the service passes that to the caller's Android.
+//!
 //! A client that watches widgets ([`HostApiClient::watch_widgets`]) receives the widgets placed
 //! on the caller's desktop, each with where its window goes, then every frame and change. The
 //! service remembers where each window is ([`HostApiClient::place_widget`]) in a
@@ -71,6 +76,7 @@ use crate::memory::{
     snapshot_from_wire, snapshot_to_wire, GuestMemoryReport, HostMemory, MemorySnapshot,
 };
 use crate::notifications::{self, Notification, NotificationAction, NotificationEvent};
+use crate::print::{self, PrintEvent, PrintJob, PrintOutcome, PrintSettings};
 use crate::resize_trace::{self, detail_requested, ResizeTrace, DETAIL_ENV};
 use crate::session::{Session, SessionError, SessionState};
 use crate::settings::{Settings, SettingsStore};
@@ -191,6 +197,18 @@ pub trait UserAndroid: Send + Sync {
     /// The notifications of this Android from now on. `None` when it does not report them.
     fn watch_notifications(&self) -> Option<Receiver<NotificationEvent>> {
         None
+    }
+    /// The documents this Android prints from now on. `None` when it does not print on the
+    /// host.
+    fn watch_print_jobs(&self) -> Option<Receiver<PrintEvent>> {
+        None
+    }
+    /// Tells this Android what became of one of its print jobs.
+    fn print_result(&self, job_id: u32, outcome: &PrintOutcome) -> Result<(), TaskRequestError> {
+        let _ = (job_id, outcome);
+        Err(TaskRequestError::Failed(
+            "this Android does not print on the host".into(),
+        ))
     }
     /// The widgets this Android hosts now and every change to them. `None` when it hosts none.
     fn watch_widgets(&self) -> Option<crate::session::WidgetWatch> {
@@ -406,6 +424,12 @@ impl UserAndroid for Session {
     }
     fn notification_action(&self, action: NotificationAction) -> Result<(), TaskRequestError> {
         Session::notification_action(self, action).map_err(request_error)
+    }
+    fn watch_print_jobs(&self) -> Option<Receiver<PrintEvent>> {
+        Some(Session::watch_print_jobs(self))
+    }
+    fn print_result(&self, job_id: u32, outcome: &PrintOutcome) -> Result<(), TaskRequestError> {
+        Session::print_result(self, job_id, outcome).map_err(request_error)
     }
     fn watch_widgets(&self) -> Option<crate::session::WidgetWatch> {
         Some(Session::watch_widgets(self))
@@ -1061,6 +1085,9 @@ impl HostApiService {
             if let Some(request::Body::WatchNotifications(_)) = request.body {
                 return self.watch_notifications(connection, &peer, request.id);
             }
+            if let Some(request::Body::WatchPrintJobs(_)) = request.body {
+                return self.watch_print_jobs(connection, &peer, request.id);
+            }
             if let Some(request::Body::WatchWidgets(_)) = request.body {
                 return self.watch_widgets(connection, &peer, request.id);
             }
@@ -1699,6 +1726,121 @@ impl HostApiService {
         }
     }
 
+    /// Answers a WatchPrintJobs request, then passes the print jobs of the client's Android to
+    /// it until the client goes away: each job as its offer and its document in pieces, and
+    /// each job withdrawn. The client sends nothing more: anything it sends closes the
+    /// connection, except a frame that cannot be read, which is dropped. A job that cannot be
+    /// sent fails in Android, so it does not wait for an answer that never comes.
+    fn watch_print_jobs(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
+        let watched = match self.androids.android(&peer.user) {
+            Err(why) => Err(error(ErrorCode::Unavailable, why)),
+            Ok(android) => match android.watch_print_jobs() {
+                Some(watch) => Ok((android, watch)),
+                None => Err(error(
+                    ErrorCode::Unavailable,
+                    "this Android does not print on the host".into(),
+                )),
+            },
+        };
+        let (android, watch) = match watched {
+            Ok(watched) => watched,
+            Err(body) => {
+                let _ = send(
+                    &mut *connection,
+                    Body::Response(Response {
+                        id,
+                        body: Some(body),
+                    }),
+                );
+                return;
+            }
+        };
+        let answer = Response {
+            id,
+            body: Some(response::Body::Done(types::Done {})),
+        };
+        if send(&mut *connection, Body::Response(answer)).is_err() {
+            return;
+        }
+        loop {
+            loop {
+                match watch.try_recv() {
+                    Ok(PrintEvent::Job(job)) => {
+                        let job_id = job.job_id;
+                        if send_print_job(&mut *connection, &job).is_err() {
+                            let _ = android.print_result(
+                                job_id,
+                                &PrintOutcome::Failed(
+                                    "the desktop session that was to print it went away".into(),
+                                ),
+                            );
+                            return;
+                        }
+                    }
+                    Ok(PrintEvent::Withdrawn { job_id }) => {
+                        let withdrawn = types::PrintJobWithdrawn { job_id };
+                        let withdrawn = Body::PrintJobWithdrawn(withdrawn);
+                        if send(&mut *connection, withdrawn).is_err() {
+                            return;
+                        }
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        connection.close();
+                        return;
+                    }
+                }
+            }
+            let frame = match connection.recv(Some(CLIPBOARD_POLL)) {
+                Ok(frame) => frame,
+                Err(TransportError::Timeout) => continue,
+                Err(_) => return,
+            };
+            match decode(&frame) {
+                Ok(_) => {
+                    eprintln!(
+                        "local API: a client of {} sent something on a connection that watches \
+                         print jobs; closing its connection",
+                        peer.user
+                    );
+                    connection.close();
+                    return;
+                }
+                Err(error) => {
+                    eprintln!(
+                        "local API: a client of {} sent an unreadable frame on a connection \
+                         that watches print jobs ({error}); dropping it",
+                        peer.user
+                    );
+                }
+            }
+        }
+    }
+
+    /// Passes what became of a print job to the caller's Android.
+    fn report_print_job(&self, peer: &Peer, report: types::ReportPrintJob) -> response::Body {
+        let outcome = match types::PrintOutcome::try_from(report.outcome) {
+            Ok(types::PrintOutcome::Printed) => PrintOutcome::Printed,
+            Ok(types::PrintOutcome::Canceled) => PrintOutcome::Canceled,
+            Ok(types::PrintOutcome::Failed) => PrintOutcome::Failed(report.message),
+            _ => {
+                return error(
+                    ErrorCode::UnknownRequest,
+                    "a print job is printed, canceled or failed".into(),
+                )
+            }
+        };
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        match android.print_result(report.job_id, &outcome) {
+            Ok(()) => response::Body::Done(types::Done {}),
+            Err(TaskRequestError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(TaskRequestError::Failed(why)) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
     /// The placements the service keeps for `user`. A broken store is logged and read as
     /// empty, so widgets still show, at default places.
     fn placements_of(&self, user: &str) -> std::collections::BTreeMap<i32, Placement> {
@@ -2261,6 +2403,7 @@ impl HostApiService {
                 self.request(peer, TaskRequest::WindowsShown { shown: shown.shown })
             }
             Some(request::Body::ActOnNotification(act)) => self.act_on_notification(peer, act),
+            Some(request::Body::ReportPrintJob(report)) => self.report_print_job(peer, report),
             Some(request::Body::ListWidgetProviders(_)) => self.widget_providers(peer),
             Some(request::Body::GetPackage(get)) => self.package_state(peer, &get.package_name),
             Some(request::Body::AddWidget(add)) => self.add_widget(peer, add),
@@ -2308,6 +2451,8 @@ impl HostApiService {
                         | request::Body::OpenFile(_)
                         | request::Body::WatchNotifications(_)
                         | request::Body::ActOnNotification(_)
+                        | request::Body::WatchPrintJobs(_)
+                        | request::Body::ReportPrintJob(_)
                         | request::Body::ListWidgetProviders(_)
                         | request::Body::GetPackage(_)
                         | request::Body::AddWidget(_)
@@ -3202,6 +3347,41 @@ impl HostApiClient {
         }))
     }
 
+    /// Watches the print jobs of the caller's Android. The connection carries nothing else
+    /// from here on, so the client is used up.
+    pub fn watch_print_jobs(mut self) -> Result<PrintStream, ClientError> {
+        match self.exchange(
+            request::Body::WatchPrintJobs(types::WatchPrintJobs {}),
+            self.timeout,
+        )? {
+            response::Body::Done(_) => Ok(PrintStream {
+                connection: self.connection,
+                arriving: None,
+            }),
+            _ => Err(ClientError::Malformed(
+                "expected the answer that print jobs are watched".into(),
+            )),
+        }
+    }
+
+    /// Tells the caller's Android what became of one of its print jobs.
+    pub fn report_print_job(
+        &mut self,
+        job_id: u32,
+        outcome: &PrintOutcome,
+    ) -> Result<(), ClientError> {
+        let (outcome, message) = match outcome {
+            PrintOutcome::Printed => (types::PrintOutcome::Printed, String::new()),
+            PrintOutcome::Canceled => (types::PrintOutcome::Canceled, String::new()),
+            PrintOutcome::Failed(why) => (types::PrintOutcome::Failed, why.clone()),
+        };
+        self.done(request::Body::ReportPrintJob(types::ReportPrintJob {
+            job_id,
+            outcome: outcome as i32,
+            message,
+        }))
+    }
+
     /// What the caller's Android has installed of `package`, if anything. Android must be
     /// running.
     pub fn package_state(
@@ -3780,6 +3960,134 @@ fn frame_to_wire(frame: WidgetFrame) -> Body {
             png: frame.png,
         })),
     })
+}
+
+/// Sends a whole print job on a connection that watches them: its offer, then its document
+/// in pieces.
+fn send_print_job(connection: &mut dyn Connection, job: &PrintJob) -> Result<(), TransportError> {
+    let offer = types::PrintJobOffer {
+        job_id: job.job_id,
+        package_name: job.package_name.clone(),
+        app_label: job.app_label.clone(),
+        document_name: job.document_name.clone(),
+        size: job.pdf.len() as u64,
+        page_count: job.settings.page_count,
+        copies: job.settings.copies,
+        color: job.settings.color,
+        duplex: job.settings.duplex,
+        landscape: job.settings.landscape,
+        media_width_mils: job.settings.media_width_mils,
+        media_height_mils: job.settings.media_height_mils,
+    };
+    send(connection, Body::PrintJobOffer(offer))?;
+    let mut offset = 0usize;
+    for piece in job.pdf.chunks(print::PIECE_BYTES) {
+        send(
+            connection,
+            Body::PrintJobData(types::PrintJobData {
+                job_id: job.job_id,
+                offset: offset as u64,
+                data: piece.to_vec(),
+            }),
+        )?;
+        offset += piece.len();
+    }
+    Ok(())
+}
+
+/// A print job whose document is still arriving on a [`PrintStream`].
+struct ArrivingJob {
+    offer: types::PrintJobOffer,
+    pdf: Vec<u8>,
+}
+
+/// A connection that watches the print jobs of the caller's Android, from
+/// [`HostApiClient::watch_print_jobs`].
+pub struct PrintStream {
+    connection: Box<dyn Connection>,
+    arriving: Option<ArrivingJob>,
+}
+
+impl PrintStream {
+    /// The next whole print job or withdrawal, waiting at most `timeout` for each frame.
+    /// `Ok(None)` means nothing whole came in time; an error means the connection has ended
+    /// or the service sent something that is not a print job.
+    pub fn next(&mut self, timeout: Duration) -> Result<Option<PrintEvent>, ClientError> {
+        loop {
+            let frame = match self.connection.recv(Some(timeout)) {
+                Ok(frame) => frame,
+                Err(TransportError::Timeout) => return Ok(None),
+                Err(error) => return Err(ClientError::Transport(error)),
+            };
+            match decode(&frame) {
+                Ok(Envelope {
+                    body: Some(Body::PrintJobOffer(offer)),
+                }) => {
+                    if offer.size == 0 || offer.size > print::MAX_PRINT_BYTES {
+                        return Err(ClientError::Malformed(format!(
+                            "a print job of {} bytes",
+                            offer.size
+                        )));
+                    }
+                    self.arriving = Some(ArrivingJob {
+                        offer,
+                        pdf: Vec::new(),
+                    });
+                }
+                Ok(Envelope {
+                    body: Some(Body::PrintJobData(piece)),
+                }) => {
+                    let Some(arriving) = self.arriving.as_mut() else {
+                        return Err(ClientError::Malformed(
+                            "a piece of a print job that was not offered".into(),
+                        ));
+                    };
+                    let received = arriving.pdf.len() as u64;
+                    let end = received + piece.data.len() as u64;
+                    let in_place = piece.job_id == arriving.offer.job_id
+                        && piece.offset == received
+                        && end <= arriving.offer.size;
+                    if !in_place {
+                        return Err(ClientError::Malformed(
+                            "a piece of a print job out of place".into(),
+                        ));
+                    }
+                    arriving.pdf.extend_from_slice(&piece.data);
+                    if (arriving.pdf.len() as u64) < arriving.offer.size {
+                        continue;
+                    }
+                    let Some(ArrivingJob { offer, pdf }) = self.arriving.take() else {
+                        continue;
+                    };
+                    return Ok(Some(PrintEvent::Job(PrintJob {
+                        job_id: offer.job_id,
+                        package_name: offer.package_name,
+                        app_label: offer.app_label,
+                        document_name: offer.document_name,
+                        settings: PrintSettings {
+                            page_count: offer.page_count,
+                            copies: offer.copies.max(1),
+                            color: offer.color,
+                            duplex: offer.duplex,
+                            landscape: offer.landscape,
+                            media_width_mils: offer.media_width_mils,
+                            media_height_mils: offer.media_height_mils,
+                        },
+                        pdf: Arc::new(pdf),
+                    })));
+                }
+                Ok(Envelope {
+                    body: Some(Body::PrintJobWithdrawn(withdrawn)),
+                }) => {
+                    return Ok(Some(PrintEvent::Withdrawn {
+                        job_id: withdrawn.job_id,
+                    }));
+                }
+                Ok(_) => return Err(ClientError::Malformed("expected a print job".into())),
+                Err(error) => return Err(ClientError::Malformed(error.to_string())),
+            }
+        }
+    }
 }
 
 fn notification_to_wire(event: NotificationEvent) -> Body {

@@ -1140,6 +1140,64 @@ message DiagnosticsDone {
   string error = 2;
 }
 
+// What became of a print job the guest handed the host.
+enum PrintOutcome {
+  PRINT_OUTCOME_UNSPECIFIED = 0;
+  // The host sent it to the printer the user picked.
+  PRINT_OUTCOME_PRINTED = 1;
+  // The user canceled the host's print dialog, or the job was withdrawn before it printed.
+  PRINT_OUTCOME_CANCELED = 2;
+  // It could not be printed; the message says why.
+  PRINT_OUTCOME_FAILED = 3;
+}
+
+// Guest to host, from the agent's print service: a print job an app queued, whose document
+// follows as PrintJobChunk pieces in order. The document is a PDF of `size` bytes, at most
+// 128 MiB. The host shows its print dialog once the whole document has arrived, and answers
+// with PrintJobResult. The settings are what the user chose in Android's print dialog.
+message PrintJob {
+  // The agent's number for the job, unique while the agent's connection lasts.
+  uint32 job_id = 1;
+  // The app that printed, and its name as the guest shows it; empty when unknown.
+  string package_name = 2;
+  string app_label = 3;
+  // The document's name, as the app gave it.
+  string document_name = 4;
+  uint64 size = 5;
+  // The document's pages; 0 when the app did not say.
+  uint32 page_count = 6;
+  uint32 copies = 7;
+  bool color = 8;
+  bool duplex = 9;
+  bool landscape = 10;
+  // The paper's size, in thousandths of an inch; 0 when unknown.
+  uint32 media_width_mils = 11;
+  uint32 media_height_mils = 12;
+}
+
+// Guest to host: one piece of a print job's document. Pieces come in order, each at most
+// 256 KiB, and the one that reaches the job's size ends it.
+message PrintJobChunk {
+  uint32 job_id = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+}
+
+// Guest to host: the job was canceled in Android, by the app or the user, before the host
+// answered it. The host drops it, or leaves it unprinted if its dialog is already open, and
+// sends no result for it.
+message PrintJobCancel {
+  uint32 job_id = 1;
+}
+
+// Host to guest: what became of a print job. The agent ends the job in Android's print
+// spooler the same way: completed, canceled, or failed with the message.
+message PrintJobResult {
+  uint32 job_id = 1;
+  PrintOutcome outcome = 2;
+  string message = 3;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -1224,5 +1282,9 @@ message Envelope {
     DiagnosticsFile diagnostics_file = 134;
     DiagnosticsDone diagnostics_done = 135;
     StopApp stop_app = 136;
+    PrintJob print_job = 220;
+    PrintJobChunk print_job_chunk = 221;
+    PrintJobCancel print_job_cancel = 222;
+    PrintJobResult print_job_result = 223;
   }
 }

@@ -3,6 +3,9 @@
     <string name="app_name">DSA agent</string>
     <string name="input_method_name">DSA host input</string>
     <string name="notification_listener_name">DSA host notifications</string>
+    <string name="print_service_name">DSA host printing</string>
+    <string name="print_printer_name">Desktop printers</string>
+    <string name="print_unavailable">DSA\'s agent is not running, so the document cannot reach the desktop.</string>
     <string name="accessibility_service_name">DSA host accessibility</string>
     <string name="accessibility_service_description">Lets screen readers and other accessibility tools on the host read and use the apps in their windows.</string>
 </resources>

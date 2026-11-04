@@ -26,6 +26,7 @@
 //! - [`clipboard`]: the text clipboard the host and the guest share.
 //! - [`notifications`]: the notifications of the guest, which the host shows.
 //! - [`widgets`]: the widgets of the guest, which the host places on its desktop.
+//! - [`print`]: the documents apps in the guest print, which the host prints.
 //! - [`video`]: the guest's video, decoded on the host's hardware decoder.
 //! - [`ime`]: text input through the host's input method in a task's window.
 //! - [`settings`]: the settings a user changes from the settings app, kept by the service.
@@ -60,6 +61,7 @@ pub mod memory;
 pub mod notifications;
 pub mod power;
 pub mod power_hints;
+pub mod print;
 pub mod resize_trace;
 pub mod session;
 pub mod settings;
