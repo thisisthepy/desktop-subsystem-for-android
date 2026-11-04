@@ -1408,6 +1408,7 @@ class GuestMemoryTests(unittest.TestCase):
             make_image.RECLAIM_PROPERTY_CONTEXT + "\n"
             + make_image.TRIM_PROPERTY_CONTEXT + "\n"
             + make_image.BOOT_PROPERTY_CONTEXT + "\n"
+            + make_image.ADB_PROPERTY_CONTEXT + "\n"
         )
         self.assertEqual(make_image.update_vendor_property_contexts(all_of_them), all_of_them)
 

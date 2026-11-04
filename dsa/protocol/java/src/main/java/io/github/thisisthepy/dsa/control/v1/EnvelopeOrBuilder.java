@@ -349,6 +349,17 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.PowerHint getPowerHint();
 
   /**
+   * <code>.dsa.control.v1.DeveloperMode developer_mode = 120;</code>
+   * @return Whether the developerMode field is set.
+   */
+  boolean hasDeveloperMode();
+  /**
+   * <code>.dsa.control.v1.DeveloperMode developer_mode = 120;</code>
+   * @return The developerMode.
+   */
+  io.github.thisisthepy.dsa.control.v1.DeveloperMode getDeveloperMode();
+
+  /**
    * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
    * @return Whether the deviceIdle field is set.
    */
