@@ -22,6 +22,11 @@ build), so they can be recorded as they are. -Json prints the same as one JSON o
                  measures the start to Active, then the launch.
   -Part return   Opens each -Package, stops Android, and measures how long the VM's memory
                  takes to go back to the host, and how much came back.
+  -Part open     Opens the first -Package, leaves it untouched for a minute, then reads each
+                 DSA process's private working set and `dsa memory` (with the guest kernel's
+                 breakdown). The sum is compared with the near-term 400 MiB target.
+  -Part close    Opens the first -Package, closes its window, and reads the VM's working set
+                 every second for 30 seconds: how much went back to the host, and how fast.
   -Part all      memory, cpu, window and return, in that order (the default).
 
 .EXAMPLE
@@ -30,7 +35,7 @@ pwsh -File measure.ps1 -Part window -Package com.android.settings -Cold
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('all', 'memory', 'cpu', 'window', 'return')]
+    [ValidateSet('all', 'memory', 'cpu', 'window', 'return', 'open', 'close')]
     [string]$Part = 'all',
     [string]$Dsa = 'dsa',
     [string[]]$Package = @('com.android.settings'),
@@ -298,7 +303,72 @@ function Measure-MemoryReturn {
     }
 }
 
+# The private working set of a process in KiB, or $null when it cannot be read.
+function Get-PrivateWorkingSetKb([int]$Id) {
+    try {
+        $sample = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Filter "IDProcess=$Id"
+        if ($sample) { return [double]$sample.WorkingSetPrivate / 1KB }
+    } catch { }
+    $null
+}
+
+function Measure-OpenApp {
+    if ((Get-State) -eq 'Stopped') { Invoke-Dsa start --wait | Out-Null }
+    $name = $Package[0]
+    Invoke-Dsa launch $name | Out-Null
+    Write-Host "waiting a minute with $name open"
+    Start-Sleep -Seconds 60
+    $memory = Get-DsaJson memory
+    $processes = @()
+    $ids = @(@($memory.host) | ForEach-Object { [int]$_.pid })
+    $service = Get-ServiceProcess
+    if ($service) { $ids += $service.Id }
+    $totalKb = 0.0
+    $complete = $true
+    foreach ($id in $ids) {
+        $kb = Get-PrivateWorkingSetKb $id
+        if ($null -eq $kb) { $complete = $false } else { $totalKb += $kb }
+        $role = (@($memory.host) | Where-Object { $_.pid -eq $id } | Select-Object -First 1).role
+        if (-not $role) { $role = 'service' }
+        $processes += [ordered]@{ role = $role; pid = $id; private_working_set_mib = if ($null -ne $kb) { ConvertTo-Mib $kb } else { $null } }
+    }
+    [ordered]@{
+        package = $name
+        state = Get-State
+        processes = $processes
+        total_private_working_set_mib = ConvertTo-Mib $totalKb
+        near_term_target_mib = 400
+        final_target_mib = 250
+        complete = $complete
+        guest_kernel = if ($memory.guest) { $memory.guest.kernel } else { $null }
+    }
+}
+
+function Measure-CloseApp {
+    if ((Get-State) -eq 'Stopped') { Invoke-Dsa start --wait | Out-Null }
+    $name = $Package[0]
+    Invoke-Dsa launch $name | Out-Null
+    Start-Sleep -Seconds 20
+    $vm = @((Get-DsaJson memory).host) | Where-Object { $_.role -eq 'vm' } | Select-Object -First 1
+    $read = { $p = if ($vm) { Get-ProcessSafe $vm.pid } else { $null }; if ($p) { ConvertTo-Mib ($p.WorkingSet64 / 1KB) } else { $null } }
+    $before = & $read
+    foreach ($process in Get-AppWindowProcesses $name) { $null = $process.CloseMainWindow() }
+    $samples = @()
+    for ($i = 1; $i -le 30; $i++) {
+        Start-Sleep -Seconds 1
+        $samples += & $read
+    }
+    [ordered]@{
+        package = $name
+        vm_working_set_before_mib = $before
+        vm_working_set_each_second_mib = $samples
+        returned_mib = if ($null -ne $before -and $samples.Count) { [math]::Round($before - ($samples | Measure-Object -Minimum).Minimum, 1) } else { $null }
+    }
+}
+
 $report = [ordered]@{ environment = Get-Environment }
+if ($Part -eq 'open') { $report['open_app'] = Measure-OpenApp }
+if ($Part -eq 'close') { $report['close_app'] = Measure-CloseApp }
 if ($Part -in 'all', 'memory') { $report['idle_memory'] = Measure-IdleMemory }
 if ($Part -in 'all', 'cpu') { $report['idle_cpu'] = Measure-IdleCpu }
 if ($Part -in 'all', 'window') { $report['window_show'] = Measure-Windows }
