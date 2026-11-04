@@ -866,6 +866,10 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::settings_round_trip(&mut || $make);
         }
         #[test]
+        fn fr17_the_settings_name_the_android_image_the_next_start_boots() {
+            $crate::host_api_conformance::android_version_follows_the_image(&mut || $make);
+        }
+        #[test]
         fn fr17_an_invalid_setting_is_refused_with_its_reason() {
             $crate::host_api_conformance::invalid_setting_is_refused(&mut || $make);
         }
@@ -2464,7 +2468,31 @@ fn facts() -> ServiceFacts {
         log_dir: Some("C:\\ProgramData\\DSA\\logs".into()),
         program_updates_available: true,
         image_updates_available: false,
+        android_version: Some("16.0.0-15581820-7".into()),
     }
+}
+
+pub fn android_version_follows_the_image(make: MakeLocal<'_>) {
+    let (listener, mut connector, _) = make();
+    let next = Arc::new(Mutex::new(Some("16.0.0-15581820-7".to_string())));
+    let source = Arc::clone(&next);
+    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+        .with_settings(Arc::new(MemorySettings::default()), facts())
+        .with_android_version(Arc::new(move || source.lock().unwrap().clone()));
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    assert_eq!(
+        client.settings().unwrap().facts.android_version.as_deref(),
+        Some("16.0.0-15581820-7")
+    );
+    // An image update moves the next start to another image while the service runs.
+    *next.lock().unwrap() = Some("17.0.0-16373615-7".into());
+    assert_eq!(
+        client.settings().unwrap().facts.android_version.as_deref(),
+        Some("17.0.0-16373615-7")
+    );
+    *next.lock().unwrap() = None;
+    assert_eq!(client.settings().unwrap().facts.android_version, None);
 }
 
 pub fn settings_round_trip(make: MakeLocal<'_>) {

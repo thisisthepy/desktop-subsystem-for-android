@@ -370,6 +370,12 @@
   <data name="AboutServiceVersionCard.Header" xml:space="preserve">
     <value>DSA 서비스 버전</value>
   </data>
+  <data name="AboutAndroidVersionCard.Header" xml:space="preserve">
+    <value>안드로이드 이미지 버전</value>
+  </data>
+  <data name="AboutAndroidVersionCard.Description" xml:space="preserve">
+    <value>다음에 시작할 때 부팅하는 안드로이드 이미지입니다. 이미지 업데이트가 이 버전을 바꿉니다.</value>
+  </data>
   <data name="AboutLicenseCard.Header" xml:space="preserve">
     <value>라이선스</value>
   </data>

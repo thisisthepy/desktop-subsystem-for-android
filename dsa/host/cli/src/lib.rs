@@ -579,6 +579,7 @@ pub fn settings_json(report: &SettingsReport) -> Value {
         "image_updates_available": report.facts.image_updates_available,
         "version": report.facts.version,
         "log_dir": report.facts.log_dir,
+        "android_version": report.facts.android_version,
     })
 }
 
@@ -623,6 +624,9 @@ pub fn describe_settings(report: &SettingsReport) -> String {
         ),
         format!("Service version: {}", facts.version),
     ];
+    if let Some(version) = &facts.android_version {
+        lines.push(format!("Android image: {version}"));
+    }
     if let Some(dir) = &facts.log_dir {
         lines.push(format!("Service log folder: {dir}"));
     }

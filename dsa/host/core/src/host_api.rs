@@ -765,7 +765,13 @@ pub struct ServiceFacts {
     pub program_updates_available: bool,
     /// Whether this installation can download new Android images.
     pub image_updates_available: bool,
+    /// The version of the Android image the next start boots, if the service knows it.
+    pub android_version: Option<String>,
 }
+
+/// Says which Android image the next start boots. An image update changes it while the
+/// service runs, so the service asks each time a client reads the settings.
+pub type AndroidVersionSource = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 
 /// The settings as the service reported them, with what it says about itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -781,6 +787,7 @@ pub struct HostApiService {
     androids: Arc<dyn UserAndroids>,
     program: Option<Arc<dyn UpdateProgram>>,
     settings: Option<(Arc<dyn SettingsStore>, ServiceFacts)>,
+    android_version: Option<AndroidVersionSource>,
     hello: types::Hello,
     handshake_timeout: Duration,
     /// Logs when each resize was handed to Android, and how long that took.
@@ -799,6 +806,7 @@ impl HostApiService {
             androids,
             program: None,
             settings: None,
+            android_version: None,
             hello: local_hello(Role::Service, build),
             handshake_timeout: Duration::from_secs(5),
             resize_trace: Mutex::new(ResizeTrace::new(
@@ -858,6 +866,22 @@ impl HostApiService {
     ) -> HostApiService {
         self.settings = Some((store, facts));
         self
+    }
+
+    /// Reports the Android image version `source` gives with the settings, in place of the
+    /// one in the facts.
+    pub fn with_android_version(mut self, source: AndroidVersionSource) -> HostApiService {
+        self.android_version = Some(source);
+        self
+    }
+
+    /// The facts as they stand now.
+    fn facts_now(&self, facts: &ServiceFacts) -> ServiceFacts {
+        let mut facts = facts.clone();
+        if let Some(source) = &self.android_version {
+            facts.android_version = source().filter(|version| !version.is_empty());
+        }
+        facts
     }
 
     /// Accepts connections until `stop` is set, serving each on its own thread. A failed
@@ -2276,7 +2300,7 @@ impl HostApiService {
             return Self::no_settings();
         };
         match store.get(&peer.user) {
-            Ok(settings) => response::Body::Settings(settings_to_wire(&settings, facts)),
+            Ok(settings) => response::Body::Settings(settings_to_wire(&settings, &self.facts_now(facts))),
             Err(why) => error(ErrorCode::Unavailable, why),
         }
     }
@@ -2344,7 +2368,7 @@ impl HostApiService {
                     on_off(settings.program_updates),
                     on_off(settings.image_updates)
                 );
-                response::Body::Settings(settings_to_wire(&settings, facts))
+                response::Body::Settings(settings_to_wire(&settings, &self.facts_now(facts)))
             }
             Err(why) => error(ErrorCode::InvalidSetting, why),
         }
@@ -2371,6 +2395,7 @@ fn settings_to_wire(settings: &Settings, facts: &ServiceFacts) -> types::Setting
         image_updates_available: facts.image_updates_available,
         version: facts.version.clone(),
         log_dir: facts.log_dir.clone().unwrap_or_default(),
+        android_version: facts.android_version.clone().unwrap_or_default(),
     }
 }
 
@@ -2389,6 +2414,7 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
             log_dir: Some(settings.log_dir).filter(|dir| !dir.is_empty()),
             program_updates_available: settings.program_updates_available,
             image_updates_available: settings.image_updates_available,
+            android_version: Some(settings.android_version).filter(|v| !v.is_empty()),
         },
     }
 }
