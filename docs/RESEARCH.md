@@ -484,3 +484,35 @@ Davey는 이 로그에 2건뿐이고 둘 다 액티비티 전환이다. 리플�
 - **`ServiceCapacityLow`**: `dsa-hwcomposer.rc`의 이 프로필은 cpuset `system-background`에 들어가는 것이다. `init.rc`가 이 그룹에 모든 CPU를 복사하므로 컴포저가 쓸 CPU는 줄지 않는다. AOSP의 컴포저 서비스(ranchu 등)도 같은 줄을 쓴다. init이 root로 쓰므로 이번 오류와도 관계가 없다. 그대로 둔다.
 
 **실제 PC에서 확인할 것**: 위 두 로그 줄이 사라지는지, `cat /proc/cgroups`에 cpu, cpuset, blkio, memory, freezer가 켜져 있는지, `ls -Z /sys/class/wakeup/`의 대상이 `/sys/devices/virtual/wakeup/`이고 `sysfs_wakeup`인지.
+
+## 부팅 로그의 시스템 서비스 오류, 감사 로그 홍수, 낡은 패키지 상태 (FR-1, FR-6, FR-14)
+
+**확인 대상**: 안드로이드 16 이미지(`aosp_cf_x86_64_only_phone` 15581820, `16.0.0-15581820-7`), develop `dcbb771`. 실제 PC의 콘솔 로그(`android-<SID>.log`, 14,937줄, 2026-11-04, 부팅 두 번)와 같은 커밋의 `DsaAgent.apk`(`resources.arsc`, 바이너리 매니페스트)를 읽었다. 고친 이미지는 이 기기에서 부팅해 보지 않았다.
+
+**결과와 결정**:
+
+| 로그 | 건수 | 누가, 왜 | 결정 |
+| --- | --- | --- | --- |
+| `E SystemServiceRegistry` `dropbox` | 12건(줄 약 240) | system_server가 부팅 초기의 WTF를 DropBox에 넣으려 했지만 `DropBoxManagerService`가 4 ms 뒤에 시작했다. | 무해. AOSP의 시작 순서이고 DSA가 뺀 서비스가 아니다. 서비스는 곧 떠서 이후 기록은 들어간다. |
+| `carrier_config` | 10건 | Wi-Fi(`WifiServiceImpl`), 시간대 감지 등이 `CarrierConfigManager`를 찾는다. 이미지에 전화 기능(rild)이 없다. | 무해. 호출하는 쪽이 null을 처리한다. WSA에도 전화 기능은 없었다. |
+| `jobscheduler` | 2건 | `SettingsProvider.scheduleWriteFallbackFilesJob`이 JobScheduler보다 먼저 불렸다. | 무해. 시작 순서. |
+| `uwb`, `thread_network` | 각 1건 | 연결 서비스의 초기화. UWB와 Thread HAL APEX는 DSA가 뺐다(`REMOVED_APEXES`). | 무해. 한 번만 묻고 기능이 없다고 판단한다. WSA에도 없었다. |
+| `trust`, `virtualdevice`, `supervision`, `keyguard` | 각 1건 | `SystemServer.startOtherServices`, `ProtectedPackages.isSupervisionPackage`가 서비스 시작 전에 매니저를 만들었다. | 무해. 시작 순서. |
+| `E InputMethodManagerService: Meta-data does not start with input-method tag` | 1건 | 아래 "낡은 패키지 상태". 호스트 입력기가 등록되지 않아 텍스트 입력이 안 된다. | 고침: 이미지마다 지문을 바꾼다. |
+| `W DsaAgent` `MANAGE_ROLE_HOLDERS`, `MANAGE_NOTIFICATION_LISTENERS` 거절 | 각 1건 | 같은 원인. 새 에이전트가 요청한 권한이 부여되지 않았다. | 고침: 같은 변경. |
+| `W DsaAgent` `User 0 must be unlocked for widgets` | 3건 | 에이전트는 사용자 저장소 잠금 해제 전에 시작하는데, 위젯 호스트는 그 전에 시작할 수 없다. 에이전트는 다시 시도하지 않아 그 부팅 내내 위젯이 그려지지 않았고, 연결 때 읽지 못한 목록을 빈 목록으로 보내 호스트가 배치한 위젯을 지울 수 있었다. | 고침: 시작이 거절되면 1초마다 다시 시도하고(경고는 한 번), 시작하기 전에는 위젯 목록을 보내지 않는다. |
+| `W auditd`, `kauditd hold queue overflow` | 705줄, 손실 1,058건 | 커널 명령줄의 `audit=1`. 커널이 iptables 변경(`NETFILTER_CFG`), BPF 프로그램 적재(`BPF`), 각 거절의 `SYSCALL`, `PROCTITLE`, `EOE` 기록까지 남겼고, logd가 뜨기 전에 대기열(64)이 넘쳤다. | 고침: `audit=1`을 뺀다. 안드로이드 기기도 주지 않는다. SELinux 거절은 그대로 logd의 auditd로 간다. |
+| `avc: denied { write } kdevtmpfs` | 부팅당 70여 건 | 커널의 devtmpfs 스레드가 정책 적재 뒤 찾은 장치마다 노드를 만들려 했다. 안드로이드는 이 devtmpfs를 올리지 않는다(`/dev`는 init의 tmpfs, 노드는 ueventd). | 고침: 거절은 두고 기록만 하지 않는다(`sepolicy/kernel.cil`의 `dontaudit`). |
+| `avc: denied { set }` `ro.debuggable`, `ro.secure`, `ro.adb.secure`, `ro.force.debuggable`, `sys.use_memfd` | 부팅당 10건 | `edit_props`가 이 값을 vendor와 odm의 build.prop에도 썼다. init은 두 파일을 vendor_init으로 읽고, vendor_init은 이 속성을 쓸 수 없다. 값은 system build.prop에서 이미 들어갔다. | 고침: vendor와 odm build.prop에는 쓰지 않고, 있던 줄도 지운다. `check-image.py`가 확인한다. |
+| `W iptables-restor` | 123줄 | netd의 iptables 적재를 `audit=1`이 감사 기록으로 남긴 것. | 고침: `audit=1` 제거로 사라진다. |
+| `W PackageManager` | 253줄 | 대부분 APEX 패키지(`com.android.vndk.v*`, `com.google.cf.*`)의 "Skipping preparing app data"와 첫 부팅의 "Missing permission state". | 무해. AOSP 기본 동작이다. |
+| `W Zygote: Class not found for preloading` | 150줄 | 프레임워크의 preloaded-classes 목록이 R8 합성 클래스 이름과 맞지 않는다. | 무해. AOSP 빌드 그대로이고 기능에 영향이 없다. |
+| 나머지 거절(`discard_max_bytes`, `storaged` sysfs, `init_dev_config`, 센서 HAL memfd, `crash_dump` keystore) | 각 1~4건 | Cuttlefish 장치 스크립트와 AOSP의 알려진 거절(`bug=` 표시). | 그대로 둔다. 반복되지 않고 기능에 영향이 없다. |
+
+### 낡은 패키지 상태
+
+- **무엇이었나**: 매니페스트의 `android.view.im` 메타데이터는 `0x7f030001`(`res/rz.xml`, `<input-method>`)을 가리키고 APK 자체는 맞다. 그런데 system_server는 그 자원을 `<input-method>`가 아니라고 읽었다. 같은 부팅에 `Checksum mismatch for dex DsaAgent.apk`도 있다.
+- **원인**: 이미지의 지문이 AOSP 빌드의 것(`.../15581820:user/release-keys`) 그대로라, DSA가 이미지를 새로 만들어도 바뀌지 않는다. PackageManager는 파티션 지문의 요약(`PackagePartitions.FINGERPRINT`)이 바뀔 때만 업그레이드로 보고 파싱 캐시를 버리고, 다시 컴파일하고, 새 권한을 준다. 그래서 사용자 데이터에 남은 이전 에이전트의 파싱 결과를 썼다. 이전 에이전트에서는 `0x7f030000`이 입력기 XML이었고, 접근성 서비스가 들어온 지금은 그 번호가 접근성 XML이다.
+- **고친 것**: `make-image.py`가 이미지 내용(DSA가 넣는 파일과 `dsa/guest/image/`의 파일)의 요약으로 `dsa<12자리>` 태그를 만들어, 모든 build.prop의 `ro.*build.version.incremental`과 `ro.*build.fingerprint`의 incremental 부분에 붙인다. 모든 파티션에 같은 태그가 붙어 서로 같다. 새 이미지의 첫 부팅은 OTA 뒤처럼 앱을 다시 컴파일하므로 조금 길어진다.
+
+**실제 PC에서 확인할 것**: 새 이미지로 부팅한 뒤 `getprop ro.build.fingerprint`에 `.dsa`가 붙는지, 로그에 `Unable to load input method`가 없고 `ime list -s`에 `io.github.thisisthepy.dsa.agent/.platform.HostInputMethod`가 있는지, 호스트에서 한글을 입력할 수 있는지, `DsaAgent`의 권한 거절이 없는지. `kauditd hold queue overflow`, `type=1325`, `type=1334`, `kdevtmpfs` 거절, `vendor_init`의 `{ set }` 거절이 사라졌는지.
