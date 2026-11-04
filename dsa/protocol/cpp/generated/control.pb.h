@@ -183,6 +183,9 @@ extern OpenFileDefaultTypeInternal _OpenFile_default_instance_;
 class OpenLink;
 struct OpenLinkDefaultTypeInternal;
 extern OpenLinkDefaultTypeInternal _OpenLink_default_instance_;
+class PackageState;
+struct PackageStateDefaultTypeInternal;
+extern PackageStateDefaultTypeInternal _PackageState_default_instance_;
 class PointerEvent;
 struct PointerEventDefaultTypeInternal;
 extern PointerEventDefaultTypeInternal _PointerEvent_default_instance_;
@@ -195,6 +198,9 @@ extern PowerStateDefaultTypeInternal _PowerState_default_instance_;
 class ProcessMemory;
 struct ProcessMemoryDefaultTypeInternal;
 extern ProcessMemoryDefaultTypeInternal _ProcessMemory_default_instance_;
+class QueryPackage;
+struct QueryPackageDefaultTypeInternal;
+extern QueryPackageDefaultTypeInternal _QueryPackage_default_instance_;
 class Rect;
 struct RectDefaultTypeInternal;
 extern RectDefaultTypeInternal _Rect_default_instance_;
@@ -296,10 +302,12 @@ template<> ::dsa::control::v1::NotificationDismissed* Arena::CreateMaybeMessage<
 template<> ::dsa::control::v1::NotificationRemoved* Arena::CreateMaybeMessage<::dsa::control::v1::NotificationRemoved>(Arena*);
 template<> ::dsa::control::v1::OpenFile* Arena::CreateMaybeMessage<::dsa::control::v1::OpenFile>(Arena*);
 template<> ::dsa::control::v1::OpenLink* Arena::CreateMaybeMessage<::dsa::control::v1::OpenLink>(Arena*);
+template<> ::dsa::control::v1::PackageState* Arena::CreateMaybeMessage<::dsa::control::v1::PackageState>(Arena*);
 template<> ::dsa::control::v1::PointerEvent* Arena::CreateMaybeMessage<::dsa::control::v1::PointerEvent>(Arena*);
 template<> ::dsa::control::v1::PowerHint* Arena::CreateMaybeMessage<::dsa::control::v1::PowerHint>(Arena*);
 template<> ::dsa::control::v1::PowerState* Arena::CreateMaybeMessage<::dsa::control::v1::PowerState>(Arena*);
 template<> ::dsa::control::v1::ProcessMemory* Arena::CreateMaybeMessage<::dsa::control::v1::ProcessMemory>(Arena*);
+template<> ::dsa::control::v1::QueryPackage* Arena::CreateMaybeMessage<::dsa::control::v1::QueryPackage>(Arena*);
 template<> ::dsa::control::v1::Rect* Arena::CreateMaybeMessage<::dsa::control::v1::Rect>(Arena*);
 template<> ::dsa::control::v1::RemoveWidget* Arena::CreateMaybeMessage<::dsa::control::v1::RemoveWidget>(Arena*);
 template<> ::dsa::control::v1::RequestGuestMemory* Arena::CreateMaybeMessage<::dsa::control::v1::RequestGuestMemory>(Arena*);
@@ -6716,6 +6724,346 @@ class ApkChunk final :
 };
 // -------------------------------------------------------------------
 
+class QueryPackage final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.QueryPackage) */ {
+ public:
+  inline QueryPackage() : QueryPackage(nullptr) {}
+  ~QueryPackage() override;
+  explicit PROTOBUF_CONSTEXPR QueryPackage(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  QueryPackage(const QueryPackage& from);
+  QueryPackage(QueryPackage&& from) noexcept
+    : QueryPackage() {
+    *this = ::std::move(from);
+  }
+
+  inline QueryPackage& operator=(const QueryPackage& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline QueryPackage& operator=(QueryPackage&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const QueryPackage& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const QueryPackage* internal_default_instance() {
+    return reinterpret_cast<const QueryPackage*>(
+               &_QueryPackage_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    39;
+
+  friend void swap(QueryPackage& a, QueryPackage& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(QueryPackage* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(QueryPackage* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  QueryPackage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<QueryPackage>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const QueryPackage& from);
+  void MergeFrom(const QueryPackage& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(QueryPackage* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.QueryPackage";
+  }
+  protected:
+  explicit QueryPackage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kPackageNameFieldNumber = 2,
+    kRequestIdFieldNumber = 1,
+  };
+  // string package_name = 2;
+  void clear_package_name();
+  const std::string& package_name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_package_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_package_name();
+  PROTOBUF_NODISCARD std::string* release_package_name();
+  void set_allocated_package_name(std::string* package_name);
+  private:
+  const std::string& _internal_package_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_package_name(const std::string& value);
+  std::string* _internal_mutable_package_name();
+  public:
+
+  // uint32 request_id = 1;
+  void clear_request_id();
+  uint32_t request_id() const;
+  void set_request_id(uint32_t value);
+  private:
+  uint32_t _internal_request_id() const;
+  void _internal_set_request_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.QueryPackage)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr package_name_;
+    uint32_t request_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class PackageState final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.PackageState) */ {
+ public:
+  inline PackageState() : PackageState(nullptr) {}
+  ~PackageState() override;
+  explicit PROTOBUF_CONSTEXPR PackageState(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  PackageState(const PackageState& from);
+  PackageState(PackageState&& from) noexcept
+    : PackageState() {
+    *this = ::std::move(from);
+  }
+
+  inline PackageState& operator=(const PackageState& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline PackageState& operator=(PackageState&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const PackageState& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const PackageState* internal_default_instance() {
+    return reinterpret_cast<const PackageState*>(
+               &_PackageState_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    40;
+
+  friend void swap(PackageState& a, PackageState& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(PackageState* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(PackageState* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  PackageState* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<PackageState>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const PackageState& from);
+  void MergeFrom(const PackageState& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(PackageState* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.PackageState";
+  }
+  protected:
+  explicit PackageState(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kSignerSha256FieldNumber = 5,
+    kVersionNameFieldNumber = 4,
+    kRequestIdFieldNumber = 1,
+    kInstalledFieldNumber = 2,
+    kVersionCodeFieldNumber = 3,
+  };
+  // repeated bytes signer_sha256 = 5;
+  int signer_sha256_size() const;
+  private:
+  int _internal_signer_sha256_size() const;
+  public:
+  void clear_signer_sha256();
+  const std::string& signer_sha256(int index) const;
+  std::string* mutable_signer_sha256(int index);
+  void set_signer_sha256(int index, const std::string& value);
+  void set_signer_sha256(int index, std::string&& value);
+  void set_signer_sha256(int index, const char* value);
+  void set_signer_sha256(int index, const void* value, size_t size);
+  std::string* add_signer_sha256();
+  void add_signer_sha256(const std::string& value);
+  void add_signer_sha256(std::string&& value);
+  void add_signer_sha256(const char* value);
+  void add_signer_sha256(const void* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& signer_sha256() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_signer_sha256();
+  private:
+  const std::string& _internal_signer_sha256(int index) const;
+  std::string* _internal_add_signer_sha256();
+  public:
+
+  // string version_name = 4;
+  void clear_version_name();
+  const std::string& version_name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_version_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_version_name();
+  PROTOBUF_NODISCARD std::string* release_version_name();
+  void set_allocated_version_name(std::string* version_name);
+  private:
+  const std::string& _internal_version_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_version_name(const std::string& value);
+  std::string* _internal_mutable_version_name();
+  public:
+
+  // uint32 request_id = 1;
+  void clear_request_id();
+  uint32_t request_id() const;
+  void set_request_id(uint32_t value);
+  private:
+  uint32_t _internal_request_id() const;
+  void _internal_set_request_id(uint32_t value);
+  public:
+
+  // bool installed = 2;
+  void clear_installed();
+  bool installed() const;
+  void set_installed(bool value);
+  private:
+  bool _internal_installed() const;
+  void _internal_set_installed(bool value);
+  public:
+
+  // int64 version_code = 3;
+  void clear_version_code();
+  int64_t version_code() const;
+  void set_version_code(int64_t value);
+  private:
+  int64_t _internal_version_code() const;
+  void _internal_set_version_code(int64_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.PackageState)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> signer_sha256_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr version_name_;
+    uint32_t request_id_;
+    bool installed_;
+    int64_t version_code_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class OpenLink final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.OpenLink) */ {
  public:
@@ -6755,7 +7103,7 @@ class OpenLink final :
                &_OpenLink_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    39;
+    41;
 
   friend void swap(OpenLink& a, OpenLink& b) {
     a.Swap(&b);
@@ -6890,7 +7238,7 @@ class LinkHandling final :
                &_LinkHandling_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    40;
+    42;
 
   friend void swap(LinkHandling& a, LinkHandling& b) {
     a.Swap(&b);
@@ -7020,7 +7368,7 @@ class OpenFile final :
                &_OpenFile_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    41;
+    43;
 
   friend void swap(OpenFile& a, OpenFile& b) {
     a.Swap(&b);
@@ -7188,7 +7536,7 @@ class FileChunk final :
                &_FileChunk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    42;
+    44;
 
   friend void swap(FileChunk& a, FileChunk& b) {
     a.Swap(&b);
@@ -7345,7 +7693,7 @@ class CancelInstall final :
                &_CancelInstall_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    43;
+    45;
 
   friend void swap(CancelInstall& a, CancelInstall& b) {
     a.Swap(&b);
@@ -7475,7 +7823,7 @@ class InstallProgress final :
                &_InstallProgress_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    44;
+    46;
 
   friend void swap(InstallProgress& a, InstallProgress& b) {
     a.Swap(&b);
@@ -7616,7 +7964,7 @@ class InstallResult final :
                &_InstallResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    45;
+    47;
 
   friend void swap(InstallResult& a, InstallResult& b) {
     a.Swap(&b);
@@ -7789,7 +8137,7 @@ class FileProgress final :
                &_FileProgress_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    46;
+    48;
 
   friend void swap(FileProgress& a, FileProgress& b) {
     a.Swap(&b);
@@ -7946,7 +8294,7 @@ class ClockProbe final :
                &_ClockProbe_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    47;
+    49;
 
   friend void swap(ClockProbe& a, ClockProbe& b) {
     a.Swap(&b);
@@ -8076,7 +8424,7 @@ class ClockAnswer final :
                &_ClockAnswer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    48;
+    50;
 
   friend void swap(ClockAnswer& a, ClockAnswer& b) {
     a.Swap(&b);
@@ -8217,7 +8565,7 @@ class ListWidgetProviders final :
                &_ListWidgetProviders_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    49;
+    51;
 
   friend void swap(ListWidgetProviders& a, ListWidgetProviders& b) {
     a.Swap(&b);
@@ -8347,7 +8695,7 @@ class WidgetProvider final :
                &_WidgetProvider_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    50;
+    52;
 
   friend void swap(WidgetProvider& a, WidgetProvider& b) {
     a.Swap(&b);
@@ -8618,7 +8966,7 @@ class WidgetProviders final :
                &_WidgetProviders_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    51;
+    53;
 
   friend void swap(WidgetProviders& a, WidgetProviders& b) {
     a.Swap(&b);
@@ -8779,7 +9127,7 @@ class AddWidget final :
                &_AddWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    52;
+    54;
 
   friend void swap(AddWidget& a, AddWidget& b) {
     a.Swap(&b);
@@ -8925,7 +9273,7 @@ class WidgetAdded final :
                &_WidgetAdded_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    53;
+    55;
 
   friend void swap(WidgetAdded& a, WidgetAdded& b) {
     a.Swap(&b);
@@ -9082,7 +9430,7 @@ class WidgetUpdated final :
                &_WidgetUpdated_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    54;
+    56;
 
   friend void swap(WidgetUpdated& a, WidgetUpdated& b) {
     a.Swap(&b);
@@ -9232,7 +9580,7 @@ class WidgetList final :
                &_WidgetList_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    55;
+    57;
 
   friend void swap(WidgetList& a, WidgetList& b) {
     a.Swap(&b);
@@ -9376,7 +9724,7 @@ class RemoveWidget final :
                &_RemoveWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    56;
+    58;
 
   friend void swap(RemoveWidget& a, RemoveWidget& b) {
     a.Swap(&b);
@@ -9506,7 +9854,7 @@ class ResizeWidget final :
                &_ResizeWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    57;
+    59;
 
   friend void swap(ResizeWidget& a, ResizeWidget& b) {
     a.Swap(&b);
@@ -9691,7 +10039,7 @@ class WidgetFrame final :
                &_WidgetFrame_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    58;
+    60;
 
   friend void swap(WidgetFrame& a, WidgetFrame& b) {
     a.Swap(&b);
@@ -9859,7 +10207,7 @@ class WidgetPointer final :
                &_WidgetPointer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    59;
+    61;
 
   friend void swap(WidgetPointer& a, WidgetPointer& b) {
     a.Swap(&b);
@@ -10033,7 +10381,7 @@ class AccessibilityWatch final :
                &_AccessibilityWatch_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    60;
+    62;
 
   friend void swap(AccessibilityWatch& a, AccessibilityWatch& b) {
     a.Swap(&b);
@@ -10174,7 +10522,7 @@ class NodeRange final :
                &_NodeRange_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    61;
+    63;
 
   friend void swap(NodeRange& a, NodeRange& b) {
     a.Swap(&b);
@@ -10326,7 +10674,7 @@ class AccessibilityNode final :
                &_AccessibilityNode_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    62;
+    64;
 
   friend void swap(AccessibilityNode& a, AccessibilityNode& b) {
     a.Swap(&b);
@@ -10769,7 +11117,7 @@ class AccessibilityTree final :
                &_AccessibilityTree_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    63;
+    65;
 
   friend void swap(AccessibilityTree& a, AccessibilityTree& b) {
     a.Swap(&b);
@@ -11002,7 +11350,7 @@ class AccessibilityAction final :
                &_AccessibilityAction_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    64;
+    66;
 
   friend void swap(AccessibilityAction& a, AccessibilityAction& b) {
     a.Swap(&b);
@@ -11192,7 +11540,7 @@ class AccessibilityActionResult final :
                &_AccessibilityActionResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    65;
+    67;
 
   friend void swap(AccessibilityActionResult& a, AccessibilityActionResult& b) {
     a.Swap(&b);
@@ -11394,6 +11742,8 @@ class Envelope final :
     kCancelInstall = 62,
     kInstallProgress = 63,
     kInstallResult = 64,
+    kQueryPackage = 65,
+    kPackageState = 66,
     kOpenLink = 50,
     kLinkHandling = 51,
     kOpenFile = 52,
@@ -11425,7 +11775,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    66;
+    68;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -11527,6 +11877,8 @@ class Envelope final :
     kCancelInstallFieldNumber = 62,
     kInstallProgressFieldNumber = 63,
     kInstallResultFieldNumber = 64,
+    kQueryPackageFieldNumber = 65,
+    kPackageStateFieldNumber = 66,
     kOpenLinkFieldNumber = 50,
     kLinkHandlingFieldNumber = 51,
     kOpenFileFieldNumber = 52,
@@ -12235,6 +12587,42 @@ class Envelope final :
       ::dsa::control::v1::InstallResult* install_result);
   ::dsa::control::v1::InstallResult* unsafe_arena_release_install_result();
 
+  // .dsa.control.v1.QueryPackage query_package = 65;
+  bool has_query_package() const;
+  private:
+  bool _internal_has_query_package() const;
+  public:
+  void clear_query_package();
+  const ::dsa::control::v1::QueryPackage& query_package() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::QueryPackage* release_query_package();
+  ::dsa::control::v1::QueryPackage* mutable_query_package();
+  void set_allocated_query_package(::dsa::control::v1::QueryPackage* query_package);
+  private:
+  const ::dsa::control::v1::QueryPackage& _internal_query_package() const;
+  ::dsa::control::v1::QueryPackage* _internal_mutable_query_package();
+  public:
+  void unsafe_arena_set_allocated_query_package(
+      ::dsa::control::v1::QueryPackage* query_package);
+  ::dsa::control::v1::QueryPackage* unsafe_arena_release_query_package();
+
+  // .dsa.control.v1.PackageState package_state = 66;
+  bool has_package_state() const;
+  private:
+  bool _internal_has_package_state() const;
+  public:
+  void clear_package_state();
+  const ::dsa::control::v1::PackageState& package_state() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::PackageState* release_package_state();
+  ::dsa::control::v1::PackageState* mutable_package_state();
+  void set_allocated_package_state(::dsa::control::v1::PackageState* package_state);
+  private:
+  const ::dsa::control::v1::PackageState& _internal_package_state() const;
+  ::dsa::control::v1::PackageState* _internal_mutable_package_state();
+  public:
+  void unsafe_arena_set_allocated_package_state(
+      ::dsa::control::v1::PackageState* package_state);
+  ::dsa::control::v1::PackageState* unsafe_arena_release_package_state();
+
   // .dsa.control.v1.OpenLink open_link = 50;
   bool has_open_link() const;
   private:
@@ -12692,6 +13080,8 @@ class Envelope final :
   void set_has_cancel_install();
   void set_has_install_progress();
   void set_has_install_result();
+  void set_has_query_package();
+  void set_has_package_state();
   void set_has_open_link();
   void set_has_link_handling();
   void set_has_open_file();
@@ -12764,6 +13154,8 @@ class Envelope final :
       ::dsa::control::v1::CancelInstall* cancel_install_;
       ::dsa::control::v1::InstallProgress* install_progress_;
       ::dsa::control::v1::InstallResult* install_result_;
+      ::dsa::control::v1::QueryPackage* query_package_;
+      ::dsa::control::v1::PackageState* package_state_;
       ::dsa::control::v1::OpenLink* open_link_;
       ::dsa::control::v1::LinkHandling* link_handling_;
       ::dsa::control::v1::OpenFile* open_file_;
@@ -16561,6 +16953,269 @@ inline void ApkChunk::set_allocated_data(std::string* data) {
   }
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.ApkChunk.data)
+}
+
+// -------------------------------------------------------------------
+
+// QueryPackage
+
+// uint32 request_id = 1;
+inline void QueryPackage::clear_request_id() {
+  _impl_.request_id_ = 0u;
+}
+inline uint32_t QueryPackage::_internal_request_id() const {
+  return _impl_.request_id_;
+}
+inline uint32_t QueryPackage::request_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.QueryPackage.request_id)
+  return _internal_request_id();
+}
+inline void QueryPackage::_internal_set_request_id(uint32_t value) {
+  
+  _impl_.request_id_ = value;
+}
+inline void QueryPackage::set_request_id(uint32_t value) {
+  _internal_set_request_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.QueryPackage.request_id)
+}
+
+// string package_name = 2;
+inline void QueryPackage::clear_package_name() {
+  _impl_.package_name_.ClearToEmpty();
+}
+inline const std::string& QueryPackage::package_name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.QueryPackage.package_name)
+  return _internal_package_name();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void QueryPackage::set_package_name(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.package_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.QueryPackage.package_name)
+}
+inline std::string* QueryPackage::mutable_package_name() {
+  std::string* _s = _internal_mutable_package_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.QueryPackage.package_name)
+  return _s;
+}
+inline const std::string& QueryPackage::_internal_package_name() const {
+  return _impl_.package_name_.Get();
+}
+inline void QueryPackage::_internal_set_package_name(const std::string& value) {
+  
+  _impl_.package_name_.Set(value, GetArenaForAllocation());
+}
+inline std::string* QueryPackage::_internal_mutable_package_name() {
+  
+  return _impl_.package_name_.Mutable(GetArenaForAllocation());
+}
+inline std::string* QueryPackage::release_package_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.QueryPackage.package_name)
+  return _impl_.package_name_.Release();
+}
+inline void QueryPackage::set_allocated_package_name(std::string* package_name) {
+  if (package_name != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.package_name_.SetAllocated(package_name, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.package_name_.IsDefault()) {
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.QueryPackage.package_name)
+}
+
+// -------------------------------------------------------------------
+
+// PackageState
+
+// uint32 request_id = 1;
+inline void PackageState::clear_request_id() {
+  _impl_.request_id_ = 0u;
+}
+inline uint32_t PackageState::_internal_request_id() const {
+  return _impl_.request_id_;
+}
+inline uint32_t PackageState::request_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PackageState.request_id)
+  return _internal_request_id();
+}
+inline void PackageState::_internal_set_request_id(uint32_t value) {
+  
+  _impl_.request_id_ = value;
+}
+inline void PackageState::set_request_id(uint32_t value) {
+  _internal_set_request_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PackageState.request_id)
+}
+
+// bool installed = 2;
+inline void PackageState::clear_installed() {
+  _impl_.installed_ = false;
+}
+inline bool PackageState::_internal_installed() const {
+  return _impl_.installed_;
+}
+inline bool PackageState::installed() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PackageState.installed)
+  return _internal_installed();
+}
+inline void PackageState::_internal_set_installed(bool value) {
+  
+  _impl_.installed_ = value;
+}
+inline void PackageState::set_installed(bool value) {
+  _internal_set_installed(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PackageState.installed)
+}
+
+// int64 version_code = 3;
+inline void PackageState::clear_version_code() {
+  _impl_.version_code_ = int64_t{0};
+}
+inline int64_t PackageState::_internal_version_code() const {
+  return _impl_.version_code_;
+}
+inline int64_t PackageState::version_code() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PackageState.version_code)
+  return _internal_version_code();
+}
+inline void PackageState::_internal_set_version_code(int64_t value) {
+  
+  _impl_.version_code_ = value;
+}
+inline void PackageState::set_version_code(int64_t value) {
+  _internal_set_version_code(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PackageState.version_code)
+}
+
+// string version_name = 4;
+inline void PackageState::clear_version_name() {
+  _impl_.version_name_.ClearToEmpty();
+}
+inline const std::string& PackageState::version_name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PackageState.version_name)
+  return _internal_version_name();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void PackageState::set_version_name(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.version_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PackageState.version_name)
+}
+inline std::string* PackageState::mutable_version_name() {
+  std::string* _s = _internal_mutable_version_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.PackageState.version_name)
+  return _s;
+}
+inline const std::string& PackageState::_internal_version_name() const {
+  return _impl_.version_name_.Get();
+}
+inline void PackageState::_internal_set_version_name(const std::string& value) {
+  
+  _impl_.version_name_.Set(value, GetArenaForAllocation());
+}
+inline std::string* PackageState::_internal_mutable_version_name() {
+  
+  return _impl_.version_name_.Mutable(GetArenaForAllocation());
+}
+inline std::string* PackageState::release_version_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.PackageState.version_name)
+  return _impl_.version_name_.Release();
+}
+inline void PackageState::set_allocated_version_name(std::string* version_name) {
+  if (version_name != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.version_name_.SetAllocated(version_name, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.version_name_.IsDefault()) {
+    _impl_.version_name_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.PackageState.version_name)
+}
+
+// repeated bytes signer_sha256 = 5;
+inline int PackageState::_internal_signer_sha256_size() const {
+  return _impl_.signer_sha256_.size();
+}
+inline int PackageState::signer_sha256_size() const {
+  return _internal_signer_sha256_size();
+}
+inline void PackageState::clear_signer_sha256() {
+  _impl_.signer_sha256_.Clear();
+}
+inline std::string* PackageState::add_signer_sha256() {
+  std::string* _s = _internal_add_signer_sha256();
+  // @@protoc_insertion_point(field_add_mutable:dsa.control.v1.PackageState.signer_sha256)
+  return _s;
+}
+inline const std::string& PackageState::_internal_signer_sha256(int index) const {
+  return _impl_.signer_sha256_.Get(index);
+}
+inline const std::string& PackageState::signer_sha256(int index) const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PackageState.signer_sha256)
+  return _internal_signer_sha256(index);
+}
+inline std::string* PackageState::mutable_signer_sha256(int index) {
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.PackageState.signer_sha256)
+  return _impl_.signer_sha256_.Mutable(index);
+}
+inline void PackageState::set_signer_sha256(int index, const std::string& value) {
+  _impl_.signer_sha256_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PackageState.signer_sha256)
+}
+inline void PackageState::set_signer_sha256(int index, std::string&& value) {
+  _impl_.signer_sha256_.Mutable(index)->assign(std::move(value));
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PackageState.signer_sha256)
+}
+inline void PackageState::set_signer_sha256(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  _impl_.signer_sha256_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:dsa.control.v1.PackageState.signer_sha256)
+}
+inline void PackageState::set_signer_sha256(int index, const void* value, size_t size) {
+  _impl_.signer_sha256_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:dsa.control.v1.PackageState.signer_sha256)
+}
+inline std::string* PackageState::_internal_add_signer_sha256() {
+  return _impl_.signer_sha256_.Add();
+}
+inline void PackageState::add_signer_sha256(const std::string& value) {
+  _impl_.signer_sha256_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:dsa.control.v1.PackageState.signer_sha256)
+}
+inline void PackageState::add_signer_sha256(std::string&& value) {
+  _impl_.signer_sha256_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:dsa.control.v1.PackageState.signer_sha256)
+}
+inline void PackageState::add_signer_sha256(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  _impl_.signer_sha256_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:dsa.control.v1.PackageState.signer_sha256)
+}
+inline void PackageState::add_signer_sha256(const void* value, size_t size) {
+  _impl_.signer_sha256_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:dsa.control.v1.PackageState.signer_sha256)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+PackageState::signer_sha256() const {
+  // @@protoc_insertion_point(field_list:dsa.control.v1.PackageState.signer_sha256)
+  return _impl_.signer_sha256_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+PackageState::mutable_signer_sha256() {
+  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.PackageState.signer_sha256)
+  return &_impl_.signer_sha256_;
 }
 
 // -------------------------------------------------------------------
@@ -22638,6 +23293,154 @@ inline ::dsa::control::v1::InstallResult* Envelope::mutable_install_result() {
   return _msg;
 }
 
+// .dsa.control.v1.QueryPackage query_package = 65;
+inline bool Envelope::_internal_has_query_package() const {
+  return body_case() == kQueryPackage;
+}
+inline bool Envelope::has_query_package() const {
+  return _internal_has_query_package();
+}
+inline void Envelope::set_has_query_package() {
+  _impl_._oneof_case_[0] = kQueryPackage;
+}
+inline void Envelope::clear_query_package() {
+  if (_internal_has_query_package()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.query_package_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::QueryPackage* Envelope::release_query_package() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.query_package)
+  if (_internal_has_query_package()) {
+    clear_has_body();
+    ::dsa::control::v1::QueryPackage* temp = _impl_.body_.query_package_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.query_package_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::QueryPackage& Envelope::_internal_query_package() const {
+  return _internal_has_query_package()
+      ? *_impl_.body_.query_package_
+      : reinterpret_cast< ::dsa::control::v1::QueryPackage&>(::dsa::control::v1::_QueryPackage_default_instance_);
+}
+inline const ::dsa::control::v1::QueryPackage& Envelope::query_package() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.query_package)
+  return _internal_query_package();
+}
+inline ::dsa::control::v1::QueryPackage* Envelope::unsafe_arena_release_query_package() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.query_package)
+  if (_internal_has_query_package()) {
+    clear_has_body();
+    ::dsa::control::v1::QueryPackage* temp = _impl_.body_.query_package_;
+    _impl_.body_.query_package_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_query_package(::dsa::control::v1::QueryPackage* query_package) {
+  clear_body();
+  if (query_package) {
+    set_has_query_package();
+    _impl_.body_.query_package_ = query_package;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.query_package)
+}
+inline ::dsa::control::v1::QueryPackage* Envelope::_internal_mutable_query_package() {
+  if (!_internal_has_query_package()) {
+    clear_body();
+    set_has_query_package();
+    _impl_.body_.query_package_ = CreateMaybeMessage< ::dsa::control::v1::QueryPackage >(GetArenaForAllocation());
+  }
+  return _impl_.body_.query_package_;
+}
+inline ::dsa::control::v1::QueryPackage* Envelope::mutable_query_package() {
+  ::dsa::control::v1::QueryPackage* _msg = _internal_mutable_query_package();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.query_package)
+  return _msg;
+}
+
+// .dsa.control.v1.PackageState package_state = 66;
+inline bool Envelope::_internal_has_package_state() const {
+  return body_case() == kPackageState;
+}
+inline bool Envelope::has_package_state() const {
+  return _internal_has_package_state();
+}
+inline void Envelope::set_has_package_state() {
+  _impl_._oneof_case_[0] = kPackageState;
+}
+inline void Envelope::clear_package_state() {
+  if (_internal_has_package_state()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.package_state_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::PackageState* Envelope::release_package_state() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.package_state)
+  if (_internal_has_package_state()) {
+    clear_has_body();
+    ::dsa::control::v1::PackageState* temp = _impl_.body_.package_state_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.package_state_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::PackageState& Envelope::_internal_package_state() const {
+  return _internal_has_package_state()
+      ? *_impl_.body_.package_state_
+      : reinterpret_cast< ::dsa::control::v1::PackageState&>(::dsa::control::v1::_PackageState_default_instance_);
+}
+inline const ::dsa::control::v1::PackageState& Envelope::package_state() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.package_state)
+  return _internal_package_state();
+}
+inline ::dsa::control::v1::PackageState* Envelope::unsafe_arena_release_package_state() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.package_state)
+  if (_internal_has_package_state()) {
+    clear_has_body();
+    ::dsa::control::v1::PackageState* temp = _impl_.body_.package_state_;
+    _impl_.body_.package_state_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_package_state(::dsa::control::v1::PackageState* package_state) {
+  clear_body();
+  if (package_state) {
+    set_has_package_state();
+    _impl_.body_.package_state_ = package_state;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.package_state)
+}
+inline ::dsa::control::v1::PackageState* Envelope::_internal_mutable_package_state() {
+  if (!_internal_has_package_state()) {
+    clear_body();
+    set_has_package_state();
+    _impl_.body_.package_state_ = CreateMaybeMessage< ::dsa::control::v1::PackageState >(GetArenaForAllocation());
+  }
+  return _impl_.body_.package_state_;
+}
+inline ::dsa::control::v1::PackageState* Envelope::mutable_package_state() {
+  ::dsa::control::v1::PackageState* _msg = _internal_mutable_package_state();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.package_state)
+  return _msg;
+}
+
 // .dsa.control.v1.OpenLink open_link = 50;
 inline bool Envelope::_internal_has_open_link() const {
   return body_case() == kOpenLink;
@@ -24352,6 +25155,10 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
