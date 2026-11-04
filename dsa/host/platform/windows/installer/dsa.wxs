@@ -23,7 +23,9 @@
   {program} and {data}, which the service fills in. The package records both, and a later
   version installed over it (as the service does when it updates DSA) keeps them.
 
-  Build variables (-d): Version, SourceDir (the built binaries and dsa-hostd.json),
+  Build variables (-d): Version, ProductName (with " (test package)" after it for a
+  package that only tests the installer), SourceDir (the built binaries, version.txt and
+  dsa-hostd.json),
   SettingsDir (the published settings app), and,
   when an image is bundled, ImageDir and ImageVersion, plus ImageManifest when the image
   is one make-image.py made (image.json, initrd.img, disk.vhdx) and ImageKernel when it
@@ -31,7 +33,7 @@
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
-    <Package Name="Desktop Subsystem for Android"
+    <Package Name="$(ProductName)"
              Manufacturer="Thisisthepy"
              Version="$(Version)"
              UpgradeCode="5c08f90f-6eaa-402b-992b-6069634c45e8"
@@ -41,8 +43,10 @@
              files both have stay. Removing the old one first would also remove the
              configuration after costing had decided to keep it, and leave none. An edited
              configuration is kept and an unedited one replaced, by Windows Installer's rule
-             for files without a version. -->
+             for files without a version. A package of the same version installs over the one
+             already there too, as a repair would, rather than beside it. -->
         <MajorUpgrade Schedule="afterInstallExecute"
+                      AllowSameVersionUpgrades="yes"
                       DowngradeErrorMessage="A newer Desktop Subsystem for Android is already installed." />
         <Media Id="1" Cabinet="dsa.cab" EmbedCab="yes" />
         <?ifdef ImageVersion ?>
@@ -117,7 +121,7 @@
                 <Exclude Files="$(SettingsDir)\DsaSettings.exe" />
             </Files>
             <Component Id="SettingsExe" Guid="*">
-                <File Id="SettingsExe" Source="$(SettingsDir)\DsaSettings.exe" KeyPath="yes">
+                <File Id="SettingsExe" Source="$(SettingsDir)\DsaSettings.exe" KeyPath="yes" CompanionFile="ProgramVersion">
                     <Shortcut Id="SettingsShortcut"
                               Directory="ProgramMenuFolder"
                               Name="DSA Settings"
@@ -127,9 +131,19 @@
             </Component>
         </ComponentGroup>
 
+        <!-- Every program file is a companion of version.txt, which has no version of its own
+             on disk but a version in the package, so Windows Installer always finds the
+             package's copy newer and replaces it, and with it every companion. Its own rules
+             would keep a program file whose version is higher than the package's, or one
+             without a version that was changed after it was installed, and an old program
+             beside a new service cannot talk to it. -->
         <ComponentGroup Id="Service" Directory="INSTALLFOLDER">
+            <Component Id="ProgramVersion" Guid="*">
+                <File Id="ProgramVersion" Source="$(SourceDir)\version.txt" KeyPath="yes"
+                      DefaultVersion="$(Version).0" DefaultLanguage="0" />
+            </Component>
             <Component Id="HostdExe" Guid="*">
-                <File Id="HostdExe" Source="$(SourceDir)\dsa-hostd.exe" KeyPath="yes" />
+                <File Id="HostdExe" Source="$(SourceDir)\dsa-hostd.exe" KeyPath="yes" CompanionFile="ProgramVersion" />
                 <ServiceInstall Id="DsaHost"
                                 Name="DsaHost"
                                 DisplayName="Desktop Subsystem for Android Service"
@@ -150,16 +164,16 @@
                 <ServiceControl Id="DsaHost" Name="DsaHost" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
             </Component>
             <Component Id="DsaExe" Guid="*">
-                <File Id="DsaExe" Source="$(SourceDir)\dsa.exe" KeyPath="yes" />
+                <File Id="DsaExe" Source="$(SourceDir)\dsa.exe" KeyPath="yes" CompanionFile="ProgramVersion" />
                 <Environment Id="Path" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="yes" Permanent="no" />
             </Component>
             <Component Id="WindowManagerExe" Guid="*">
-                <File Id="WindowManagerExe" Source="$(SourceDir)\dsa-wm.exe" KeyPath="yes" />
+                <File Id="WindowManagerExe" Source="$(SourceDir)\dsa-wm.exe" KeyPath="yes" CompanionFile="ProgramVersion" />
             </Component>
             <!-- The app window host. The window manager copies it for each Android app into
                  the user's profile (%LOCALAPPDATA%\DSA\apps\<package>\<Label>.exe), named and drawn as the app. -->
             <Component Id="AppWindowExe" Guid="*">
-                <File Id="AppWindowExe" Source="$(SourceDir)\dsa-app-window.exe" KeyPath="yes" />
+                <File Id="AppWindowExe" Source="$(SourceDir)\dsa-app-window.exe" KeyPath="yes" CompanionFile="ProgramVersion" />
             </Component>
             <!-- Opening an .apk file in Explorer opens the APK install window of the settings
                  app, which shows what the file is (its name, icon, version, permissions and
@@ -207,7 +221,7 @@
                                Type="string" Value="&quot;[INSTALLFOLDER]dsa-app-window.exe&quot; --share-file &quot;%1&quot;" />
             </Component>
             <Component Id="GfxstreamBackendDll" Guid="*">
-                <File Id="GfxstreamBackendDll" Source="$(SourceDir)\gfxstream_backend.dll" KeyPath="yes" />
+                <File Id="GfxstreamBackendDll" Source="$(SourceDir)\gfxstream_backend.dll" KeyPath="yes" CompanionFile="ProgramVersion" />
             </Component>
             <Component Id="WindowManagerRun" Guid="c1904da8-fec3-46a3-9d9f-676d1873a52e">
                 <RegistryValue Root="HKLM"
@@ -242,7 +256,7 @@
                 </RegistryKey>
             </Component>
             <Component Id="NoticeFile" Guid="*">
-                <File Id="NoticeFile" Source="$(SourceDir)\NOTICE.txt" KeyPath="yes" />
+                <File Id="NoticeFile" Source="$(SourceDir)\NOTICE.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
             </Component>
         </ComponentGroup>
 
@@ -272,41 +286,41 @@
         <!-- The licence bundle for all shipped components and dependencies. -->
         <ComponentGroup Id="Licenses" Directory="LICENSESFOLDER">
             <Component Id="LicNotice" Guid="*">
-                <File Id="LicNotice" Source="$(SourceDir)\licenses\NOTICE.txt" KeyPath="yes" />
+                <File Id="LicNotice" Source="$(SourceDir)\licenses\NOTICE.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
             </Component>
             <Component Id="LicRust" Guid="*">
-                <File Id="LicRust" Source="$(SourceDir)\licenses\rust-crates.txt" KeyPath="yes" />
+                <File Id="LicRust" Source="$(SourceDir)\licenses\rust-crates.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
             </Component>
             <Component Id="LicKernel" Guid="*">
-                <File Id="LicKernel" Source="$(SourceDir)\licenses\kernel-GPL-2.0.txt" KeyPath="yes" />
+                <File Id="LicKernel" Source="$(SourceDir)\licenses\kernel-GPL-2.0.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
             </Component>
             <Component Id="LicWix" Guid="*">
-                <File Id="LicWix" Source="$(SourceDir)\licenses\wix-MS-RL.txt" KeyPath="yes" />
+                <File Id="LicWix" Source="$(SourceDir)\licenses\wix-MS-RL.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
             </Component>
             <Component Id="LicSetupUi" Guid="*">
-                <File Id="LicSetupUi" Source="$(SourceDir)\licenses\setup-ui.txt" KeyPath="yes" />
+                <File Id="LicSetupUi" Source="$(SourceDir)\licenses\setup-ui.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
             </Component>
             <Component Id="LicSettingsApp" Guid="*">
-                <File Id="LicSettingsApp" Source="$(SourceDir)\licenses\settings-app.txt" KeyPath="yes" />
+                <File Id="LicSettingsApp" Source="$(SourceDir)\licenses\settings-app.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
             </Component>
             <Component Id="LicGfxstream" Guid="*">
-                <File Id="LicGfxstream" Source="$(SourceDir)\licenses\gfxstream.txt" KeyPath="yes" />
+                <File Id="LicGfxstream" Source="$(SourceDir)\licenses\gfxstream.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
             </Component>
             <Component Id="LicAosp" Guid="*">
-                <File Id="LicAosp" Source="$(SourceDir)\licenses\aosp-notice.txt" KeyPath="yes" />
+                <File Id="LicAosp" Source="$(SourceDir)\licenses\aosp-notice.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
             </Component>
             <Component Id="LicApache" Guid="*">
-                <File Id="LicApache" Source="$(SourceDir)\licenses\apache-2.0.txt" KeyPath="yes" />
+                <File Id="LicApache" Source="$(SourceDir)\licenses\apache-2.0.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
             </Component>
             <Component Id="LicMit" Guid="*">
-                <File Id="LicMit" Source="$(SourceDir)\licenses\mit.txt" KeyPath="yes" />
+                <File Id="LicMit" Source="$(SourceDir)\licenses\mit.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
             </Component>
         </ComponentGroup>
 
         <!-- The kernel: readable by everyone and by the VMs. -->
         <ComponentGroup Id="Kernel" Directory="VMFOLDER">
             <Component Id="Kernel" Guid="*">
-                <File Id="Kernel" Source="$(SourceDir)\bzImage" KeyPath="yes" />
+                <File Id="Kernel" Source="$(SourceDir)\bzImage" KeyPath="yes" CompanionFile="ProgramVersion" />
                 <CreateFolder>
                     <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)(A;OICI;GRGX;;;S-1-5-83-0)" />
                 </CreateFolder>
@@ -381,7 +395,31 @@
                       Execute="deferred"
                       Impersonate="no"
                       Return="ignore" />
+        <!-- Before any file is replaced or removed: every DSA program still running from the
+             program folder, and each app's window program in every user's profile, in every
+             session. A program left running keeps its file in use, and an old window manager
+             would hold its single-instance lock against the new one. It runs from the package
+             itself, since the installed dsa-hostd may be an older one that cannot do it, or
+             none. Not while an upgrade removes the version before it: the new one has its
+             files in place by then, and its service is running. -->
+        <Binary Id="StopProgramsHost" SourceFile="$(SourceDir)\dsa-hostd.exe" />
+        <CustomAction Id="StopPrograms"
+                      BinaryRef="StopProgramsHost"
+                      ExeCommand="stop-programs &quot;[INSTALLFOLDER]&quot;"
+                      Execute="deferred"
+                      Impersonate="no"
+                      Return="ignore" />
+        <!-- Once the old version is gone too: the window manager again, for every signed-in
+             user, as signing in starts it. -->
+        <CustomAction Id="StartWindowManagers"
+                      FileRef="HostdExe"
+                      ExeCommand="start-window-managers"
+                      Execute="deferred"
+                      Impersonate="no"
+                      Return="ignore" />
         <InstallExecuteSequence>
+            <Custom Action="StopPrograms" After="StopServices" Condition="NOT UPGRADINGPRODUCTCODE" />
+            <Custom Action="StartWindowManagers" After="RemoveExistingProducts" Condition="NOT REMOVE~=&quot;ALL&quot;" />
             <Custom Action="RemoveUserData" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
             <Custom Action="RemoveMachineData" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
             <Custom Action="RemoveImages" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />

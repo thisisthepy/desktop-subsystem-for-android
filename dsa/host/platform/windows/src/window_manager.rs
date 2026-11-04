@@ -80,6 +80,43 @@ fn sessions_of(sid: &str) -> io::Result<Vec<UserSession>> {
     }
 }
 
+/// Starts the window manager at `program` in every session someone is signed in to, as that
+/// session's user, the way signing in starts it. A window manager already running in a
+/// session keeps it, and the new one ends at once. Returns what could not be started.
+pub fn start_for_signed_in_users(program: &Path) -> Vec<String> {
+    let mut list: *mut WTS_SESSION_INFOW = std::ptr::null_mut();
+    let mut count = 0u32;
+    // SAFETY: this server (a null handle), and out pointers that outlive the call.
+    if unsafe { WTSEnumerateSessionsW(std::ptr::null_mut(), 0, 1, &mut list, &mut count) } == 0 {
+        return vec![format!(
+            "listing the signed-in sessions: {}",
+            io::Error::last_os_error()
+        )];
+    }
+    // SAFETY: Windows returned `count` entries at `list`, freed below.
+    let ids: Vec<u32> = unsafe { std::slice::from_raw_parts(list, count as usize) }
+        .iter()
+        .filter(|info| [WTSActive, WTSConnected, WTSDisconnected].contains(&info.State))
+        .map(|info| info.SessionId)
+        .collect();
+    // SAFETY: the list WTSEnumerateSessionsW allocated, freed once and not used after.
+    unsafe { WTSFreeMemory(list.cast()) };
+    let mut problems = Vec::new();
+    for id in ids {
+        let mut token: HANDLE = std::ptr::null_mut();
+        // SAFETY: an out pointer that outlives the call. A session with no one signed in to
+        // it has no token, and nothing is started there.
+        if unsafe { WTSQueryUserToken(id, &mut token) } == 0 {
+            continue;
+        }
+        let token = OwnedHandle(token);
+        if let Err(error) = run_in_session(&token, program) {
+            problems.push(format!("starting {} in session {id}: {error}", program.display()));
+        }
+    }
+    problems
+}
+
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }

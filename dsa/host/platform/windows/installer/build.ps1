@@ -18,6 +18,11 @@
 # newest supported image from -ListUrl after installation. -PlaceholderKernel puts an empty
 # kernel in the package, for testing the installer before a kernel is built.
 #
+# -PlaceholderKernel makes a test package, which must never be taken for the real one: its
+# files are dsa-test-<version>.msi and setup-test-<version>.exe, its product name ends in
+# "(test package)", and its service says it is a test package each time it starts. A real
+# package needs -Kernel and -GfxstreamBackend (or the library a local graphics build left).
+#
 # -ProgramListUrl names the signed program list the service updates DSA itself from (it
 # needs -ListUrl, and the same -TrustedKey signs both lists). Without it the installed DSA
 # is updated by hand.
@@ -38,6 +43,10 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
+$testPackage = [bool]$PlaceholderKernel
+$productName = if ($testPackage) { "Desktop Subsystem for Android (test package)" } else { "Desktop Subsystem for Android" }
+$fileTag = if ($testPackage) { "test-" } else { "" }
+
 $installer = $PSScriptRoot
 $dsa = Resolve-Path (Join-Path $installer "..\..\..\..")
 $out = Join-Path $dsa "target\installer"
@@ -56,6 +65,9 @@ Copy-Item (Join-Path $dsa "target\release\dsa-hostd.exe") $stage
 Copy-Item (Join-Path $dsa "target\release\dsa-wm.exe") $stage
 Copy-Item (Join-Path $dsa "target\release\dsa-app-window.exe") $stage
 Copy-Item (Join-Path $dsa "target\release\dsa.exe") $stage
+# Every program file is installed as a companion of this one, which makes Windows Installer
+# replace them all on every installation (see dsa.wxs).
+Set-Content -Path (Join-Path $stage "version.txt") -Value $Version -NoNewline -Encoding ascii
 
 if ($GfxstreamBackend) {
     Copy-Item $GfxstreamBackend (Join-Path $stage "gfxstream_backend.dll")
@@ -122,6 +134,7 @@ $config = [ordered]@{
     log_file      = "{data}\logs\dsa-hostd.log"
     settings_dir  = "{data}\settings"
 }
+if ($testPackage) { $config.test_package = $true }
 if ($PipeSddl) { $config.pipe_sddl = $PipeSddl }
 if ($ListUrl) {
     if ($TrustedKey.Count -eq 0) { throw "-ListUrl needs at least one -TrustedKey" }
@@ -172,9 +185,9 @@ if (-not (Test-Path $utilDll)) {
     if (-not (Test-Path $utilDll)) { throw "the util extension has no $utilDll" }
 }
 
-$msi = Join-Path $out "dsa-$Version.msi"
-$setup = Join-Path $out "setup-$Version.exe"
-$defines = @("-d", "Version=$Version", "-d", "SourceDir=$stage", "-d", "SettingsDir=$settingsApp")
+$msi = Join-Path $out "dsa-$fileTag$Version.msi"
+$setup = Join-Path $out "setup-$fileTag$Version.exe"
+$defines = @("-d", "Version=$Version", "-d", "ProductName=$productName", "-d", "SourceDir=$stage", "-d", "SettingsDir=$settingsApp")
 if ($ImageDir) { $defines += @("-d", "ImageDir=$ImageDir", "-d", "ImageVersion=$ImageVersion") }
 if ($imageManifest) {
     $defines += @("-d", "ImageManifest=1")
@@ -192,7 +205,7 @@ try {
     $msiExt = if (Test-Path $utilDll) { @("-ext", $utilDll) } else { @("-ext", "WixToolset.Util.wixext") }
     wix build -arch x64 @msiExt @defines dsa.wxs -o $msi
     if ($LASTEXITCODE -ne 0) { throw "building the package failed" }
-    $bundleDefines = @("-d", "Version=$Version", "-d", "MsiPath=$msi", "-d", "SetupUiDir=$setupUi")
+    $bundleDefines = @("-d", "Version=$Version", "-d", "ProductName=$productName", "-d", "MsiPath=$msi", "-d", "SetupUiDir=$setupUi")
     if ($AndroidMajor -gt 0) { $bundleDefines += @("-d", "AndroidMajor=$AndroidMajor") }
     if ($ImageDir) { $bundleDefines += @("-d", "BundledImage=1") }
     wix build -arch x64 -ext $balDll @bundleDefines bundle.wxs -o $setup

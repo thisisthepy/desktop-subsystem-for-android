@@ -9,6 +9,11 @@
 //! dsa-hostd remove-machine-data <folder> removes the settings, logs and tmp folder (the same)
 //! dsa-hostd remove-user-data       removes every user's shortcuts, files and keys DSA made,
 //!                                  keeping their Android disk (the same)
+//! dsa-hostd stop-programs <folder> ends every DSA program running from the program folder or
+//!                                  from a user's app windows, in every session (the
+//!                                  installer runs it before it replaces the files)
+//! dsa-hostd start-window-managers  starts the window manager beside this program for every
+//!                                  signed-in user (the installer runs it at the end)
 //! ```
 //!
 //! Without a mode it starts one VM, waits for the guest's channel daemon to connect and
@@ -71,7 +76,8 @@ mod windows_host {
 
     const USAGE: &str = "usage: dsa-hostd [serve | service] <config.json> | \
                          dsa-hostd remove-images <folder> | dsa-hostd remove-updates <folder> | \
-                         dsa-hostd remove-machine-data <folder> | dsa-hostd remove-user-data";
+                         dsa-hostd remove-machine-data <folder> | dsa-hostd remove-user-data | \
+                         dsa-hostd stop-programs <folder> | dsa-hostd start-window-managers";
 
     fn build() -> String {
         format!("dsa-hostd {}", dsa_host_windows::VERSION)
@@ -119,6 +125,22 @@ mod windows_host {
             // remove-start-menu is the name earlier packages used.
             [mode] if mode == "remove-user-data" || mode == "remove-start-menu" => {
                 remove_every_users_data();
+                Ok(())
+            }
+            [mode, path] if mode == "stop-programs" => {
+                use dsa_host_windows::installer_actions::stop_dsa_programs;
+                use dsa_host_windows::uninstall::installer_folder;
+                for why in stop_dsa_programs(&installer_folder(path)) {
+                    eprintln!("{why}");
+                }
+                Ok(())
+            }
+            [mode] if mode == "start-window-managers" => {
+                let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+                let program = exe.with_file_name("dsa-wm.exe");
+                for why in dsa_host_windows::window_manager::start_for_signed_in_users(&program) {
+                    eprintln!("{why}");
+                }
                 Ok(())
             }
             [path] if path != "serve" && path != "service" => one_vm(read_config(path)?),
