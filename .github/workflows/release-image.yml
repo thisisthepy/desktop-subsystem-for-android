@@ -1,7 +1,8 @@
 # Publishes the Android images: builds the guest kernel, makes each image in
 # dsa/guest/image/inputs.json with the project's keys, publishes each one as the GitHub
-# release android-<version>, and publishes the signed release list the service reads as
-# the release "images" (images.json and images.json.sig). With an installer version it
+# release android-<version>, and publishes the signed release lists the service reads as
+# the release "images": images.json and images.json.sig for x86_64 hosts, and
+# images-arm64.json and images-arm64.json.sig for ARM64 hosts, whose image is 64-bit only. With an installer version it
 # also publishes the installer as the release v<version>, and the signed program list the
 # service updates DSA itself from (program.json and program.json.sig, in "images" too).
 #
@@ -45,10 +46,18 @@ permissions:
 
 jobs:
   guest-graphics:
-    name: Build the guest Hyper-V graphics transport
+    name: Build the guest Hyper-V graphics transport (${{ matrix.arch }})
     if: inputs.rebuild_images
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64]
+    env:
+      DSA_GUEST_ARCH: ${{ matrix.arch }}
+      # What readelf calls the guest's machine.
+      GUEST_MACHINE: ${{ matrix.arch == 'arm64' && 'AArch64' || 'Advanced Micro Devices X86-64' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -69,11 +78,11 @@ jobs:
       - name: Verify ELF architecture and exported Hyper-V symbols
         run: |
           target=".scratch/build/libOpenglSystemCommon.so"
-          readelf -h "$target" | grep -Fq 'Advanced Micro Devices X86-64'
+          readelf -h "$target" | grep -Fq "$GUEST_MACHINE"
           nm -D "$target" | grep -Fq 'HvSocketStream'
           nm -D "$target" | grep -Fq 'goldfish_get_egl_tls'
           target_vk=".scratch/build/vulkan.ranchu.so"
-          readelf -h "$target_vk" | grep -Fq 'Advanced Micro Devices X86-64'
+          readelf -h "$target_vk" | grep -Fq "$GUEST_MACHINE"
           # The Android loader looks up HMI and nothing else; everything else stays hidden.
           exports=$(nm -D --defined-only "$target_vk" | awk '{print $3}')
           test "$exports" = "HMI"
@@ -82,7 +91,7 @@ jobs:
       - name: Keep the patched guest library
         uses: actions/upload-artifact@v4
         with:
-          name: guest-gfxstream-hvsocket
+          name: guest-gfxstream-hvsocket${{ matrix.arch == 'arm64' && '-arm64' || '' }}
           path: |
             .scratch/build/libOpenglSystemCommon.so
             .scratch/build/vulkan.ranchu.so
@@ -114,11 +123,48 @@ jobs:
           path: .scratch/kernel-out/bzImage
           if-no-files-found: error
 
+  # The arm64 guest kernel, which the arm64 images boot. dsa/kernel/build.sh builds it for
+  # DSA_KERNEL_ARCH=arm64 and names it Image-<release>; the image jobs take it as Image.
+  kernel-arm64:
+    name: Build the guest kernel (arm64)
+    if: inputs.rebuild_images
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential flex bison bc dwarves libssl-dev libelf-dev cpio gcc-aarch64-linux-gnu
+
+      - name: Build
+        run: |
+          DSA_KERNEL_ARCH=arm64 DSA_KERNEL_OUT="$PWD/.scratch/kernel-out" dsa/kernel/build.sh
+          if [[ ! -f .scratch/kernel-out/Image ]]; then
+            mv .scratch/kernel-out/Image-* .scratch/kernel-out/Image
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-arm64
+          path: .scratch/kernel-out/Image
+          if-no-files-found: error
+
   channeld:
-    name: Build the guest control daemon
+    name: Build the guest control daemon (${{ matrix.arch }})
     if: inputs.rebuild_images
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64]
+    env:
+      DSA_GUEST_ARCH: ${{ matrix.arch }}
+      # What readelf calls the guest's machine.
+      GUEST_MACHINE: ${{ matrix.arch == 'arm64' && 'AArch64' || 'Advanced Micro Devices X86-64' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -136,15 +182,23 @@ jobs:
       - name: Keep the daemon
         uses: actions/upload-artifact@v4
         with:
-          name: guest-channeld
+          name: guest-channeld${{ matrix.arch == 'arm64' && '-arm64' || '' }}
           path: .scratch/channeld/dsa-channeld
           if-no-files-found: error
 
   hwcomposer:
-    name: Build the guest hwcomposer
+    name: Build the guest hwcomposer (${{ matrix.arch }})
     if: inputs.rebuild_images
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64]
+    env:
+      DSA_GUEST_ARCH: ${{ matrix.arch }}
+      # What readelf calls the guest's machine.
+      GUEST_MACHINE: ${{ matrix.arch == 'arm64' && 'AArch64' || 'Advanced Micro Devices X86-64' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -163,15 +217,23 @@ jobs:
       - name: Keep the hwcomposer
         uses: actions/upload-artifact@v4
         with:
-          name: guest-hwcomposer
+          name: guest-hwcomposer${{ matrix.arch == 'arm64' && '-arm64' || '' }}
           path: .scratch/build-hwcomposer/dsa-hwcomposer
           if-no-files-found: error
 
   codec2:
-    name: Build the guest codec HAL
+    name: Build the guest codec HAL (${{ matrix.arch }})
     if: inputs.rebuild_images
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64]
+    env:
+      DSA_GUEST_ARCH: ${{ matrix.arch }}
+      # What readelf calls the guest's machine.
+      GUEST_MACHINE: ${{ matrix.arch == 'arm64' && 'AArch64' || 'Advanced Micro Devices X86-64' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -190,15 +252,23 @@ jobs:
       - name: Keep the codec HAL
         uses: actions/upload-artifact@v4
         with:
-          name: guest-codec2
+          name: guest-codec2${{ matrix.arch == 'arm64' && '-arm64' || '' }}
           path: .scratch/build-codec2/dsa-codec2
           if-no-files-found: error
 
   power-hal:
-    name: Build the guest power and health HALs
+    name: Build the guest power and health HALs (${{ matrix.arch }})
     if: inputs.rebuild_images
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64]
+    env:
+      DSA_GUEST_ARCH: ${{ matrix.arch }}
+      # What readelf calls the guest's machine.
+      GUEST_MACHINE: ${{ matrix.arch == 'arm64' && 'AArch64' || 'Advanced Micro Devices X86-64' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -217,7 +287,7 @@ jobs:
       - name: Keep the power and health HALs
         uses: actions/upload-artifact@v4
         with:
-          name: guest-power-hal
+          name: guest-power-hal${{ matrix.arch == 'arm64' && '-arm64' || '' }}
           path: |
             .scratch/build-power/dsa-power
             .scratch/build-power/dsa-health
@@ -254,8 +324,8 @@ jobs:
           if-no-files-found: error
 
   image:
-    name: Make and publish the guest image (ubuntu-latest, Android ${{ matrix.android }})
-    needs: [kernel, guest-graphics, channeld, hwcomposer, power-hal, codec2, agent]
+    name: Make and publish the guest image (ubuntu-latest, Android ${{ matrix.android }}, ${{ matrix.arch }})
+    needs: [kernel, kernel-arm64, guest-graphics, channeld, hwcomposer, power-hal, codec2, agent]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
@@ -264,8 +334,12 @@ jobs:
       fail-fast: true
       matrix:
         android: [17, 16]
+        # ARM64 Windows hosts boot the arm64 image, which is 64-bit only.
+        arch: [x86_64, arm64]
     env:
       GH_TOKEN: ${{ github.token }}
+      # The kernel file of the image's architecture: bzImage on x86_64, Image on arm64.
+      KERNEL: ${{ matrix.arch == 'arm64' && 'Image' || 'bzImage' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -292,37 +366,37 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: guest-kernel
+          name: ${{ matrix.arch == 'arm64' && 'kernel-arm64' || 'guest-kernel' }}
           path: .scratch/kernel-out
 
       - name: Download guest graphics transport
         uses: actions/download-artifact@v4
         with:
-          name: guest-gfxstream-hvsocket
+          name: guest-gfxstream-hvsocket${{ matrix.arch == 'arm64' && '-arm64' || '' }}
           path: .scratch/guest-graphics
 
       - name: Download the guest control daemon
         uses: actions/download-artifact@v4
         with:
-          name: guest-channeld
+          name: guest-channeld${{ matrix.arch == 'arm64' && '-arm64' || '' }}
           path: .scratch/channeld
 
       - name: Download the guest hwcomposer
         uses: actions/download-artifact@v4
         with:
-          name: guest-hwcomposer
+          name: guest-hwcomposer${{ matrix.arch == 'arm64' && '-arm64' || '' }}
           path: .scratch/hwcomposer
 
       - name: Download the guest power and health HALs
         uses: actions/download-artifact@v4
         with:
-          name: guest-power-hal
+          name: guest-power-hal${{ matrix.arch == 'arm64' && '-arm64' || '' }}
           path: .scratch/power-hal
 
       - name: Download the guest codec HAL
         uses: actions/download-artifact@v4
         with:
-          name: guest-codec2
+          name: guest-codec2${{ matrix.arch == 'arm64' && '-arm64' || '' }}
           path: .scratch/codec2
 
       - name: Download the guest agent
@@ -332,7 +406,7 @@ jobs:
           path: .scratch/agent
 
       - name: Fetch the pinned inputs
-        run: dsa/guest/image/fetch.sh ${{ matrix.android }}
+        run: dsa/guest/image/fetch.sh ${{ matrix.android }} ${{ matrix.arch }}
 
       - name: Verify graphics libraries ELF dependencies
         run: |
@@ -372,8 +446,8 @@ jobs:
 
       - name: Make the image
         run: >
-          uv run dsa/guest/image/make-image.py --major ${{ matrix.android }}
-          --keys .scratch/image-keys --kernel .scratch/kernel-out/bzImage
+          uv run dsa/guest/image/make-image.py --major ${{ matrix.android }} --arch ${{ matrix.arch }}
+          --keys .scratch/image-keys --kernel .scratch/kernel-out/${{ env.KERNEL }}
           --graphics-dir .scratch/guest-graphics
           --channeld .scratch/channeld/dsa-channeld
           --hwcomposer .scratch/hwcomposer/dsa-hwcomposer
@@ -415,13 +489,13 @@ jobs:
         run: |
           cargo build -q --release -p dsa-host-core --bin dsa-release
           base="https://github.com/${{ github.repository }}/releases/download/${{ steps.publish.outputs.tag }}"
-          target/release/dsa-release image-entry "$base" "../${{ steps.publish.outputs.dir }}" > ../entry-${{ matrix.android }}.json
-          cat ../entry-${{ matrix.android }}.json
+          target/release/dsa-release image-entry "$base" "../${{ steps.publish.outputs.dir }}" > ../entry-${{ matrix.android }}-${{ matrix.arch }}.json
+          cat ../entry-${{ matrix.android }}-${{ matrix.arch }}.json
 
       - uses: actions/upload-artifact@v4
         with:
-          name: entry-${{ matrix.android }}
-          path: entry-${{ matrix.android }}.json
+          name: entry-${{ matrix.android }}-${{ matrix.arch }}
+          path: entry-${{ matrix.android }}-${{ matrix.arch }}.json
           if-no-files-found: error
 
   list:
@@ -448,17 +522,24 @@ jobs:
           merge-multiple: true
           path: entries
 
-      - name: Write the list
+      # One list per host architecture, so a host never picks an image it cannot boot:
+      # images.json (x86_64, the list existing hosts read) and images-arm64.json.
+      - name: Write the lists
         id: write
         run: |
-          jq -n --slurpfile inputs dsa/guest/image/inputs.json --slurpfile images <(jq -s . entries/*.json) \
-            '{format: 1, supported_majors: ([$inputs[0].images[].android_major] | sort), images: $images[0]}' \
-            > images.json
-          cat images.json
+          for arch in x86_64 arm64; do
+            list=images.json
+            [[ "$arch" == arm64 ]] && list=images-arm64.json
+            jq -n --arg arch "$arch" --slurpfile inputs dsa/guest/image/inputs.json \
+              --slurpfile images <(jq -s . entries/*-"$arch".json) \
+              '{format: 1, supported_majors: ([$inputs[0].images[] | select((.arch // "x86_64") == $arch) | .android_major] | unique), images: $images[0]}' \
+              > "$list"
+            cat "$list"
+          done
           # The installer's first screen names the newest Android the list supports.
           echo "newest_major=$(jq '.supported_majors | max' images.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Sign and check the list
+      - name: Sign and check the lists
         id: sign
         working-directory: dsa
         env:
@@ -473,18 +554,21 @@ jobs:
           key="$RUNNER_TEMP/release.key"
           printf '%s\n' "$SIGNING_KEY" > "$key"
           target/release/dsa-release sign "$key" ../images.json
+          target/release/dsa-release sign "$key" ../images-arm64.json
           public="$(target/release/dsa-release public-key "$key")"
           rm -f "$key"
           target/release/dsa-release verify "$public" ../images.json
-          echo "The service trusts this list with the public key $public"
+          target/release/dsa-release verify "$public" ../images-arm64.json
+          echo "The service trusts these lists with the public key $public"
           echo "public_key=$public" >> "$GITHUB_OUTPUT"
 
-      - name: Publish the list
+      - name: Publish the lists
         run: |
+          lists=(images.json images.json.sig images-arm64.json images-arm64.json.sig)
           if gh release view images >/dev/null 2>&1; then
-            gh release upload images images.json images.json.sig --clobber
+            gh release upload images "${lists[@]}" --clobber
           else
-            gh release create images images.json images.json.sig --target "$GITHUB_SHA" \
+            gh release create images "${lists[@]}" --target "$GITHUB_SHA" \
               --title "Android image list" \
               --notes "The signed list of Android images the Desktop Subsystem for Android service reads."
           fi

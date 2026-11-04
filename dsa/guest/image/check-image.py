@@ -8,8 +8,9 @@ app is not signed with one of the keys in the key folder, when the framework ove
 trace script is missing, when the agent is missing or not signed with the platform key, when
 Settings still has the preferences or code that crash it without Bluetooth, when a system
 app users open is not compiled for the guest's boot image and its own dex, when the files
-do not match image.json, or when the ramdisk lacks the directories and links Android's first
-stage init needs.
+do not match image.json, when the kernel or a DSA guest binary is built for another
+architecture than the image's, or when the ramdisk lacks the directories and links
+Android's first stage init needs.
 
 The signatures are read from the apps themselves. sign_target_files_apks copies
 META/apkcerts.txt over unchanged, so that file still names AOSP's keys after signing.
@@ -40,6 +41,30 @@ ours = [base64.b64decode("".join(l for l in p.read_text().splitlines() if "-----
         for p in sorted(keys.glob("*.x509.pem"))]
 manifest = json.loads((image / "image.json").read_text())
 problems = []
+
+# The guest architecture: an image.json without one is from before arm64 images, so x86_64.
+arch = manifest.get("arch") or make_image.DEFAULT_ARCH
+if arch not in make_image.ARCHES:
+    problems.append(f"image.json names architecture {arch}, which DSA makes no image for")
+    arch = make_image.DEFAULT_ARCH
+make_image.use_arch(arch)
+target = manifest.get("source", {}).get("target", "")
+if arch == "arm64" and "arm64_only" not in target:
+    problems.append(f"the arm64 image is made from {target or 'an unnamed target'}, not a 64-bit only one, "
+                    "so it would carry 32-bit ARM code")
+if arch == "x86_64" and "arm64" in target:
+    problems.append(f"the x86_64 image is made from the arm64 target {target}")
+
+# The kernel, when the image has one, must be in its architecture's format and name.
+kernel = make_image.kernel_name(arch)
+for other in {a["kernel"] for a in make_image.ARCHES.values()} - {kernel}:
+    if other in manifest["files"]:
+        problems.append(f"the {arch} image carries {other}, a kernel name for another architecture")
+if kernel in manifest["files"]:
+    with open(image / kernel, "rb") as f:
+        found = make_image.kernel_format(f.read(0x1000))
+    if found != arch:
+        problems.append(f"{kernel} is not a kernel for {arch} (its header says {found or 'neither'})")
 
 for name, expected in manifest["files"].items():
     h = hashlib.sha256()
@@ -175,6 +200,17 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         problems.append("VENDOR/lib64/hw/vulkan.ranchu.so is missing from the image")
     if "VENDOR/lib64/libOpenglSystemCommon.so" not in names:
         problems.append("VENDOR/lib64/libOpenglSystemCommon.so is missing from the image")
+
+    # Every binary DSA builds for the guest must be built for its architecture: one built for
+    # another is refused by the loader, and its service never starts.
+    machine = make_image.ARCHES[arch]["elf_machine"]
+    for name in make_image.DSA_GUEST_BINARIES:
+        if name not in names:
+            continue
+        with z.open(name) as f:
+            found = make_image.elf_machine(f.read(64))
+        if found != machine:
+            problems.append(f"{name} is built for ELF machine {found}, not {arch} ({machine})")
 
     # The control channel daemon, which makes the session active, and its own domain: the
     # only one that may read the boot's secret.

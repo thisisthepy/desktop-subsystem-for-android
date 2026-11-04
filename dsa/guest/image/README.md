@@ -1,13 +1,15 @@
 # guest/image
 
 Makes the Android image the VM boots, without building AOSP: it takes the build inputs
-Google CI publishes for the Cuttlefish x86_64 device, changes them for DSA and re-signs
-them with the project's keys.
+Google CI publishes for the Cuttlefish x86_64 device, or for the 64-bit only arm64 one
+(`aosp_cf_arm64_only_phone`) for ARM64 Windows hosts, changes them for DSA and re-signs
+them with the project's keys. `make-image.py --arch arm64` makes the arm64 image; the
+default is x86_64. The arm64 guest runs no 32-bit ARM code, because the target has none.
 
 | File | What it is |
 |---|---|
 | `inputs.json` | The pinned inputs: per Android version, the CI build number and the SHA-256 of its `target_files`, `otatools` and `dexpreopt_tools` |
-| `fetch.sh` | Downloads one version's inputs into `.scratch/aosp-inputs/<build>/` and checks them |
+| `fetch.sh` | Downloads one version's inputs for one architecture (`x86_64` by default, or `arm64`) into `.scratch/aosp-inputs/<build>-<arch>/` and checks them |
 | `make-keys.sh` | Makes a set of signing keys (CI makes a throwaway set each run) |
 | `pack-keys.sh`, `unpack-keys.sh` | Split the key set into repository secrets and put it back |
 | `make-image.py` | Changes, re-signs and lays out the image |
@@ -77,7 +79,7 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
   size, and the dex checksum and signature are written again. `check-image.py` fails an image
   that still has either.
 - The system apps users open (`COMPILED_APPS`: Settings, Files, the package installer, the
-  share sheet, WebView, the agent and a few more) are compiled to x86_64 machine code when
+  share sheet, WebView, the agent and a few more) are compiled to the guest's machine code (x86_64 or arm64) when
   the image is made. The build compiles them only into system_other, which the guest does not
   have, and with the verify filter only, so they ran interpreted and each Settings screen took
   100 to 350 ms to open. `make-image.py` runs the build's own `dex2oat` (from
@@ -213,10 +215,12 @@ In `dsa/target/image/<version>/`:
   here because the boot control HAL writes the boot state into it. The service copies the
   template for a new user and keeps each user's disk across updates.
 - `initrd.img`: the vendor ramdisk followed by the generic one.
-- `bzImage`, with `--kernel`: the guest kernel (`dsa/kernel/`). The host boots an image's
-  own kernel when it has one, so a kernel update ships with the image.
-- `image.json`: the version, the source build, the kernel command line, and the files'
-  SHA-256.
+- `bzImage` (x86_64) or `Image` (arm64), with `--kernel`: the guest kernel (`dsa/kernel/`).
+  The host boots an image's own kernel when it has one, so a kernel update ships with the
+  image. `make-image.py` refuses a kernel built for the other architecture.
+- `image.json`: the version, the architecture (`arch`), the source build, the kernel command
+  line, and the files' SHA-256. An arm64 image's version ends in `-arm64`, so both images of
+  one build are published side by side.
 - `signed-target_files.zip`: the signed build inputs, kept to make later images and update
   packages from. It is not part of the image and is never published.
 

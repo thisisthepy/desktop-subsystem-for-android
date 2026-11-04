@@ -1616,14 +1616,74 @@ COMPILED_APPS = [
     "PRODUCT/app/webview/webview.apk",
     AGENT_APK,
 ]
-COMPILED_ISA = "x86_64"
+# What differs between the guest architectures DSA makes images for: the kernel's file
+# format and name, ART's instruction set and its variant, and the ELF machine number of a
+# binary built for the guest. arm64 is 64-bit only: the guest runs no 32-bit ARM code.
+ARCHES = {
+    "x86_64": {"kernel": "bzImage", "isa": "x86_64", "isa_variant": "x86_64", "elf_machine": 62},
+    "arm64": {"kernel": "Image", "isa": "arm64", "isa_variant": "generic", "elf_machine": 183},
+}
+DEFAULT_ARCH = "x86_64"
+# The binaries DSA builds for the guest, where the image keeps them.
+DSA_GUEST_BINARIES = [
+    "VENDOR/bin/dsa-channeld",
+    "VENDOR/bin/hw/dsa-hwcomposer",
+    "VENDOR/bin/hw/dsa-codec2",
+    "VENDOR/bin/hw/dsa-power",
+    "VENDOR/bin/hw/dsa-health",
+    "VENDOR/lib64/hw/vulkan.ranchu.so",
+    "VENDOR/lib64/libOpenglSystemCommon.so",
+]
+COMPILED_ISA = ARCHES[DEFAULT_ARCH]["isa"]
+COMPILED_ISA_VARIANT = ARCHES[DEFAULT_ARCH]["isa_variant"]
 CAPEX_ORIGINAL = "original_apex"
 EMBEDDED_PROFILE = "assets/dexopt/baseline.prof"
 # Where an app's shared libraries are listed when the build left no odex to read them from:
 # the agent declares none.
 DEFAULT_CLASS_LOADER_CONTEXT = "PCL[]"
 # Compiled against the same boot image as the framework's own odex files.
-FRAMEWORK_ODEX = "SYSTEM/framework/oat/x86_64/services.odex"
+FRAMEWORK_ODEX = f"SYSTEM/framework/oat/{COMPILED_ISA}/services.odex"
+
+
+def use_arch(arch):
+    """Aims the app compilation and its checks at `arch`'s boot image."""
+    global COMPILED_ISA, COMPILED_ISA_VARIANT, FRAMEWORK_ODEX
+    if arch not in ARCHES:
+        raise ValueError(f"the guest architecture must be one of {', '.join(ARCHES)}, not {arch}")
+    COMPILED_ISA = ARCHES[arch]["isa"]
+    COMPILED_ISA_VARIANT = ARCHES[arch]["isa_variant"]
+    FRAMEWORK_ODEX = f"SYSTEM/framework/oat/{COMPILED_ISA}/services.odex"
+
+
+def image_spec(images, major, arch=DEFAULT_ARCH):
+    """The inputs.json entry for Android `major` on `arch`. An entry without an arch is x86_64."""
+    for spec in images:
+        if spec["android_major"] == major and spec.get("arch", DEFAULT_ARCH) == arch:
+            return spec
+    raise ValueError(f"inputs.json has no image for Android {major} on {arch}")
+
+
+def kernel_name(arch):
+    """The file name the guest kernel has in an image: bzImage on x86_64, Image on arm64."""
+    return ARCHES[arch]["kernel"]
+
+
+def kernel_format(data):
+    """The architecture a kernel file boots on, read from its header: x86_64 for a bzImage
+    (its setup header says HdrS at 0x202), arm64 for an arm64 Image (ARM\\x64 at 0x38), and
+    None for anything else."""
+    if len(data) >= 0x206 and data[0x202:0x206] == b"HdrS":
+        return "x86_64"
+    if len(data) >= 0x3c and data[0x38:0x3c] == b"ARM\x64":
+        return "arm64"
+    return None
+
+
+def elf_machine(data):
+    """The e_machine of a little-endian 64-bit ELF file, or None for anything else."""
+    if len(data) < 20 or data[:4] != b"\x7fELF" or data[4] != 2 or data[5] != 1:
+        return None
+    return int.from_bytes(data[18:20], "little")
 PARTITION_DIRS = {"SYSTEM": "system", "SYSTEM_EXT": "system_ext", "PRODUCT": "product",
                   "VENDOR": "vendor", "ODM": "odm"}
 PARTITION_FS_CONFIG = {
@@ -1755,7 +1815,7 @@ def apex_jar_sources(bootclasspath, names):
 def dex2oat_command(dex2oat, apk, dex_location, odex, root, bootclasspath, boot_images, contexts,
                     filter, profile=None, extra=()):
     """The dex2oat command line the build itself uses to compile a system app, aimed at the
-    guest's x86_64 boot image."""
+    guest's boot image (COMPILED_ISA)."""
     host_context, stored_context = contexts
     jars = bootclasspath.split(":")
     cmd = [
@@ -1770,7 +1830,7 @@ def dex2oat_command(dex2oat, apk, dex_location, odex, root, bootclasspath, boot_
         f"--dex-file={apk}", f"--dex-location={dex_location}",
         f"--oat-file={odex}", f"--oat-location={dex_location.rsplit('/', 1)[0]}/oat/{COMPILED_ISA}/{Path(odex).name}",
         f"--android-root={root}/empty",
-        f"--instruction-set={COMPILED_ISA}", f"--instruction-set-variant={COMPILED_ISA}",
+        f"--instruction-set={COMPILED_ISA}", f"--instruction-set-variant={COMPILED_ISA_VARIANT}",
         "--instruction-set-features=default",
         "--no-generate-debug-info", "--generate-build-id", "--force-determinism",
         "--no-inline-from=core-oj.jar",
@@ -2052,9 +2112,13 @@ def data_disk(otatools, work, out):
     raw.unlink()
 
 
-def kernel_cmdline(partition_cmdline, hwcomposer=False):
-    """Returns the kernel command line shared by every DSA guest image. With `hwcomposer`,
-    the image has DSA's composer in place of Cuttlefish's."""
+# The serial console of a Hyper-V VM: a 16550 UART (ttyS0) on x86_64, a PL011 (ttyAMA0) on arm64.
+SERIAL_CONSOLE = {"x86_64": ["console=ttyS0", "8250.nr_uarts=1"], "arm64": ["console=ttyAMA0"]}
+
+
+def kernel_cmdline(partition_cmdline, hwcomposer=False, arch=DEFAULT_ARCH):
+    """Returns the kernel command line shared by every DSA guest image of `arch`. With
+    `hwcomposer`, the image has DSA's composer in place of Cuttlefish's."""
     if hwcomposer:
         composer = [f"androidboot.dsa.{key}={value}" for key, value in DISPLAY_BOOTCONFIG.items()]
         apexes = {module: apex for module, apex in VENDOR_APEX_BOOTCONFIG.items()
@@ -2072,7 +2136,7 @@ def kernel_cmdline(partition_cmdline, hwcomposer=False):
         # No audit=1, as on Android devices: SELinux denials reach logd's auditd without it.
         # With it, the kernel also audited every iptables change and BPF program load with
         # their syscall records, and overflowed its queue for auditd before logd started.
-        "console=ttyS0", "printk.devkmsg=on", "panic=-1", "8250.nr_uarts=1",
+        SERIAL_CONSOLE[arch][0], "printk.devkmsg=on", "panic=-1", *SERIAL_CONSOLE[arch][1:],
         "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init", partition_cmdline,
         "androidboot.boot_devices=vmbus", "androidboot.fstab_suffix=dsa",
         "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",
@@ -2099,8 +2163,10 @@ def main():
     parser.add_argument("--keys", type=Path, required=True)
     parser.add_argument("--inputs", type=Path, default=REPO / ".scratch/aosp-inputs")
     parser.add_argument("--out", type=Path, default=REPO / "dsa/target/image")
-    parser.add_argument("--kernel", type=Path, help="the guest kernel (bzImage) the image boots with; "
-                        "without it the host's own kernel is used")
+    parser.add_argument("--arch", choices=sorted(ARCHES), default=DEFAULT_ARCH,
+                        help="the guest architecture: x86_64 (the default) or arm64, which is 64-bit only")
+    parser.add_argument("--kernel", type=Path, help="the guest kernel the image boots with (bzImage on "
+                        "x86_64, Image on arm64); without it the host's own kernel is used")
     parser.add_argument("--graphics-library", type=Path,
                         help="a libOpenglSystemCommon.so built for the selected guest")
     parser.add_argument("--vulkan-driver", type=Path,
@@ -2127,8 +2193,9 @@ def main():
                         help="a directory containing guest graphics libraries (vulkan.ranchu.so, libOpenglSystemCommon.so)")
     args = parser.parse_args()
 
-    spec = next(i for i in json.loads((HERE / "inputs.json").read_text())["images"] if i["android_major"] == args.major)
-    inputs = args.inputs / spec["build_id"]
+    spec = image_spec(json.loads((HERE / "inputs.json").read_text())["images"], args.major, args.arch)
+    use_arch(args.arch)
+    inputs = args.inputs / f"{spec['build_id']}-{args.arch}"
     target_files = inputs / spec["files"]["target_files"]["name"]
     keys = args.keys.resolve()
     out = args.out / spec["version"]
@@ -2214,19 +2281,26 @@ def main():
     files = ["system.vhdx", "data.vhdx", "initrd.img"]
     if notice_name:
         files.append(notice_name)
-    (out / "bzImage").unlink(missing_ok=True)
+    kernel = kernel_name(args.arch)
+    for name in {a["kernel"] for a in ARCHES.values()}:
+        (out / name).unlink(missing_ok=True)
     if args.kernel:
-        shutil.copy(args.kernel, out / "bzImage")
-        files.append("bzImage")
+        with open(args.kernel, "rb") as f:
+            found = kernel_format(f.read(0x1000))
+        if found != args.arch:
+            raise SystemExit(f"{args.kernel} is not a kernel for {args.arch} (its header says {found or 'neither'})")
+        shutil.copy(args.kernel, out / kernel)
+        files.append(kernel)
 
-    cmdline = kernel_cmdline(partition_cmdline, hwcomposer=args.hwcomposer is not None)
+    cmdline = kernel_cmdline(partition_cmdline, hwcomposer=args.hwcomposer is not None, arch=args.arch)
     manifest = {
         "version": spec["version"],
         "android_major": spec["android_major"],
+        "arch": args.arch,
         # Orders images of one Android version: a new AOSP build, or a new revision of
         # DSA's image of the same build (a fix to how the image is made), is newer.
         "build": int(spec["build_id"]) * 100 + spec.get("revision", 1),
-        "source": {"branch": spec["branch"], "target": spec["target"], "build_id": spec["build_id"], "revision": spec.get("revision", 1), "security_patch": spec["security_patch"]},
+        "source": {"branch": spec["branch"], "target": spec["target"], "arch": args.arch, "build_id": spec["build_id"], "revision": spec.get("revision", 1), "security_patch": spec["security_patch"]},
         "kernel_cmdline": cmdline,
         "files": {name: {"size": (out / name).stat().st_size, "sha256": sha256(out / name)} for name in files},
     }
