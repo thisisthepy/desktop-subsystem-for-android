@@ -222,7 +222,9 @@ class Agent(
             lifecycle.start { work -> scheduler.post(work) }
             clipboardSync.start { work -> scheduler.post(work) }
             notificationForwarder.start { work -> scheduler.post(work) }
-            widgetManager.start { work -> scheduler.post(work) }
+            widgetManager.start(later = { work -> scheduler.postDelayed(RETRY_MILLIS, work) }) { work ->
+                scheduler.post(work)
+            }
             listenToApps()
             channel.start()
             requestRefresh()
