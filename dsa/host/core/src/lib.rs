@@ -12,6 +12,7 @@
 //! - [`handshake`]: the control channel's handshake as a session uses it.
 //! - [`host_api`]: the local API service, which acts on each caller's own Android, and its
 //!   client.
+//! - [`host_config`]: the configuration file's defaults and rules that every host shares.
 //! - [`tasks`]: the guest's app tasks, which the session keeps and hands on.
 //! - [`input`]: pointer input in a task's window, as the guest task receives it.
 //! - [`keys`]: key input in a task's window.
@@ -49,6 +50,7 @@ pub mod guest_log;
 pub mod guest_log_api;
 pub mod handshake;
 pub mod host_api;
+pub mod host_config;
 #[cfg(feature = "conformance")]
 pub mod host_api_conformance;
 pub mod ime;
