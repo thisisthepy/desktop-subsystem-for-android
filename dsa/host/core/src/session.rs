@@ -92,10 +92,10 @@ use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{self, envelope::Body};
 use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 
-use crate::adb_bridge::{AdbBridge, BridgeStream, GuestAdb};
 use crate::accessibility::{
     AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, TreeUpdate,
 };
+use crate::adb_bridge::{AdbBridge, BridgeStream, GuestAdb};
 use crate::apk::{self, InstallOutcome, InstalledPackage};
 use crate::clipboard;
 use crate::clock_trace::ClockTrace;
