@@ -31,4 +31,7 @@ public partial class GeneralPage : Page
     private async void OnRefresh(object sender, RoutedEventArgs e) => await ViewModel.RefreshAsync();
 
     private void OnOpenLogs(object sender, RoutedEventArgs e) => Shell.OpenFolder(Shell.UserLogFolder);
+
+    private void OnOpenServiceLogs(object sender, RoutedEventArgs e) =>
+        Shell.OpenFolder(Shell.ServiceLogFolder(App.Settings.LogDir));
 }

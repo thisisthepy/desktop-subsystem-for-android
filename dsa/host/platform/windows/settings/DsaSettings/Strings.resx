@@ -68,7 +68,7 @@
     <value>More</value>
   </data>
   <data name="OpenLogsCard.Header" xml:space="preserve">
-    <value>Open the log folder</value>
+    <value>Open my log folder</value>
   </data>
   <data name="OpenLogsCard.Description" xml:space="preserve">
     <value>The logs of the window manager and the app windows, for reporting a problem.</value>
@@ -345,6 +345,9 @@
   </data>
   <data name="ServiceLogsCard.Header" xml:space="preserve">
     <value>Open the service's log folder (administrators)</value>
+  </data>
+  <data name="ServiceLogsCard.Description" xml:space="preserve">
+    <value>The logs of the DSA service and of Android itself.</value>
   </data>
   <data name="CommandLineHeader.Text" xml:space="preserve">
     <value>Command line</value>

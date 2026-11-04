@@ -17,7 +17,7 @@ const MAX_RECORD_BYTES: u64 = 4096;
 
 /// Where the monitors are recorded, below a user's local application data.
 pub fn record_path(local_app_data: &Path) -> PathBuf {
-    local_app_data.join("DSA").join("monitors.txt")
+    crate::paths::UserRoot::in_local_app_data(local_app_data).monitors()
 }
 
 /// The guest display for the monitors recorded below `local_app_data`, when there is a record
@@ -95,7 +95,8 @@ mod session {
     }
 
     fn local_app_data() -> Option<PathBuf> {
-        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+        crate::paths::UserRoot::current()
+            .and_then(|root| root.dir().parent().map(PathBuf::from))
     }
 
     /// Records this session's monitors for the service.
@@ -108,7 +109,7 @@ mod session {
         if monitors.is_empty() {
             return Ok(());
         }
-        let dir = local_app_data().ok_or("LOCALAPPDATA is not set")?;
+        let dir = local_app_data().ok_or("this user's local application data folder is unknown")?;
         write_record(&dir, monitors).map_err(|e| format!("recording the monitors: {e}"))
     }
 

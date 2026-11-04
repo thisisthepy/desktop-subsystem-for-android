@@ -26,5 +26,5 @@ public partial class AdvancedPage : Page
 
     private void OnOpenUserLogs(object sender, RoutedEventArgs e) => Shell.OpenFolder(Shell.UserLogFolder);
 
-    private void OnOpenServiceLogs(object sender, RoutedEventArgs e) => Shell.OpenFolder(ViewModel.LogDir);
+    private void OnOpenServiceLogs(object sender, RoutedEventArgs e) => Shell.OpenFolder(Shell.ServiceLogFolder(ViewModel.LogDir));
 }

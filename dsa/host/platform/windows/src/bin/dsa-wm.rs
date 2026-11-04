@@ -25,7 +25,7 @@ fn main() {
     use dsa_host_windows::compositor::{Compositor, CompositorConfig};
     use dsa_host_windows::pipe::NamedPipeConnector;
     use dsa_host_windows::render_gpu::{
-        choose, default_settings_file, describe_outcome, describe_request, render_gpu_setting,
+        choose, describe_outcome, describe_request, render_gpu_setting,
         CompositorSettings,
     };
 
@@ -94,7 +94,9 @@ fn main() {
             log.log(message);
         }
     };
-    let local_app_data = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from);
+    let compositor_settings = dsa_host_windows::paths::UserRoot::current()
+        .map(|root| root.compositor_settings())
+        .unwrap_or_else(|| std::path::PathBuf::from("compositor.json"));
     let from_service = (|| {
         let mut connector = NamedPipeConnector {
             name: config.pipe_name.clone(),
@@ -111,7 +113,7 @@ fn main() {
             .map_err(|e| e.to_string())
     })();
     let (render_gpu, notes) = render_gpu_setting(from_service, || {
-        CompositorSettings::load(&default_settings_file(local_app_data.as_deref()))
+        CompositorSettings::load(&compositor_settings)
     });
     for note in &notes {
         log(note);

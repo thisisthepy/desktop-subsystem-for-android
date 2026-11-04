@@ -11,9 +11,10 @@
   Windows has, so nothing is installed before it.
 
   The user chooses where the program goes (InstallFolder) and where the service keeps its
-  configuration, logs and Android images (DataFolder), on the first screen or on the
-  command line. Each user's Android disk is in their own profile, under %LOCALAPPDATA%\DSA,
-  whatever is chosen.
+  configuration, settings, logs, temporary files and Android images (DataFolder, the
+  machine's DSA folder), on the first screen or on the command line. Each user's files and
+  Android disk are in their own profile, under %LOCALAPPDATA%\DSA, whatever is chosen. The
+  layout of both folders is the one in dsa.wxs.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
