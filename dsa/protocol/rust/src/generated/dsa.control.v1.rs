@@ -333,6 +333,16 @@ pub struct PowerState {
     #[prost(bool, tag = "5")]
     pub power_saver: bool,
 }
+/// Host to guest: whether the host computer is short of memory. While it is, the guest gives
+/// memory back the way a phone's low memory killer would, cheapest first: the agent ends the
+/// cached app processes (apps the user is not using), and the control daemon then has the
+/// guest drop its clean caches, so free page reporting returns the pages to the host. Sent
+/// when it changes, and once after the agent connects while the host is short.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct HostMemory {
+    #[prost(bool, tag = "1")]
+    pub low: bool,
+}
 /// Guest to host, from the guest's power HAL: the framework turned a power mode on or off, or
 /// asked for a boost. The host runs the guest's processors faster or more frugally to match.
 /// The HAL sends every mode that is on each time it subscribes to the channel, and the
@@ -961,7 +971,7 @@ pub struct AccessibilityActionResult {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 110, 42, 60, 61, 62, 63, 64, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 110, 42, 43, 60, 61, 62, 63, 64, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -1033,6 +1043,8 @@ pub mod envelope {
         PowerHint(super::PowerHint),
         #[prost(message, tag = "42")]
         DeviceIdle(super::DeviceIdle),
+        #[prost(message, tag = "43")]
+        HostMemory(super::HostMemory),
         #[prost(message, tag = "60")]
         InstallApk(super::InstallApk),
         #[prost(message, tag = "61")]

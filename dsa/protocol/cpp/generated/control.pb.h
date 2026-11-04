@@ -126,6 +126,9 @@ extern HelloAcceptedDefaultTypeInternal _HelloAccepted_default_instance_;
 class HelloRejected;
 struct HelloRejectedDefaultTypeInternal;
 extern HelloRejectedDefaultTypeInternal _HelloRejected_default_instance_;
+class HostMemory;
+struct HostMemoryDefaultTypeInternal;
+extern HostMemoryDefaultTypeInternal _HostMemory_default_instance_;
 class ImeCommit;
 struct ImeCommitDefaultTypeInternal;
 extern ImeCommitDefaultTypeInternal _ImeCommit_default_instance_;
@@ -274,6 +277,7 @@ template<> ::dsa::control::v1::GuestNotification* Arena::CreateMaybeMessage<::ds
 template<> ::dsa::control::v1::Hello* Arena::CreateMaybeMessage<::dsa::control::v1::Hello>(Arena*);
 template<> ::dsa::control::v1::HelloAccepted* Arena::CreateMaybeMessage<::dsa::control::v1::HelloAccepted>(Arena*);
 template<> ::dsa::control::v1::HelloRejected* Arena::CreateMaybeMessage<::dsa::control::v1::HelloRejected>(Arena*);
+template<> ::dsa::control::v1::HostMemory* Arena::CreateMaybeMessage<::dsa::control::v1::HostMemory>(Arena*);
 template<> ::dsa::control::v1::ImeCommit* Arena::CreateMaybeMessage<::dsa::control::v1::ImeCommit>(Arena*);
 template<> ::dsa::control::v1::ImeComposition* Arena::CreateMaybeMessage<::dsa::control::v1::ImeComposition>(Arena*);
 template<> ::dsa::control::v1::ImeCursor* Arena::CreateMaybeMessage<::dsa::control::v1::ImeCursor>(Arena*);
@@ -4221,6 +4225,136 @@ class PowerState final :
 };
 // -------------------------------------------------------------------
 
+class HostMemory final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.HostMemory) */ {
+ public:
+  inline HostMemory() : HostMemory(nullptr) {}
+  ~HostMemory() override;
+  explicit PROTOBUF_CONSTEXPR HostMemory(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  HostMemory(const HostMemory& from);
+  HostMemory(HostMemory&& from) noexcept
+    : HostMemory() {
+    *this = ::std::move(from);
+  }
+
+  inline HostMemory& operator=(const HostMemory& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline HostMemory& operator=(HostMemory&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const HostMemory& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const HostMemory* internal_default_instance() {
+    return reinterpret_cast<const HostMemory*>(
+               &_HostMemory_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    23;
+
+  friend void swap(HostMemory& a, HostMemory& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(HostMemory* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(HostMemory* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  HostMemory* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<HostMemory>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const HostMemory& from);
+  void MergeFrom(const HostMemory& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(HostMemory* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.HostMemory";
+  }
+  protected:
+  explicit HostMemory(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kLowFieldNumber = 1,
+  };
+  // bool low = 1;
+  void clear_low();
+  bool low() const;
+  void set_low(bool value);
+  private:
+  bool _internal_low() const;
+  void _internal_set_low(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.HostMemory)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    bool low_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class PowerHint final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.PowerHint) */ {
  public:
@@ -4260,7 +4394,7 @@ class PowerHint final :
                &_PowerHint_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    23;
+    24;
 
   friend void swap(PowerHint& a, PowerHint& b) {
     a.Swap(&b);
@@ -4423,7 +4557,7 @@ class DeviceIdle final :
                &_DeviceIdle_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    24;
+    25;
 
   friend void swap(DeviceIdle& a, DeviceIdle& b) {
     a.Swap(&b);
@@ -4553,7 +4687,7 @@ class ClipboardText final :
                &_ClipboardText_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    25;
+    26;
 
   friend void swap(ClipboardText& a, ClipboardText& b) {
     a.Swap(&b);
@@ -4688,7 +4822,7 @@ class ClipboardSharing final :
                &_ClipboardSharing_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    26;
+    27;
 
   friend void swap(ClipboardSharing& a, ClipboardSharing& b) {
     a.Swap(&b);
@@ -4818,7 +4952,7 @@ class GuestNotification final :
                &_GuestNotification_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    27;
+    28;
 
   friend void swap(GuestNotification& a, GuestNotification& b) {
     a.Swap(&b);
@@ -5077,7 +5211,7 @@ class NotificationRemoved final :
                &_NotificationRemoved_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    28;
+    29;
 
   friend void swap(NotificationRemoved& a, NotificationRemoved& b) {
     a.Swap(&b);
@@ -5212,7 +5346,7 @@ class NotificationClicked final :
                &_NotificationClicked_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    29;
+    30;
 
   friend void swap(NotificationClicked& a, NotificationClicked& b) {
     a.Swap(&b);
@@ -5347,7 +5481,7 @@ class NotificationDismissed final :
                &_NotificationDismissed_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    30;
+    31;
 
   friend void swap(NotificationDismissed& a, NotificationDismissed& b) {
     a.Swap(&b);
@@ -5482,7 +5616,7 @@ class RequestGuestMemory final :
                &_RequestGuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    31;
+    32;
 
   friend void swap(RequestGuestMemory& a, RequestGuestMemory& b) {
     a.Swap(&b);
@@ -5599,7 +5733,7 @@ class ProcessMemory final :
                &_ProcessMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    32;
+    33;
 
   friend void swap(ProcessMemory& a, ProcessMemory& b) {
     a.Swap(&b);
@@ -5767,7 +5901,7 @@ class GuestMemory final :
                &_GuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    33;
+    34;
 
   friend void swap(GuestMemory& a, GuestMemory& b) {
     a.Swap(&b);
@@ -6049,7 +6183,7 @@ class AgentConnected final :
                &_AgentConnected_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    34;
+    35;
 
   friend void swap(AgentConnected& a, AgentConnected& b) {
     a.Swap(&b);
@@ -6166,7 +6300,7 @@ class GuestBoot final :
                &_GuestBoot_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    35;
+    36;
 
   friend void swap(GuestBoot& a, GuestBoot& b) {
     a.Swap(&b);
@@ -6307,7 +6441,7 @@ class InstallApk final :
                &_InstallApk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    36;
+    37;
 
   friend void swap(InstallApk& a, InstallApk& b) {
     a.Swap(&b);
@@ -6464,7 +6598,7 @@ class ApkChunk final :
                &_ApkChunk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    37;
+    38;
 
   friend void swap(ApkChunk& a, ApkChunk& b) {
     a.Swap(&b);
@@ -6621,7 +6755,7 @@ class OpenLink final :
                &_OpenLink_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    38;
+    39;
 
   friend void swap(OpenLink& a, OpenLink& b) {
     a.Swap(&b);
@@ -6756,7 +6890,7 @@ class LinkHandling final :
                &_LinkHandling_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    39;
+    40;
 
   friend void swap(LinkHandling& a, LinkHandling& b) {
     a.Swap(&b);
@@ -6886,7 +7020,7 @@ class OpenFile final :
                &_OpenFile_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    40;
+    41;
 
   friend void swap(OpenFile& a, OpenFile& b) {
     a.Swap(&b);
@@ -7054,7 +7188,7 @@ class FileChunk final :
                &_FileChunk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    41;
+    42;
 
   friend void swap(FileChunk& a, FileChunk& b) {
     a.Swap(&b);
@@ -7211,7 +7345,7 @@ class CancelInstall final :
                &_CancelInstall_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    42;
+    43;
 
   friend void swap(CancelInstall& a, CancelInstall& b) {
     a.Swap(&b);
@@ -7341,7 +7475,7 @@ class InstallProgress final :
                &_InstallProgress_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    43;
+    44;
 
   friend void swap(InstallProgress& a, InstallProgress& b) {
     a.Swap(&b);
@@ -7482,7 +7616,7 @@ class InstallResult final :
                &_InstallResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    44;
+    45;
 
   friend void swap(InstallResult& a, InstallResult& b) {
     a.Swap(&b);
@@ -7655,7 +7789,7 @@ class FileProgress final :
                &_FileProgress_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    45;
+    46;
 
   friend void swap(FileProgress& a, FileProgress& b) {
     a.Swap(&b);
@@ -7812,7 +7946,7 @@ class ClockProbe final :
                &_ClockProbe_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    46;
+    47;
 
   friend void swap(ClockProbe& a, ClockProbe& b) {
     a.Swap(&b);
@@ -7942,7 +8076,7 @@ class ClockAnswer final :
                &_ClockAnswer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    47;
+    48;
 
   friend void swap(ClockAnswer& a, ClockAnswer& b) {
     a.Swap(&b);
@@ -8083,7 +8217,7 @@ class ListWidgetProviders final :
                &_ListWidgetProviders_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    48;
+    49;
 
   friend void swap(ListWidgetProviders& a, ListWidgetProviders& b) {
     a.Swap(&b);
@@ -8213,7 +8347,7 @@ class WidgetProvider final :
                &_WidgetProvider_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    49;
+    50;
 
   friend void swap(WidgetProvider& a, WidgetProvider& b) {
     a.Swap(&b);
@@ -8484,7 +8618,7 @@ class WidgetProviders final :
                &_WidgetProviders_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    50;
+    51;
 
   friend void swap(WidgetProviders& a, WidgetProviders& b) {
     a.Swap(&b);
@@ -8645,7 +8779,7 @@ class AddWidget final :
                &_AddWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    51;
+    52;
 
   friend void swap(AddWidget& a, AddWidget& b) {
     a.Swap(&b);
@@ -8791,7 +8925,7 @@ class WidgetAdded final :
                &_WidgetAdded_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    52;
+    53;
 
   friend void swap(WidgetAdded& a, WidgetAdded& b) {
     a.Swap(&b);
@@ -8948,7 +9082,7 @@ class WidgetUpdated final :
                &_WidgetUpdated_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    53;
+    54;
 
   friend void swap(WidgetUpdated& a, WidgetUpdated& b) {
     a.Swap(&b);
@@ -9098,7 +9232,7 @@ class WidgetList final :
                &_WidgetList_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    54;
+    55;
 
   friend void swap(WidgetList& a, WidgetList& b) {
     a.Swap(&b);
@@ -9242,7 +9376,7 @@ class RemoveWidget final :
                &_RemoveWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    55;
+    56;
 
   friend void swap(RemoveWidget& a, RemoveWidget& b) {
     a.Swap(&b);
@@ -9372,7 +9506,7 @@ class ResizeWidget final :
                &_ResizeWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    56;
+    57;
 
   friend void swap(ResizeWidget& a, ResizeWidget& b) {
     a.Swap(&b);
@@ -9557,7 +9691,7 @@ class WidgetFrame final :
                &_WidgetFrame_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    57;
+    58;
 
   friend void swap(WidgetFrame& a, WidgetFrame& b) {
     a.Swap(&b);
@@ -9725,7 +9859,7 @@ class WidgetPointer final :
                &_WidgetPointer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    58;
+    59;
 
   friend void swap(WidgetPointer& a, WidgetPointer& b) {
     a.Swap(&b);
@@ -9899,7 +10033,7 @@ class AccessibilityWatch final :
                &_AccessibilityWatch_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    59;
+    60;
 
   friend void swap(AccessibilityWatch& a, AccessibilityWatch& b) {
     a.Swap(&b);
@@ -10040,7 +10174,7 @@ class NodeRange final :
                &_NodeRange_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    60;
+    61;
 
   friend void swap(NodeRange& a, NodeRange& b) {
     a.Swap(&b);
@@ -10192,7 +10326,7 @@ class AccessibilityNode final :
                &_AccessibilityNode_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    61;
+    62;
 
   friend void swap(AccessibilityNode& a, AccessibilityNode& b) {
     a.Swap(&b);
@@ -10635,7 +10769,7 @@ class AccessibilityTree final :
                &_AccessibilityTree_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    62;
+    63;
 
   friend void swap(AccessibilityTree& a, AccessibilityTree& b) {
     a.Swap(&b);
@@ -10868,7 +11002,7 @@ class AccessibilityAction final :
                &_AccessibilityAction_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    63;
+    64;
 
   friend void swap(AccessibilityAction& a, AccessibilityAction& b) {
     a.Swap(&b);
@@ -11058,7 +11192,7 @@ class AccessibilityActionResult final :
                &_AccessibilityActionResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    64;
+    65;
 
   friend void swap(AccessibilityActionResult& a, AccessibilityActionResult& b) {
     a.Swap(&b);
@@ -11254,6 +11388,7 @@ class Envelope final :
     kPowerState = 41,
     kPowerHint = 110,
     kDeviceIdle = 42,
+    kHostMemory = 43,
     kInstallApk = 60,
     kApkChunk = 61,
     kCancelInstall = 62,
@@ -11290,7 +11425,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    65;
+    66;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -11386,6 +11521,7 @@ class Envelope final :
     kPowerStateFieldNumber = 41,
     kPowerHintFieldNumber = 110,
     kDeviceIdleFieldNumber = 42,
+    kHostMemoryFieldNumber = 43,
     kInstallApkFieldNumber = 60,
     kApkChunkFieldNumber = 61,
     kCancelInstallFieldNumber = 62,
@@ -11991,6 +12127,24 @@ class Envelope final :
       ::dsa::control::v1::DeviceIdle* device_idle);
   ::dsa::control::v1::DeviceIdle* unsafe_arena_release_device_idle();
 
+  // .dsa.control.v1.HostMemory host_memory = 43;
+  bool has_host_memory() const;
+  private:
+  bool _internal_has_host_memory() const;
+  public:
+  void clear_host_memory();
+  const ::dsa::control::v1::HostMemory& host_memory() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::HostMemory* release_host_memory();
+  ::dsa::control::v1::HostMemory* mutable_host_memory();
+  void set_allocated_host_memory(::dsa::control::v1::HostMemory* host_memory);
+  private:
+  const ::dsa::control::v1::HostMemory& _internal_host_memory() const;
+  ::dsa::control::v1::HostMemory* _internal_mutable_host_memory();
+  public:
+  void unsafe_arena_set_allocated_host_memory(
+      ::dsa::control::v1::HostMemory* host_memory);
+  ::dsa::control::v1::HostMemory* unsafe_arena_release_host_memory();
+
   // .dsa.control.v1.InstallApk install_apk = 60;
   bool has_install_apk() const;
   private:
@@ -12532,6 +12686,7 @@ class Envelope final :
   void set_has_power_state();
   void set_has_power_hint();
   void set_has_device_idle();
+  void set_has_host_memory();
   void set_has_install_apk();
   void set_has_apk_chunk();
   void set_has_cancel_install();
@@ -12603,6 +12758,7 @@ class Envelope final :
       ::dsa::control::v1::PowerState* power_state_;
       ::dsa::control::v1::PowerHint* power_hint_;
       ::dsa::control::v1::DeviceIdle* device_idle_;
+      ::dsa::control::v1::HostMemory* host_memory_;
       ::dsa::control::v1::InstallApk* install_apk_;
       ::dsa::control::v1::ApkChunk* apk_chunk_;
       ::dsa::control::v1::CancelInstall* cancel_install_;
@@ -14991,6 +15147,30 @@ inline void PowerState::_internal_set_power_saver(bool value) {
 inline void PowerState::set_power_saver(bool value) {
   _internal_set_power_saver(value);
   // @@protoc_insertion_point(field_set:dsa.control.v1.PowerState.power_saver)
+}
+
+// -------------------------------------------------------------------
+
+// HostMemory
+
+// bool low = 1;
+inline void HostMemory::clear_low() {
+  _impl_.low_ = false;
+}
+inline bool HostMemory::_internal_low() const {
+  return _impl_.low_;
+}
+inline bool HostMemory::low() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.HostMemory.low)
+  return _internal_low();
+}
+inline void HostMemory::_internal_set_low(bool value) {
+  
+  _impl_.low_ = value;
+}
+inline void HostMemory::set_low(bool value) {
+  _internal_set_low(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.HostMemory.low)
 }
 
 // -------------------------------------------------------------------
@@ -22014,6 +22194,80 @@ inline ::dsa::control::v1::DeviceIdle* Envelope::mutable_device_idle() {
   return _msg;
 }
 
+// .dsa.control.v1.HostMemory host_memory = 43;
+inline bool Envelope::_internal_has_host_memory() const {
+  return body_case() == kHostMemory;
+}
+inline bool Envelope::has_host_memory() const {
+  return _internal_has_host_memory();
+}
+inline void Envelope::set_has_host_memory() {
+  _impl_._oneof_case_[0] = kHostMemory;
+}
+inline void Envelope::clear_host_memory() {
+  if (_internal_has_host_memory()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.host_memory_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::HostMemory* Envelope::release_host_memory() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.host_memory)
+  if (_internal_has_host_memory()) {
+    clear_has_body();
+    ::dsa::control::v1::HostMemory* temp = _impl_.body_.host_memory_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.host_memory_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::HostMemory& Envelope::_internal_host_memory() const {
+  return _internal_has_host_memory()
+      ? *_impl_.body_.host_memory_
+      : reinterpret_cast< ::dsa::control::v1::HostMemory&>(::dsa::control::v1::_HostMemory_default_instance_);
+}
+inline const ::dsa::control::v1::HostMemory& Envelope::host_memory() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.host_memory)
+  return _internal_host_memory();
+}
+inline ::dsa::control::v1::HostMemory* Envelope::unsafe_arena_release_host_memory() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.host_memory)
+  if (_internal_has_host_memory()) {
+    clear_has_body();
+    ::dsa::control::v1::HostMemory* temp = _impl_.body_.host_memory_;
+    _impl_.body_.host_memory_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_host_memory(::dsa::control::v1::HostMemory* host_memory) {
+  clear_body();
+  if (host_memory) {
+    set_has_host_memory();
+    _impl_.body_.host_memory_ = host_memory;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.host_memory)
+}
+inline ::dsa::control::v1::HostMemory* Envelope::_internal_mutable_host_memory() {
+  if (!_internal_has_host_memory()) {
+    clear_body();
+    set_has_host_memory();
+    _impl_.body_.host_memory_ = CreateMaybeMessage< ::dsa::control::v1::HostMemory >(GetArenaForAllocation());
+  }
+  return _impl_.body_.host_memory_;
+}
+inline ::dsa::control::v1::HostMemory* Envelope::mutable_host_memory() {
+  ::dsa::control::v1::HostMemory* _msg = _internal_mutable_host_memory();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.host_memory)
+  return _msg;
+}
+
 // .dsa.control.v1.InstallApk install_apk = 60;
 inline bool Envelope::_internal_has_install_apk() const {
   return body_case() == kInstallApk;
@@ -24098,6 +24352,8 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
