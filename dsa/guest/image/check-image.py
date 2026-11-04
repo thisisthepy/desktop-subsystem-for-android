@@ -201,6 +201,21 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     if "META/file_contexts.bin" in names and b"/vendor/bin/hw/dsa-hwcomposer" not in z.read("META/file_contexts.bin"):
         problems.append("META/file_contexts.bin does not label dsa-hwcomposer, so init refuses to start it")
 
+    # DSA's codec HAL: without it every video decodes on the guest's processors.
+    if "VENDOR/bin/hw/dsa-codec2" not in names:
+        problems.append("VENDOR/bin/hw/dsa-codec2 is missing from the image")
+    if "VENDOR/etc/init/dsa-codec2.rc" not in names:
+        problems.append("VENDOR/etc/init/dsa-codec2.rc is missing, so init never starts the codec HAL")
+    codec2_manifest = "VENDOR/etc/vintf/manifest/dsa-codec2.xml"
+    if codec2_manifest not in names:
+        problems.append(f"{codec2_manifest} is missing, so the codec HAL is not declared")
+    elif "<fqname>IComponentStore/default</fqname>" not in z.read(codec2_manifest).decode():
+        problems.append("dsa-codec2.xml does not declare IComponentStore/default")
+    if "VENDOR/etc/media_codecs_c2.xml" not in names:
+        problems.append("VENDOR/etc/media_codecs_c2.xml is missing, so the framework lists none of the host's decoders")
+    if "META/file_contexts.bin" in names and b"/vendor/bin/hw/dsa-codec2" not in z.read("META/file_contexts.bin"):
+        problems.append("META/file_contexts.bin does not label dsa-codec2, so init refuses to start it")
+
     if "VENDOR/etc/selinux/vendor_file_contexts" in names:
         vendor_fc = z.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
         for expected in ["vulkan", "libOpenglSystemCommon"]:

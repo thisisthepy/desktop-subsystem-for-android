@@ -1,0 +1,8 @@
+# The guest's Codec 2.0 HAL for video decoding on the host's GPU. It runs in the vendor
+# codec domain (mediacodec), as a vendor's hardware codec service does.
+service vendor.dsa-codec2 /vendor/bin/hw/dsa-codec2
+    class hal
+    user mediacodec
+    group camera drmrpc mediadrm
+    ioprio rt 4
+    task_profiles ProcessCapacityHigh
