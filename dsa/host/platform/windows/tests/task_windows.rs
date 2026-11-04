@@ -680,7 +680,6 @@ fn fr4_a_dragged_window_keeps_a_new_size_back_until_the_frame_of_that_size_is_sh
         "a guest that answered again was not waited for on the next step"
     );
 
-
     unsafe { SendMessageW(hwnd as HWND, WM_EXITSIZEMOVE, 0, 0) };
     running.android.publish(TaskEvent::Removed { task_id: 1 });
     windows_of(&running, 0);
