@@ -347,9 +347,7 @@ AHardwareBuffer* Component::allocate(uint32_t width, uint32_t height) {
             IGraphicBufferAllocator::Allocation allocation;
             const ndk::ScopedAStatus result = igba->allocate(desc, &allocation);
             if (result.isOk()) {
-                if (allocation.fence) {
-                    waitFd(allocation.fence->get(), std::chrono::milliseconds(1000));
-                }
+                waitFd(allocation.fence.get(), std::chrono::milliseconds(1000));
                 return allocation.buffer.release();
             }
             if (result.getServiceSpecificError() != kBlocking) {

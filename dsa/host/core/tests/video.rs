@@ -104,13 +104,14 @@ fn next(connection: &mut dyn Connection) -> Body {
 
 /// Starts the host's end of one connection and returns the guest's end, past the
 /// handshake and the capabilities, with the log of what the decoder was asked.
-fn connect(
-    role: Role,
-) -> (
+/// The guest's end, the host's thread, and the log of what the decoder was asked.
+type Connected = (
     Box<dyn Connection>,
     thread::JoinHandle<VideoEnd>,
     Arc<Mutex<Vec<String>>>,
-) {
+);
+
+fn connect(role: Role) -> Connected {
     let (mut listener, mut connector) = memory::pair();
     let log = Arc::new(Mutex::new(Vec::new()));
     let decoders = FakeDecoders {
