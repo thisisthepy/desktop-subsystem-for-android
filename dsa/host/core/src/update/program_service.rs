@@ -739,6 +739,27 @@ impl UserAndroid for WithProgramStatus {
     fn watch_tasks(&self) -> Option<TaskWatch> {
         self.android.watch_tasks()
     }
+    fn watch_log(
+        &self,
+        filter: crate::guest_log::LogFilter,
+    ) -> Option<crate::guest_log::LogWatch> {
+        self.android.watch_log(filter)
+    }
+    fn dump_log(
+        &self,
+        filter: crate::guest_log::LogFilter,
+    ) -> Result<std::sync::mpsc::Receiver<crate::guest_log::LogDumpEvent>, TaskRequestError> {
+        self.android.dump_log(filter)
+    }
+    fn recent_log(&self) -> Vec<crate::guest_log::LogEntry> {
+        self.android.recent_log()
+    }
+    fn collect_diagnostics(
+        &self,
+    ) -> Result<std::sync::mpsc::Receiver<crate::guest_log::DiagnosticsEvent>, TaskRequestError>
+    {
+        self.android.collect_diagnostics()
+    }
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
         self.android.request(request)
     }

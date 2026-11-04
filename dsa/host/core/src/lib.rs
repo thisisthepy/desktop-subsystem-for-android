@@ -19,6 +19,8 @@
 //! - [`links`]: web links apps in the guest open, which the host opens in its browser.
 //! - [`apk_info`]: what an APK on the host says about itself (its name, icon, version,
 //!   permissions and signer), read from the file before Android sees it.
+//! - [`guest_log`]: the guest's log, streamed only while someone reads it, and
+//!   [`diagnostics`]: the archive a problem report carries.
 //! - [`files`]: host files the user opens or shares in an app in the guest.
 //! - [`clipboard`]: the text clipboard the host and the guest share.
 //! - [`notifications`]: the notifications of the guest, which the host shows.
@@ -37,8 +39,11 @@ pub mod bootconfig;
 pub mod clipboard;
 pub mod clock_trace;
 pub mod compositor;
+pub mod diagnostics;
 pub mod files;
 pub mod guest_display;
+pub mod guest_log;
+pub mod guest_log_api;
 pub mod handshake;
 pub mod host_api;
 #[cfg(feature = "conformance")]

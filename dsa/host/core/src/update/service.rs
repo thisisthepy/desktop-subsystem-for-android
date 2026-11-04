@@ -256,6 +256,27 @@ impl UserAndroid for UpdatingAndroid {
     fn watch_tasks(&self) -> Option<TaskWatch> {
         UserAndroid::watch_tasks(&*self.session)
     }
+    fn watch_log(
+        &self,
+        filter: crate::guest_log::LogFilter,
+    ) -> Option<crate::guest_log::LogWatch> {
+        UserAndroid::watch_log(&*self.session, filter)
+    }
+    fn dump_log(
+        &self,
+        filter: crate::guest_log::LogFilter,
+    ) -> Result<std::sync::mpsc::Receiver<crate::guest_log::LogDumpEvent>, TaskRequestError> {
+        UserAndroid::dump_log(&*self.session, filter)
+    }
+    fn recent_log(&self) -> Vec<crate::guest_log::LogEntry> {
+        UserAndroid::recent_log(&*self.session)
+    }
+    fn collect_diagnostics(
+        &self,
+    ) -> Result<std::sync::mpsc::Receiver<crate::guest_log::DiagnosticsEvent>, TaskRequestError>
+    {
+        UserAndroid::collect_diagnostics(&*self.session)
+    }
     fn request(&self, request: TaskRequest) -> Result<(), TaskRequestError> {
         UserAndroid::request(&*self.session, request)
     }
