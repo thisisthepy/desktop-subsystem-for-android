@@ -930,11 +930,11 @@ pub struct Settings {
     /// Whether the caller's Android takes adb connections: the service then listens on
     /// 127.0.0.1:adb_port and bridges each connection to the guest's adbd. Off by default, and
     /// the caller's own. It applies at once, without restarting Android.
-    #[prost(bool, tag = "13")]
+    #[prost(bool, tag = "14")]
     pub developer_mode: bool,
     /// The loopback port adb connects to while developer mode is on. 58526 unless the user
     /// chooses another; 0 in a request means the default.
-    #[prost(uint32, tag = "14")]
+    #[prost(uint32, tag = "15")]
     pub adb_port: u32,
 }
 /// Turns the connection into the accessibility tree of one of the caller's task windows, for a

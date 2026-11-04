@@ -462,6 +462,19 @@ struct ClipboardSharingDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ClipboardSharingDefaultTypeInternal _ClipboardSharing_default_instance_;
+PROTOBUF_CONSTEXPR DeveloperMode::DeveloperMode(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.on_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct DeveloperModeDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR DeveloperModeDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~DeveloperModeDefaultTypeInternal() {}
+  union {
+    DeveloperMode _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DeveloperModeDefaultTypeInternal _DeveloperMode_default_instance_;
 PROTOBUF_CONSTEXPR GuestNotification::GuestNotification(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.key_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
@@ -9474,6 +9487,186 @@ void ClipboardSharing::InternalSwap(ClipboardSharing* other) {
 
 std::string ClipboardSharing::GetTypeName() const {
   return "dsa.control.v1.ClipboardSharing";
+}
+
+
+// ===================================================================
+
+class DeveloperMode::_Internal {
+ public:
+};
+
+DeveloperMode::DeveloperMode(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.DeveloperMode)
+}
+DeveloperMode::DeveloperMode(const DeveloperMode& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  DeveloperMode* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.on_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _this->_impl_.on_ = from._impl_.on_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.DeveloperMode)
+}
+
+inline void DeveloperMode::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.on_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+DeveloperMode::~DeveloperMode() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.DeveloperMode)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void DeveloperMode::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void DeveloperMode::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void DeveloperMode::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.DeveloperMode)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.on_ = false;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* DeveloperMode::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // bool on = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.on_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* DeveloperMode::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.DeveloperMode)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // bool on = 1;
+  if (this->_internal_on() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(1, this->_internal_on(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.DeveloperMode)
+  return target;
+}
+
+size_t DeveloperMode::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.DeveloperMode)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // bool on = 1;
+  if (this->_internal_on() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void DeveloperMode::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const DeveloperMode*>(
+      &from));
+}
+
+void DeveloperMode::MergeFrom(const DeveloperMode& from) {
+  DeveloperMode* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.DeveloperMode)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_on() != 0) {
+    _this->_internal_set_on(from._internal_on());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void DeveloperMode::CopyFrom(const DeveloperMode& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.DeveloperMode)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool DeveloperMode::IsInitialized() const {
+  return true;
+}
+
+void DeveloperMode::InternalSwap(DeveloperMode* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_.on_, other->_impl_.on_);
+}
+
+std::string DeveloperMode::GetTypeName() const {
+  return "dsa.control.v1.DeveloperMode";
 }
 
 
@@ -24828,6 +25021,7 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::ScreenState& screen_state(const Envelope* msg);
   static const ::dsa::control::v1::PowerState& power_state(const Envelope* msg);
   static const ::dsa::control::v1::PowerHint& power_hint(const Envelope* msg);
+  static const ::dsa::control::v1::DeveloperMode& developer_mode(const Envelope* msg);
   static const ::dsa::control::v1::DeviceIdle& device_idle(const Envelope* msg);
   static const ::dsa::control::v1::HostMemory& host_memory(const Envelope* msg);
   static const ::dsa::control::v1::HostSleep& host_sleep(const Envelope* msg);
@@ -25001,6 +25195,10 @@ Envelope::_Internal::power_state(const Envelope* msg) {
 const ::dsa::control::v1::PowerHint&
 Envelope::_Internal::power_hint(const Envelope* msg) {
   return *msg->_impl_.body_.power_hint_;
+}
+const ::dsa::control::v1::DeveloperMode&
+Envelope::_Internal::developer_mode(const Envelope* msg) {
+  return *msg->_impl_.body_.developer_mode_;
 }
 const ::dsa::control::v1::DeviceIdle&
 Envelope::_Internal::device_idle(const Envelope* msg) {
@@ -25658,6 +25856,21 @@ void Envelope::set_allocated_power_hint(::dsa::control::v1::PowerHint* power_hin
     _impl_.body_.power_hint_ = power_hint;
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.power_hint)
+}
+void Envelope::set_allocated_developer_mode(::dsa::control::v1::DeveloperMode* developer_mode) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (developer_mode) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(developer_mode);
+    if (message_arena != submessage_arena) {
+      developer_mode = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, developer_mode, submessage_arena);
+    }
+    set_has_developer_mode();
+    _impl_.body_.developer_mode_ = developer_mode;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.developer_mode)
 }
 void Envelope::set_allocated_device_idle(::dsa::control::v1::DeviceIdle* device_idle) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -26551,6 +26764,11 @@ Envelope::Envelope(const Envelope& from)
           from._internal_power_hint());
       break;
     }
+    case kDeveloperMode: {
+      _this->_internal_mutable_developer_mode()->::dsa::control::v1::DeveloperMode::MergeFrom(
+          from._internal_developer_mode());
+      break;
+    }
     case kDeviceIdle: {
       _this->_internal_mutable_device_idle()->::dsa::control::v1::DeviceIdle::MergeFrom(
           from._internal_device_idle());
@@ -27016,6 +27234,12 @@ void Envelope::clear_body() {
     case kPowerHint: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.power_hint_;
+      }
+      break;
+    }
+    case kDeveloperMode: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.developer_mode_;
       }
       break;
     }
@@ -27963,6 +28187,14 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.DeveloperMode developer_mode = 140;
+      case 140:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 98)) {
+          ptr = ctx->ParseMessage(_internal_mutable_developer_mode(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -28545,6 +28777,13 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::diagnostics_done(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.DeveloperMode developer_mode = 140;
+  if (_internal_has_developer_mode()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(140, _Internal::developer_mode(this),
+        _Internal::developer_mode(this).GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -28777,6 +29016,13 @@ size_t Envelope::ByteSizeLong() const {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.body_.power_hint_);
+      break;
+    }
+    // .dsa.control.v1.DeveloperMode developer_mode = 140;
+    case kDeveloperMode: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.developer_mode_);
       break;
     }
     // .dsa.control.v1.DeviceIdle device_idle = 42;
@@ -29296,6 +29542,11 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_power_hint());
       break;
     }
+    case kDeveloperMode: {
+      _this->_internal_mutable_developer_mode()->::dsa::control::v1::DeveloperMode::MergeFrom(
+          from._internal_developer_mode());
+      break;
+    }
     case kDeviceIdle: {
       _this->_internal_mutable_device_idle()->::dsa::control::v1::DeviceIdle::MergeFrom(
           from._internal_device_idle());
@@ -29690,6 +29941,10 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::ClipboardText >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::ClipboardSharing*
 Arena::CreateMaybeMessage< ::dsa::control::v1::ClipboardSharing >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::ClipboardSharing >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::DeveloperMode*
+Arena::CreateMaybeMessage< ::dsa::control::v1::DeveloperMode >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::DeveloperMode >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::GuestNotification*
 Arena::CreateMaybeMessage< ::dsa::control::v1::GuestNotification >(Arena* arena) {

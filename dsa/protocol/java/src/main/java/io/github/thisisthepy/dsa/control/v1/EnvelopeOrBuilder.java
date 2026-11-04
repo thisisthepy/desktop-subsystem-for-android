@@ -349,12 +349,12 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.PowerHint getPowerHint();
 
   /**
-   * <code>.dsa.control.v1.DeveloperMode developer_mode = 120;</code>
+   * <code>.dsa.control.v1.DeveloperMode developer_mode = 140;</code>
    * @return Whether the developerMode field is set.
    */
   boolean hasDeveloperMode();
   /**
-   * <code>.dsa.control.v1.DeveloperMode developer_mode = 120;</code>
+   * <code>.dsa.control.v1.DeveloperMode developer_mode = 140;</code>
    * @return The developerMode.
    */
   io.github.thisisthepy.dsa.control.v1.DeveloperMode getDeveloperMode();
