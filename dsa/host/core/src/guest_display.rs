@@ -36,6 +36,15 @@ pub fn display_for(monitors: &[(u32, u32)]) -> Option<(u32, u32)> {
     Some((side, side))
 }
 
+/// The display when the monitors may be unknown: [`display_for`] the ones there are, and
+/// otherwise the smallest square. The image's own default is a landscape 1920 by 1080, which
+/// would cap every window's height at 1080 pixels, so it is never left in place.
+pub fn display_or_smallest(monitors: Option<&[(u32, u32)]>) -> (u32, u32) {
+    monitors
+        .and_then(display_for)
+        .unwrap_or((MIN_SIDE, MIN_SIDE))
+}
+
 /// `cmdline` with the display set to `size`. An appended value would lose to the image's
 /// earlier one, so the image's are removed.
 pub fn with_display_size(cmdline: &str, size: (u32, u32)) -> String {
@@ -92,6 +101,13 @@ mod tests {
     fn fr4_the_display_is_never_below_1920_or_above_3840() {
         assert_eq!(display_for(&[(1280, 720)]), Some((1920, 1920)));
         assert_eq!(display_for(&[(7680, 4320)]), Some((3840, 3840)));
+    }
+
+    #[test]
+    fn fr4_without_known_monitors_the_display_is_still_square_so_height_is_not_capped_at_1080() {
+        assert_eq!(display_or_smallest(None), (1920, 1920));
+        assert_eq!(display_or_smallest(Some(&[])), (1920, 1920));
+        assert_eq!(display_or_smallest(Some(&[(2560, 1440)])), (2560, 2560));
     }
 
     #[test]

@@ -29,10 +29,10 @@ fn main() -> std::process::ExitCode {
     };
     use dsa_host_windows::compositor::current_session;
     use dsa_host_windows::compositor::hosts::pipe_name;
-    use dsa_host_windows::compositor::log::{default_log_dir, note, CompositorLogger};
+    use dsa_host_windows::compositor::log::{default_app_window_log_file, note, CompositorLogger};
     use dsa_host_windows::pipe::{NamedPipeConnector, SameUserPipeConnector};
 
-    let logger = CompositorLogger::open(default_log_dir().join("dsa-app-window.log"))
+    let logger = CompositorLogger::open(default_app_window_log_file())
         .ok()
         .map(Arc::new);
     // Its windows show frames and take touches whether or not one has the focus.

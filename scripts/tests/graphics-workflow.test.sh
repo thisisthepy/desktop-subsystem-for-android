@@ -21,3 +21,7 @@ grep -Fq 'host-gfxstream-windows' "$workflow"
 grep -Fq 'gfxstream_backend.dll' "$workflow"
 grep -Fq 'nfr5_unknown_vulkan_image_is_rejected_without_reaching_the_driver' "$workflow"
 grep -Fq 'dsa/graphics/tests/test.sh' "$workflow"
+# The Vulkan CTS subset stays valid and the test apps the PC checks use are built.
+grep -Fq 'verify.py check-subset' "$workflow"
+grep -Fq 'dsa/graphics/verify/build-test-apps.sh' "$workflow"
+grep -Fq 'name: graphics-test-apps' "$workflow"

@@ -12,8 +12,12 @@
 //! - [`guid`]: the VM and service IDs those sockets are addressed by.
 //! - [`vm_listener`]: a control channel listener that follows the VM's ID across restarts.
 //! - [`host_config`]: the configuration file `dsa-hostd` reads.
+//! - [`paths`]: where every file DSA makes at run time goes, in the machine's and each user's
+//!   DSA folder, and moving files from where earlier releases kept them.
 //! - [`monitors`]: the record of the user's monitors the guest display is sized from.
 //! - [`power`]: the computer's power, which each guest's battery state follows.
+//! - [`guest_performance`]: how hard Windows runs the guest's processors, as the guest's power
+//!   hints ask (the applying part on Windows only).
 //! - [`host_memory`]: the host's memory for each user's Android: its VM and its window
 //!   processes (the measuring part on Windows only).
 //! - [`service`]: the local API and one VM per user behind it, as `dsa-hostd` serves them
@@ -24,6 +28,7 @@
 //! - [`scm`]: running under the Service Control Manager (Windows only).
 //! - [`uninstall`]: what uninstalling needs from `dsa-hostd`.
 //! - [`user_disk`]: each user's Android disk (Windows only).
+//! - [`user_registry`]: removing the keys DSA wrote in each user's classes (Windows only).
 //! - [`account`]: the Windows account the host runs as (Windows only).
 //! - [`render_gpu`]: which GPU the host renderer runs on, and the setting that chooses it.
 //! - [`window_manager`]: starting a user's window manager in their session (Windows only).
@@ -60,6 +65,7 @@ pub mod console_pipe;
 pub mod gpt;
 #[cfg(windows)]
 pub mod guest_communication_services;
+pub mod guest_performance;
 pub mod guid;
 #[cfg(windows)]
 pub mod hcs;
@@ -70,6 +76,7 @@ pub mod https;
 #[cfg(windows)]
 pub mod hvsocket;
 pub mod monitors;
+pub mod paths;
 #[cfg(windows)]
 pub mod pipe;
 pub mod power;
@@ -89,6 +96,8 @@ pub mod ui_automation;
 pub mod uninstall;
 #[cfg(windows)]
 pub mod user_disk;
+#[cfg(windows)]
+pub mod user_registry;
 pub mod vm;
 pub mod vm_listener;
 #[cfg(windows)]

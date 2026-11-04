@@ -10,8 +10,12 @@ namespace Dsa.Settings;
 internal static class Shell
 {
     /// <summary>This user's DSA logs: the window manager's and the app windows'.</summary>
-    public static string UserLogFolder => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DSA", "logs");
+    public static string UserLogFolder => Dsa.Settings.Core.StoragePaths.UserLogs;
+
+    /// <summary>The service's and Android's logs: the folder the service reports, or the
+    /// machine's DSA folder's when it has not answered.</summary>
+    public static string ServiceLogFolder(string? reported) =>
+        Dsa.Settings.Core.StoragePaths.MachineLogs(reported, App.DataFolder);
 
     public static string LicenseFolder => Path.Combine(App.InstallFolder, "licenses");
 

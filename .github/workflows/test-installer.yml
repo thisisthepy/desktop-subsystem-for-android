@@ -615,6 +615,14 @@ jobs:
 
       - name: Uninstall
         run: |
+          $userRoot = "$env:LOCALAPPDATA\DSA"
+          $hadDisk = Test-Path "$userRoot\android.vhdx"
+          # Files the window manager and the app windows make in the user's folder, which
+          # uninstalling must remove along with the rest.
+          New-Item -ItemType Directory -Force "$userRoot\logs", "$userRoot\apps\org.example", "$userRoot\notifications" | Out-Null
+          Set-Content "$userRoot\logs\dsa-wm.log" 'log'
+          Set-Content "$userRoot\monitors.txt" '1920x1080'
+          Set-Content "$userRoot\compositor.json" '{}'
           $p = Start-Process 'dsa\target\installer\setup-0.0.10.exe' -Wait -PassThru -ArgumentList '/uninstall', '/quiet', '/log', 'uninstall.log'
           if ($p.ExitCode -ne 0) { Get-ChildItem uninstall*.log | ForEach-Object { Get-Content $_ -Tail 80 }; throw "uninstall failed ($($p.ExitCode))" }
           if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
@@ -624,7 +632,14 @@ jobs:
           if (Test-Path "$env:PROGRAM_DIR\licenses") { throw "the licence folder is still there" }
           if (Test-Path "$env:DATA_DIR\images") { throw "the downloaded images are still there" }
           if (Test-Path "$env:DATA_DIR\updates") { throw "the downloaded setup files are still there" }
-          if (-not (Test-Path "$env:LOCALAPPDATA\DSA")) { throw "each user's Android folder must stay" }
+          foreach ($made in 'settings', 'logs', 'tmp') {
+            if (Test-Path "$env:DATA_DIR\$made") { throw "the service's $made folder is still there" }
+          }
+          # fr19: everything DSA made in the user's folder goes but the Android disk.
+          if ($hadDisk -and -not (Test-Path "$userRoot\android.vhdx")) { throw "the user's Android disk was removed" }
+          $left = Get-ChildItem $userRoot -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notin 'android.vhdx', 'android.image-version' }
+          if ($left) { throw "uninstalling left in the user's folder: $($left.Name -join ', ')" }
           $wslconfig = "$env:USERPROFILE\.wslconfig"
           $currentHash = (Get-FileHash -Path $wslconfig -Algorithm SHA256).Hash
           if ($currentHash -ne $env:INITIAL_WSLCONFIG_HASH) { throw ".wslconfig was modified during uninstall" }

@@ -15,6 +15,7 @@
 //! - [`input`]: pointer input in a task's window, as the guest task receives it.
 //! - [`keys`]: key input in a task's window.
 //! - [`power`]: the host computer's power, which each guest's battery state follows.
+//! - [`power_hints`]: the guest's power hints, and how hard the host runs its processors.
 //! - [`links`]: web links apps in the guest open, which the host opens in its browser.
 //! - [`apk_info`]: what an APK on the host says about itself (its name, icon, version,
 //!   permissions and signer), read from the file before Android sees it.
@@ -50,6 +51,7 @@ pub mod links;
 pub mod memory;
 pub mod notifications;
 pub mod power;
+pub mod power_hints;
 pub mod resize_trace;
 pub mod session;
 pub mod settings;

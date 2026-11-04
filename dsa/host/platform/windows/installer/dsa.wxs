@@ -6,9 +6,16 @@
   command on the system PATH, the DSA Window Manager (dsa-wm, started at each sign-in) and
   the app window host it makes each app's window program from, the service's configuration, the guest kernel and, when the
   build has one, the first Android image. Uninstalling removes all of that, the Android
-  images the service downloaded since, and the setup files it downloaded to update DSA.
-  Each user's Android disk is in their own profile (%LOCALAPPDATA%\DSA), so it is not
-  part of the package and stays. The settings app (DSA Settings) goes in the program folder's
+  images the service downloaded since, the setup files it downloaded to update DSA, the
+  service's settings, logs and tmp folder, and in every user's profile the files, shortcuts
+  and registry keys DSA made there. Each user's Android disk is in their own profile
+  (%LOCALAPPDATA%\DSA\android.vhdx), so it is not part of the package and stays.
+
+  The files follow one layout. The machine's folder (DATAFOLDER, %ProgramData%\DSA by
+  default): dsa-hostd.json, images\, updates\, settings\, logs\, tmp\. Each user's
+  %LOCALAPPDATA%\DSA: android.vhdx, apps\, notifications\, logs\, compositor.json,
+  monitors.txt, start-menu.json, tmp\. The Windows host's paths module (src\paths.rs) is
+  the one place that builds them. The settings app (DSA Settings) goes in the program folder's
   settings folder, with a Start menu shortcut.
 
   INSTALLFOLDER (the program) and DATAFOLDER (configuration, logs and images) can be set
@@ -352,17 +359,29 @@
                       Execute="deferred"
                       Impersonate="no"
                       Return="ignore" />
-        <!-- The window manager made a Start menu shortcut for each Android app in each user's
-             profile; they would open nothing once DSA is gone. Only the ones it recorded
-             making are removed. -->
-        <CustomAction Id="RemoveStartMenu"
+        <!-- The service's settings, logs and tmp folder in DATAFOLDER are not files of this
+             package either. A users folder, where the first releases kept each user's Android
+             disk, stays if a disk could not be moved out of it. -->
+        <CustomAction Id="RemoveMachineData"
                       FileRef="HostdExe"
-                      ExeCommand="remove-start-menu"
+                      ExeCommand="remove-machine-data &quot;[DATAFOLDER]&quot;"
+                      Execute="deferred"
+                      Impersonate="no"
+                      Return="ignore" />
+        <!-- In each user's profile the window manager made a Start menu shortcut for each
+             Android app (only the ones it recorded making are removed), the files in
+             %LOCALAPPDATA%\DSA (app window programs, notification icons, logs, its notes),
+             and the notification keys in the user's classes. All of it goes, for every user,
+             signed in or not; each user's Android disk (android.vhdx) stays. -->
+        <CustomAction Id="RemoveUserData"
+                      FileRef="HostdExe"
+                      ExeCommand="remove-user-data"
                       Execute="deferred"
                       Impersonate="no"
                       Return="ignore" />
         <InstallExecuteSequence>
-            <Custom Action="RemoveStartMenu" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+            <Custom Action="RemoveUserData" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+            <Custom Action="RemoveMachineData" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
             <Custom Action="RemoveImages" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
             <Custom Action="RemoveUpdates" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
         </InstallExecuteSequence>

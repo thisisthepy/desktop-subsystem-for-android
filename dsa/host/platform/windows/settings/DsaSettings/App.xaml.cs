@@ -36,4 +36,24 @@ public partial class App : Application
     /// <summary>The folder DSA is installed in: the settings app's folder is inside it.</summary>
     internal static string InstallFolder =>
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, ".."));
+
+    /// <summary>The machine's DSA folder the installer recorded, or null when it recorded
+    /// none.</summary>
+    internal static string? DataFolder
+    {
+        get
+        {
+            try
+            {
+                using var key = Microsoft.Win32.RegistryKey
+                    .OpenBaseKey(Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry64)
+                    .OpenSubKey(@"SOFTWARE\thisisthepy\DSA");
+                return (key?.GetValue("DataFolder") as string)?.TrimEnd('\\');
+            }
+            catch (Exception e) when (e is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+            {
+                return null;
+            }
+        }
+    }
 }

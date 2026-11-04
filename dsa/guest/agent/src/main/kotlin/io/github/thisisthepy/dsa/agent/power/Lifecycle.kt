@@ -87,8 +87,11 @@ class Lifecycle(
                 charging = state.charging,
             )
         } else {
-            // A host without a battery: a full battery on AC power.
-            Battery(acOnline = true, present = false, percent = 100, charging = false)
+            // A host without a battery runs on mains power, so the guest is a full battery
+            // plugged into AC. Jobs that wait for charging (background dexopt among them) then
+            // run, as they would on a phone left on its charger; a battery that is not there
+            // would leave the battery service's status unknown instead.
+            Battery(acOnline = true, present = true, percent = 100, charging = false)
         }
         attempt("setting the battery state") { power.setBattery(battery) }
         attempt("setting battery saver") { power.setPowerSaver(state.powerSaver) }

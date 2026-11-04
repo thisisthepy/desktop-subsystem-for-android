@@ -2,6 +2,7 @@
 
 import base64
 import gzip
+import hashlib
 import importlib.util
 import io
 import json
@@ -12,6 +13,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+import zlib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -944,6 +946,79 @@ class ImageLayoutTests(unittest.TestCase):
                         archive.read(contexts).decode(),
                     )
 
+    def test_pr4_dsa_power_and_health_hals_replace_cuttlefishs(self):
+        # The host serves the guest's power hints and its battery; Cuttlefish's example power
+        # HAL and its made-up battery go, so nothing else serves those HALs.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            hal = root / "power"
+            hal.mkdir()
+            (hal / "dsa-power").write_bytes(b"\x7fELF power")
+            (hal / "dsa-health").write_bytes(b"\x7fELF health")
+            channeld = root / "dsa-channeld"
+            channeld.write_bytes(b"\x7fELF channeld")
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+                archive.writestr("VENDOR/apex/com.android.hardware.power.apex", b"apex")
+                archive.writestr("VENDOR/apex/com.google.cf.health.apex", b"apex")
+                archive.writestr("VENDOR/apex/com.android.hardware.gatekeeper.nonsecure.apex", b"apex")
+                archive.writestr(
+                    "META/apexkeys.txt",
+                    'name="com.android.hardware.power.apex" public_key="a"\n'
+                    'name="com.google.cf.health.apex" public_key="b"\n'
+                    'name="com.android.hardware.gatekeeper.nonsecure.apex" public_key="c"\n',
+                )
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+                archive.writestr("VENDOR/etc/selinux/vendor_file_contexts", "/vendor/bin/sh u:object_r:vendor_shell_exec:s0\n")
+
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, channeld=channeld, power_hal=hal)
+
+            with zipfile.ZipFile(modified) as archive:
+                names = archive.namelist()
+                self.assertNotIn("VENDOR/apex/com.android.hardware.power.apex", names)
+                self.assertNotIn("VENDOR/apex/com.google.cf.health.apex", names)
+                self.assertIn("VENDOR/apex/com.android.hardware.gatekeeper.nonsecure.apex", names)
+                apexkeys = archive.read("META/apexkeys.txt").decode()
+                self.assertNotIn("hardware.power", apexkeys)
+                self.assertNotIn("cf.health", apexkeys)
+                self.assertIn("gatekeeper", apexkeys)
+                self.assertEqual(archive.read("VENDOR/bin/hw/dsa-power"), b"\x7fELF power")
+                self.assertEqual(archive.read("VENDOR/bin/hw/dsa-health"), b"\x7fELF health")
+                self.assertIn("service vendor.dsa-power /vendor/bin/hw/dsa-power",
+                              archive.read("VENDOR/etc/init/dsa-power.rc").decode())
+                self.assertIn("service vendor.dsa-health /vendor/bin/hw/dsa-health",
+                              archive.read("VENDOR/etc/init/dsa-health.rc").decode())
+                power = archive.read("VENDOR/etc/vintf/manifest/dsa-power.xml").decode()
+                self.assertIn("<name>android.hardware.power</name>", power)
+                self.assertIn("<version>5</version>", power)
+                self.assertIn("<fqname>IPower/default</fqname>", power)
+                health = archive.read("VENDOR/etc/vintf/manifest/dsa-health.xml").decode()
+                self.assertIn("<name>android.hardware.health</name>", health)
+                self.assertIn("<version>3</version>", health)
+                self.assertIn("<fqname>IHealth/default</fqname>", health)
+                fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
+                self.assertIn("vendor/bin/hw/dsa-power 0 2000 755 capabilities=0x0", fs_config)
+                self.assertIn("vendor/bin/hw/dsa-health 0 2000 755 capabilities=0x0", fs_config)
+                self.assertIn("vendor/etc/init/dsa-power.rc 0 0 644 capabilities=0x0", fs_config)
+                self.assertIn("vendor/etc/vintf/manifest/dsa-health.xml 0 0 644 capabilities=0x0", fs_config)
+                contexts = archive.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
+                self.assertIn("/vendor/bin/hw/dsa-power u:object_r:hal_power_default_exec:s0", contexts)
+                self.assertIn("/vendor/bin/hw/dsa-health u:object_r:hal_health_default_exec:s0", contexts)
+                policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+                self.assertIn("(allow hal_power_server dsa_channel_service (service_manager (find)))", policy)
+                self.assertIn("(allow dsa_channeld hal_health_server (binder (call transfer)))", policy)
+
+    def test_pr4_the_power_hals_need_the_channel_daemon(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+            with self.assertRaises(ValueError):
+                make_image.modify(source, root / "modified.zip", power_hal=root)
+
     def test_fr3_without_the_dsa_hwcomposer_the_cuttlefish_composer_stays(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1125,6 +1200,9 @@ class ImageLayoutTests(unittest.TestCase):
             self.assertNotIn("privapp-permissions-dsa-agent.xml is missing", proc.stdout)
             # Without DSA's composer no task window ever gets a frame.
             self.assertIn("VENDOR/bin/hw/dsa-hwcomposer is missing", proc.stdout)
+            # Without DSA's power and health HALs the host never hears the guest's power hints.
+            self.assertIn("VENDOR/bin/hw/dsa-power is missing", proc.stdout)
+            self.assertIn("VENDOR/bin/hw/dsa-health is missing", proc.stdout)
             self.assertIn("androidboot.dsa.display_width", proc.stdout)
 
     def test_fr3_check_image_rejects_the_wifi_trace_setup(self):
@@ -1585,6 +1663,235 @@ class SettingsWithoutBluetoothTests(unittest.TestCase):
     def test_fr1_compiled_xml_that_is_not_xml_is_refused(self):
         with self.assertRaises(ValueError):
             make_image.remove_xml_elements(b"\x02\x00\x0c\x00" + b"\0" * 8, "controller", {MEDIA_OUTPUT})
+
+    def test_fr1_the_connected_devices_screen_opens_without_the_bluetooth_adapter(self):
+        # Settings died opening Connected devices: isAudioSharingSupported called
+        # isLeAudioBroadcastSourceSupported on the null default adapter.
+        self.assertEqual(make_image.SETTINGS_CODE_WITHOUT_BLUETOOTH[AUDIO_SHARING_SUPPORTED],
+                         ("return false", None))
+        dex = settings_dex()
+        apk = self.modified_settings({"classes2.dex": dex})
+        with zipfile.ZipFile(io.BytesIO(apk)) as archive:
+            edited = archive.read("classes2.dex")
+        code = dex_code(edited, AUDIO_SHARING_SUPPORTED)
+        # const/4 v0, 0; return v0, then the call and its move-result as no-ops.
+        self.assertEqual(code[:8], bytes.fromhex("12000f0000000000"))
+        self.assertEqual(code[8:], dex_code(dex, AUDIO_SHARING_SUPPORTED)[8:])
+        self.assert_dex_is_sealed(edited)
+        self.assertEqual(make_image.edit_dex(edited, make_image.SETTINGS_CODE_WITHOUT_BLUETOOTH)[1], [])
+
+    def test_fr1_the_accessibility_screen_opens_without_the_bluetooth_adapter(self):
+        # The hearing aid controller cannot be made without Bluetooth, so the fragment's
+        # use() returns null and onAttach called setFragmentManager on it.
+        self.assertEqual(
+            make_image.SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH["res/xml/accessibility_settings.xml"],
+            [HEARING_AID],
+        )
+        self.assertEqual(make_image.SETTINGS_CODE_WITHOUT_BLUETOOTH[ACCESSIBILITY_ON_ATTACH],
+                         ("skip call", SET_FRAGMENT_MANAGER))
+        dex = settings_dex()
+        apk = self.modified_settings({
+            "classes3.dex": dex,
+            "res/xml/accessibility_settings.xml": compiled_xml(ACCESSIBILITY_SCREEN),
+        })
+        with zipfile.ZipFile(io.BytesIO(apk)) as archive:
+            edited = archive.read("classes3.dex")
+            screen = archive.read("res/xml/accessibility_settings.xml")
+        original = dex_code(dex, ACCESSIBILITY_ON_ATTACH)
+        code = dex_code(edited, ACCESSIBILITY_ON_ATTACH)
+        # Only the setFragmentManager call (three code units, from unit 13) is gone.
+        self.assertEqual(code[:26], original[:26])
+        self.assertEqual(code[26:32], bytes(6))
+        self.assertEqual(code[32:], original[32:])
+        self.assert_dex_is_sealed(edited)
+        self.assertEqual(elements(screen), [
+            ("PreferenceScreen", "accessibility_settings_screen"),
+            ("PreferenceCategory", "audio_category"),
+            ("Preference", "flash_notifications_preference_accessibility"),
+        ])
+
+    def test_fr1_a_dex_edit_that_would_break_the_method_is_refused(self):
+        dex = settings_dex()
+        with self.assertRaises(ValueError):
+            make_image.edit_dex(dex, {ACCESSIBILITY_ON_ATTACH: ("return false", None)})
+        with self.assertRaises(ValueError):
+            make_image.edit_dex(dex, {ACCESSIBILITY_ON_ATTACH: ("skip call", FRAGMENT_USE)})
+
+    def test_fr1_check_image_rejects_settings_code_that_needs_bluetooth(self):
+        check_script = Path(__file__).with_name("check-image.py")
+        settings = self.apk({"classes2.dex": settings_dex()})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_dir = root / "image"
+            img_dir.mkdir()
+            keys_dir = root / "keys"
+            keys_dir.mkdir()
+            (img_dir / "image.json").write_text(json.dumps({"files": {}, "kernel_cmdline": ""}))
+            (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
+            outputs = []
+            for apk in [settings, make_image.edit_settings_apk(settings, "Settings.apk")]:
+                with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                    archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
+                    archive.writestr("META/apkcerts.txt", "")
+                    archive.writestr("SYSTEM_EXT/priv-app/Settings/Settings.apk", apk)
+                outputs.append(subprocess.run(
+                    [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                    capture_output=True,
+                    text=True,
+                ).stdout)
+        self.assertIn("crashes Settings without the Bluetooth adapter", outputs[0])
+        self.assertIn(AUDIO_SHARING_SUPPORTED, outputs[0])
+        self.assertIn(ACCESSIBILITY_ON_ATTACH, outputs[0])
+        self.assertNotIn("crashes Settings", outputs[1])
+
+    def assert_dex_is_sealed(self, dex):
+        self.assertEqual(dex[12:32], hashlib.sha1(dex[32:]).digest())
+        self.assertEqual(struct.unpack_from("<I", dex, 8)[0], zlib.adler32(dex[12:]))
+
+
+HEARING_AID = "com.android.settings.accessibility.AccessibilityHearingAidPreferenceController"
+AUDIO_SHARING_SUPPORTED = "Lcom/android/settingslib/bluetooth/BluetoothUtils;->isAudioSharingSupported"
+ACCESSIBILITY_ON_ATTACH = "Lcom/android/settings/accessibility/AccessibilitySettings;->onAttach"
+SET_FRAGMENT_MANAGER = ("Lcom/android/settings/accessibility/AccessibilityHearingAidPreferenceController;"
+                        "->setFragmentManager")
+FRAGMENT_USE = "Lcom/android/settings/dashboard/DashboardFragment;->use"
+
+# The part of Android 16's accessibility screen that matters here: the hearing devices entry,
+# beside a preference in its category that stays.
+ACCESSIBILITY_SCREEN = preference("PreferenceScreen", "accessibility_settings_screen", children=[
+    preference("PreferenceCategory", "audio_category", children=[
+        preference("Preference", "flash_notifications_preference_accessibility",
+                   "com.android.settings.accessibility.FlashNotificationsPreferenceController"),
+        preference("Preference", "hearing_aid_preference", HEARING_AID),
+    ]),
+])
+
+
+def uleb128(value):
+    out = b""
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        if value:
+            out += bytes([byte | 0x80])
+        else:
+            return out + bytes([byte])
+
+
+def dex_file(methods, code):
+    """A dex file with the methods [(class, name, shorty)] it refers to, and the code
+    {method index: (registers, instructions)} of those it defines, laid out as d8 lays it out:
+    the header, the id tables, then the data."""
+    strings, types, protos = [], [], []
+
+    def string(text):
+        if text not in strings:
+            strings.append(text)
+        return strings.index(text)
+
+    def type_(descriptor):
+        string(descriptor)
+        if descriptor not in types:
+            types.append(descriptor)
+        return types.index(descriptor)
+
+    def proto(shorty):
+        string(shorty)
+        type_(shorty[0])
+        if shorty not in protos:
+            protos.append(shorty)
+        return protos.index(shorty)
+
+    method_ids = [(type_(cls), proto(shorty), string(name)) for cls, name, shorty in methods]
+    classes = {}
+    for index in sorted(code):
+        classes.setdefault(method_ids[index][0], []).append(index)
+
+    string_off = 0x70
+    type_off = string_off + 4 * len(strings)
+    proto_off = type_off + 4 * len(types)
+    method_off = proto_off + 12 * len(protos)
+    class_off = method_off + 8 * len(method_ids)
+    data_off = class_off + 32 * len(classes)
+
+    data = b""
+    string_data = []
+    for text in strings:
+        string_data.append(data_off + len(data))
+        data += uleb128(len(text)) + text.encode() + b"\0"
+    data += b"\0" * (-len(data) % 4)
+    code_offs = {}
+    for index, (registers, instructions) in sorted(code.items()):
+        code_offs[index] = data_off + len(data)
+        data += struct.pack("<HHHHII", registers, 0, 2, 0, 0, len(instructions) // 2) + instructions
+        data += b"\0" * (-len(data) % 4)
+    class_data = {}
+    for cls, indices in classes.items():
+        class_data[cls] = data_off + len(data)
+        data += uleb128(0) + uleb128(0) + uleb128(len(indices)) + uleb128(0)
+        previous = 0
+        for index in indices:
+            data += uleb128(index - previous) + uleb128(0x9) + uleb128(code_offs[index])
+            previous = index
+
+    tables = b"".join(struct.pack("<I", offset) for offset in string_data)
+    tables += b"".join(struct.pack("<I", strings.index(t)) for t in types)
+    tables += b"".join(struct.pack("<III", strings.index(s), types.index(s[0]), 0) for s in protos)
+    tables += b"".join(struct.pack("<HHI", *ids) for ids in method_ids)
+    tables += b"".join(struct.pack("<8I", cls, 1, 0xFFFFFFFF, 0, 0xFFFFFFFF, 0, class_data[cls], 0)
+                       for cls in classes)
+    size = data_off + len(data)
+    header = struct.pack("<8sI20s20I", b"dex\n035\0", 0, bytes(20), size, 0x70, 0x12345678, 0, 0, 0,
+                         len(strings), string_off, len(types), type_off, len(protos), proto_off,
+                         0, 0, len(method_ids), method_off, len(classes), class_off,
+                         len(data), data_off)
+    dex = bytearray(header + tables + data)
+    dex[12:32] = hashlib.sha1(bytes(dex[32:])).digest()
+    dex[8:12] = struct.pack("<I", zlib.adler32(bytes(dex[12:])))
+    return bytes(dex)
+
+
+def settings_dex():
+    """The two methods of Android 16's Settings.apk that dereference the missing adapter, as
+    d8 compiled them, cut down to the instructions that matter."""
+    methods = [
+        ("Lcom/android/settingslib/bluetooth/BluetoothUtils;", "isAudioSharingSupported", "Z"),
+        ("Landroid/bluetooth/BluetoothAdapter;", "getDefaultAdapter", "L"),
+        ("Landroid/bluetooth/BluetoothAdapter;", "isLeAudioBroadcastSourceSupported", "I"),
+        ("Lcom/android/settings/accessibility/AccessibilitySettings;", "onAttach", "VL"),
+        ("Lcom/android/settings/dashboard/DashboardFragment;", "onAttach", "VL"),
+        ("Lcom/android/settings/dashboard/DashboardFragment;", "use", "LL"),
+        ("Landroidx/fragment/app/Fragment;", "getFragmentManager", "L"),
+        ("Lcom/android/settings/accessibility/AccessibilityHearingAidPreferenceController;",
+         "setFragmentManager", "VL"),
+    ]
+    audio_sharing_supported = bytes.fromhex(
+        "71000100 0000"  # invoke-static {}, BluetoothAdapter.getDefaultAdapter
+        "0c00"  # move-result-object v0
+        "1201"  # const/4 v1, 0
+        "6e100200 0000"  # invoke-virtual {v0}, isLeAudioBroadcastSourceSupported
+        "0a02"  # move-result v2
+        "0f02"  # return v2
+    )
+    on_attach = bytes.fromhex(
+        "6f200400 1000"  # invoke-super {v0, v1}, DashboardFragment.onAttach
+        "1c010000"  # const-class v1, AccessibilityHearingAidPreferenceController
+        "6e200500 1000"  # invoke-virtual {v0, v1}, use
+        "0c01"  # move-result-object v1
+        "6e100600 0000"  # invoke-virtual {v0}, getFragmentManager
+        "0c00"  # move-result-object v0
+        "6e200700 0100"  # invoke-virtual {v1, v0}, setFragmentManager
+        "0e00"  # return-void
+    )
+    return dex_file(methods, {0: (3, audio_sharing_supported), 3: (2, on_attach)})
+
+
+def dex_code(dex, method):
+    """The instructions of a method a dex file defines."""
+    defined, _ = make_image.dex_methods(dex)
+    (code_off, _), = defined[method]
+    count = struct.unpack_from("<I", dex, code_off + 12)[0]
+    return dex[code_off + 16:code_off + 16 + 2 * count]
 
 
 class TouchLatencyTests(unittest.TestCase):
