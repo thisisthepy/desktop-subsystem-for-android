@@ -114,6 +114,26 @@ public class ViewModelTests
     }
 
     [Fact]
+    public async Task Fr17_about_page_names_the_android_image_the_next_start_boots()
+    {
+        var cli = new FakeCli()
+            .Answer("settings --json", Settings.Replace("}", ",\"android_version\":\"17.0.0-16373615-7\"}"))
+            .Answer("gpus --json", "{\"gpus\":[]}");
+        var vm = new SettingsViewModel(new DsaService(cli), new KeyText());
+        await vm.LoadAsync();
+        Assert.True(vm.HasAndroidVersion);
+        Assert.Equal("17.0.0-16373615-7", vm.AndroidVersion);
+
+        // A service that does not know the image (or an older one) leaves the line empty.
+        var older = new SettingsViewModel(new DsaService(new FakeCli()
+            .Answer("settings --json", Settings)
+            .Answer("gpus --json", "{\"gpus\":[]}")), new KeyText());
+        await older.LoadAsync();
+        Assert.False(older.HasAndroidVersion);
+        Assert.Equal("", older.AndroidVersion);
+    }
+
+    [Fact]
     public async Task Fr17_settings_are_changed_through_the_service_only()
     {
         var cli = new FakeCli()

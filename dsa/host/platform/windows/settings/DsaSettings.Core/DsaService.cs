@@ -100,7 +100,8 @@ public sealed class DsaService
         String(json, "version"),
         OptionalString(json, "log_dir"),
         Bool(json, "clipboard", missing: true),
-        Bool(json, "links_in_android"));
+        Bool(json, "links_in_android"),
+        OptionalString(json, "android_version"));
 
     public async Task<SettingsInfo> SettingsAsync() =>
         ReadSettings(await RunJsonAsync("settings").ConfigureAwait(true));
