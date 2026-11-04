@@ -2004,6 +2004,37 @@ class TouchLatencyTests(unittest.TestCase):
             self.assertIn(missing, outputs[0])
             self.assertNotIn(missing, outputs[1])
 
+    def test_fr10_check_image_rejects_a_policy_that_leaves_wakeup_sources_unlabelled(self):
+        # The suspend service reads each wakeup source's statistics; unlabelled, every read
+        # is refused and logged, thousands of lines a boot.
+        check_script = Path(__file__).with_name("check-image.py")
+        labelled = (
+            '(genfscon sysfs "/devices/virtual/wakeup" (u object_r sysfs_wakeup ((s0) (s0))))\n'
+            '(genfscon sysfs "/class/wakeup" (u object_r sysfs_wakeup ((s0) (s0))))\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_dir = root / "image"
+            img_dir.mkdir()
+            keys_dir = root / "keys"
+            keys_dir.mkdir()
+            (img_dir / "image.json").write_text(json.dumps({"files": {}, "kernel_cmdline": ""}))
+            (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
+            outputs = []
+            for policy in ["", labelled]:
+                with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                    archive.writestr("META/apkcerts.txt", "")
+                    archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
+                    archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", policy)
+                outputs.append(subprocess.run(
+                    [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                    capture_output=True, text=True,
+                ).stdout)
+        for path in ["/devices/virtual/wakeup", "/class/wakeup"]:
+            missing = f"does not label sysfs {path} sysfs_wakeup"
+            self.assertIn(missing, outputs[0])
+            self.assertNotIn(missing, outputs[1])
+
 
 if __name__ == "__main__":
     unittest.main()

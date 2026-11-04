@@ -126,6 +126,14 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         plat_sepolicy = z.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
         if not re.search(r"\(allow\s+appdomain\s+self\s+\(\s*vsock_socket\s*\(.*connect", plat_sepolicy):
             problems.append("the SELinux policy does not allow appdomain to connect vsock_socket")
+        # The guest kernel puts every wakeup source under /sys/devices/virtual/wakeup. The
+        # suspend service may read them only there and through /sys/class/wakeup, as
+        # sysfs_wakeup; anywhere else they are plain sysfs and each read is refused.
+        for path in ["/devices/virtual/wakeup", "/class/wakeup"]:
+            if not re.search(r'\(genfscon\s+sysfs\s+"' + re.escape(path) + r'"\s+\(u\s+object_r\s+sysfs_wakeup\b',
+                             plat_sepolicy):
+                problems.append(f"the SELinux policy does not label sysfs {path} sysfs_wakeup, so the "
+                                "suspend service cannot read the wakeup sources")
 
     if "VENDOR/lib64/hw/vulkan.ranchu.so" not in names:
         problems.append("VENDOR/lib64/hw/vulkan.ranchu.so is missing from the image")

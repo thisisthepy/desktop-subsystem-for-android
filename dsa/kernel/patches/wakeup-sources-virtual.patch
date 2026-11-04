@@ -1,0 +1,18 @@
+diff --git a/drivers/base/power/wakeup_stats.c b/drivers/base/power/wakeup_stats.c
+--- a/drivers/base/power/wakeup_stats.c
++++ b/drivers/base/power/wakeup_stats.c
+@@ -150,7 +150,13 @@
+ 	device_initialize(dev);
+ 	dev->devt = MKDEV(0, 0);
+ 	dev->class = wakeup_class;
+-	dev->parent = parent;
++	/*
++	 * Every wakeup source sits under /sys/devices/virtual/wakeup, not below the
++	 * device that owns it. A Hyper-V guest's devices are named after VMBus instance
++	 * GUIDs and ACPI tables that change with the host, so no fixed SELinux label could
++	 * reach the statistics Android's suspend service reads under each one.
++	 */
++	dev->parent = NULL;
+ 	dev->groups = wakeup_source_groups;
+ 	dev->release = device_create_release;
+ 	dev_set_drvdata(dev, ws);
