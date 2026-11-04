@@ -618,6 +618,15 @@ fn fr3_dsa_launch_and_dsa_tasks_are_parsed() {
 }
 
 #[test]
+fn nfr2_dsa_stop_app_names_the_app_to_stop() {
+    let stop = parse(&args("stop-app com.example.music")).unwrap();
+    assert_eq!(stop.command, Cmd::StopApp);
+    assert_eq!(stop.package.as_deref(), Some("com.example.music"));
+    let missing = parse(&args("stop-app")).unwrap_err();
+    assert!(missing.contains("package"), "{missing}");
+}
+
+#[test]
 fn fr3_dsa_launch_asks_the_users_android_to_start_the_app() {
     use dsa_host_core::tasks::TaskRequest;
     let ((listener, _, user), endpoint) = local_pair();

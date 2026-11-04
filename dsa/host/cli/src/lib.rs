@@ -7,6 +7,7 @@
 //! dsa freeze
 //! dsa update [--wait]
 //! dsa launch <package>
+//! dsa stop-app <package>
 //! dsa install <file.apk> [--progress]
 //! dsa apk-info <file.apk>
 //! dsa open <file>
@@ -131,7 +132,7 @@ use dsa_host_core::widgets::{Widget, WidgetProvider};
 use dsa_transport::Connector;
 use serde_json::{json, Value};
 
-pub const USAGE: &str = "usage: dsa <status | start | stop | freeze | update | launch <package> | \
+pub const USAGE: &str = "usage: dsa <status | start | stop | freeze | update | launch <package> | stop-app <package> | \
      install <file.apk> [--progress] | apk-info <file.apk> | open <file> | share <file> | \
      tasks | settings [set <name> <value>] | memory | gpus | \
      widgets [list | add <provider> | remove <id>] | \
@@ -151,6 +152,7 @@ pub enum Command {
     Update,
     /// Start an app in a window of its own; the package is in [`Invocation::package`].
     Launch,
+    StopApp,
     /// Install an APK; the file is in [`Invocation::file`].
     Install,
     /// Say what an APK is, and what installing it would do; the file is in
@@ -346,9 +348,9 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             spec if command == Some(Command::Logcat) && !spec.starts_with('-') => {
                 tags.push(dsa_host_core::guest_log::LogFilter::parse_spec(spec)?);
             }
-            "status" | "start" | "stop" | "freeze" | "update" | "launch" | "install"
-            | "apk-info" | "open" | "share" | "tasks" | "settings" | "memory" | "gpus"
-            | "widgets"
+            "status" | "start" | "stop" | "freeze" | "update" | "launch" | "stop-app"
+            | "install" | "apk-info" | "open" | "share" | "tasks" | "settings" | "memory"
+            | "gpus" | "widgets"
                 if command.is_none() =>
             {
                 command = Some(match arg.as_str() {
@@ -357,6 +359,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                     "freeze" => Command::Freeze,
                     "update" => Command::Update,
                     "launch" => Command::Launch,
+                    "stop-app" => Command::StopApp,
                     "install" => Command::Install,
                     "apk-info" => Command::ApkInfo,
                     "open" => Command::Open,
@@ -406,7 +409,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             }
             "--json" => json = true,
             "--progress" if command == Some(Command::Install) => progress = true,
-            name if command == Some(Command::Launch)
+            name if matches!(command, Some(Command::Launch | Command::StopApp))
                 && package.is_none()
                 && !name.starts_with('-') =>
             {
@@ -479,6 +482,12 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         tags,
     };
     let log_filter = (command == Command::Logcat).then_some(filter);
+    if command == Command::StopApp && package.is_none() {
+        return Err(format!(
+            "dsa stop-app needs the package of the app to stop, such as com.example.music\n\
+             {USAGE}"
+        ));
+    }
     if command == Command::Launch && package.is_none() {
         return Err(format!(
             "dsa launch needs the package of the app to start, such as com.android.settings\n\
@@ -765,6 +774,18 @@ pub fn memory_json(memory: &MemorySnapshot) -> Value {
             "zram_original_kb": guest.zram_original_kb,
             "zram_used_kb": guest.zram_used_kb,
             "total_pss_kb": guest.total_pss_kb,
+            "kernel": {
+                "slab_unreclaimable_kb": guest.kernel.slab_unreclaimable_kb,
+                "kernel_stack_kb": guest.kernel.kernel_stack_kb,
+                "page_tables_kb": guest.kernel.page_tables_kb,
+                "vmalloc_used_kb": guest.kernel.vmalloc_used_kb,
+                "percpu_kb": guest.kernel.percpu_kb,
+                "cma_total_kb": guest.kernel.cma_total_kb,
+                "hugetlb_kb": guest.kernel.hugetlb_kb,
+                "mem_online_kb": guest.kernel.mem_online_kb,
+                "unaccounted_kb": guest.unaccounted_kb(),
+                "reserved_at_boot_kb": guest.reserved_at_boot_kb(),
+            },
             "age_seconds": report.age.as_secs(),
             "top_processes": guest.top_processes.iter().map(|p| json!({
                 "pid": p.pid,
@@ -1396,6 +1417,11 @@ pub fn run_with_starter(
             let package = invocation.package.as_deref().unwrap_or_default();
             client.launch_app(package).map_err(|e| e.to_string())?;
             return Ok(format!("Launching {package}"));
+        }
+        Command::StopApp => {
+            let package = invocation.package.as_deref().unwrap_or_default();
+            client.stop_app(package).map_err(|e| e.to_string())?;
+            return Ok(format!("Stopping {package} and giving its memory back"));
         }
         Command::Install => return install(invocation, client, connector),
         Command::Widgets => return widgets(invocation, client, connector),

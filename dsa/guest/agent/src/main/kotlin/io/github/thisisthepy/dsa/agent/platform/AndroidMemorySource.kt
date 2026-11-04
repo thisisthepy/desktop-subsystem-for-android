@@ -28,6 +28,15 @@ class AndroidMemorySource(context: Context) : MemorySource {
         }
     }
 
+    /** The online memory blocks times the block size, from sysfs; null when policy hides them. */
+    override fun memOnlineKb(): Long? {
+        val memory = File("/sys/devices/system/memory")
+        val blockBytes = File(memory, "block_size_bytes").readText().trim().toLong(16)
+        val online = memory.listFiles { file -> file.name.startsWith("memory") }.orEmpty()
+            .count { block -> runCatching { File(block, "online").readText().trim() == "1" }.getOrDefault(false) }
+        return if (online == 0) null else online * blockBytes / 1024
+    }
+
     override fun processes(): List<ProcessPss> {
         val running = activities.runningAppProcesses ?: return emptyList()
         if (running.isEmpty()) return emptyList()

@@ -221,8 +221,21 @@ mod daemon {
         };
         let start = std::time::Instant::now();
         let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+        let mut closed = router.apps_closed();
         loop {
-            thread::sleep(CHECK_INTERVAL);
+            let now_closed = router.wait_for_closed_app(closed, CHECK_INTERVAL);
+            if now_closed != closed {
+                closed = now_closed;
+                // An app's last window closed: the agent ends its processes, and what they
+                // held and the cache they read go back to the host now, not at the next look.
+                // The pause lets the processes die first.
+                thread::sleep(std::time::Duration::from_secs(2));
+                say!("an app closed: dropping its caches so its memory goes back to the host");
+                if let Err(why) = set_property(RECLAIM_PROPERTY, "1") {
+                    say!("could not ask init to reclaim: {why}");
+                }
+                continue;
+            }
             let memory = match std::fs::read_to_string("/proc/meminfo") {
                 Ok(text) => MemInfo::parse(&text),
                 Err(error) => {

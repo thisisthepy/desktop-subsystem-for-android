@@ -115,6 +115,14 @@ fn report() -> control::GuestMemory {
             pss_kb: 180 * MIB,
             swap_pss_kb: MIB,
         }],
+        slab_unreclaimable_kb: 60 * MIB,
+        kernel_stack_kb: 10 * MIB,
+        page_tables_kb: 20 * MIB,
+        vmalloc_used_kb: 30 * MIB,
+        percpu_kb: 2 * MIB,
+        cma_total_kb: 0,
+        hugetlb_kb: 0,
+        mem_online_kb: 4200 * MIB,
     }
 }
 
@@ -302,7 +310,10 @@ fn nfr1_the_report_dsa_memory_prints_names_every_part() {
         "page cache 900 MiB",
         "swap 100 of 2048 MiB used; zram holds 100 MiB in 30 MiB",
         "650 MiB PSS in all",
-        "kernel and everything else",
+        "kernel and everything else 358 MiB",
+        "unreclaimable slab 60, kernel stacks 10, page tables 20, vmalloc 30, per-CPU 2",
+        "zram store 30, unaccounted (drivers, GPU and DMA buffers) 206 MiB",
+        "reserved by the kernel at boot 104 MiB of 4200 MiB given",
         "system",
     ] {
         assert!(text.contains(part), "{part:?} missing from:\n{text}");

@@ -1190,6 +1190,8 @@ pub fn close_and_launch_reach_the_caller(make: MakeLocal<'_>) {
     client.start().unwrap();
     client.launch_app("com.example.clock").expect("the launch");
     client.close_task(9).expect("the close");
+    // The user's Stop for an app kept running in the background.
+    client.stop_app("com.example.music").expect("the stop");
     assert_eq!(
         *androids.of(&user).unwrap().requests.lock().unwrap(),
         vec![
@@ -1197,6 +1199,9 @@ pub fn close_and_launch_reach_the_caller(make: MakeLocal<'_>) {
                 package_name: "com.example.clock".into()
             },
             TaskRequest::Close { task_id: 9 },
+            TaskRequest::StopApp {
+                package_name: "com.example.music".into()
+            },
         ]
     );
 }

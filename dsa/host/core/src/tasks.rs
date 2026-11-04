@@ -146,6 +146,9 @@ pub enum TaskRequest {
     /// a while the guest's screen goes off and the guest goes into Doze; it wakes as soon as
     /// a window is shown again.
     WindowsShown { shown: bool },
+    /// End every process of the app and give its memory back to the host, even one kept
+    /// running by a widget or a foreground service: the user's Stop.
+    StopApp { package_name: String },
 }
 
 impl TaskRequest {
@@ -173,6 +176,9 @@ impl TaskRequest {
             TaskRequest::WindowsShown { shown: true } => "wake for a shown window".into(),
             TaskRequest::WindowsShown { shown: false } => {
                 "let the screen go off with no window shown".into()
+            }
+            TaskRequest::StopApp { package_name } => {
+                format!("stop {package_name} and give its memory back")
             }
         }
     }

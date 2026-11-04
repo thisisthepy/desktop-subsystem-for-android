@@ -179,6 +179,31 @@ fn fr3_a_listener_that_missed_a_frame_keeps_its_subscription() {
 }
 
 #[test]
+fn nfr2_the_last_task_of_an_app_ending_wakes_the_reclaim() {
+    let (router, _host) = router();
+    router.from_guest(AGENT, task_updated(7)).unwrap();
+    router.from_guest(AGENT, task_updated(8)).unwrap();
+    let seen = router.apps_closed();
+    router
+        .from_guest(AGENT, frame(Body::TaskRemoved(TaskRemoved { task_id: 8 })))
+        .unwrap();
+    // The app still has a task: nothing to give back yet.
+    assert_eq!(router.apps_closed(), seen);
+    router
+        .from_guest(AGENT, frame(Body::TaskRemoved(TaskRemoved { task_id: 7 })))
+        .unwrap();
+    assert_eq!(
+        router.wait_for_closed_app(seen, std::time::Duration::from_secs(5)),
+        seen + 1
+    );
+    // Without a new close, the wait times out with the count unchanged.
+    assert_eq!(
+        router.wait_for_closed_app(seen + 1, std::time::Duration::from_millis(10)),
+        seen + 1
+    );
+}
+
+#[test]
 fn fr3_a_late_listener_learns_the_tasks_already_there() {
     // A hwcomposer that restarts must still know each task's bounds; the agent sends them
     // only when they change.
