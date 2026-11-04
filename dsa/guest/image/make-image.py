@@ -722,16 +722,64 @@ def edit_settings_apk(data, name):
     return out.getvalue()
 
 
-def edit_props(text, codec2=False):
+# Properties the vendor and odm build.prop files may not set. init reads those two files as
+# vendor_init, and the platform's policy gives vendor_init no right to set these: each line
+# was refused, and logged as a denial, on every boot. The system build.prop sets them.
+VENDOR_FORBIDDEN_PROPS = {*USER_PROPS, "sys.use_memfd"}
+VENDOR_PROP_FILES = {"VENDOR/build.prop", "ODM/etc/build.prop"}
+
+# The build's own fingerprint is AOSP's, and it stays the same however often DSA's image
+# changes. PackageManager keys its parsed package cache, its compiled code and its upgrade
+# handling on the fingerprints of the partitions, so with the same fingerprint it went on
+# using what it had parsed from the agent the image had before: the input method's metadata
+# pointed at a resource the new agent had moved, the input method failed to load, and
+# permissions the new agent asks for were never granted. Each image adds a tag of its own
+# content to the incremental version, which every fingerprint carries, so a new image is an
+# upgrade, as an over-the-air update is.
+FINGERPRINT_KEY = re.compile(r"^ro\.(?:[a-z_]+\.)?build\.fingerprint$")
+INCREMENTAL_KEY = re.compile(r"^ro\.(?:[a-z_]+\.)?build\.version\.incremental$")
+
+
+def image_build_tag(payloads):
+    """Returns the tag that names one image's content: a digest of the files DSA adds to the
+    image and of the files in this folder that say how the image is made."""
+    h = hashlib.sha256()
+    for payload in payloads:
+        h.update(hashlib.sha256(payload or b"").digest())
+    for path in sorted(p for p in HERE.rglob("*") if p.is_file() and "__pycache__" not in p.parts):
+        h.update(path.relative_to(HERE).as_posix().encode() + b"\0")
+        h.update(hashlib.sha256(path.read_bytes()).digest())
+    return "dsa" + h.hexdigest()[:12]
+
+
+def tag_build_version(key, value, build_tag):
+    """Returns a build property's value with `build_tag` added to its incremental version."""
+    if INCREMENTAL_KEY.match(key):
+        return f"{value}.{build_tag}"
+    if FINGERPRINT_KEY.match(key) and ":" in value:
+        # brand/product/device:release/id/incremental:type/tags
+        head, tail = value.rsplit(":", 1)
+        return f"{head}.{build_tag}:{tail}"
+    return value
+
+
+def edit_props(text, codec2=False, vendor=False, build_tag=None):
+    """Returns a build.prop with DSA's properties. With `vendor`, it is one init reads as
+    vendor_init, which gets only the properties vendor_init may set. With `build_tag`, the
+    incremental version and the fingerprints carry it."""
     props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS, **FRP_PROPS,
                       **(CODEC2_PROPS if codec2 else {})}
+    if vendor:
+        props_to_apply = {k: v for k, v in props_to_apply.items() if k not in VENDOR_FORBIDDEN_PROPS}
     out = []
     for line in text.splitlines():
         key = line.split("=", 1)[0]
-        if key in props_to_apply:
+        if key in props_to_apply or (vendor and key in VENDOR_FORBIDDEN_PROPS):
             continue
         if key.endswith("build.type"):
             line = f"{key}=user"
+        if build_tag and "=" in line and not line.startswith("#"):
+            line = f"{key}={tag_build_version(key, line.split('=', 1)[1], build_tag)}"
         out.append(line)
     out += [f"{k}={v}" for k, v in props_to_apply.items()]
     return "\n".join(out) + "\n"
@@ -1068,6 +1116,7 @@ POWER_POLICY = HERE / "sepolicy/power.cil"
 CODEC2_POLICY = HERE / "sepolicy/codec2.cil"
 AGENT_POLICY = HERE / "sepolicy/agent.cil"
 MEMORY_POLICY = HERE / "sepolicy/memory.cil"
+KERNEL_POLICY = HERE / "sepolicy/kernel.cil"
 
 
 def narrow_vsock_neverallows(text):
@@ -1233,6 +1282,10 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             for name, source in CODEC2_FILES.items()
         }
     has_codec2 = codec2_payloads is not None
+    build_tag = image_build_tag([
+        graphics_payload, vulkan_payload, channeld_payload, agent_payload, hwcomposer_payload,
+        overlay_payload, *(power_payloads or {}).values(), *(codec2_payloads or {}).values(),
+    ])
     replaced_graphics_payload = False
     replaced_vulkan_payload = False
     kept_modules = re.compile(r"^(VENDOR_BOOT/RAMDISK|VENDOR_DLKM|SYSTEM_DLKM)/lib/modules/.*\.ko$")
@@ -1260,6 +1313,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             plat_patched = patch_plat_sepolicy(plat_orig, fragment_text)
             # The memory controls the vendor scripts write, and the reclaim property.
             plat_patched += "\n" + MEMORY_POLICY.read_text()
+            # The kernel thread whose devtmpfs nodes nothing uses.
+            plat_patched += "\n" + KERNEL_POLICY.read_text()
             if channeld_payload is not None:
                 # Its rules name the domain they declare, so they go in whole.
                 plat_patched += "\n" + CHANNELD_POLICY.read_text()
@@ -1342,7 +1397,9 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             else:
                 data = zin.read(name)
                 if name in PROP_FILES:
-                    data = edit_props(data.decode(), codec2=has_codec2).encode()
+                    data = edit_props(data.decode(), codec2=has_codec2,
+                                      vendor=name in VENDOR_PROP_FILES,
+                                      build_tag=build_tag).encode()
                 elif name == WIFI_RC:
                     data = edit_wifi_rc(data.decode()).encode()
                 elif name.endswith(SETTINGS_APK):
@@ -1638,7 +1695,10 @@ def kernel_cmdline(partition_cmdline, hwcomposer=False):
         ]
         apexes = VENDOR_APEX_BOOTCONFIG
     return " ".join([
-        "console=ttyS0", "printk.devkmsg=on", "audit=1", "panic=-1", "8250.nr_uarts=1",
+        # No audit=1, as on Android devices: SELinux denials reach logd's auditd without it.
+        # With it, the kernel also audited every iptables change and BPF program load with
+        # their syscall records, and overflowed its queue for auditd before logd started.
+        "console=ttyS0", "printk.devkmsg=on", "panic=-1", "8250.nr_uarts=1",
         "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init", partition_cmdline,
         "androidboot.boot_devices=vmbus", "androidboot.fstab_suffix=dsa",
         "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",

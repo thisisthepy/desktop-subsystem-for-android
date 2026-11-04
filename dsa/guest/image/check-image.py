@@ -266,6 +266,17 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         if f"{prop}={val}" not in props and f"{prop}={val}" not in vendor_props:
             problems.append(f"neither SYSTEM nor VENDOR build.prop sets {prop}={val}")
 
+    # init reads these as vendor_init, which may not set the user build's properties.
+    for name in sorted(make_image.VENDOR_PROP_FILES & set(names)):
+        for line in z.read(name).decode(errors="replace").splitlines():
+            if line.split("=", 1)[0] in make_image.VENDOR_FORBIDDEN_PROPS:
+                problems.append(f"{name} sets {line}, which vendor_init may not set")
+
+    # Without the image's own tag, PackageManager takes a new image for the one before it.
+    incremental = [l for l in props.splitlines() if l.startswith("ro.build.version.incremental=")]
+    if not incremental or not re.search(r"\.dsa[0-9a-f]{12}$", incremental[0]):
+        problems.append(f"the system build.prop has no image tag in {incremental or 'ro.build.version.incremental'}")
+
     # With a value, the loader would take Cuttlefish's APEX driver instead of the vendor
     # one. The APEX's init script sets it unless a build.prop has claimed it empty first.
     for name in sorted(n for n in names if n.endswith("build.prop") or n.endswith("prop.default")):
