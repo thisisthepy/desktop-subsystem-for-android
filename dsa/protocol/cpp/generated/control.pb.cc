@@ -368,6 +368,19 @@ struct PowerStateDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 PowerStateDefaultTypeInternal _PowerState_default_instance_;
+PROTOBUF_CONSTEXPR HostMemory::HostMemory(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.low_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct HostMemoryDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR HostMemoryDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~HostMemoryDefaultTypeInternal() {}
+  union {
+    HostMemory _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 HostMemoryDefaultTypeInternal _HostMemory_default_instance_;
 PROTOBUF_CONSTEXPR DeviceIdle::DeviceIdle(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.idle_)*/false
@@ -7576,6 +7589,186 @@ void PowerState::InternalSwap(PowerState* other) {
 
 std::string PowerState::GetTypeName() const {
   return "dsa.control.v1.PowerState";
+}
+
+
+// ===================================================================
+
+class HostMemory::_Internal {
+ public:
+};
+
+HostMemory::HostMemory(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.HostMemory)
+}
+HostMemory::HostMemory(const HostMemory& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  HostMemory* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.low_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _this->_impl_.low_ = from._impl_.low_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.HostMemory)
+}
+
+inline void HostMemory::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.low_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+HostMemory::~HostMemory() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.HostMemory)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void HostMemory::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void HostMemory::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void HostMemory::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.HostMemory)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.low_ = false;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* HostMemory::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // bool low = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.low_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* HostMemory::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.HostMemory)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // bool low = 1;
+  if (this->_internal_low() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(1, this->_internal_low(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.HostMemory)
+  return target;
+}
+
+size_t HostMemory::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.HostMemory)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // bool low = 1;
+  if (this->_internal_low() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void HostMemory::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const HostMemory*>(
+      &from));
+}
+
+void HostMemory::MergeFrom(const HostMemory& from) {
+  HostMemory* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.HostMemory)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_low() != 0) {
+    _this->_internal_set_low(from._internal_low());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void HostMemory::CopyFrom(const HostMemory& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.HostMemory)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool HostMemory::IsInitialized() const {
+  return true;
+}
+
+void HostMemory::InternalSwap(HostMemory* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_.low_, other->_impl_.low_);
+}
+
+std::string HostMemory::GetTypeName() const {
+  return "dsa.control.v1.HostMemory";
 }
 
 
@@ -18919,6 +19112,7 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::ScreenState& screen_state(const Envelope* msg);
   static const ::dsa::control::v1::PowerState& power_state(const Envelope* msg);
   static const ::dsa::control::v1::DeviceIdle& device_idle(const Envelope* msg);
+  static const ::dsa::control::v1::HostMemory& host_memory(const Envelope* msg);
   static const ::dsa::control::v1::InstallApk& install_apk(const Envelope* msg);
   static const ::dsa::control::v1::ApkChunk& apk_chunk(const Envelope* msg);
   static const ::dsa::control::v1::CancelInstall& cancel_install(const Envelope* msg);
@@ -19072,6 +19266,10 @@ Envelope::_Internal::power_state(const Envelope* msg) {
 const ::dsa::control::v1::DeviceIdle&
 Envelope::_Internal::device_idle(const Envelope* msg) {
   return *msg->_impl_.body_.device_idle_;
+}
+const ::dsa::control::v1::HostMemory&
+Envelope::_Internal::host_memory(const Envelope* msg) {
+  return *msg->_impl_.body_.host_memory_;
 }
 const ::dsa::control::v1::InstallApk&
 Envelope::_Internal::install_apk(const Envelope* msg) {
@@ -19649,6 +19847,21 @@ void Envelope::set_allocated_device_idle(::dsa::control::v1::DeviceIdle* device_
     _impl_.body_.device_idle_ = device_idle;
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.device_idle)
+}
+void Envelope::set_allocated_host_memory(::dsa::control::v1::HostMemory* host_memory) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (host_memory) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(host_memory);
+    if (message_arena != submessage_arena) {
+      host_memory = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, host_memory, submessage_arena);
+    }
+    set_has_host_memory();
+    _impl_.body_.host_memory_ = host_memory;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.host_memory)
 }
 void Envelope::set_allocated_install_apk(::dsa::control::v1::InstallApk* install_apk) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -20242,6 +20455,11 @@ Envelope::Envelope(const Envelope& from)
           from._internal_device_idle());
       break;
     }
+    case kHostMemory: {
+      _this->_internal_mutable_host_memory()->::dsa::control::v1::HostMemory::MergeFrom(
+          from._internal_host_memory());
+      break;
+    }
     case kInstallApk: {
       _this->_internal_mutable_install_apk()->::dsa::control::v1::InstallApk::MergeFrom(
           from._internal_install_apk());
@@ -20607,6 +20825,12 @@ void Envelope::clear_body() {
     case kDeviceIdle: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.device_idle_;
+      }
+      break;
+    }
+    case kHostMemory: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.host_memory_;
       }
       break;
     }
@@ -21046,6 +21270,14 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
       case 42:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 82)) {
           ptr = ctx->ParseMessage(_internal_mutable_device_idle(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.HostMemory host_memory = 43;
+      case 43:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 90)) {
+          ptr = ctx->ParseMessage(_internal_mutable_host_memory(), ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -21520,6 +21752,13 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::device_idle(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.HostMemory host_memory = 43;
+  if (_internal_has_host_memory()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(43, _Internal::host_memory(this),
+        _Internal::host_memory(this).GetCachedSize(), target, stream);
+  }
+
   // .dsa.control.v1.OpenLink open_link = 50;
   if (_internal_has_open_link()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
@@ -21950,6 +22189,13 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.device_idle_);
       break;
     }
+    // .dsa.control.v1.HostMemory host_memory = 43;
+    case kHostMemory: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.host_memory_);
+      break;
+    }
     // .dsa.control.v1.InstallApk install_apk = 60;
     case kInstallApk: {
       total_size += 2 +
@@ -22327,6 +22573,11 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_device_idle());
       break;
     }
+    case kHostMemory: {
+      _this->_internal_mutable_host_memory()->::dsa::control::v1::HostMemory::MergeFrom(
+          from._internal_host_memory());
+      break;
+    }
     case kInstallApk: {
       _this->_internal_mutable_install_apk()->::dsa::control::v1::InstallApk::MergeFrom(
           from._internal_install_apk());
@@ -22593,6 +22844,10 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::ScreenState >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::PowerState*
 Arena::CreateMaybeMessage< ::dsa::control::v1::PowerState >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::PowerState >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::HostMemory*
+Arena::CreateMaybeMessage< ::dsa::control::v1::HostMemory >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::HostMemory >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::DeviceIdle*
 Arena::CreateMaybeMessage< ::dsa::control::v1::DeviceIdle >(Arena* arena) {
