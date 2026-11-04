@@ -78,6 +78,11 @@ jobs:
       - name: Regenerate each branch
         if: steps.list.outputs.any == 'true'
         run: |
+          if [[ ! -f .github/scripts/protocol/regenerate.sh ]]; then
+            # The pull request that adds this workflow: its base has no script yet.
+            echo "::notice::the base has no regenerate.sh yet; nothing to do"
+            exit 0
+          fi
           cp .github/scripts/protocol/regenerate.sh "$RUNNER_TEMP/regenerate.sh"
           git config user.name "dsa-ci"
           git config user.email "dsa-ci@users.noreply.github.com"
