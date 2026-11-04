@@ -7,11 +7,20 @@ and the .NET SDK, build tools that are not shipped with DSA.
 ```
 dotnet tool install --global wix --version 5.0.2
 pwsh dsa/host/platform/windows/installer/build.ps1 -Version 0.1.0 -Kernel bzImage `
+    -GfxstreamBackend gfxstream_backend.dll `
     -ListUrl https://.../images.json -TrustedKey <public key> -AndroidMajor 17 `
     -ProgramListUrl https://.../program.json
 ```
 
 The results land in `dsa/target/installer/`.
+
+`-PlaceholderKernel` builds a test package instead, which only checks the installer: its
+kernel and graphics library are empty stand-ins. It cannot be taken for the real one. Its
+files are `dsa-test-<version>.msi` and `setup-test-<version>.exe`, its product name ends in
+"(test package)", and its service writes a line saying so to its log each time it starts.
+CI keeps both: `installer-windows-<version>` holds test packages, and
+`installer-real-windows` the real one, built with the published kernel and update lists and
+the graphics library of the newest graphics build.
 
 A release ships setup.exe only, as `DSA-v<version>-win-x64-setup.exe`, with its SHA-256 in
 `SHA256SUMS.txt`. The package (`dsa-<version>.msi`, and `image.cab` when it carries an
@@ -58,6 +67,14 @@ copies only `setup.exe` itself, because the package is embedded in it.)
 - Lets Hyper-V's virtual machines (`S-1-5-83-0`) read the kernel and the images, which a VM
   needs to boot from them. `C:\ProgramData\DSA` is otherwise for SYSTEM and Administrators
   only.
+- Replaces every program file on every installation, upgrade and repair, even one whose
+  version is higher or that was changed after it was installed. Before that it ends every
+  DSA program still running from them in every session (the window manager, the app
+  windows and the settings app), and afterwards starts the window manager again for each
+  signed-in user.
+- When the image the service last used has missing or broken files, the service moves to
+  a usable installed image, or downloads one when there is none, rather than waiting on
+  files that cannot boot.
 - Stops with a message saying how to turn on Virtual Machine Platform when it is off. It
   never turns the feature on by itself.
 - Uninstalling removes the program, the service, the downloaded images and setup files,

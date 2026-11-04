@@ -60,6 +60,69 @@ pub struct State {
     pub failed_build: Option<String>,
 }
 
+/// What [`ImageStore::recover`] found and did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Recovery {
+    /// The current image has its files.
+    Usable,
+    /// The current image was broken, and `current` replaced it.
+    Moved {
+        broken: InstalledImage,
+        current: InstalledImage,
+    },
+    /// The current image is broken and no other image is usable or named.
+    NothingBetter { broken: InstalledImage },
+}
+
+/// Every VHDX file starts with this signature.
+const VHDX_SIGNATURE: &[u8] = b"vhdxfile";
+
+fn is_vhdx(path: &Path) -> bool {
+    let mut head = [0u8; 8];
+    fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut head))
+        .is_ok_and(|()| head == VHDX_SIGNATURE)
+}
+
+/// Whether the image folder `dir` holds files an Android VM can boot from. An image with an
+/// `image.json` has every file it names, at the size it names, and its disks are VHDX files.
+/// An older image without one has at least one disk, and every disk in it is a VHDX file.
+pub fn image_is_usable(dir: &Path) -> bool {
+    let is_disk = |name: &str| name.to_ascii_lowercase().ends_with(".vhdx");
+    match fs::read(dir.join("image.json")) {
+        Ok(text) => {
+            let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&text) else {
+                return false;
+            };
+            let Some(files) = manifest["files"].as_object() else {
+                return false;
+            };
+            !files.is_empty()
+                && files.iter().all(|(name, entry)| {
+                    let path = dir.join(name);
+                    let Ok(meta) = fs::metadata(&path) else {
+                        return false;
+                    };
+                    is_plain_name(name)
+                        && meta.is_file()
+                        && entry["size"].as_u64().is_none_or(|size| size == meta.len())
+                        && (!is_disk(name) || is_vhdx(&path))
+                })
+        }
+        Err(_) => {
+            let Ok(entries) = fs::read_dir(dir) else {
+                return false;
+            };
+            let disks: Vec<PathBuf> = entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| is_disk(&path.file_name().unwrap_or_default().to_string_lossy()))
+                .collect();
+            !disks.is_empty() && disks.iter().all(|disk| is_vhdx(disk))
+        }
+    }
+}
+
 pub struct ImageStore {
     root: PathBuf,
     /// The DSA build using the store, recorded with each failure.
@@ -242,6 +305,66 @@ impl ImageStore {
         self.write_state(&state)?;
         let _ = fs::remove_dir_all(self.image_dir(&failed.version));
         Ok(state.current)
+    }
+
+    /// Makes sure the current image is one that can boot. When the state names an image whose
+    /// files are missing or broken (a test package's stand-in, a folder emptied by hand), it
+    /// moves to a usable image instead: the previous one, another complete image in the store
+    /// (the newest), or the image the installer put there. With none of those usable, it goes
+    /// back to the installer's image by name, so that an installation without an image
+    /// downloads its first one rather than waiting on files that will never boot.
+    pub fn recover(&self, installed: &InstalledImage) -> Result<Recovery, UpdateError> {
+        let mut state = self.state()?;
+        if image_is_usable(&self.image_dir(&state.current.version)) {
+            return Ok(Recovery::Usable);
+        }
+        let broken = state.current.clone();
+        let mut candidates: Vec<InstalledImage> = state.previous.iter().cloned().collect();
+        let mut others = self.complete_images();
+        others.sort_by_key(|image| std::cmp::Reverse((image.android_major, image.build)));
+        candidates.extend(others);
+        candidates.push(installed.clone());
+        let usable = candidates.into_iter().find(|image| {
+            image.version != broken.version
+                && is_plain_name(&image.version)
+                && image_is_usable(&self.image_dir(&image.version))
+        });
+        let next = match usable {
+            Some(image) => image,
+            None if broken.version != installed.version && is_plain_name(&installed.version) => {
+                installed.clone()
+            }
+            None => return Ok(Recovery::NothingBetter { broken }),
+        };
+        state.current = next.clone();
+        state.previous = None;
+        state.on_trial = false;
+        self.write_state(&state)?;
+        Ok(Recovery::Moved {
+            broken,
+            current: next,
+        })
+    }
+
+    /// The images in the store that carry an `image.json` naming them.
+    fn complete_images(&self) -> Vec<InstalledImage> {
+        let Ok(entries) = fs::read_dir(self.root.join("images")) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let text = fs::read(entry.path().join("image.json")).ok()?;
+                let value: serde_json::Value = serde_json::from_slice(&text).ok()?;
+                let image = InstalledImage {
+                    version: value["version"].as_str()?.to_string(),
+                    android_major: u32::try_from(value["android_major"].as_u64()?).ok()?,
+                    build: value["build"].as_u64()?,
+                };
+                (image.version == name).then_some(image)
+            })
+            .collect()
     }
 
     fn remove_others(&self, state: &State) {

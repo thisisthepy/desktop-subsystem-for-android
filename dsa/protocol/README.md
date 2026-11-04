@@ -59,6 +59,14 @@ This rewrites everything under `rust/src/generated/`, `java/src/main/java/` and
 `cpp/generated/`, and every `.sha256` file. CI runs it and fails when the result differs from
 what is checked in.
 
+Nobody has to run it for a pull request from a branch of this repository. The "Protocol
+sync" workflow (`.github/workflows/protocol-sync.yml`) regenerates the code on the branch
+and pushes it as "Chore: Regenerate the protocol code". It does so again for every open pull
+request after each push to `develop`, merging `develop` in when only generated files
+conflict. A conflict in generated files is therefore never resolved by hand: take either
+side and regenerate, or leave the branch to the workflow. A conflict in a `.proto` file is
+left for a person.
+
 After adding or changing a vector case in `rust/tests/vectors.rs` (and the same case in
 the Java and C++ tests), rewrite the vector file from `dsa/`:
 

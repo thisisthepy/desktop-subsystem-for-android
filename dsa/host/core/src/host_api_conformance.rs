@@ -60,6 +60,8 @@ pub struct FakeAndroid {
     pub requests: Mutex<Vec<TaskRequest>>,
     /// The pointer events it was given, in order.
     pub pointers: Mutex<Vec<PointerEvent>>,
+    /// How many pointer events it refused because it was not running.
+    pub pointers_refused: Mutex<usize>,
     /// The key events it was given, in order.
     pub keys: Mutex<Vec<KeyEvent>>,
     /// The text input it was given, in order.
@@ -136,6 +138,7 @@ impl FakeAndroid {
             tasks: Mutex::new((TaskTable::new(), Vec::new())),
             requests: Mutex::new(Vec::new()),
             pointers: Mutex::new(Vec::new()),
+            pointers_refused: Mutex::new(0),
             keys: Mutex::new(Vec::new()),
             text: Mutex::new(Vec::new()),
             shown: Mutex::new(Vec::new()),
@@ -494,6 +497,7 @@ impl UserAndroid for FakeAndroid {
     }
     fn pointer(&self, event: &PointerEvent) -> Result<(), TaskRequestError> {
         if self.state() != SessionState::Active {
+            *self.pointers_refused.lock().unwrap() += 1;
             return Err(TaskRequestError::NotRunning(format!(
                 "Android is {}, not running",
                 self.state()
@@ -1378,8 +1382,18 @@ pub fn pointer_input_to_stopped_android_is_dropped(make: MakeLocal<'_>) {
         .send(&pointer(4, PointerAction::Down, 1.0))
         .expect("the event is sent");
     // The service reads the stream on a thread of its own, and nothing answers an input
-    // event, so the test gives it time to drop the first event before Android starts.
-    thread::sleep(Duration::from_millis(300));
+    // event, so the test waits until Android has refused the first event before it starts.
+    let deadline = std::time::Instant::now() + WAIT;
+    while androids
+        .of(&user)
+        .is_none_or(|android| *android.pointers_refused.lock().unwrap() == 0)
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the event sent while Android was stopped never reached it"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
     // Once Android runs, the same stream carries input to it.
     connect(&mut *connector).start().unwrap();
     let up = pointer(4, PointerAction::Up, 2.0);

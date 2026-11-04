@@ -592,6 +592,71 @@ mod tests {
         assert_eq!(geometry.to_guest((10.0, 20.0)), (10.0, 20.0));
     }
 
+    /// The Settings window the offset was reported on: placed at 900 by 1100 window pixels on
+    /// a 2880 by 1800 monitor at 200%. Windows draws its frame outside the client area, and
+    /// the window's messages carry client coordinates, so the frame's invisible resize
+    /// borders and its caption never reach the mapping. The task is the client area's size,
+    /// one guest pixel per window pixel, in sizes that are not whole dp at 320 dpi.
+    fn settings_at_200_percent() -> WindowGeometry {
+        WindowGeometry {
+            client: (869, 1031),
+            task: (869, 1031),
+        }
+    }
+
+    #[test]
+    fn fr5_at_200_percent_every_client_pixel_lands_on_the_same_task_pixel() {
+        let geometry = settings_at_200_percent();
+        for y in 0..geometry.client.1 {
+            for x in 0..geometry.client.0 {
+                let landed = geometry.to_guest((f64::from(x), f64::from(y)));
+                assert_eq!(
+                    landed,
+                    (x as f32, y as f32),
+                    "client pixel ({x}, {y}) of a window shown 1:1 landed elsewhere"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fr5_at_200_percent_a_hover_and_a_click_on_the_back_button_land_on_the_same_point() {
+        // The back arrow of Settings' toolbar, in client pixels.
+        let arrow = (87.0, 54.0);
+        let mut mapper = PointerMapper::new(7);
+        let geometry = settings_at_200_percent();
+        let hover = mapper.handle(WindowInput::MouseMove { position: arrow }, geometry);
+        let press = mapper.handle(button(MouseButton::Left, true, arrow), geometry);
+        let hovered = hover.events[0];
+        assert_eq!(hovered.action, PointerAction::HoverMove);
+        let down = press
+            .events
+            .iter()
+            .find(|event| event.action == PointerAction::Down)
+            .expect("a press is a down");
+        assert_eq!((hovered.x, hovered.y), (87.0, 54.0));
+        assert_eq!((down.x, down.y), (hovered.x, hovered.y));
+    }
+
+    #[test]
+    fn fr5_a_frame_stretched_by_a_non_integer_ratio_has_no_offset_that_grows_across_it() {
+        // While a resize waits for the guest, the last frame is stretched over the window.
+        // The mapping follows the same ratio, so the error stays under a pixel everywhere
+        // instead of growing toward one side.
+        let geometry = WindowGeometry {
+            client: (869, 1031),
+            task: (1003, 1187),
+        };
+        for x in (0..869).step_by(7) {
+            let expected = f64::from(x) * 1003.0 / 869.0;
+            let landed = geometry.to_guest((f64::from(x), 0.0)).0;
+            assert!(
+                (f64::from(landed) - expected).abs() < 1.0,
+                "client x {x} landed at {landed}, expected {expected}"
+            );
+        }
+    }
+
     #[test]
     fn fr5_a_drag_out_of_the_window_keeps_its_position() {
         let geometry = at_scale((400, 300), 2.0);

@@ -21,9 +21,61 @@ permissions:
   contents: read
 
 jobs:
+  # Which parts a pull request touches, so each job below runs only when its part changed.
+  # A change to this workflow, or a run by hand, runs every job. A pull request that only
+  # touches documents runs just the repository checks. A skipped job counts as passed, and
+  # "Report the test result" always reports, so a skipped job never holds a merge back.
+  changes:
+    name: Find the parts that changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.find.outputs.rust }}
+      unix: ${{ steps.find.outputs.unix }}
+      agent: ${{ steps.find.outputs.agent }}
+      apk: ${{ steps.find.outputs.apk }}
+      protocol: ${{ steps.find.outputs.protocol }}
+      settings: ${{ steps.find.outputs.settings }}
+      hwcomposer: ${{ steps.find.outputs.hwcomposer }}
+      codec2: ${{ steps.find.outputs.codec2 }}
+      power: ${{ steps.find.outputs.power }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The pull request's merge commit and its first parent, the base it merges into.
+          fetch-depth: 2
+
+      - name: Compare with the base
+        id: find
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed"
+          else
+            echo ".github/workflows/test.yml" > "$RUNNER_TEMP/changed"
+          fi
+          cat "$RUNNER_TEMP/changed"
+          # Prints true when a changed file matches the pattern, or this workflow changed.
+          part() {
+            if grep -qE "^(\.github/workflows/test\.yml$|$1)" "$RUNNER_TEMP/changed"; then
+              echo "$2=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$2=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          part 'dsa/(Cargo\.(toml|lock)|deny\.toml|protocol/|host/|guest/(transport|channeld)/)' rust
+          part 'dsa/(Cargo\.(toml|lock)|protocol/|host/(core|platform/unix|cli)/)' unix
+          part 'dsa/(guest/agent|protocol)/' agent
+          part 'dsa/(Cargo\.(toml|lock)|host/(core|cli)/)|\.github/scripts/apk/' apk
+          part 'dsa/protocol/' protocol
+          part 'dsa/host/platform/windows/settings/' settings
+          part 'dsa/(guest/hwcomposer|protocol)/' hwcomposer
+          part 'dsa/(guest/codec2|protocol)/' codec2
+          part 'dsa/(guest/power|protocol)/' power
+
   repository:
     name: Check the repository rules
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,11 +93,14 @@ jobs:
 
   rust:
     name: Test the Rust code (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: dsa
@@ -87,7 +142,10 @@ jobs:
 
   unix-socket:
     name: Test the local API and dsa over Unix sockets (macos-latest)
+    needs: changes
+    if: needs.changes.outputs.unix == 'true'
     runs-on: macos-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: dsa
@@ -100,7 +158,10 @@ jobs:
 
   agent:
     name: Test the guest agent (ubuntu-latest)
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: dsa/guest/agent
@@ -122,7 +183,10 @@ jobs:
   # apksigner), not only against the ones its unit tests write.
   apk-reader:
     name: Read APKs made by the Android SDK (ubuntu-latest)
+    needs: changes
+    if: needs.changes.outputs.apk == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -145,7 +209,10 @@ jobs:
 
   protocol:
     name: Check the generated protocol code (ubuntu-latest)
+    needs: changes
+    if: needs.changes.outputs.protocol == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -189,7 +256,10 @@ jobs:
 
   settings-app:
     name: Test and build the settings app (windows-latest)
+    needs: changes
+    if: needs.changes.outputs.settings == 'true'
     runs-on: windows-latest
+    timeout-minutes: 20
     defaults:
       run:
         shell: pwsh
@@ -212,7 +282,10 @@ jobs:
 
   hwcomposer:
     name: Test the guest hwcomposer's task rules (ubuntu-latest)
+    needs: changes
+    if: needs.changes.outputs.hwcomposer == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -228,7 +301,10 @@ jobs:
 
   codec2:
     name: Test the guest codec HAL's rules (ubuntu-latest)
+    needs: changes
+    if: needs.changes.outputs.codec2 == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -244,7 +320,10 @@ jobs:
 
   power-hal:
     name: Test the guest power and health HALs' rules (ubuntu-latest)
+    needs: changes
+    if: needs.changes.outputs.power == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -257,3 +336,20 @@ jobs:
 
       - name: Run the tests
         run: dsa/guest/power/test.sh
+
+  # One check that always reports: it fails when any job failed or was cancelled, and passes
+  # when every job passed or was skipped because its part did not change.
+  result:
+    name: Report the test result
+    if: always()
+    needs:
+      [changes, repository, rust, unix-socket, agent, apk-reader, protocol, settings-app, hwcomposer, codec2, power-hal]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check every job passed or was skipped
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "::error::a test job failed or was cancelled"
+            exit 1
+          fi

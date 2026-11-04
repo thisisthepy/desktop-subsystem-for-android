@@ -23,7 +23,9 @@
   {program} and {data}, which the service fills in. The package records both, and a later
   version installed over it (as the service does when it updates DSA) keeps them.
 
-  Build variables (-d): Version, SourceDir (the built binaries and dsa-hostd.json),
+  Build variables (-d): Version, ProductName (with " (test package)" after it for a
+  package that only tests the installer), SourceDir (the built binaries and
+  dsa-hostd.json),
   SettingsDir (the published settings app), and,
   when an image is bundled, ImageDir and ImageVersion, plus ImageManifest when the image
   is one make-image.py made (image.json, initrd.img, disk.vhdx) and ImageKernel when it
@@ -31,7 +33,7 @@
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
-    <Package Name="Desktop Subsystem for Android"
+    <Package Name="$(ProductName)"
              Manufacturer="Thisisthepy"
              Version="$(Version)"
              UpgradeCode="5c08f90f-6eaa-402b-992b-6069634c45e8"
@@ -40,9 +42,10 @@
         <!-- The new version installs over the old one before the old one is removed, so the
              files both have stay. Removing the old one first would also remove the
              configuration after costing had decided to keep it, and leave none. An edited
-             configuration is kept and an unedited one replaced, by Windows Installer's rule
-             for files without a version. -->
+             configuration is kept: the package never overwrites it. A package of the same version installs over the one
+             already there too, as a repair would, rather than beside it. -->
         <MajorUpgrade Schedule="afterInstallExecute"
+                      AllowSameVersionUpgrades="yes"
                       DowngradeErrorMessage="A newer Desktop Subsystem for Android is already installed." />
         <Media Id="1" Cabinet="dsa.cab" EmbedCab="yes" />
         <?ifdef ImageVersion ?>
@@ -127,6 +130,13 @@
             </Component>
         </ComponentGroup>
 
+        <!-- Every installation, upgrade and repair replaces every file of the package (the
+             "a" of REINSTALLMODE), even one whose version is higher than the package's or
+             one without a version that was changed after it was installed: Windows
+             Installer's own rules would keep those, and an old program beside a new service
+             cannot talk to it. The configuration alone is never overwritten, so an edited one
+             stays. -->
+        <Property Id="REINSTALLMODE" Value="amus" />
         <ComponentGroup Id="Service" Directory="INSTALLFOLDER">
             <Component Id="HostdExe" Guid="*">
                 <File Id="HostdExe" Source="$(SourceDir)\dsa-hostd.exe" KeyPath="yes" />
@@ -249,7 +259,7 @@
         <!-- The service's own folder: SYSTEM and Administrators only, and read access for
              Hyper-V's virtual machines (S-1-5-83-0), which open the images from it. -->
         <ComponentGroup Id="Data" Directory="DATAFOLDER">
-            <Component Id="Config" Guid="*">
+            <Component Id="Config" Guid="*" NeverOverwrite="yes">
                 <File Id="Config" Source="$(SourceDir)\dsa-hostd.json" KeyPath="yes" />
                 <CreateFolder>
                     <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;S-1-5-83-0)" />
@@ -381,7 +391,31 @@
                       Execute="deferred"
                       Impersonate="no"
                       Return="ignore" />
+        <!-- Before any file is replaced or removed: every DSA program still running from the
+             program folder, and each app's window program in every user's profile, in every
+             session. A program left running keeps its file in use, and an old window manager
+             would hold its single-instance lock against the new one. It runs from the package
+             itself, since the installed dsa-hostd may be an older one that cannot do it, or
+             none. Not while an upgrade removes the version before it: the new one has its
+             files in place by then, and its service is running. -->
+        <Binary Id="StopProgramsHost" SourceFile="$(SourceDir)\dsa-hostd.exe" />
+        <CustomAction Id="StopPrograms"
+                      BinaryRef="StopProgramsHost"
+                      ExeCommand="stop-programs &quot;[INSTALLFOLDER]&quot;"
+                      Execute="deferred"
+                      Impersonate="no"
+                      Return="ignore" />
+        <!-- Once the old version is gone too: the window manager again, for every signed-in
+             user, as signing in starts it. -->
+        <CustomAction Id="StartWindowManagers"
+                      FileRef="HostdExe"
+                      ExeCommand="start-window-managers"
+                      Execute="deferred"
+                      Impersonate="no"
+                      Return="ignore" />
         <InstallExecuteSequence>
+            <Custom Action="StopPrograms" After="StopServices" Condition="NOT UPGRADINGPRODUCTCODE" />
+            <Custom Action="StartWindowManagers" After="RemoveExistingProducts" Condition="NOT REMOVE~=&quot;ALL&quot;" />
             <Custom Action="RemoveUserData" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
             <Custom Action="RemoveMachineData" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
             <Custom Action="RemoveImages" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />

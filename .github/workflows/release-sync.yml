@@ -27,6 +27,7 @@ jobs:
   sync:
     name: Rebuild the release branch and open the pull request
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
       pull-requests: write
