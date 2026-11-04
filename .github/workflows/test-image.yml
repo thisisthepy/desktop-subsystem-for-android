@@ -313,3 +313,31 @@ jobs:
             dsa/target/image/*/image.json
             dsa/target/image/*/initrd.img
           if-no-files-found: error
+
+  hal-inventory:
+    name: List the image's power, health and codec HALs (temporary)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make room
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - name: Fetch the pinned inputs
+        run: dsa/guest/image/fetch.sh 17
+      - name: List
+        shell: bash {0}
+        run: |
+          zip=$(echo .scratch/aosp-inputs/*/*target_files*.zip)
+          unzip -l "$zip" | grep -Ei 'power|health|c2|codec|media|omx|stagefright|apex/' | grep -v 'SYSTEM/app\|framework/oat' | awk '{print $4}' | head -400
+          mkdir x; cd x
+          unzip -q "$zip" 'VENDOR/etc/vintf/*' 'VENDOR/etc/init/*' 'VENDOR/etc/media*' 'VENDOR/etc/selinux/*' 'SYSTEM/etc/vintf/*' 'META/*filesystem_config.txt' 'VENDOR/apex/*' 2>/dev/null
+          for f in VENDOR/etc/vintf/manifest.xml VENDOR/etc/vintf/manifest/*; do echo "== $f"; cat "$f"; done 2>/dev/null | grep -i -B3 -A6 'power\|health\|media\|c2' | head -200
+          for f in VENDOR/etc/init/*; do echo "== $f"; done
+          grep -il 'power\|health\|media\|codec' VENDOR/etc/init/* | while read f; do echo "== $f"; cat "$f"; done
+          ls -la VENDOR/etc/media* ; for f in VENDOR/etc/media_codecs*.xml; do echo "== $f"; cat "$f"; done
+          grep -i 'power\|health\|c2\|codec\|media' VENDOR/etc/selinux/vendor_file_contexts
+          grep -i 'power\|health\|media\|c2' VENDOR/etc/selinux/vendor_service_contexts VENDOR/etc/selinux/*hwservice* 2>/dev/null
+          ls VENDOR/apex
+          sudo apt-get install -y -qq android-sdk-libsparse-utils e2fsprogs >/dev/null 2>&1 || true
+          for a in VENDOR/apex/*power* VENDOR/apex/*health* VENDOR/apex/*media* VENDOR/apex/*codec*; do [ -f "$a" ] || continue; echo "== $a"; mkdir -p ap; unzip -o -q "$a" -d ap/$(basename $a); ls -R ap/$(basename $a) | head -20; done
+          grep -i 'health\|power\|media\|c2' SYSTEM/etc/vintf/compatibility_matrix*.xml | head -60
+          for f in SYSTEM/etc/vintf/compatibility_matrix.*.xml; do echo "== $f"; grep -A4 -i 'power\|health\|media.c2' "$f"; done | head -200
