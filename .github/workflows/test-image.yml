@@ -163,7 +163,7 @@ jobs:
         id: ndk
         uses: nttld/setup-ndk@v1
         with:
-          ndk-version: r26b
+          ndk-version: r27c
 
       # aidl comes from the runner's Android SDK build-tools.
       - name: Build dsa-codec2 for the guest

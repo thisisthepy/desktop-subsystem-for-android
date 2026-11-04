@@ -3,8 +3,9 @@
 
 #include "host_link.h"
 
-#include <linux/vm_sockets.h>
 #include <sys/socket.h>
+// After sys/socket.h, which defines what it uses.
+#include <linux/vm_sockets.h>
 #include <sys/time.h>
 #include <unistd.h>
 
