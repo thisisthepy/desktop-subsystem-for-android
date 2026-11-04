@@ -32,6 +32,9 @@ enum Role {
   ROLE_UNSPECIFIED = 0;
   ROLE_HOST = 1;
   ROLE_GUEST = 2;
+  // The guest's video codec HAL, on the video port. It decodes video and nothing else, so the
+  // host asks it for no secret, and the control port refuses it.
+  ROLE_GUEST_VIDEO = 4;
 }
 
 // The first frame on a new connection, sent by the guest. The host checks it, then asks the
@@ -614,6 +617,94 @@ message ClockProbe {
   uint64 host_sent_ns = 1;
 }
 
+// The video port (vsock 5569): the guest's codec HAL opens one connection for each decoder.
+// After the handshake (a Hello of ROLE_GUEST_VIDEO, which needs no secret) the host sends
+// VideoCapabilities. The HAL then sends VideoDecoderOpen and, once the host answers with
+// VideoDecoderOpened, the stream's packets in decode order. The host decodes them on its
+// hardware decoder and sends each picture back as a VideoFrame, in presentation order. Every
+// message on the port is one of these.
+
+// A video coding format.
+enum VideoCodec {
+  VIDEO_CODEC_UNSPECIFIED = 0;
+  // H.264 (AVC), Annex B byte stream.
+  VIDEO_CODEC_H264 = 1;
+  // H.265 (HEVC), Annex B byte stream.
+  VIDEO_CODEC_HEVC = 2;
+  // VP9, one frame (or superframe) per packet.
+  VIDEO_CODEC_VP9 = 3;
+  // AV1, one temporal unit per packet, low overhead bitstream format.
+  VIDEO_CODEC_AV1 = 4;
+}
+
+// One format the host decodes, and the largest picture it decodes in it.
+message VideoCodecSupport {
+  VideoCodec codec = 1;
+  uint32 max_width = 2;
+  uint32 max_height = 3;
+}
+
+// Host to guest, first on each connection: the formats the host's hardware decodes. A
+// format not listed is not decoded on the host.
+message VideoCapabilities {
+  repeated VideoCodecSupport codecs = 1;
+}
+
+// Guest to host: open a decoder for `codec`. `width` and `height` are the stream's coded
+// size as the app gave it, or 0 when it is not known yet; the bitstream has the last word.
+message VideoDecoderOpen {
+  VideoCodec codec = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+}
+
+// Host to guest: the answer to VideoDecoderOpen. When `ok` is false, `error` says, in words
+// a person can act on, why there is no decoder, and the host closes the connection.
+message VideoDecoderOpened {
+  bool ok = 1;
+  string error = 2;
+}
+
+// Guest to host: one access unit of the stream, in decode order. `frame_index` is the
+// guest's, and comes back on the picture it becomes.
+message VideoPacket {
+  uint64 frame_index = 1;
+  int64 timestamp_us = 2;
+  bytes data = 3;
+  // Codec configuration (parameter sets) rather than a picture.
+  bool codec_config = 4;
+  // The last packet: the host outputs every picture still held, then a VideoFrame with
+  // `end_of_stream` set.
+  bool end_of_stream = 5;
+}
+
+// Host to guest: one decoded picture, in presentation order, as 8-bit 4:2:0 with the luma
+// plane then the interleaved chroma plane (NV12), each row `stride` bytes long. `width` and
+// `height` are the visible size; the planes are `stride` by `height` and `stride` by
+// `height / 2` (rounded up) bytes. A frame with `end_of_stream` set carries no picture.
+message VideoFrame {
+  uint64 frame_index = 1;
+  int64 timestamp_us = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+  uint32 stride = 5;
+  bytes nv12 = 6;
+  bool end_of_stream = 7;
+}
+
+// Guest to host: drop every packet and picture held, as for a seek. The host answers with
+// VideoFlushed once nothing from before is left to send.
+message VideoFlush {}
+
+// Host to guest: the answer to VideoFlush.
+message VideoFlushed {}
+
+// Host to guest: the decoder failed; `error` says how. The connection stays open, and the
+// next packet after a key frame may decode again.
+message VideoError {
+  string error = 1;
+}
+
 // Guest to host, from the control daemon: the answer to a ClockProbe, sent as soon as the
 // probe is read.
 message ClockAnswer {
@@ -916,5 +1007,13 @@ message Envelope {
     AccessibilityTree accessibility_tree = 81;
     AccessibilityAction accessibility_action = 82;
     AccessibilityActionResult accessibility_action_result = 83;
+    VideoCapabilities video_capabilities = 120;
+    VideoDecoderOpen video_decoder_open = 121;
+    VideoDecoderOpened video_decoder_opened = 122;
+    VideoPacket video_packet = 123;
+    VideoFrame video_frame = 124;
+    VideoFlush video_flush = 125;
+    VideoFlushed video_flushed = 126;
+    VideoError video_error = 127;
   }
 }

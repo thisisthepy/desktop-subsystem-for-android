@@ -34,6 +34,8 @@
 //!   each node is in it).
 //! - [`app_exe`]: each app's own copy of the window host, named and drawn as the app
 //!   (Windows only).
+//! - [`video_decoder`]: the guest's video, decoded with Media Foundation on the GPU (the
+//!   decoding part on Windows only).
 //! - [`start_menu`]: a Start menu shortcut for each app installed in the user's Android, which
 //!   Windows search finds (Windows only).
 
@@ -89,6 +91,7 @@ pub mod ui_automation;
 pub mod uninstall;
 #[cfg(windows)]
 pub mod user_disk;
+pub mod video_decoder;
 pub mod vm;
 pub mod vm_listener;
 #[cfg(windows)]
