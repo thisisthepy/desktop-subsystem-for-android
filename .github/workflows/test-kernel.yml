@@ -1,5 +1,7 @@
-# Builds the guest kernel: the WSL kernel source at the tag in dsa/kernel/wsl-kernel.tag,
-# configured with Microsoft/config-wsl plus dsa/kernel/android.config.
+# Builds the guest kernel for x86_64 and arm64: the WSL kernel source at the tag in
+# dsa/kernel/wsl-kernel.tag, configured with Microsoft/config-wsl (x86_64, bzImage) or
+# Microsoft/config-wsl-arm64 (arm64, Image) plus dsa/kernel/android.config, and for arm64
+# dsa/kernel/android-arm64.config.
 #
 # The build takes tens of minutes, so it runs when the kernel inputs change, by hand, and
 # once a week to notice a newer WSL kernel tag.
@@ -29,9 +31,26 @@ permissions:
 
 jobs:
   build:
-    name: Build the guest kernel (x86_64)
-    runs-on: ubuntu-latest
+    name: Build the guest kernel (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            image: bzImage
+            artifact: guest-kernel-x86_64
+          # A native arm64 runner; build.sh cross-compiles with aarch64-linux-gnu- on any
+          # other machine.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            image: Image
+            artifact: kernel-arm64
+    env:
+      DSA_KERNEL_ARCH: ${{ matrix.arch }}
+      DSA_KERNEL_OUT: ${{ github.workspace }}/.scratch/kernel-out-${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +58,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential flex bison bc dwarves libssl-dev libelf-dev cpio
+            build-essential flex bison bc dwarves libssl-dev libelf-dev cpio file
 
       - name: Use the requested tag
         if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
@@ -48,17 +67,34 @@ jobs:
       - name: Test the kernel configuration
         run: python3 dsa/kernel/test_android_config.py
 
-      - name: Configure and check the fragment
+      - name: Configure and check the fragments
         run: dsa/kernel/build.sh --config-only
+
+      - name: Test the merged configuration
+        run: |
+          DSA_KERNEL_MERGED_CONFIG="$(ls "$DSA_KERNEL_OUT"/config-*)" \
+            python3 dsa/kernel/test_android_config.py
 
       - name: Build
         run: dsa/kernel/build.sh
 
+      - name: Check the kernel image
+        run: |
+          image="$(ls "$DSA_KERNEL_OUT"/${{ matrix.image }}-*)"
+          file "$image"
+          if [[ "${{ matrix.arch }}" == arm64 ]]; then
+            # Hyper-V's UEFI firmware starts the image as an EFI application, so it must be
+            # a PE image (MZ) that also carries the arm64 Image magic (ARM\x64 at offset 56).
+            [[ "$(head -c 2 "$image")" == MZ ]] || { echo "::error::$image has no EFI stub"; exit 1; }
+            magic="$(dd if="$image" bs=1 skip=56 count=4 status=none | od -An -tx1 | tr -d ' \n')"
+            [[ "$magic" == 41524d64 ]] || { echo "::error::$image is not an arm64 Image ($magic)"; exit 1; }
+          fi
+
       - name: Upload the kernel
         uses: actions/upload-artifact@v4
         with:
-          name: guest-kernel-x86_64
-          path: .scratch/kernel/*/out/
+          name: ${{ matrix.artifact }}
+          path: ${{ env.DSA_KERNEL_OUT }}/
           if-no-files-found: error
 
   newer-tag:

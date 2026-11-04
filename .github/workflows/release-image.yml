@@ -114,6 +114,34 @@ jobs:
           path: .scratch/kernel-out/bzImage
           if-no-files-found: error
 
+  # The kernel of the arm64 guest, for ARM64 Windows hosts: an EFI stub Image that
+  # Hyper-V's UEFI firmware starts.
+  kernel-arm64:
+    name: Build the guest kernel (arm64)
+    if: inputs.rebuild_images
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential flex bison bc dwarves libssl-dev libelf-dev cpio
+
+      - name: Build
+        run: |
+          DSA_KERNEL_OUT="$PWD/.scratch/kernel-out" dsa/kernel/build.sh --arch arm64
+          # build.sh names the kernel Image-<release>; the arm64 image takes it as Image.
+          mv .scratch/kernel-out/Image-* .scratch/kernel-out/Image
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-arm64
+          path: .scratch/kernel-out/Image
+          if-no-files-found: error
+
   channeld:
     name: Build the guest control daemon
     if: inputs.rebuild_images

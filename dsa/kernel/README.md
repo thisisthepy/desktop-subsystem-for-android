@@ -6,9 +6,25 @@ kernel, and the user's WSL kernel is not touched.
 | File | What it is |
 |---|---|
 | `wsl-kernel.tag` | The WSL kernel tag the source comes from |
-| `android.config` | The options merged on top of that tag's `Microsoft/config-wsl` |
-| `patches/` | Small patches applied to the pinned source before configuration |
-| `build.sh` | Fetches the source into `.scratch/`, merges the configuration, checks it and builds `bzImage` |
+| `android.config` | The options merged on top of that tag's `Microsoft/config-wsl` (x86_64) or `Microsoft/config-wsl-arm64` (arm64) |
+| `android-arm64.config` | The options the arm64 kernel adds after `android.config` |
+| `patches/` | Small patches applied to the pinned source before configuration, the same for both architectures |
+| `build.sh` | Fetches the source into `.scratch/`, merges the configuration, checks it and builds `bzImage` (x86_64) or `Image` (arm64) |
+
+## Architectures
+
+The kernel is built for two hosts:
+
+- **x86_64**, a `bzImage` the host boots directly (`LinuxKernelDirect`).
+- **arm64**, for ARM64 Windows PCs, an `Image` with its EFI stub. Hyper-V on ARM64 has no
+  direct Linux boot, so its UEFI firmware starts the stub, which loads the initrd named on
+  its command line, as WSL does on the same hosts. The machine is described by ACPI, and the
+  console is a PL011 UART (`ttyAMA0`). `android-arm64.config` names what that boot, VMBus
+  and free page reporting need, so the build fails if a WSL tag ever drops one.
+
+The patches touch only architecture-neutral code (VMBus's ACPI probe, which Hyper-V uses on
+both architectures, the command-line partition parser, cgroup v1, wakeup sources, shmem),
+so the same set applies to both builds.
 
 ## Why the WSL kernel
 
@@ -41,7 +57,7 @@ metadata its virtual SCSI uevents omit.
 
 ## The ramoops region
 
-The host puts the region on the kernel command line it boots every VM with
+The host puts the region on the kernel command line it boots every x86_64 VM with
 (`dsa/host/platform/windows/src/vm.rs`):
 
 ```
@@ -71,17 +87,33 @@ Two options of Android's own kernel are not in the upstream source: `DM_DEFAULT_
 (metadata encryption) and `INCREMENTAL_FS` (streaming app installs). The guest image is
 configured not to need them.
 
+On arm64 the region is reserved by name instead, with the same split:
+
+```
+reserve_mem=1M:4096:dsa_ramoops ramoops.mem_name=dsa_ramoops ...
+```
+
+`memmap=` exists only on x86, and a Hyper-V ARM64 VM's memory map is the firmware's, so a
+fixed address is not known to be RAM there. `reserve_mem=` lets the kernel pick the region
+early in boot and ramoops find it by name.
+
 ## Building
 
 ```
-dsa/kernel/build.sh --config-only   # merge and check, about a minute
-dsa/kernel/build.sh                 # also build bzImage, tens of minutes
+dsa/kernel/build.sh --config-only               # merge and check, about a minute
+dsa/kernel/build.sh                             # also build bzImage, tens of minutes
+dsa/kernel/build.sh --arch arm64 [--config-only] # the same for arm64 (Image)
 ```
 
 The check fails when any line of `android.config` did not survive the merge, which is how
 Kconfig reports a missing dependency: by silently dropping the option. It also fails if
 ashmem is enabled or memfd is not.
 
-CI runs the full build in "Kernel test" (`.github/workflows/test-kernel.yml`) when these
+An arm64 kernel builds natively on an arm64 machine and is cross-compiled with
+`aarch64-linux-gnu-` anywhere else. Each architecture builds out of tree in its own
+directory under `.scratch/kernel/<tag>/`, so both come from one checkout.
+
+CI runs the full build for both architectures in "Kernel test"
+(`.github/workflows/test-kernel.yml`, the arm64 one on a native arm64 runner) when these
 files change, by hand, and weekly. The weekly run warns when a newer WSL kernel tag
 exists. To try one, run the workflow with its `tag` input, then update `wsl-kernel.tag`.
