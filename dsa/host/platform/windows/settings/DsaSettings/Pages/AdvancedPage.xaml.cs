@@ -38,6 +38,30 @@ public partial class AdvancedPage : Page
     private async void OnFreezeToggled(object sender, RoutedEventArgs e) =>
         await ViewModel.SetFreezeAsync(FreezeSwitch.IsChecked == true);
 
+    private async void OnInputTraceToggled(object sender, RoutedEventArgs e) =>
+        await ViewModel.SetInputTraceAsync(InputTraceSwitch.IsChecked == true);
+
+    private async void OnResizeTraceToggled(object sender, RoutedEventArgs e) =>
+        await ViewModel.SetResizeTraceAsync(ResizeTraceSwitch.IsChecked == true);
+
+    private void OnInputTraceAsAdministrator(object sender, RoutedEventArgs e) =>
+        ChangeAsAdministrator("input-trace", !ViewModel.InputTrace);
+
+    private void OnResizeTraceAsAdministrator(object sender, RoutedEventArgs e) =>
+        ChangeAsAdministrator("resize-trace", !ViewModel.ResizeTrace);
+
+    /// <summary>Runs <c>dsa settings set</c> as an administrator (Windows asks the user),
+    /// then shows what the service keeps.</summary>
+    private static async void ChangeAsAdministrator(string name, bool on)
+    {
+        var problem = await Shell.RunDsaElevated("settings", "set", name, on ? "on" : "off");
+        if (problem is not null)
+        {
+            await Shell.Tell(App.Text.Get("SettingsErrorBar.Title"), problem);
+        }
+        await ViewModel.LoadAsync();
+    }
+
     private void OnOpenUserLogs(object sender, RoutedEventArgs e) => Shell.OpenFolder(Shell.UserLogFolder);
 
     private void OnOpenServiceLogs(object sender, RoutedEventArgs e) => Shell.OpenFolder(Shell.ServiceLogFolder(ViewModel.LogDir));

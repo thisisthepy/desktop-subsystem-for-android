@@ -352,6 +352,87 @@
   <data name="FreezeCard.Description" xml:space="preserve">
     <value>기본값은 꺼짐입니다. 꺼져 있으면 유휴 상태의 안드로이드는 Doze 상태로 들어가고 알림을 계속 받습니다. 일시 정지하면 CPU를 쓰지 않지만, 앱을 열 때까지 아무것도 받지 않습니다.</value>
   </data>
+  <data name="FreezeNowCard.Header" xml:space="preserve">
+    <value>지금 안드로이드 일시 정지</value>
+  </data>
+  <data name="FreezeNowCard.Description" xml:space="preserve">
+    <value>안드로이드의 창을 다시 열 때까지 모든 프로세스를 멈춥니다. 알림, 알람, 위젯도 함께 멈춥니다.</value>
+  </data>
+  <data name="FreezeNowButton.Content" xml:space="preserve">
+    <value>일시 정지</value>
+  </data>
+  <data name="MemoryLimitCard.Header" xml:space="preserve">
+    <value>메모리 한도</value>
+  </data>
+  <data name="MemoryLimitCard.Description" xml:space="preserve">
+    <value>안드로이드가 늘어날 수 있는 최대 메모리입니다. 안드로이드는 필요한 만큼만 메모리를 쓰고 유휴 상태가 되면 돌려줍니다. 자동이면 3 GB까지 늘어나고, 이 PC의 메모리를 넘지 않습니다. 다음에 안드로이드를 시작할 때 적용됩니다.</value>
+  </data>
+  <data name="MemoryLimit_Auto" xml:space="preserve">
+    <value>자동</value>
+  </data>
+  <data name="MemoryVmSizeCard.Header" xml:space="preserve">
+    <value>지금 안드로이드 VM</value>
+  </data>
+  <data name="MemoryVmSizeCard.Description" xml:space="preserve">
+    <value>VM이 이 PC에서 차지한 메모리와 그중 안드로이드가 쓰는 양</value>
+  </data>
+  <data name="MemoryGuestUsedLabel.Text" xml:space="preserve">
+    <value>안드로이드 사용</value>
+  </data>
+  <data name="MemoryBeyondGuestLabel.Text" xml:space="preserve">
+    <value>비어 있지만 아직 돌려주지 않음</value>
+  </data>
+  <data name="MemoryKernelHeader.Text" xml:space="preserve">
+    <value>안드로이드 커널</value>
+  </data>
+  <data name="Memory_KernelSlab" xml:space="preserve">
+    <value>커널 객체</value>
+  </data>
+  <data name="Memory_KernelSlabDetail" xml:space="preserve">
+    <value>커널이 자기 데이터에 쓰고 회수할 수 없는 메모리</value>
+  </data>
+  <data name="Memory_KernelStacks" xml:space="preserve">
+    <value>스레드 스택</value>
+  </data>
+  <data name="Memory_KernelPageTables" xml:space="preserve">
+    <value>페이지 테이블</value>
+  </data>
+  <data name="Memory_KernelVmalloc" xml:space="preserve">
+    <value>커널 매핑(vmalloc)</value>
+  </data>
+  <data name="Memory_KernelPercpu" xml:space="preserve">
+    <value>CPU별 데이터</value>
+  </data>
+  <data name="Memory_KernelUnaccounted" xml:space="preserve">
+    <value>드라이버</value>
+  </data>
+  <data name="Memory_KernelUnaccountedDetail" xml:space="preserve">
+    <value>GPU와 DMA 버퍼처럼 어떤 카운터에도 잡히지 않는 메모리</value>
+  </data>
+  <data name="Memory_KernelReserved" xml:space="preserve">
+    <value>부팅 때 예약</value>
+  </data>
+  <data name="Memory_KernelReservedDetail" xml:space="preserve">
+    <value>받은 {0} 중 커널 코드, 페이지 구조체, 버퍼. 연속 영역 {1}</value>
+  </data>
+  <data name="DiagnosticsHeader.Text" xml:space="preserve">
+    <value>진단</value>
+  </data>
+  <data name="InputTraceCard.Header" xml:space="preserve">
+    <value>입력 추적</value>
+  </data>
+  <data name="InputTraceCard.Description" xml:space="preserve">
+    <value>모든 DSA 프로세스가 터치, 클릭, 키가 언제 닿았는지 기록해, 입력에서 화면까지의 지연을 잴 수 있습니다. 기본값은 꺼짐입니다.</value>
+  </data>
+  <data name="ResizeTraceCard.Header" xml:space="preserve">
+    <value>크기 조정 추적</value>
+  </data>
+  <data name="ResizeTraceCard.Description" xml:space="preserve">
+    <value>모든 DSA 프로세스가 창 크기 조정의 단계마다 기록해, 크기 조정이 느리거나 깜박이는 곳을 찾습니다. 기본값은 꺼짐입니다.</value>
+  </data>
+  <data name="DiagnosticsNote.Text" xml:space="preserve">
+    <value>추적은 아래의 DSA 로그에 쌓여 로그를 키우므로, 문제를 알릴 때만 켜세요. 이 PC의 모든 사용자에게 적용되므로 관리자만 바꿀 수 있습니다.</value>
+  </data>
   <data name="LogsHeader.Text" xml:space="preserve">
     <value>로그</value>
   </data>

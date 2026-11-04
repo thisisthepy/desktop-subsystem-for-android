@@ -39,7 +39,10 @@ public sealed record SettingsInfo(
     bool LinksInAndroid = false,
     string? AndroidVersion = null,
     bool DeveloperMode = false,
-    int AdbPort = SettingsInfo.DefaultAdbPort)
+    int AdbPort = SettingsInfo.DefaultAdbPort,
+    bool InputTrace = false,
+    bool ResizeTrace = false,
+    int MemoryLimitMb = 0)
 {
     /// <summary>The loopback port adb connects to in developer mode unless the user picks
     /// another.</summary>
@@ -84,9 +87,26 @@ public sealed record GuestMemoryInfo(
     ulong ZramUsedKb,
     ulong TotalPssKb,
     IReadOnlyList<GuestProcess> TopProcesses,
-    ulong AgeSeconds);
+    ulong AgeSeconds,
+    GuestKernelInfo? Kernel = null);
 
-public sealed record MemoryReport(GuestMemoryInfo? Guest, IReadOnlyList<HostProcess> Host, ulong HostTotalKb);
+/// <summary>What the guest kernel holds for itself, as <c>dsa memory</c> reports it, in KiB.
+/// <see cref="ReservedAtBootKb"/> is null when the guest could not count its memory.</summary>
+public sealed record GuestKernelInfo(
+    ulong SlabUnreclaimableKb,
+    ulong KernelStackKb,
+    ulong PageTablesKb,
+    ulong VmallocUsedKb,
+    ulong PercpuKb,
+    ulong CmaTotalKb,
+    ulong MemOnlineKb,
+    ulong UnaccountedKb,
+    ulong? ReservedAtBootKb);
+
+/// <summary>The memory of the user's Android. <see cref="VmBeyondGuestKb"/> is what the VM
+/// holds on the host beyond what Android uses, null until Android has reported.</summary>
+public sealed record MemoryReport(GuestMemoryInfo? Guest, IReadOnlyList<HostProcess> Host, ulong HostTotalKb,
+    ulong? VmBeyondGuestKb = null);
 
 public sealed record GpuInfo(string Name, string Luid, bool PrimaryDisplay);
 

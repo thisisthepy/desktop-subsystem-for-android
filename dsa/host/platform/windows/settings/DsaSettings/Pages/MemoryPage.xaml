@@ -30,6 +30,47 @@
             <ui:InfoBar Title="{l:Text MemoryErrorBar.Title}" Severity="Error" IsClosable="False"
                         IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
 
+            <!-- The limit is a setting, so these two cards read the settings, not the report. -->
+            <StackPanel x:Name="LimitSection">
+                <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
+                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Ram20}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text MemoryLimitCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{l:Text MemoryLimitCard.Description}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <ComboBox x:Name="LimitBox" MinWidth="180" DisplayMemberPath="Label"
+                              ItemsSource="{Binding MemoryLimitChoices, Mode=OneWay}"
+                              SelectedIndex="{Binding SelectedMemoryLimitIndex, Mode=OneWay}"
+                              IsEnabled="{Binding CanChange, Mode=OneWay}" SelectionChanged="OnLimitChanged" />
+                </ui:CardControl>
+            </StackPanel>
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Server24}"
+                            Visibility="{Binding HasVmSize, Converter={StaticResource Visible}}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="{l:Text MemoryVmSizeCard.Header}" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{l:Text MemoryVmSizeCard.Description}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <StackPanel HorizontalAlignment="Right">
+                    <TextBlock Text="{Binding VmSize, Mode=OneWay}" HorizontalAlignment="Right"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                                Visibility="{Binding GuestReported, Converter={StaticResource Visible}}">
+                        <TextBlock Text="{l:Text MemoryGuestUsedLabel.Text}" Margin="0,0,6,0" Style="{StaticResource CardDescription}" />
+                        <TextBlock Text="{Binding GuestUsed, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                                Visibility="{Binding HasVmBeyondGuest, Converter={StaticResource Visible}}">
+                        <TextBlock Text="{l:Text MemoryBeyondGuestLabel.Text}" Margin="0,0,6,0" Style="{StaticResource CardDescription}" />
+                        <TextBlock Text="{Binding VmBeyondGuest, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                </StackPanel>
+            </ui:CardControl>
+
             <TextBlock Text="{l:Text MemoryHostHeader.Text}" Style="{StaticResource SectionHeader}" />
             <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Desktop24}">
                 <ui:CardControl.Header>
@@ -68,6 +109,10 @@
                     </StackPanel>
                 </ui:CardControl>
                 <ItemsControl ItemsSource="{Binding GuestRows, Mode=OneWay}" ItemTemplate="{StaticResource MemoryRow}" />
+                <StackPanel Visibility="{Binding KernelReported, Converter={StaticResource Visible}}">
+                    <TextBlock Text="{l:Text MemoryKernelHeader.Text}" Style="{StaticResource SectionHeader}" />
+                    <ItemsControl ItemsSource="{Binding KernelRows, Mode=OneWay}" ItemTemplate="{StaticResource MemoryRow}" />
+                </StackPanel>
                 <TextBlock Text="{l:Text MemoryTopHeader.Text}" Style="{StaticResource SectionHeader}" />
                 <ItemsControl ItemsSource="{Binding GuestProcessRows, Mode=OneWay}" ItemTemplate="{StaticResource MemoryRow}" />
             </StackPanel>

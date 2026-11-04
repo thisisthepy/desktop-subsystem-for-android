@@ -262,6 +262,41 @@ jobs:
             Get-Process cmd, PING -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           }
 
+      # The memory limit, the VM's size and the kernel's breakdown (Memory), freezing now
+      # (General) and the trace switches (Advanced), in both themes and both languages. A
+      # stand-in dsa answers `dsa memory`, since no guest here reports its memory
+      # (memory-fixture.ps1); the settings come from the real service.
+      - name: Take pictures of the settings app's memory limit, freeze and trace controls
+        run: |
+          . .github/scripts/installer/setup-ui.ps1
+          . .github/scripts/installer/memory-fixture.ps1
+          New-Item -ItemType Directory -Force screens | Out-Null
+          $exe = "$env:PROGRAM_DIR\settings\DsaSettings.exe"
+          $env:DSA_CLI = New-MemoryFixture "$env:RUNNER_TEMP\memory-fixture" "$env:PROGRAM_DIR\dsa.exe"
+          try {
+            foreach ($lang in 'en-US', 'ko-KR') {
+              foreach ($theme in 'light', 'dark') {
+                Set-AppTheme -Dark:($theme -eq 'dark')
+                foreach ($page in 'memory', 'general', 'advanced') {
+                  $app = Start-Process $exe -ArgumentList '--page', $page, '--lang', $lang -PassThru
+                  $window = Wait-ProcessWindow $app.Id 90
+                  if (-not $window) {
+                    Show-Desktop "settings-$theme-$page-$lang-timeout"
+                    throw "DSA Settings showed no window for the $page page within 90 seconds"
+                  }
+                  Start-Sleep -Seconds 5
+                  Save-WindowScreen $window "$PWD\screens\settings-$theme-$page-$lang.png"
+                  if ($app.HasExited) { throw "DSA Settings exited while showing the $page page (code $($app.ExitCode))" }
+                  Stop-Process -Id $app.Id -Force
+                  $app.WaitForExit(10000) | Out-Null
+                }
+              }
+            }
+          } finally {
+            Set-AppTheme
+            Remove-Item Env:DSA_CLI
+          }
+
       # In a window as short as the app allows, some navigation items are out of view at
       # first. The mouse wheel over the pane, and Tab through the pane, bring every item into
       # view; the wheel over the page brings its last card into view.

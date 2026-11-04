@@ -53,7 +53,7 @@ public static class Format
 
 /// <summary>The General page: the state of Android, starting and stopping it, and the last
 /// error.</summary>
-public sealed class GeneralViewModel : ObservableObject
+public sealed partial class GeneralViewModel : ObservableObject
 {
     private readonly DsaService _service;
     private readonly ITextSource _text;
@@ -137,7 +137,7 @@ public sealed class GeneralViewModel : ObservableObject
 public sealed record GpuChoice(string Label, string Value);
 
 /// <summary>The settings the Display, Updates, Advanced and About pages show and change.</summary>
-public sealed class SettingsViewModel : ObservableObject
+public sealed partial class SettingsViewModel : ObservableObject
 {
     private readonly DsaService _service;
     private readonly ITextSource _text;
@@ -451,7 +451,7 @@ public sealed record MemoryRow(string Label, string Detail, string Size);
 
 /// <summary>The Memory page: the host processes that run Android, and Android's own
 /// breakdown.</summary>
-public sealed class MemoryViewModel : ObservableObject
+public sealed partial class MemoryViewModel : ObservableObject
 {
     private readonly DsaService _service;
     private readonly ITextSource _text;

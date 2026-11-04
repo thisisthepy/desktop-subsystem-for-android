@@ -28,6 +28,8 @@ public partial class GeneralPage : Page
 
     private async void OnStop(object sender, RoutedEventArgs e) => await ViewModel.StopAsync();
 
+    private async void OnFreeze(object sender, RoutedEventArgs e) => await ViewModel.FreezeAsync();
+
     private async void OnRefresh(object sender, RoutedEventArgs e) => await ViewModel.RefreshAsync();
 
     private void OnOpenLogs(object sender, RoutedEventArgs e) => Shell.OpenFolder(Shell.UserLogFolder);

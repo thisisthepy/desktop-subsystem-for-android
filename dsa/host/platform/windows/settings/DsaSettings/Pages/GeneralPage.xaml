@@ -36,6 +36,15 @@
                         IsOpen="{Binding HasLastReason, Mode=OneWay}" Message="{Binding LastReason, Mode=OneWay}" Margin="0,0,0,4" />
             <ui:InfoBar Title="{l:Text UpdateNoticeBar.Title}" Severity="Informational" IsClosable="False"
                         IsOpen="{Binding HasUpdateNotice, Mode=OneWay}" Message="{Binding UpdateNotice, Mode=OneWay}" />
+            <ui:CardControl Margin="0,4,0,0" Icon="{ui:SymbolIcon Snooze24}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="{l:Text FreezeNowCard.Header}" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{l:Text FreezeNowCard.Description}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <ui:Button Content="{l:Text FreezeNowButton.Content}" Click="OnFreeze" IsEnabled="{Binding CanFreeze, Mode=OneWay}" />
+            </ui:CardControl>
 
             <TextBlock Text="{l:Text GeneralMoreHeader.Text}" Style="{StaticResource SectionHeader}" />
             <ui:CardAction Icon="{ui:SymbolIcon Folder24}" Click="OnOpenLogs" Margin="0,0,0,4">

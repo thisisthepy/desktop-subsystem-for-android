@@ -571,16 +571,19 @@ What keeps the number small:
 
 `settings/` is the settings app, a WPF app in C# with WPF UI (MIT), an open source
 library of Windows 11 style controls: a navigation view with the pages
-General (start and stop Android, its state and last error), Memory (the VM, the window
-manager and the app windows on the host, and Android's own breakdown), Display & GPU (the
-render GPU), Updates, Advanced (freeze when idle, off by default, opening web links in
-Android apps instead of the default browser, off by default, and the log folders) and
+General (start, stop and freeze Android, its state and last error), Memory (the memory
+limit, automatic by default; the VM's size and what Android uses of it; the VM, the window
+manager and the app windows on the host; Android's own breakdown and its kernel's), Display
+& GPU (the render GPU), Updates, Advanced (freeze when idle, off by default, opening web
+links in Android apps instead of the default browser, off by default, developer mode and
+its adb address, the input and resize trace switches, which only an administrator changes,
+and the log folders) and
 About, built from cards, with Mica behind the window where Windows has it. It follows the
 system's theme, accent colour and language (English and Korean). The Windows App SDK and
 WinUI 3 are not used, because their runtime's licence is not open source.
 
 It changes nothing itself. It runs `dsa` with `--json` (`dsa status`, `dsa settings`,
-`dsa settings set`, `dsa memory`, `dsa gpus`) and shows what the service answers, so every
+`dsa settings set`, `dsa memory`, `dsa gpus`, `dsa freeze`) and shows what the service answers, so every
 setting goes through the service's local API, and the local API stays generated for Rust
 only.
 

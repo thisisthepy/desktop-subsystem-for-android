@@ -103,7 +103,10 @@ public sealed class DsaService
         Bool(json, "links_in_android"),
         OptionalString(json, "android_version"),
         Bool(json, "developer_mode"),
-        Int(json, "adb_port") is > 0 and var port ? port : SettingsInfo.DefaultAdbPort);
+        Int(json, "adb_port") is > 0 and var port ? port : SettingsInfo.DefaultAdbPort,
+        Bool(json, "input_trace"),
+        Bool(json, "resize_trace"),
+        Int(json, "memory_limit_mb"));
 
     public async Task<SettingsInfo> SettingsAsync() =>
         ReadSettings(await RunJsonAsync("settings").ConfigureAwait(true));
@@ -127,6 +130,18 @@ public sealed class DsaService
     public Task<SettingsInfo> SetProgramUpdatesAsync(bool on) => SetAsync("program-updates", on ? "on" : "off");
 
     public Task<SettingsInfo> SetImageUpdatesAsync(bool on) => SetAsync("image-updates", on ? "on" : "off");
+
+    public Task<SettingsInfo> SetInputTraceAsync(bool on) => SetAsync("input-trace", on ? "on" : "off");
+
+    public Task<SettingsInfo> SetResizeTraceAsync(bool on) => SetAsync("resize-trace", on ? "on" : "off");
+
+    /// <summary>Sets the most memory the user's Android may grow to, in MiB; 0 is automatic.</summary>
+    public Task<SettingsInfo> SetMemoryLimitAsync(int mb) =>
+        SetAsync("memory-limit", mb == 0 ? "auto" : mb.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    /// <summary>Freezes Android now: every process stops until one of its windows is shown
+    /// again.</summary>
+    public async Task<StatusInfo> FreezeAsync() => ReadStatus(await RunJsonAsync("freeze").ConfigureAwait(true));
 
     private static HostRole? ParseRole(string? role) => role switch
     {
@@ -167,9 +182,27 @@ public sealed class DsaService
                 Number(g, "buffers_kb"), Number(g, "cached_kb"), Number(g, "anon_pages_kb"),
                 Number(g, "shmem_kb"), Number(g, "slab_reclaimable_kb"), Number(g, "swap_total_kb"),
                 Number(g, "swap_free_kb"), Number(g, "zram_original_kb"), Number(g, "zram_used_kb"),
-                Number(g, "total_pss_kb"), top, Number(g, "age_seconds"));
+                Number(g, "total_pss_kb"), top, Number(g, "age_seconds"), ReadKernel(g));
         }
-        return new MemoryReport(guest, host, Number(json, "host_total_kb"));
+        return new MemoryReport(guest, host, Number(json, "host_total_kb"), OptionalNumber(json, "vm_beyond_guest_kb"));
+    }
+
+    private static ulong? OptionalNumber(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
+            ? value.GetUInt64()
+            : null;
+
+    /// <summary>The kernel's own memory, or null from a service that does not report it.</summary>
+    private static GuestKernelInfo? ReadKernel(JsonElement guest)
+    {
+        if (!guest.TryGetProperty("kernel", out var k) || k.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+        return new GuestKernelInfo(
+            Number(k, "slab_unreclaimable_kb"), Number(k, "kernel_stack_kb"), Number(k, "page_tables_kb"),
+            Number(k, "vmalloc_used_kb"), Number(k, "percpu_kb"), Number(k, "cma_total_kb"),
+            Number(k, "mem_online_kb"), Number(k, "unaccounted_kb"), OptionalNumber(k, "reserved_at_boot_kb"));
     }
 
     public async Task<IReadOnlyList<GpuInfo>> GpusAsync()

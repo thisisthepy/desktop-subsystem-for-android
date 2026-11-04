@@ -74,6 +74,45 @@
                 </StackPanel>
             </ui:CardControl>
 
+            <TextBlock Text="{l:Text DiagnosticsHeader.Text}" Style="{StaticResource SectionHeader}" />
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Bug24}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{l:Text InputTraceCard.Header}" Style="{StaticResource CardTitle}" />
+                            <ui:SymbolIcon Symbol="Shield24" Margin="6,0,0,0" ToolTip="{l:Text AdminShield.ToolTip}" />
+                        </StackPanel>
+                        <TextBlock Text="{l:Text InputTraceCard.Description}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <StackPanel Orientation="Horizontal">
+                    <ui:Button Content="{l:Text ChangeAsAdmin.Content}" Icon="{ui:SymbolIcon Shield24}" Margin="0,0,12,0"
+                               Visibility="{Binding TracesNeedAdministrator, Converter={StaticResource Visible}}"
+                               Click="OnInputTraceAsAdministrator" />
+                    <ui:ToggleSwitch x:Name="InputTraceSwitch" IsChecked="{Binding InputTrace, Mode=OneWay}"
+                                     IsEnabled="{Binding CanChangeTraces, Mode=OneWay}" Click="OnInputTraceToggled" />
+                </StackPanel>
+            </ui:CardControl>
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ResizeLarge24}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{l:Text ResizeTraceCard.Header}" Style="{StaticResource CardTitle}" />
+                            <ui:SymbolIcon Symbol="Shield24" Margin="6,0,0,0" ToolTip="{l:Text AdminShield.ToolTip}" />
+                        </StackPanel>
+                        <TextBlock Text="{l:Text ResizeTraceCard.Description}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <StackPanel Orientation="Horizontal">
+                    <ui:Button Content="{l:Text ChangeAsAdmin.Content}" Icon="{ui:SymbolIcon Shield24}" Margin="0,0,12,0"
+                               Visibility="{Binding TracesNeedAdministrator, Converter={StaticResource Visible}}"
+                               Click="OnResizeTraceAsAdministrator" />
+                    <ui:ToggleSwitch x:Name="ResizeTraceSwitch" IsChecked="{Binding ResizeTrace, Mode=OneWay}"
+                                     IsEnabled="{Binding CanChangeTraces, Mode=OneWay}" Click="OnResizeTraceToggled" />
+                </StackPanel>
+            </ui:CardControl>
+            <TextBlock Text="{l:Text DiagnosticsNote.Text}" Style="{StaticResource Note}" />
+
             <TextBlock Text="{l:Text LogsHeader.Text}" Style="{StaticResource SectionHeader}" />
             <ui:CardAction Icon="{ui:SymbolIcon Folder24}" Click="OnOpenUserLogs" Margin="0,0,0,4">
                 <StackPanel>

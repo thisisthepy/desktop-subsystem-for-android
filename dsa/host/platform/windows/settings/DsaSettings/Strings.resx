@@ -352,6 +352,87 @@
   <data name="FreezeCard.Description" xml:space="preserve">
     <value>Off by default: an idle Android dozes and still receives notifications. Frozen, it uses no CPU but receives nothing until you open an app.</value>
   </data>
+  <data name="FreezeNowCard.Header" xml:space="preserve">
+    <value>Freeze Android now</value>
+  </data>
+  <data name="FreezeNowCard.Description" xml:space="preserve">
+    <value>Stops every process in Android until you open one of its windows again. Notifications, alarms and widgets stop with it.</value>
+  </data>
+  <data name="FreezeNowButton.Content" xml:space="preserve">
+    <value>Freeze</value>
+  </data>
+  <data name="MemoryLimitCard.Header" xml:space="preserve">
+    <value>Memory limit</value>
+  </data>
+  <data name="MemoryLimitCard.Description" xml:space="preserve">
+    <value>The most memory Android may grow to. Android takes memory only as it needs it and gives it back when idle. Automatic lets it grow to 3 GB, never past this PC's memory. Takes effect the next time Android starts.</value>
+  </data>
+  <data name="MemoryLimit_Auto" xml:space="preserve">
+    <value>Automatic</value>
+  </data>
+  <data name="MemoryVmSizeCard.Header" xml:space="preserve">
+    <value>Android's VM now</value>
+  </data>
+  <data name="MemoryVmSizeCard.Description" xml:space="preserve">
+    <value>The memory the VM holds on this PC, and how much of it Android uses</value>
+  </data>
+  <data name="MemoryGuestUsedLabel.Text" xml:space="preserve">
+    <value>Used by Android</value>
+  </data>
+  <data name="MemoryBeyondGuestLabel.Text" xml:space="preserve">
+    <value>Free, not yet returned</value>
+  </data>
+  <data name="MemoryKernelHeader.Text" xml:space="preserve">
+    <value>Android's kernel</value>
+  </data>
+  <data name="Memory_KernelSlab" xml:space="preserve">
+    <value>Kernel objects</value>
+  </data>
+  <data name="Memory_KernelSlabDetail" xml:space="preserve">
+    <value>Memory the kernel keeps for its own data and cannot reclaim</value>
+  </data>
+  <data name="Memory_KernelStacks" xml:space="preserve">
+    <value>Thread stacks</value>
+  </data>
+  <data name="Memory_KernelPageTables" xml:space="preserve">
+    <value>Page tables</value>
+  </data>
+  <data name="Memory_KernelVmalloc" xml:space="preserve">
+    <value>Kernel mappings (vmalloc)</value>
+  </data>
+  <data name="Memory_KernelPercpu" xml:space="preserve">
+    <value>Per-CPU data</value>
+  </data>
+  <data name="Memory_KernelUnaccounted" xml:space="preserve">
+    <value>Drivers</value>
+  </data>
+  <data name="Memory_KernelUnaccountedDetail" xml:space="preserve">
+    <value>What no counter names, such as GPU and DMA buffers</value>
+  </data>
+  <data name="Memory_KernelReserved" xml:space="preserve">
+    <value>Reserved at boot</value>
+  </data>
+  <data name="Memory_KernelReservedDetail" xml:space="preserve">
+    <value>Kernel code, page structures and buffers, of {0} given; contiguous area {1}</value>
+  </data>
+  <data name="DiagnosticsHeader.Text" xml:space="preserve">
+    <value>Diagnostics</value>
+  </data>
+  <data name="InputTraceCard.Header" xml:space="preserve">
+    <value>Input trace</value>
+  </data>
+  <data name="InputTraceCard.Description" xml:space="preserve">
+    <value>Every DSA process writes when each touch, click and key reaches it, so the delay from your input to the picture can be measured. Off by default.</value>
+  </data>
+  <data name="ResizeTraceCard.Header" xml:space="preserve">
+    <value>Resize trace</value>
+  </data>
+  <data name="ResizeTraceCard.Description" xml:space="preserve">
+    <value>Every DSA process writes each stage of each window resize, to find where a resize is slow or flickers. Off by default.</value>
+  </data>
+  <data name="DiagnosticsNote.Text" xml:space="preserve">
+    <value>The traces go to the DSA logs below and make them grow, so turn them on only to report a problem. They apply to every user of this PC, so only an administrator can change them.</value>
+  </data>
   <data name="LogsHeader.Text" xml:space="preserve">
     <value>Logs</value>
   </data>
