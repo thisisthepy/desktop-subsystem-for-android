@@ -18,7 +18,7 @@ fn fr1_programs_running_from_the_program_folder_are_ended_before_an_upgrade() {
         r"C:\Program Files\DSA\dsa-wm.exe",
         r"c:\program files\dsa\DSA-APP-WINDOW.EXE",
         r"\\?\C:\Program Files\DSA\settings\DsaSettings.exe",
-        "C:/Program Files/DSA/dsa.exe",
+        "C:/Program Files/DSA/dsa-wm.exe",
     ] {
         assert!(
             is_dsa_program(Path::new(image), program, &apps()),
@@ -50,6 +50,9 @@ fn fr1_other_programs_are_left_running() {
         r"C:\Windows\explorer.exe",
         r"C:\Users\ada\AppData\Local\DSA\android.vhdx",
         r"C:\Program Files\DSA",
+        // The service is stopped by the installer, and dsa may be waiting for it.
+        r"C:\Program Files\DSA\dsa-hostd.exe",
+        r"C:\Program Files\DSA\dsa.exe",
     ] {
         assert!(
             !is_dsa_program(Path::new(image), program, &apps()),

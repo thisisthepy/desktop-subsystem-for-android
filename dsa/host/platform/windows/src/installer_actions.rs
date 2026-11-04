@@ -12,20 +12,31 @@
 
 use std::path::{Path, PathBuf};
 
-/// Whether the program at `image` is one of DSA's: it is in the program folder (or below
-/// it), or in one of the users' app window folders. Paths are compared without regard to
+/// The programs in the program folder that run in a user's session and are ended. The
+/// service is stopped by Windows Installer itself, and `dsa.exe` is left alone: it may be
+/// the very command (`dsa update`) that is waiting for this installation to finish.
+const SESSION_PROGRAMS: [&str; 4] = [
+    "dsa-wm.exe",
+    "dsa-compositor.exe",
+    "dsa-app-window.exe",
+    "dsasettings.exe",
+];
+
+/// Whether the program at `image` is one of DSA's that runs in a user's session: the window
+/// manager, the app window host or the settings app in the program folder (or below it), or
+/// any program in one of the users' app window folders. Paths are compared without regard to
 /// case and to the separator, as Windows compares them.
 pub fn is_dsa_program(image: &Path, program_folder: &Path, app_folders: &[PathBuf]) -> bool {
     let image = normalised(image);
-    std::iter::once(program_folder)
-        .chain(app_folders.iter().map(PathBuf::as_path))
-        .map(normalised)
-        .filter(|folder| !folder.is_empty())
-        .any(|folder| {
-            image.len() > folder.len()
-                && image.starts_with(&folder)
-                && image[folder.len()..].starts_with('\\')
-        })
+    let below = |folder: &str| {
+        !folder.is_empty()
+            && image.len() > folder.len()
+            && image.starts_with(folder)
+            && image[folder.len()..].starts_with('\\')
+    };
+    let name = image.rsplit('\\').next().unwrap_or_default();
+    let in_program = below(&normalised(program_folder)) && SESSION_PROGRAMS.contains(&name);
+    in_program || app_folders.iter().any(|folder| below(&normalised(folder)))
 }
 
 fn normalised(path: &Path) -> String {
