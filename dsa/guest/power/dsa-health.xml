@@ -1,0 +1,9 @@
+<!-- The health HAL dsa-health serves. Version 3 is in the compatibility matrix of every
+     supported image. -->
+<manifest version="1.0" type="device">
+    <hal format="aidl">
+        <name>android.hardware.health</name>
+        <version>3</version>
+        <fqname>IHealth/default</fqname>
+    </hal>
+</manifest>

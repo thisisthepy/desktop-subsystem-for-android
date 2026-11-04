@@ -10,8 +10,8 @@ use dsa_guest_channeld::router::{
 };
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{
-    AgentConnected, AppInfo, AuthProof, CloseTask, Envelope, GuestBoot, Hello, LaunchApp, Rect,
-    TaskFrames, TaskRemoved, TaskUpdated,
+    AgentConnected, AppInfo, AuthProof, CloseTask, Envelope, GuestBoot, Hello, LaunchApp,
+    PowerHint, PowerHintKind, PowerState, Rect, TaskFrames, TaskRemoved, TaskUpdated,
 };
 
 /// A client's callback that keeps what it is given, and can be made to die.
@@ -219,6 +219,72 @@ fn fr3_a_host_that_connects_again_learns_the_live_tasks() {
 
     router.host_connected();
     assert_eq!(apart_from_boot(&host), vec![updated, frames]);
+}
+
+const POWER_HAL: Peer = Peer(600);
+
+fn power_state(percent: u32) -> Vec<u8> {
+    frame(Body::PowerState(PowerState {
+        ac_online: false,
+        battery_present: true,
+        battery_percent: percent,
+        charging: false,
+        power_saver: false,
+    }))
+}
+
+fn power_hint(kind: PowerHintKind, id: i32, enabled: bool) -> Vec<u8> {
+    frame(Body::PowerHint(PowerHint {
+        kind: kind as i32,
+        id,
+        enabled,
+        duration_ms: 0,
+    }))
+}
+
+#[test]
+fn pr4_a_late_listener_learns_the_hosts_power_first() {
+    // The health HAL starts, or restarts, after the host has said what its power is; the
+    // host says so again only when it changes.
+    let (router, _host) = router();
+    router.from_host(&power_state(80));
+    router.from_host(&power_state(57));
+    router.from_guest(AGENT, task_updated(7)).unwrap();
+
+    let health = Arc::new(Recorder::default());
+    router.subscribe(POWER_HAL, health.clone());
+    assert_eq!(health.frames(), vec![power_state(57), task_updated(7)]);
+}
+
+#[test]
+fn pr4_power_hints_go_to_the_host_alone() {
+    let (router, host) = router();
+    let composer = Arc::new(Recorder::default());
+    router.subscribe(COMPOSER, composer.clone());
+    let launch = power_hint(PowerHintKind::Mode, 5, true);
+    router.from_guest(POWER_HAL, launch.clone()).unwrap();
+    assert_eq!(apart_from_boot(&host), vec![launch]);
+    assert!(composer.frames().is_empty());
+}
+
+#[test]
+fn pr4_a_host_that_connects_again_learns_the_power_modes_still_on() {
+    let (router, host) = router();
+    let launch = power_hint(PowerHintKind::Mode, 5, true);
+    let game = power_hint(PowerHintKind::Mode, 15, true);
+    router.from_guest(POWER_HAL, launch).unwrap();
+    router.from_guest(POWER_HAL, game.clone()).unwrap();
+    router
+        .from_guest(POWER_HAL, power_hint(PowerHintKind::Mode, 5, false))
+        .unwrap();
+    // A boost is over long before a host could connect again.
+    router
+        .from_guest(POWER_HAL, power_hint(PowerHintKind::Boost, 0, false))
+        .unwrap();
+    host.try_iter().count();
+
+    router.host_connected();
+    assert_eq!(apart_from_boot(&host), vec![game]);
 }
 
 #[test]

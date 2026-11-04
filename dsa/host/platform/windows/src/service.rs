@@ -206,6 +206,15 @@ pub fn create_user_android(
     if let Some(power) = power {
         power.attach(&session);
     }
+    // The guest's power HAL: its hints set how hard Windows runs the guest's processors.
+    let hints = session.watch_power_hints();
+    let (watched, user_name) = (Arc::downgrade(&session), sid.to_string());
+    if let Err(error) = std::thread::Builder::new()
+        .name("dsa-guest-power".into())
+        .spawn(move || crate::guest_performance::follow(hints, watched, user_name))
+    {
+        eprintln!("{sid}: power: cannot follow Android's power hints: {error}");
+    }
     Ok(match updates {
         None => session as Arc<dyn UserAndroid>,
         Some(updates) => Arc::new(UpdatingAndroid {

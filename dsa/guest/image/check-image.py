@@ -209,6 +209,24 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     if "META/file_contexts.bin" in names and b"/vendor/bin/hw/dsa-hwcomposer" not in z.read("META/file_contexts.bin"):
         problems.append("META/file_contexts.bin does not label dsa-hwcomposer, so init refuses to start it")
 
+    # DSA's power and health HALs: without them the host never hears the guest's power hints,
+    # and the guest's battery is Cuttlefish's made-up one.
+    for name, what in [("dsa-power", "IPower/default"), ("dsa-health", "IHealth/default")]:
+        if f"VENDOR/bin/hw/{name}" not in names:
+            problems.append(f"VENDOR/bin/hw/{name} is missing from the image")
+        if f"VENDOR/etc/init/{name}.rc" not in names:
+            problems.append(f"VENDOR/etc/init/{name}.rc is missing, so init never starts {name}")
+        hal_manifest = f"VENDOR/etc/vintf/manifest/{name}.xml"
+        if hal_manifest not in names:
+            problems.append(f"{hal_manifest} is missing, so its HAL is not declared")
+        elif f"<fqname>{what}</fqname>" not in z.read(hal_manifest).decode():
+            problems.append(f"{name}.xml does not declare {what}")
+        if "META/file_contexts.bin" in names and f"/vendor/bin/hw/{name}".encode() not in z.read("META/file_contexts.bin"):
+            problems.append(f"META/file_contexts.bin does not label {name}, so init refuses to start it")
+    for apex in ["com.android.hardware.power", "com.google.cf.health"]:
+        if f"VENDOR/apex/{apex}.apex" in names:
+            problems.append(f"{apex} is still in the image and would serve its HAL too")
+
     # DSA's codec HAL: without it every video decodes on the guest's processors.
     if "VENDOR/bin/hw/dsa-codec2" not in names:
         problems.append("VENDOR/bin/hw/dsa-codec2 is missing from the image")

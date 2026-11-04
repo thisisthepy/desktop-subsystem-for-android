@@ -19,6 +19,45 @@ permissions:
   contents: read
 
 jobs:
+  test-apps:
+    name: Check the Vulkan CTS subset and build the graphics test apps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      # Every pattern must still name cases of the pinned CTS. Running the cases needs a
+      # booted DSA guest on a Windows machine with Hyper-V and a GPU, which a hosted runner
+      # does not have; dsa/graphics/verify/README.md says how to run them there.
+      - name: Check the Vulkan CTS subset against the pinned CTS
+        run: uv run dsa/graphics/verify/verify.py check-subset
+
+      - name: Set up a JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up the Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "cmake;4.1.0"
+
+      - name: Build the OpenGL ES and Vulkan test apps
+        run: bash dsa/graphics/verify/build-test-apps.sh .scratch/graphics-test-apps
+
+      - name: Keep the test apps and the expanded case list
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphics-test-apps
+          path: |
+            .scratch/graphics-test-apps/hello-gl2.apk
+            .scratch/graphics-test-apps/hello-vulkan.apk
+            .scratch/graphics-verify/vk-cts-subset.cases.txt
+          if-no-files-found: error
+
   guest-transport:
     name: Build the guest Hyper-V graphics transport
     runs-on: ubuntu-latest

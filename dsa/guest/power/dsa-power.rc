@@ -1,0 +1,6 @@
+# The guest's power HAL. Its modes and boosts go to the host, which runs the guest's
+# processors to match.
+service vendor.dsa-power /vendor/bin/hw/dsa-power
+    class hal
+    user system
+    group system

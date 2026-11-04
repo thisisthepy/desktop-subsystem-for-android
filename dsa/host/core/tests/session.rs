@@ -12,9 +12,10 @@ use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use dsa_host_core::keys::{keycode, meta, KeyAction, KeyEvent};
 use dsa_host_core::notifications::{Notification, NotificationAction, NotificationEvent};
 use dsa_host_core::power::{PowerHub, PowerState};
+use dsa_host_core::power_hints::{mode, PowerHint};
 use dsa_host_core::session::{
-    BootProblem, GuestLauncher, GuestStall, Session, SessionConfig, SessionError, SessionEvent,
-    SessionState, StopReason,
+    BootProblem, GuestLauncher, GuestPower, GuestStall, Session, SessionConfig, SessionError,
+    SessionEvent, SessionState, StopReason,
 };
 use dsa_host_core::tasks::{Bounds, Task, TaskEvent, TaskRequest};
 use dsa_host_core::widgets::{self, Placement, Widget, WidgetEvent, WidgetSize};
@@ -504,6 +505,31 @@ fn fr2_an_agent_that_connects_again_is_told_the_screen_and_the_power() {
         Body::PowerState(on_battery(40).to_control())
     );
     assert_eq!(next_body(&mut daemon), screen(false));
+}
+
+#[test]
+fn pr4_the_guests_power_hints_reach_the_host_and_end_when_the_guest_stops() {
+    let (session, mut daemon, _launcher) = lifecycle_session(None);
+    let hints = session.watch_power_hints();
+    send_body(
+        &mut daemon,
+        Body::PowerHint(dsa_protocol::control::PowerHint {
+            kind: dsa_protocol::control::PowerHintKind::Mode as i32,
+            id: mode::LAUNCH,
+            enabled: true,
+            duration_ms: 0,
+        }),
+    );
+    assert_eq!(
+        hints.recv_timeout(WAIT),
+        Ok(GuestPower::Hint(PowerHint::Mode {
+            id: mode::LAUNCH,
+            enabled: true,
+        }))
+    );
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(hints.recv_timeout(WAIT), Ok(GuestPower::Stopped));
 }
 
 #[test]

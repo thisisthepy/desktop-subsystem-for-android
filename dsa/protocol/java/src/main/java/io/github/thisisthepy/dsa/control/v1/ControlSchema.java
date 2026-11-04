@@ -7,5 +7,5 @@ public final class ControlSchema {
     private ControlSchema() {}
 
     /** SHA-256 of the normalised definition, in lower-case hexadecimal. */
-    public static final String SCHEMA_HASH_HEX = "cc968852d24aed86e2bf10bfcb7e95ef8cfac45dcbe923a0940383a46d85d2e5";
+    public static final String SCHEMA_HASH_HEX = "efdccaa80f6962045d1bf3fd539ed632bc0d729ce6e67a750def4022badd41c3";
 }

@@ -253,6 +253,18 @@ public final class VectorsTest {
                         .setCharging(false)
                         .setPowerSaver(true))
                 .build());
+        cases.put("power_hint_launch_mode", Envelope.newBuilder()
+                .setPowerHint(PowerHint.newBuilder()
+                        .setKind(PowerHintKind.POWER_HINT_KIND_MODE)
+                        .setId(5)
+                        .setEnabled(true))
+                .build());
+        cases.put("power_hint_interaction_boost", Envelope.newBuilder()
+                .setPowerHint(PowerHint.newBuilder()
+                        .setKind(PowerHintKind.POWER_HINT_KIND_BOOST)
+                        .setId(0)
+                        .setDurationMs(80))
+                .build());
         cases.put("device_idle", Envelope.newBuilder()
                 .setDeviceIdle(DeviceIdle.newBuilder().setIdle(true))
                 .build());
