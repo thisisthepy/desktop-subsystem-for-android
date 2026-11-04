@@ -404,6 +404,28 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.InstallResult getInstallResult();
 
   /**
+   * <code>.dsa.control.v1.QueryPackage query_package = 65;</code>
+   * @return Whether the queryPackage field is set.
+   */
+  boolean hasQueryPackage();
+  /**
+   * <code>.dsa.control.v1.QueryPackage query_package = 65;</code>
+   * @return The queryPackage.
+   */
+  io.github.thisisthepy.dsa.control.v1.QueryPackage getQueryPackage();
+
+  /**
+   * <code>.dsa.control.v1.PackageState package_state = 66;</code>
+   * @return Whether the packageState field is set.
+   */
+  boolean hasPackageState();
+  /**
+   * <code>.dsa.control.v1.PackageState package_state = 66;</code>
+   * @return The packageState.
+   */
+  io.github.thisisthepy.dsa.control.v1.PackageState getPackageState();
+
+  /**
    * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
    * @return Whether the openLink field is set.
    */

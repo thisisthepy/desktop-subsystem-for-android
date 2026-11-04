@@ -56,6 +56,8 @@ public  final class Envelope extends
     CANCEL_INSTALL(62),
     INSTALL_PROGRESS(63),
     INSTALL_RESULT(64),
+    QUERY_PACKAGE(65),
+    PACKAGE_STATE(66),
     OPEN_LINK(50),
     LINK_HANDLING(51),
     OPEN_FILE(52),
@@ -130,6 +132,8 @@ public  final class Envelope extends
         case 62: return CANCEL_INSTALL;
         case 63: return INSTALL_PROGRESS;
         case 64: return INSTALL_RESULT;
+        case 65: return QUERY_PACKAGE;
+        case 66: return PACKAGE_STATE;
         case 50: return OPEN_LINK;
         case 51: return LINK_HANDLING;
         case 52: return OPEN_FILE;
@@ -1969,6 +1973,106 @@ public  final class Envelope extends
    */
   private void clearInstallResult() {
     if (bodyCase_ == 64) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int QUERY_PACKAGE_FIELD_NUMBER = 65;
+  /**
+   * <code>.dsa.control.v1.QueryPackage query_package = 65;</code>
+   */
+  @java.lang.Override
+  public boolean hasQueryPackage() {
+    return bodyCase_ == 65;
+  }
+  /**
+   * <code>.dsa.control.v1.QueryPackage query_package = 65;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.QueryPackage getQueryPackage() {
+    if (bodyCase_ == 65) {
+       return (io.github.thisisthepy.dsa.control.v1.QueryPackage) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.QueryPackage.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.QueryPackage query_package = 65;</code>
+   */
+  private void setQueryPackage(io.github.thisisthepy.dsa.control.v1.QueryPackage value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 65;
+  }
+  /**
+   * <code>.dsa.control.v1.QueryPackage query_package = 65;</code>
+   */
+  private void mergeQueryPackage(io.github.thisisthepy.dsa.control.v1.QueryPackage value) {
+    value.getClass();
+  if (bodyCase_ == 65 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.QueryPackage.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.QueryPackage.newBuilder((io.github.thisisthepy.dsa.control.v1.QueryPackage) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 65;
+  }
+  /**
+   * <code>.dsa.control.v1.QueryPackage query_package = 65;</code>
+   */
+  private void clearQueryPackage() {
+    if (bodyCase_ == 65) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int PACKAGE_STATE_FIELD_NUMBER = 66;
+  /**
+   * <code>.dsa.control.v1.PackageState package_state = 66;</code>
+   */
+  @java.lang.Override
+  public boolean hasPackageState() {
+    return bodyCase_ == 66;
+  }
+  /**
+   * <code>.dsa.control.v1.PackageState package_state = 66;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.PackageState getPackageState() {
+    if (bodyCase_ == 66) {
+       return (io.github.thisisthepy.dsa.control.v1.PackageState) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.PackageState.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.PackageState package_state = 66;</code>
+   */
+  private void setPackageState(io.github.thisisthepy.dsa.control.v1.PackageState value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 66;
+  }
+  /**
+   * <code>.dsa.control.v1.PackageState package_state = 66;</code>
+   */
+  private void mergePackageState(io.github.thisisthepy.dsa.control.v1.PackageState value) {
+    value.getClass();
+  if (bodyCase_ == 66 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.PackageState.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.PackageState.newBuilder((io.github.thisisthepy.dsa.control.v1.PackageState) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 66;
+  }
+  /**
+   * <code>.dsa.control.v1.PackageState package_state = 66;</code>
+   */
+  private void clearPackageState() {
+    if (bodyCase_ == 66) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -4964,6 +5068,102 @@ public  final class Envelope extends
     }
 
     /**
+     * <code>.dsa.control.v1.QueryPackage query_package = 65;</code>
+     */
+    @java.lang.Override
+    public boolean hasQueryPackage() {
+      return instance.hasQueryPackage();
+    }
+    /**
+     * <code>.dsa.control.v1.QueryPackage query_package = 65;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.QueryPackage getQueryPackage() {
+      return instance.getQueryPackage();
+    }
+    /**
+     * <code>.dsa.control.v1.QueryPackage query_package = 65;</code>
+     */
+    public Builder setQueryPackage(io.github.thisisthepy.dsa.control.v1.QueryPackage value) {
+      copyOnWrite();
+      instance.setQueryPackage(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.QueryPackage query_package = 65;</code>
+     */
+    public Builder setQueryPackage(
+        io.github.thisisthepy.dsa.control.v1.QueryPackage.Builder builderForValue) {
+      copyOnWrite();
+      instance.setQueryPackage(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.QueryPackage query_package = 65;</code>
+     */
+    public Builder mergeQueryPackage(io.github.thisisthepy.dsa.control.v1.QueryPackage value) {
+      copyOnWrite();
+      instance.mergeQueryPackage(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.QueryPackage query_package = 65;</code>
+     */
+    public Builder clearQueryPackage() {
+      copyOnWrite();
+      instance.clearQueryPackage();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.PackageState package_state = 66;</code>
+     */
+    @java.lang.Override
+    public boolean hasPackageState() {
+      return instance.hasPackageState();
+    }
+    /**
+     * <code>.dsa.control.v1.PackageState package_state = 66;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.PackageState getPackageState() {
+      return instance.getPackageState();
+    }
+    /**
+     * <code>.dsa.control.v1.PackageState package_state = 66;</code>
+     */
+    public Builder setPackageState(io.github.thisisthepy.dsa.control.v1.PackageState value) {
+      copyOnWrite();
+      instance.setPackageState(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PackageState package_state = 66;</code>
+     */
+    public Builder setPackageState(
+        io.github.thisisthepy.dsa.control.v1.PackageState.Builder builderForValue) {
+      copyOnWrite();
+      instance.setPackageState(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PackageState package_state = 66;</code>
+     */
+    public Builder mergePackageState(io.github.thisisthepy.dsa.control.v1.PackageState value) {
+      copyOnWrite();
+      instance.mergePackageState(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PackageState package_state = 66;</code>
+     */
+    public Builder clearPackageState() {
+      copyOnWrite();
+      instance.clearPackageState();
+      return this;
+    }
+
+    /**
      * <code>.dsa.control.v1.OpenLink open_link = 50;</code>
      */
     @java.lang.Override
@@ -6126,6 +6326,8 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.CancelInstall.class,
             io.github.thisisthepy.dsa.control.v1.InstallProgress.class,
             io.github.thisisthepy.dsa.control.v1.InstallResult.class,
+            io.github.thisisthepy.dsa.control.v1.QueryPackage.class,
+            io.github.thisisthepy.dsa.control.v1.PackageState.class,
             io.github.thisisthepy.dsa.control.v1.GuestNotification.class,
             io.github.thisisthepy.dsa.control.v1.NotificationRemoved.class,
             io.github.thisisthepy.dsa.control.v1.NotificationClicked.class,
@@ -6146,14 +6348,14 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.WidgetPointer.class,
           };
           java.lang.String info =
-              "\u0000;\u0001\u0000\u0001c;\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<\u0000" +
+              "\u0000=\u0001\u0000\u0001c=\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<\u0000" +
               "\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<\u0000\u000b" +
               "<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012<\u0000\u0013" +
               "<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000\u0019<\u0000" +
               "\u001a<\u0000\u001b<\u0000\u001c<\u0000\u001d<\u0000(<\u0000)<\u0000*<\u00002<\u0000" +
-              "3<\u00004<\u00005<\u00006<\u0000<<\u0000=<\u0000><\u0000?<\u0000@<\u0000F<\u0000" +
-              "G<\u0000H<\u0000I<\u0000P<\u0000Q<\u0000R<\u0000S<\u0000Z<\u0000[<\u0000\\<\u0000" +
-              "]<\u0000^<\u0000_<\u0000`<\u0000a<\u0000b<\u0000c<\u0000";
+              "3<\u00004<\u00005<\u00006<\u0000<<\u0000=<\u0000><\u0000?<\u0000@<\u0000A<\u0000" +
+              "B<\u0000F<\u0000G<\u0000H<\u0000I<\u0000P<\u0000Q<\u0000R<\u0000S<\u0000Z<\u0000" +
+              "[<\u0000\\<\u0000]<\u0000^<\u0000_<\u0000`<\u0000a<\u0000b<\u0000c<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through
