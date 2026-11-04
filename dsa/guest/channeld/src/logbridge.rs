@@ -292,7 +292,7 @@ impl LogBridge {
             Arc::clone(&self.last_ns),
             self.queue_capacity,
         );
-        let (run_stop, run_wanted) = (Arc::clone(&stop), wanted.clone());
+        let (run_stop, run_wanted) = (Arc::clone(&stop), wanted);
         spawn("dsa-log-stream", move || {
             run_stream(source, &*connect, run_wanted, run_stop, last_ns, capacity)
         });
@@ -382,7 +382,7 @@ fn run_stream(
         let (queue, stop, wanted, last_ns) = (
             Arc::clone(&queue),
             Arc::clone(&stop),
-            wanted.clone(),
+            wanted,
             Arc::clone(&last_ns),
         );
         thread::Builder::new()
