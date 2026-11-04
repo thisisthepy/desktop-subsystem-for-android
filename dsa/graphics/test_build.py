@@ -14,7 +14,7 @@ class GraphicsBuildTests(unittest.TestCase):
     def test_pr3_build_script_invokes_cmake_for_guest_transport(self):
         script = BUILD_SCRIPT.read_text()
         self.assertIn("android.toolchain.cmake", script)
-        self.assertIn("ANDROID_ABI=x86_64", script)
+        self.assertIn('-DANDROID_ABI="$android_abi"', script)
         self.assertIn("OpenglSystemCommon", script)
         self.assertIn("vulkan.ranchu", script)
 
@@ -57,6 +57,22 @@ class GraphicsBuildTests(unittest.TestCase):
         self.assertIn("-Dplatforms=android", script)
         self.assertIn("-Dvulkan-drivers=gfxstream", script)
         self.assertIn('-DMESA_BUILD_DIR="$mesa_build/out"', script)
+
+    def test_fr25_the_guest_transport_builds_for_arm64_too(self):
+        script = BUILD_SCRIPT.read_text()
+        self.assertIn('guest_arch="${DSA_GUEST_ARCH:-x86_64}"', script)
+        self.assertIn("arm64) android_abi=arm64-v8a; android_triple=aarch64-linux-android", script)
+        self.assertIn("--target=${android_triple}34", script)
+        self.assertIn("arm64) mesa_cpu=aarch64", script)
+        # Each architecture has its own Mesa build, so one never links the other's objects.
+        self.assertIn('mesa_build="$scratch/build-mesa-$guest_arch"', script)
+
+    def test_fr25_sse41_helpers_are_built_and_linked_only_for_x86_64(self):
+        script = BUILD_SCRIPT.read_text()
+        self.assertIn('[[ "$guest_arch" == x86_64 ]] && mesa_sse41=src/util/libmesa_util_sse41.a', script)
+        self.assertNotIn(" src/util/libmesa_util_sse41.a \\", script)
+        vulkan = VULKAN_FILE.read_text()
+        self.assertIn('if(ANDROID_ABI STREQUAL "x86_64")', vulkan)
 
 
 if __name__ == "__main__":

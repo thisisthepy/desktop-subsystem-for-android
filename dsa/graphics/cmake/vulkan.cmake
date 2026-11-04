@@ -206,11 +206,14 @@ set(MESA_STATIC_LIBS
     ${MESA_BUILD_DIR}/src/util/u_gralloc/lib_mesa_u_gralloc.a
     ${MESA_BUILD_DIR}/src/util/libmesa_util.a
     ${MESA_BUILD_DIR}/src/util/libxmlconfig.a
-    ${MESA_BUILD_DIR}/src/util/libmesa_util_sse41.a
     ${MESA_BUILD_DIR}/src/util/blake3/libblake3.a
     ${MESA_BUILD_DIR}/src/c11/impl/libmesa_util_c11.a
     ${MESA_BUILD_DIR}/src/gfxstream/aemu/libaemu.a
 )
+# Mesa builds its SSE 4.1 helpers only for x86.
+if(ANDROID_ABI STREQUAL "x86_64")
+    list(INSERT MESA_STATIC_LIBS 8 ${MESA_BUILD_DIR}/src/util/libmesa_util_sse41.a)
+endif()
 
 # Every symbol must resolve now: the platform loads the driver with immediate binding, so
 # one that does not resolve makes it fail to load on the device. The platform libraries

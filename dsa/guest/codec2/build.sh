@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds dsa-codec2, the guest's Codec 2.0 HAL for video decoding on the host's GPU, for
-# x86_64 Android with the NDK.
+# x86_64 or arm64 Android (DSA_GUEST_ARCH) with the NDK.
 #
 #   dsa/guest/codec2/build.sh [scratch dir] [output dir]
 #
@@ -12,6 +12,14 @@
 # the SDK whose newest build-tools provide aidl. Both are found in their usual places when
 # unset.
 set -euo pipefail
+
+# The guest architecture: x86_64 (default) or arm64. DSA_GUEST_ARCH selects it.
+guest_arch="${DSA_GUEST_ARCH:-x86_64}"
+case "$guest_arch" in
+    x86_64) android_abi=x86_64; android_triple=x86_64-linux-android ;;
+    arm64) android_abi=arm64-v8a; android_triple=aarch64-linux-android ;;
+    *) echo "DSA_GUEST_ARCH must be x86_64 or arm64, not $guest_arch" >&2; exit 1 ;;
+esac
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
@@ -126,7 +134,7 @@ fi
 "$cmake_bin" -B "$out/cmake" -S "$here" "${generator[@]}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$ndk_dir/build/cmake/android.toolchain.cmake" \
-    -DANDROID_ABI=x86_64 \
+    -DANDROID_ABI="$android_abi" \
     -DANDROID_PLATFORM=android-34 \
     -DSCRATCH_DIR="$scratch" \
     -DAIDL_GEN_DIR="$gen"

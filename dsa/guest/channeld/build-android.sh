@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds dsa-channeld for the x86_64 guest with the Android NDK and checks the result.
+# Builds dsa-channeld for the x86_64 or arm64 guest (DSA_GUEST_ARCH, x86_64 by default) with
+# the Android NDK and checks the result.
 #
 #   ANDROID_NDK_HOME=/path/to/ndk dsa/guest/channeld/build-android.sh <out dir>
 #
@@ -13,14 +14,19 @@ ndk="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
 [[ -n "$ndk" ]] || { echo "set ANDROID_NDK_HOME to the NDK" >&2; exit 1; }
 here="$(cd "$(dirname "$0")" && pwd)"
 api=34
-target=x86_64-linux-android
+case "${DSA_GUEST_ARCH:-x86_64}" in
+    x86_64) target=x86_64-linux-android; machine='Advanced Micro Devices X86-64' ;;
+    arm64) target=aarch64-linux-android; machine='AArch64' ;;
+    *) echo "DSA_GUEST_ARCH must be x86_64 or arm64" >&2; exit 1 ;;
+esac
 
 host_tag=linux-x86_64
 [[ "$(uname -s)" == Darwin ]] && host_tag=darwin-x86_64
 bin="$ndk/toolchains/llvm/prebuilt/$host_tag/bin"
 
 rustup target add "$target"
-export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$bin/$target$api-clang"
+linker_var="CARGO_TARGET_$(tr 'a-z-' 'A-Z_' <<<"$target")_LINKER"
+export "$linker_var=$bin/$target$api-clang"
 export CARGO_PROFILE_RELEASE_STRIP=symbols
 (cd "$here/../.." && cargo build --release --locked -p dsa-guest-channeld --bin dsa-channeld --target "$target")
 
@@ -30,7 +36,7 @@ cp "$here/../../target/$target/release/dsa-channeld" "$out/dsa-channeld"
 readelf="$bin/llvm-readelf"
 # Read whole first: grep -q stops at the first match, and llvm-readelf exits 74 when the pipe it
 # is still writing to closes.
-grep -Fq 'Advanced Micro Devices X86-64' <<<"$("$readelf" -h "$out/dsa-channeld")"
+grep -Fq "$machine" <<<"$("$readelf" -h "$out/dsa-channeld")"
 grep -Fq '/system/bin/linker64' <<<"$("$readelf" -l "$out/dsa-channeld")"
 needed="$("$readelf" -d "$out/dsa-channeld" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | sort | tr '\n' ' ')"
 for lib in $needed; do
