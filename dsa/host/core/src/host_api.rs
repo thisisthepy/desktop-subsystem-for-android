@@ -2422,6 +2422,7 @@ impl HostApiService {
             freeze: wanted.freeze,
             clipboard: wanted.clipboard,
             links_in_android: wanted.links_in_android,
+            memory_limit_mb: wanted.memory_limit_mb,
             program_updates: wanted.program_updates,
             image_updates: wanted.image_updates,
             input_trace: wanted.input_trace,
@@ -2501,6 +2502,7 @@ fn settings_to_wire(settings: &Settings, facts: &ServiceFacts) -> types::Setting
         render_gpu: settings.render_gpu.clone(),
         freeze: settings.freeze,
         links_in_android: settings.links_in_android,
+        memory_limit_mb: settings.memory_limit_mb,
         program_updates: settings.program_updates,
         image_updates: settings.image_updates,
         clipboard: settings.clipboard,
@@ -2518,6 +2520,7 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
         settings: Settings {
             render_gpu: settings.render_gpu,
             links_in_android: settings.links_in_android,
+            memory_limit_mb: settings.memory_limit_mb,
             freeze: settings.freeze,
             clipboard: settings.clipboard,
             program_updates: settings.program_updates,

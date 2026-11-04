@@ -88,6 +88,9 @@ UNNEEDED_APPS = [
     "SecureElement",
     # The search widget lives on the launcher, which is removed.
     "QuickSearchBox",
+    # Cuttlefish's monitoring service (com.android.google.gce.gceservice) reports boot and
+    # network state to the Cuttlefish launcher on its host, which DSA does not have.
+    "CuttlefishService",
     # Developer and demo apps.
     "Traceur",
     "EasterEgg",

@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use dsa_host_windows::host_config::{
-    expand_locations, page_reporting_order_for_build, profile_disk, HostConfig,
+    expand_locations, host_sized_memory_mb, page_reporting_order_for_build, profile_disk,
+    HostConfig,
 };
 
 const MINIMAL: &str = r#"{
@@ -24,7 +25,9 @@ fn fr2_a_minimal_configuration_gets_working_defaults() {
     assert_eq!(session.stop_timeout, Duration::from_secs(30));
     let vm = config.vm_config(Some("S-1-5-21-1-2-3-1001")).unwrap();
     assert_eq!(vm.kernel, PathBuf::from(r"C:\Program Files\DSA\vm\bzImage"));
-    assert_eq!(vm.memory_mb, 3072);
+    // Without memory_mb the VM is sized to the computer, not held to 3 GiB.
+    assert_eq!(vm.memory_mb, host_sized_memory_mb(0));
+    assert!(vm.memory_mb >= 2048);
     assert!([5, 9].contains(&vm.page_reporting_order));
     assert_eq!(vm.socket_sids, ["S-1-5-21-1-2-3-1001"]);
     vm.to_hcs_document().expect("the defaults make a valid VM");

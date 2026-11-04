@@ -200,6 +200,8 @@ pub enum Change {
     ImageUpdates(bool),
     InputTrace(bool),
     ResizeTrace(bool),
+    /// The most memory Android may have, in MiB; 0 for sized to the computer.
+    MemoryLimit(u32),
 }
 
 impl Change {
@@ -218,13 +220,39 @@ impl Change {
             "image-updates" => switch().map(Change::ImageUpdates),
             "input-trace" => switch().map(Change::InputTrace),
             "resize-trace" => switch().map(Change::ResizeTrace),
+            "memory-limit" => parse_memory_limit(value).map(Change::MemoryLimit),
             _ => Err(format!(
                 "there is no setting {name:?}; the settings are render-gpu, freeze, \
-                 clipboard, links-in-android, program-updates, image-updates, input-trace \
-                 and resize-trace"
+                 clipboard, links-in-android, program-updates, image-updates, input-trace, \
+                 resize-trace and memory-limit"
             )),
         }
     }
+}
+
+/// A memory limit as `dsa settings set memory-limit` takes it: `auto` (sized to the
+/// computer), or a size in MiB, with `G` or `GB` for GiB.
+fn parse_memory_limit(value: &str) -> Result<u32, String> {
+    let lower = value.trim().to_ascii_lowercase();
+    if lower == "auto" || lower == "0" {
+        return Ok(0);
+    }
+    let (number, scale) = match lower.strip_suffix("gb").or_else(|| lower.strip_suffix('g')) {
+        Some(gib) => (gib, 1024),
+        None => (lower.strip_suffix("mb").unwrap_or(&lower), 1),
+    };
+    number
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .and_then(|n| n.checked_mul(scale))
+        .filter(|mb| *mb >= 2048)
+        .ok_or_else(|| {
+            format!(
+                "memory-limit is auto or a size of at least 2048 MiB (such as 8192 or 8G), \
+                 not {value:?}"
+            )
+        })
 }
 
 /// What can start a host service or ensure it is running.
@@ -699,6 +727,7 @@ pub fn settings_json(report: &SettingsReport) -> Value {
         "image_updates": report.settings.image_updates,
         "input_trace": report.settings.input_trace,
         "resize_trace": report.settings.resize_trace,
+        "memory_limit_mb": report.settings.memory_limit_mb,
         "program_updates_available": report.facts.program_updates_available,
         "image_updates_available": report.facts.image_updates_available,
         "version": report.facts.version,
@@ -747,6 +776,13 @@ pub fn describe_settings(report: &SettingsReport) -> String {
         ),
         format!("Input trace: {}", on_off(settings.input_trace)),
         format!("Resize trace: {}", on_off(settings.resize_trace)),
+        format!(
+            "Memory limit: {}",
+            match settings.memory_limit_mb {
+                0 => "sized to this computer".to_string(),
+                mb => format!("{mb} MiB"),
+            }
+        ),
         format!("Service version: {}", facts.version),
     ];
     if let Some(dir) = &facts.log_dir {
@@ -865,6 +901,7 @@ fn settings(invocation: &Invocation, client: &mut HostApiClient) -> Result<Strin
             Change::ImageUpdates(on) => wanted.image_updates = *on,
             Change::InputTrace(on) => wanted.input_trace = *on,
             Change::ResizeTrace(on) => wanted.resize_trace = *on,
+            Change::MemoryLimit(mb) => wanted.memory_limit_mb = *mb,
         }
         report = client.set_settings(&wanted).map_err(|e| e.to_string())?;
     }

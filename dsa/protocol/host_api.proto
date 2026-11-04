@@ -858,6 +858,10 @@ message Settings {
   // Whether every DSA process writes a line for each stage of each resize, rather than a
   // summary at the end of a drag. Off by default; the same rules as input_trace.
   bool resize_trace = 12;
+  // The most memory the caller's Android may have, in MiB. 0, the default, sizes it to the
+  // computer: its memory less what the host's own system keeps for itself. It takes effect
+  // the next time Android starts.
+  uint32 memory_limit_mb = 13;
 }
 
 // Turns the connection into the accessibility tree of one of the caller's task windows, for a

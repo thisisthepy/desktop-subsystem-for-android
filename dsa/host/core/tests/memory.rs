@@ -16,6 +16,20 @@ use dsa_host_core::memory::{
 };
 
 #[test]
+fn nfr2_the_vm_is_sized_to_the_host_less_what_the_host_keeps() {
+    use dsa_host_core::memory::{automatic_vm_memory_mb, vm_memory_mb};
+    // A tenth of a large host, at least 2 GiB of a small one.
+    assert_eq!(automatic_vm_memory_mb(32768), 32768 - 3276);
+    assert_eq!(automatic_vm_memory_mb(8192), 6144);
+    // Never less than Android needs to boot.
+    assert_eq!(automatic_vm_memory_mb(3072), 2048);
+    // The user's limit wins, within what the host has.
+    assert_eq!(vm_memory_mb(32768, 4096), 4096);
+    assert_eq!(vm_memory_mb(8192, 65536), 8192);
+    assert_eq!(vm_memory_mb(32768, 0), 32768 - 3276);
+}
+
+#[test]
 fn nfr1_a_give_back_logs_what_the_window_manager_still_holds() {
     let before = HeldMemory {
         working_set_kb: Some(119 * MIB),

@@ -4,7 +4,9 @@
      Bluetooth controller, the Bluetooth stack aborts each time system_server starts it,
      because no HCI HAL is declared. Bluetooth comes back as a host HAL. Without NFC and
      a modem, the NFC service and the phone process time out at every start, and each of
-     their ANRs takes the CPU from the apps on screen. Without its HAL, the UWB service waits
+     their ANRs takes the CPU from the apps on screen. Device lock is a phone carrier's
+     financing lock, which a desktop has no use for; without the feature, system_server does
+     not start its service. Without its HAL, the UWB service waits
      for it forever and servicemanager tries to start it about twice a second. -->
 <permissions>
     <unavailable-feature name="android.hardware.uwb" />
@@ -26,4 +28,5 @@
     <unavailable-feature name="android.hardware.telephony.cdma" />
     <unavailable-feature name="android.hardware.telephony.ims" />
     <unavailable-feature name="android.hardware.telephony.euicc" />
+    <unavailable-feature name="android.software.device_lock" />
 </permissions>

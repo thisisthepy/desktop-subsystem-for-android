@@ -40,6 +40,9 @@ pub struct Settings {
     /// Whether the web links apps in the user's Android open go to apps in it rather than to
     /// the host's default browser. Off by default.
     pub links_in_android: bool,
+    /// The most memory the user's Android may have, in MiB. 0 (the default) sizes it to the
+    /// computer: its memory less what the host's own system keeps for itself.
+    pub memory_limit_mb: u32,
     /// Whether text copied on the host can be pasted in the user's Android, and the reverse.
     /// On by default.
     pub clipboard: bool,
@@ -61,6 +64,7 @@ impl Default for Settings {
             render_gpu: "display".into(),
             freeze: false,
             links_in_android: false,
+            memory_limit_mb: 0,
             clipboard: true,
             program_updates: true,
             image_updates: true,
@@ -111,6 +115,8 @@ pub struct UserSettings {
     pub freeze: bool,
     #[serde(default)]
     pub links_in_android: bool,
+    #[serde(default)]
+    pub memory_limit_mb: u32,
     #[serde(default = "yes")]
     pub clipboard: bool,
 }
@@ -121,6 +127,7 @@ impl Default for UserSettings {
             render_gpu: display(),
             freeze: false,
             links_in_android: false,
+            memory_limit_mb: 0,
             clipboard: true,
         }
     }
@@ -233,6 +240,7 @@ impl FileSettings {
                     .unwrap_or_else(display),
                 freeze: false,
                 links_in_android: false,
+                memory_limit_mb: 0,
                 clipboard: true,
             }),
         }
@@ -266,6 +274,7 @@ fn combine(mine: UserSettings, machine: MachineSettings) -> Settings {
         render_gpu: mine.render_gpu,
         freeze: mine.freeze,
         links_in_android: mine.links_in_android,
+        memory_limit_mb: mine.memory_limit_mb,
         clipboard: mine.clipboard,
         program_updates: machine.program_updates,
         image_updates: machine.image_updates,
@@ -302,6 +311,7 @@ impl SettingsStore for FileSettings {
                 render_gpu: render_gpu.clone(),
                 freeze: settings.freeze,
                 links_in_android: settings.links_in_android,
+                memory_limit_mb: settings.memory_limit_mb,
                 clipboard: settings.clipboard,
             },
         )?;
@@ -353,6 +363,7 @@ impl SettingsStore for MemorySettings {
                 render_gpu: render_gpu.clone(),
                 freeze: settings.freeze,
                 links_in_android: settings.links_in_android,
+                memory_limit_mb: settings.memory_limit_mb,
                 clipboard: settings.clipboard,
             },
         );
@@ -409,6 +420,7 @@ mod tests {
                     render_gpu: " Discrete ".into(),
                     freeze: true,
                     links_in_android: true,
+                    memory_limit_mb: 0,
                     clipboard: false,
                     program_updates: false,
                     image_updates: true,
@@ -474,6 +486,7 @@ mod tests {
                 "uid:1000",
                 &Settings {
                     links_in_android: true,
+                    memory_limit_mb: 0,
                     ..Settings::default()
                 },
             )

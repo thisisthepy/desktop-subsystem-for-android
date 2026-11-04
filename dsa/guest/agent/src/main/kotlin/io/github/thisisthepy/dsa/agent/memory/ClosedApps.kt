@@ -14,11 +14,19 @@ interface AppProcesses {
     /** The guest's free memory now, in KiB (MemFree), which is what the host can get back. */
     fun freeKb(): Long
 
+    /** Turns the app off if it is installed and on. True when it was turned off now. */
+    fun disable(packageName: String): Boolean
+
+    /** Keeps at most [max] cached app processes, however much memory is free. */
+    fun limitCachedProcesses(max: Int)
+
     companion object {
         val NONE = object : AppProcesses {
             override fun hasForegroundService(packageName: String) = false
             override fun stop(packageName: String) = Unit
             override fun freeKb() = 0L
+            override fun disable(packageName: String) = false
+            override fun limitCachedProcesses(max: Int) = Unit
         }
     }
 }
@@ -48,6 +56,25 @@ class ClosedApps(
     private val settleMillis: Long = SETTLE_MILLIS,
 ) {
     private var open: Set<String> = emptySet()
+
+    /**
+     * Sets the guest up for a desktop at the agent's start: few cached processes, and the
+     * phone-only apps that start by themselves turned off.
+     */
+    fun configure() {
+        try {
+            processes.limitCachedProcesses(MAX_CACHED_PROCESSES)
+        } catch (e: Exception) {
+            log.warn("could not limit the cached processes", e)
+        }
+        for (packageName in DESKTOP_UNNEEDED) {
+            try {
+                if (processes.disable(packageName)) log.info("turned off $packageName, which a desktop does not use")
+            } catch (e: Exception) {
+                log.warn("could not turn off $packageName", e)
+            }
+        }
+    }
 
     /** Takes the packages that have a task window now; ends those that had one and have not. */
     fun tasks(packages: Set<String>) {
@@ -105,5 +132,23 @@ class ClosedApps(
          * finish.
          */
         const val SETTLE_MILLIS = 4000L
+
+        /**
+         * Cached processes the activity manager keeps: a phone keeps 32 so apps resume fast,
+         * but here a closed window ends its app, and what stays cached is services and
+         * providers started in the background. A few keep restarts of those cheap.
+         */
+        const val MAX_CACHED_PROCESSES = 8
+
+        /**
+         * Apps the build has that start by themselves and do nothing on a desktop:
+         * Cuttlefish's host monitoring service, which reports to a Cuttlefish launcher, and a
+         * phone carrier's device financing lock. The image removes or withdraws them too; this
+         * covers a build that still has them.
+         */
+        val DESKTOP_UNNEEDED = listOf(
+            "com.android.google.gce.gceservice",
+            "com.android.devicelockcontroller",
+        )
     }
 }

@@ -226,6 +226,7 @@ class Agent(
     fun start() {
         scheduler.post {
             freeform.start()
+            closedApps.configure()
             try {
                 inputMethods.useHostInputMethod()
             } catch (e: Exception) {

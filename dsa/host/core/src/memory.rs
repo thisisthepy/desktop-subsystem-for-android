@@ -484,6 +484,33 @@ pub fn summary_lines(androids: &dyn UserAndroids, host: &dyn HostMemory) -> Vec<
         .collect()
 }
 
+/// The least memory the host's own system keeps when the VM is sized to the host, in MiB.
+pub const HOST_RESERVE_MIN_MB: u64 = 2048;
+
+/// The least memory a VM is given, in MiB: Android does not boot in much less.
+pub const VM_MEMORY_MIN_MB: u64 = 2048;
+
+/// The memory the VM may grow to on a host with `host_total_mb` of RAM, in MiB, when the user
+/// set no limit: all of it but what the host's own system keeps, a tenth of it and at least
+/// [`HOST_RESERVE_MIN_MB`]. The VM holds only what the guest uses (deferred commit, free page
+/// reporting), so a large maximum costs nothing while the guest does not use it.
+pub fn automatic_vm_memory_mb(host_total_mb: u64) -> u64 {
+    let reserve = HOST_RESERVE_MIN_MB.max(host_total_mb / 10);
+    host_total_mb.saturating_sub(reserve).max(VM_MEMORY_MIN_MB)
+}
+
+/// The VM's memory, in MiB: the user's limit when they set one (`limit_mb` above 0), never
+/// more than the host has, else [`automatic_vm_memory_mb`].
+pub fn vm_memory_mb(host_total_mb: u64, limit_mb: u32) -> u64 {
+    if limit_mb > 0 {
+        u64::from(limit_mb)
+            .min(host_total_mb.max(VM_MEMORY_MIN_MB))
+            .max(VM_MEMORY_MIN_MB)
+    } else {
+        automatic_vm_memory_mb(host_total_mb)
+    }
+}
+
 /// What a host process holds, in KiB, as far as the platform can tell; `None` where it
 /// cannot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -627,6 +627,18 @@ fn nfr2_dsa_stop_app_names_the_app_to_stop() {
 }
 
 #[test]
+fn nfr2_dsa_settings_set_memory_limit_takes_auto_or_a_size() {
+    let limit = |value: &str| {
+        parse(&args(&format!("settings set memory-limit {value}"))).map(|i| i.change)
+    };
+    assert_eq!(limit("auto").unwrap(), Some(Change::MemoryLimit(0)));
+    assert_eq!(limit("8192").unwrap(), Some(Change::MemoryLimit(8192)));
+    assert_eq!(limit("8G").unwrap(), Some(Change::MemoryLimit(8192)));
+    assert!(limit("512").unwrap_err().contains("2048"));
+    assert!(limit("lots").is_err());
+}
+
+#[test]
 fn fr3_dsa_launch_asks_the_users_android_to_start_the_app() {
     use dsa_host_core::tasks::TaskRequest;
     let ((listener, _, user), endpoint) = local_pair();

@@ -20,6 +20,18 @@ class FakeProcesses : AppProcesses {
     }
 
     override fun freeKb() = free
+
+    val disabled = mutableListOf<String>()
+    var cachedLimit: Int? = null
+
+    override fun disable(packageName: String): Boolean {
+        disabled += packageName
+        return true
+    }
+
+    override fun limitCachedProcesses(max: Int) {
+        cachedLimit = max
+    }
 }
 
 class ClosedAppsTest {
@@ -53,6 +65,13 @@ class ClosedAppsTest {
         assertFalse(apps.stop("org.example.music", force = false))
         assertTrue(apps.stop("org.example.music", force = true))
         assertEquals(listOf("org.example.music"), processes.stopped)
+    }
+
+    @Test
+    fun nfr2_the_guest_keeps_few_cached_processes_and_turns_off_phone_only_apps() {
+        apps.configure()
+        assertEquals(ClosedApps.MAX_CACHED_PROCESSES, processes.cachedLimit)
+        assertEquals(listOf("com.android.google.gce.gceservice", "com.android.devicelockcontroller"), processes.disabled)
     }
 
     @Test
