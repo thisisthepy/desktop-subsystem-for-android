@@ -7,9 +7,10 @@
 # their generated files start to conflict or go stale. Forks are never touched: their
 # token cannot push, and their code is not run with a token that can.
 #
-# What it does to one branch is .github/scripts/protocol/regenerate.sh. A push made with the
-# workflow token starts no workflow, so after pushing it starts the test workflows on the
-# branch itself. Those runs are not pull request events, so they never start this workflow
+# What it does to one branch is .github/scripts/protocol/regenerate.sh. The pull request
+# runs a push made with the workflow token gets are held for approval ("action required")
+# and run no job, so after pushing it starts the test workflows on the branch itself. Those
+# runs test the same commit, so their checks are the ones that show on the pull request. Those runs are not pull request events, so they never start this workflow
 # again; and a pull request whose last commit is already a regeneration is skipped.
 
 name: Protocol sync

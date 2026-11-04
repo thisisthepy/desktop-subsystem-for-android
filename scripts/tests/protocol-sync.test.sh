@@ -135,6 +135,20 @@ check "the last branch is regenerated too" "$(in_work feat/d)" "0 pushed"
 check "the last branch has the merged hash" "$(file_on "$d" feat/d control.sha256)" \
     "$(file_on "$d" feat/d control.proto | sha256sum | cut -c1-64)"
 
+# --- the runs the workflow starts after a push can start and test everything -----
+# A push made with the workflow token gets pull request runs that wait for approval, so
+# the workflow starts these by hand. Each must take a run by hand, and Test must run every
+# job then, since a run by hand has no pull request to compare with.
+workflows="$script_dir/../../.github/workflows"
+started="$(grep -oE 'for workflow in [a-z. -]+;' "$workflows/protocol-sync.yml" | sed 's/for workflow in //; s/;//')"
+check "protocol sync starts the test workflows" "$started" "test.yml test-image.yml test-installer.yml"
+for workflow in $started; do
+    check "$workflow can be started by hand" \
+        "$(grep -c '^  workflow_dispatch:' "$workflows/$workflow")" "1"
+done
+check "a Test run by hand runs every job" \
+    "$(grep -c 'echo ".github/workflows/test.yml" > "$RUNNER_TEMP/changed"' "$workflows/test.yml")" "1"
+
 if ((failures)); then
     echo "$failures failed"
     exit 1
