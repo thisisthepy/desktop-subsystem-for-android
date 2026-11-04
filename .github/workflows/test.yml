@@ -24,6 +24,7 @@ jobs:
   repository:
     name: Check the repository rules
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,6 +47,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: dsa
@@ -88,6 +90,7 @@ jobs:
   unix-socket:
     name: Test the local API and dsa over Unix sockets (macos-latest)
     runs-on: macos-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: dsa
@@ -101,6 +104,7 @@ jobs:
   agent:
     name: Test the guest agent (ubuntu-latest)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: dsa/guest/agent
@@ -123,6 +127,7 @@ jobs:
   apk-reader:
     name: Read APKs made by the Android SDK (ubuntu-latest)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -146,6 +151,7 @@ jobs:
   protocol:
     name: Check the generated protocol code (ubuntu-latest)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -190,6 +196,7 @@ jobs:
   settings-app:
     name: Test and build the settings app (windows-latest)
     runs-on: windows-latest
+    timeout-minutes: 20
     defaults:
       run:
         shell: pwsh
@@ -213,6 +220,7 @@ jobs:
   hwcomposer:
     name: Test the guest hwcomposer's task rules (ubuntu-latest)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -229,6 +237,7 @@ jobs:
   codec2:
     name: Test the guest codec HAL's rules (ubuntu-latest)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -245,6 +254,7 @@ jobs:
   power-hal:
     name: Test the guest power and health HALs' rules (ubuntu-latest)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 

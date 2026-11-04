@@ -22,6 +22,7 @@ jobs:
   test-apps:
     name: Check the Vulkan CTS subset and build the graphics test apps
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -61,6 +62,7 @@ jobs:
   guest-transport:
     name: Build the guest Hyper-V graphics transport
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -106,6 +108,7 @@ jobs:
   host-renderer:
     name: Build the host graphics renderer (windows)
     runs-on: windows-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -196,6 +199,7 @@ jobs:
     name: Package the installer with the host graphics renderer (windows)
     needs: host-renderer
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 

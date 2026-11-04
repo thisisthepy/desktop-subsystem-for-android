@@ -529,19 +529,27 @@ fn fr4_frames_of_a_resizing_task_reuse_one_texture_and_each_is_shown() {
 struct DragStep {
     /// How long the step held the window back.
     took: Duration,
-    /// The window's client size when the fake guest sent the frame, if it did.
-    client_when_sent: Option<(i32, i32)>,
+    /// The window's client size when the fake guest was asked for the step's size.
+    client_when_asked: (i32, i32),
     /// The window's client size before the step.
     before: (i32, i32),
 }
 
-/// Drags the window one step to `outer`. The fake guest answers `after` the step began, with a
-/// frame of the client size that step comes to, or never when `after` is `None`.
+/// Drags the window one step to `outer`. The fake guest watches for the request of the client
+/// size that step comes to and notes the window's size then. When `answer` is set it answers
+/// the request at once with a frame of that size; otherwise it never answers.
+///
+/// A step that waits for its frame asks the guest for the size while the window still has
+/// the old one; a step that does not wait takes the size first and only then asks. The size
+/// the guest notes therefore says whether the step waited, however slowly the machine runs
+/// the resize itself, and an answer that follows the request rather than a timer comes in
+/// time however the machine schedules the threads.
 fn drag_step(
+    running: &Running,
     sink: &Arc<dyn DisplaySink>,
     hwnd: isize,
     outer: (i32, i32),
-    after: Option<Duration>,
+    answer: bool,
 ) -> DragStep {
     let before = client_size(hwnd);
     let (window, _) = window_and_work_area(hwnd);
@@ -549,23 +557,43 @@ fn drag_step(
         outer.0 - (window.right - window.left - before.0),
         outer.1 - (window.bottom - window.top - before.1),
     );
+    let size = (client.0 as u32, client.1 as u32);
     let guest = {
         let sink = Arc::clone(sink);
+        let android = Arc::clone(&running.android);
         thread::spawn(move || {
-            let after = after?;
-            thread::sleep(after);
-            let when_sent = client_size(hwnd);
-            sink.frame(3, (client.0 as u32, client.1 as u32));
-            Some(when_sent)
+            let deadline = Instant::now() + WAIT;
+            loop {
+                let asked = android.requests.lock().unwrap().iter().any(|request| {
+                    matches!(request, TaskRequest::Resize { task_id: 1, width, height, .. }
+                        if (*width, *height) == size)
+                });
+                if asked {
+                    break;
+                }
+                if Instant::now() >= deadline {
+                    return None;
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+            let when_asked = client_size(hwnd);
+            if answer {
+                sink.frame(3, size);
+            }
+            Some(when_asked)
         })
     };
     let started = Instant::now();
     resize_to(hwnd, outer.0, outer.1);
     let took = started.elapsed();
     assert_eq!(client_size(hwnd), client, "the step did not take its size");
+    let client_when_asked = guest
+        .join()
+        .unwrap()
+        .unwrap_or_else(|| panic!("the guest was never asked for {size:?}"));
     DragStep {
         took,
-        client_when_sent: guest.join().unwrap(),
+        client_when_asked,
         before,
     }
 }
@@ -578,9 +606,12 @@ fn fr4_a_dragged_window_keeps_a_new_size_back_until_the_frame_of_that_size_is_sh
         eprintln!("skipping: no Direct3D 11 device on this machine");
         return;
     };
+    // Running, so the guest records the sizes it is asked for; at the monitor's density, so
+    // they are the window's client sizes.
+    running.android.start();
     running
         .android
-        .publish(TaskEvent::Updated(task(1, "Clock", 400, 300)));
+        .publish(TaskEvent::Updated(task_at_monitor_density(1, 400, 300)));
     running.android.publish(TaskEvent::Frames {
         task_id: 1,
         display_id: 3,
@@ -595,28 +626,27 @@ fn fr4_a_dragged_window_keeps_a_new_size_back_until_the_frame_of_that_size_is_sh
     sink.frame(3, (width as u32, height as u32));
     unsafe { SendMessageW(hwnd as HWND, WM_ENTERSIZEMOVE, 0, 0) };
 
-    // The guest answers 40 ms after the step began. The window still has its old size when
-    // the frame comes, and takes the size only then: the step does not return before it, and
+    // The guest is asked for the size while the window keeps its old one, and the window
+    // takes the size only once the frame is in: the step returns with the new size, and
     // nothing on the screen disagrees in between.
-    let step = drag_step(&sink, hwnd, (560, 450), Some(Duration::from_millis(40)));
+    let step = drag_step(&running, &sink, hwnd, (560, 450), true);
     assert_eq!(
-        step.client_when_sent,
-        Some(step.before),
-        "the window took its new size before the frame of that size was in"
-    );
-    assert!(
-        step.took >= Duration::from_millis(35),
-        "the resize returned after {:?}, before the guest's frame",
-        step.took
+        step.client_when_asked, step.before,
+        "the window took its new size before it asked the guest for a frame of that size"
     );
     assert!(
         step.took < Duration::from_millis(400),
-        "the resize waited {:?} for a frame that came in 40 ms",
+        "the resize waited {:?} for a frame that came as soon as it was asked for",
         step.took
     );
 
     // A guest that never answers holds the step back for the wait's budget and no longer.
-    let took = drag_step(&sink, hwnd, (600, 480), None).took;
+    let step = drag_step(&running, &sink, hwnd, (600, 480), false);
+    assert_eq!(
+        step.client_when_asked, step.before,
+        "the window took its new size before it asked the guest for a frame of that size"
+    );
+    let took = step.took;
     assert!(
         took >= Duration::from_millis(45),
         "the resize returned after {took:?} without a frame, before the wait's budget"
@@ -626,30 +656,30 @@ fn fr4_a_dragged_window_keeps_a_new_size_back_until_the_frame_of_that_size_is_sh
         "the resize waited {took:?} for a frame that never came"
     );
 
-    // After steps in a row without a frame the drag stops waiting: the next is not held back.
-    drag_step(&sink, hwnd, (610, 490), None);
-    drag_step(&sink, hwnd, (620, 500), None);
-    let took = drag_step(&sink, hwnd, (630, 510), None).took;
-    assert!(
-        took < Duration::from_millis(40),
-        "a drag whose guest never answers still waited {took:?} on its fourth step"
+    // After steps in a row without a frame the drag stops waiting: the next takes its size
+    // before the guest is asked for it.
+    drag_step(&running, &sink, hwnd, (610, 490), false);
+    drag_step(&running, &sink, hwnd, (620, 500), false);
+    let step = drag_step(&running, &sink, hwnd, (630, 510), false);
+    assert_ne!(
+        step.client_when_asked, step.before,
+        "a drag whose guest never answers still held its fourth step back for a frame"
     );
 
     // The drag has not given up for good: later in the same drag, a step waits again, and a
     // guest that answers by then has every step after it wait too.
     thread::sleep(Duration::from_millis(600));
-    let step = drag_step(&sink, hwnd, (640, 520), Some(Duration::from_millis(30)));
+    let step = drag_step(&running, &sink, hwnd, (640, 520), true);
     assert_eq!(
-        step.client_when_sent,
-        Some(step.before),
+        step.client_when_asked, step.before,
         "a drag that gave up never waited again"
     );
-    let step = drag_step(&sink, hwnd, (650, 530), Some(Duration::from_millis(30)));
+    let step = drag_step(&running, &sink, hwnd, (650, 530), true);
     assert_eq!(
-        step.client_when_sent,
-        Some(step.before),
+        step.client_when_asked, step.before,
         "a guest that answered again was not waited for on the next step"
     );
+
 
     unsafe { SendMessageW(hwnd as HWND, WM_EXITSIZEMOVE, 0, 0) };
     running.android.publish(TaskEvent::Removed { task_id: 1 });
