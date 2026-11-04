@@ -41,7 +41,7 @@ use dsa_host_core::update::program_service::{
 use dsa_host_core::update::service::{
     check_reporting, next_image_check, Download, UpdateNotices, UpdatingAndroid,
 };
-use dsa_host_core::update::store::ImageStore;
+use dsa_host_core::update::store::{ImageStore, Recovery};
 use dsa_host_core::window_manager::WindowManagerKeeper;
 use dsa_transport::Listener;
 
@@ -233,6 +233,26 @@ fn open_updates(config: &HostConfig, build: &str) -> Result<Option<Updates>, Str
         return Ok(None);
     };
     let store = ImageStore::open_as(root, first, build).map_err(|e| e.to_string())?;
+    // An installation can find a state that names an image it cannot boot, such as a test
+    // package's stand-in, and Android would then never start.
+    match store.recover(first) {
+        Ok(Recovery::Usable) => {}
+        Ok(Recovery::Moved { broken, current }) => eprintln!(
+            "{build}: the image {} has missing or broken files; using {} instead",
+            broken.version, current.version
+        ),
+        Ok(Recovery::NothingBetter { broken }) => {
+            // An installation that bundled no image has none yet, which is not broken.
+            if store.has_image(&broken.version) {
+                eprintln!(
+                    "{build}: the image {} has missing or broken files and no other image \
+                     is installed",
+                    broken.version
+                );
+            }
+        }
+        Err(why) => eprintln!("{build}: checking the current image: {why}"),
+    }
     let boot_timeout = config
         .update
         .as_ref()
@@ -454,6 +474,13 @@ where
         "{build}: serving the local API on \\\\.\\pipe\\{}",
         config.pipe_name
     );
+    if config.test_package {
+        eprintln!(
+            "{build}: this is a TEST PACKAGE made to check the installer: its kernel and \
+             graphics library are empty stand-ins and Android cannot run from it. Install \
+             the real package instead"
+        );
+    }
     prepare_machine_tmp(&config, build);
     let grace = Duration::from_secs(config.stop_timeout_secs + 15);
     let store = settings_store(&config);

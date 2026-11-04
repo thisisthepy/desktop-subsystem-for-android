@@ -546,3 +546,10 @@ fn fr14_an_image_with_two_disks_attaches_system_image_and_data_disk() {
         .unwrap()
         .contains("androidboot.boot_devices=vmbus"));
 }
+
+#[test]
+fn fr1_a_test_package_says_what_it_is_and_a_real_one_does_not() {
+    assert!(!HostConfig::parse(MINIMAL).unwrap().test_package);
+    let test = MINIMAL.replace("\"kernel\":", "\"test_package\": true,\n  \"kernel\":");
+    assert!(HostConfig::parse(&test).unwrap().test_package);
+}

@@ -206,6 +206,10 @@ pub struct HostConfig {
     /// The image the installer put in `images_dir`.
     #[serde(default)]
     pub first_image: Option<InstalledImage>,
+    /// Set by a package built only to test the installer: its kernel and graphics library
+    /// are empty stand-ins and its image cannot boot, so the service says so when it starts.
+    #[serde(default)]
+    pub test_package: bool,
     /// Where to look for new images.
     #[serde(default)]
     pub update: Option<UpdateSettings>,
