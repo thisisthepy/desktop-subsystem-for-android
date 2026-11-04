@@ -470,14 +470,15 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             "dsa logs collect needs the file to save the archive to, such as -o diag.zip\n{USAGE}"
         ));
     }
-    let log_filter = (command == Command::Logcat).then(|| dsa_host_core::guest_log::LogFilter {
+    let filter = dsa_host_core::guest_log::LogFilter {
         buffers: if buffers == 0 {
             dsa_host_core::guest_log::DEFAULT_BUFFERS
         } else {
             buffers
         },
         tags,
-    });
+    };
+    let log_filter = (command == Command::Logcat).then_some(filter);
     if command == Command::Launch && package.is_none() {
         return Err(format!(
             "dsa launch needs the package of the app to start, such as com.android.settings\n\
