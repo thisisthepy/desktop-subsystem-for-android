@@ -98,7 +98,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # windows-11-arm builds and tests the host for aarch64-pc-windows-msvc, the target
+        # of ARM64 Windows PCs, next to the x64 build on windows-latest.
+        os: [ubuntu-latest, windows-latest, windows-11-arm]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     defaults:
@@ -106,6 +108,18 @@ jobs:
         working-directory: dsa
     steps:
       - uses: actions/checkout@v4
+
+      # The ARM64 runner image does not always carry a Rust toolchain, so it gets one here,
+      # with the components the steps below use.
+      - name: Set up Rust for ARM64 Windows
+        if: matrix.os == 'windows-11-arm'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - name: Show the host target
+        run: rustc -vV
 
       - name: Check formatting
         run: cargo fmt --all --check
