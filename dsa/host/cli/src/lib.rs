@@ -200,7 +200,7 @@ pub enum Change {
     ImageUpdates(bool),
     InputTrace(bool),
     ResizeTrace(bool),
-    /// The most memory Android may have, in MiB; 0 for sized to the computer.
+    /// The most memory Android may have, in MiB; 0 for automatic.
     MemoryLimit(u32),
 }
 
@@ -230,8 +230,8 @@ impl Change {
     }
 }
 
-/// A memory limit as `dsa settings set memory-limit` takes it: `auto` (sized to the
-/// computer), or a size in MiB, with `G` or `GB` for GiB.
+/// A memory limit as `dsa settings set memory-limit` takes it: `auto` (the service's
+/// default size), or a size in MiB, with `G` or `GB` for GiB.
 fn parse_memory_limit(value: &str) -> Result<u32, String> {
     let lower = value.trim().to_ascii_lowercase();
     if lower == "auto" || lower == "0" {
@@ -780,7 +780,7 @@ pub fn describe_settings(report: &SettingsReport) -> String {
         format!(
             "Memory limit: {}",
             match settings.memory_limit_mb {
-                0 => "sized to this computer".to_string(),
+                0 => "automatic".to_string(),
                 mb => format!("{mb} MiB"),
             }
         ),

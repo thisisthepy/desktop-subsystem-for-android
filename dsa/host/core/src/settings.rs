@@ -40,8 +40,8 @@ pub struct Settings {
     /// Whether the web links apps in the user's Android open go to apps in it rather than to
     /// the host's default browser. Off by default.
     pub links_in_android: bool,
-    /// The most memory the user's Android may have, in MiB. 0 (the default) sizes it to the
-    /// computer: its memory less what the host's own system keeps for itself.
+    /// The most memory the user's Android may have, in MiB. 0 (the default) is automatic:
+    /// the service's default size.
     pub memory_limit_mb: u32,
     /// Whether text copied on the host can be pasted in the user's Android, and the reverse.
     /// On by default.

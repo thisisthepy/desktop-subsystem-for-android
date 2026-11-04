@@ -11,9 +11,9 @@
 //! }
 //! ```
 //!
-//! Without `memory_mb`, which an installation leaves out, the VM may grow to the computer's
-//! memory less what Windows keeps for itself (a tenth, at least 2 GiB), or to the limit the
-//! user set (`dsa settings set memory-limit <MiB>`). It holds only what Android uses.
+//! Without `memory_mb`, which an installation leaves out, the VM may grow to 3 GiB, or to the
+//! limit the user set (`dsa settings set memory-limit <MiB>`), never past the computer's
+//! memory. It holds only what Android uses.
 //!
 //! The service runs one VM per user. Each user's VM is named after the user's SID and lets
 //! only that user (and SYSTEM) use its Hyper-V sockets. Its disk is in the user's own
@@ -130,12 +130,25 @@ pub fn profile_disk(local_app_data: &std::path::Path) -> PathBuf {
 fn default_vm_name() -> String {
     "dsa-android".into()
 }
-/// The VM's memory when the configuration names none and the user set no limit: the
-/// computer's memory less what Windows keeps (see [`automatic_vm_memory_mb`]). 3 GiB when
-/// Windows cannot say how much memory the computer has.
+/// The VM's memory when the configuration names none and the user set no limit, in MiB.
+pub const DEFAULT_MEMORY_MB: u32 = 3072;
+
+/// Whether "automatic" sizes the VM to the computer (its memory less what Windows keeps, see
+/// [`automatic_vm_memory_mb`]) rather than [`DEFAULT_MEMORY_MB`]. Off for now: the guest
+/// kernel keeps its page records for the VM's whole maximum resident, about 1.6% of it (some
+/// 460 MiB for a 29.5 GiB VM), so a large maximum raises idle memory until that cost is
+/// measured and accepted.
 ///
 /// [`automatic_vm_memory_mb`]: dsa_host_core::memory::automatic_vm_memory_mb
+pub const SIZE_TO_COMPUTER: bool = false;
+
+/// The VM's memory in MiB for a user whose limit is `limit_mb` (0 for automatic): their limit,
+/// never more than the computer has, else [`DEFAULT_MEMORY_MB`] (or the computer's size, with
+/// [`SIZE_TO_COMPUTER`]).
 pub fn host_sized_memory_mb(limit_mb: u32) -> u32 {
+    if limit_mb == 0 && !SIZE_TO_COMPUTER {
+        return DEFAULT_MEMORY_MB;
+    }
     #[cfg(windows)]
     let total_mb = crate::power::read_memory().map(|(total_kb, _)| total_kb / 1024);
     #[cfg(not(windows))]
@@ -146,7 +159,7 @@ pub fn host_sized_memory_mb(limit_mb: u32) -> u32 {
             u32::try_from(sized).unwrap_or(u32::MAX)
         }
         None if limit_mb > 0 => limit_mb,
-        None => 3072,
+        None => DEFAULT_MEMORY_MB,
     }
 }
 fn default_processors() -> u32 {

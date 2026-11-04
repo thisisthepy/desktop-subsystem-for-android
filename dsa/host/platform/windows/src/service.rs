@@ -204,7 +204,7 @@ impl MemorySizing {
             if limit > 0 {
                 format!("their limit {limit} MiB")
             } else {
-                "sized to this computer".to_string()
+                "automatic".to_string()
             }
         );
         sized
