@@ -70,6 +70,33 @@ class KeyInputTest {
     }
 
     @Test
+    fun fr16_esc_alone_goes_back() {
+        down(AndroidKey.KEYCODE_ESCAPE)
+        up(AndroidKey.KEYCODE_ESCAPE)
+
+        assertEquals(listOf(AndroidKey.ACTION_DOWN, AndroidKey.ACTION_UP), injector.keys.map { it.action })
+        assertEquals(listOf(AndroidKey.KEYCODE_BACK, AndroidKey.KEYCODE_BACK), injector.keys.map { it.keyCode })
+    }
+
+    @Test
+    fun fr16_esc_with_a_modifier_stays_escape() {
+        val shift = AndroidKey.META_SHIFT_ON or AndroidKey.META_SHIFT_LEFT_ON
+        down(AndroidKey.KEYCODE_ESCAPE, shift)
+        up(AndroidKey.KEYCODE_ESCAPE, shift)
+
+        assertEquals(listOf(AndroidKey.KEYCODE_ESCAPE, AndroidKey.KEYCODE_ESCAPE), injector.keys.map { it.keyCode })
+    }
+
+    @Test
+    fun fr16_an_esc_press_is_released_as_the_key_it_went_down_as() {
+        val ctrl = AndroidKey.META_CTRL_ON or AndroidKey.META_CTRL_LEFT_ON
+        down(AndroidKey.KEYCODE_ESCAPE)
+        up(AndroidKey.KEYCODE_ESCAPE, ctrl)
+
+        assertEquals(listOf(AndroidKey.KEYCODE_BACK, AndroidKey.KEYCODE_BACK), injector.keys.map { it.keyCode })
+    }
+
+    @Test
     fun fr16_ctrl_a_carries_the_meta_state_the_host_sent() {
         val ctrl = AndroidKey.META_CTRL_ON or AndroidKey.META_CTRL_LEFT_ON
         down(AndroidKey.KEYCODE_CTRL_LEFT, ctrl)

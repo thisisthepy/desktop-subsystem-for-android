@@ -28,7 +28,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dsa_host_core::guest_display::with_display_size;
+use dsa_host_core::guest_display::{display_or_smallest, with_display_size};
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{HostApiService, PerUser, ServiceFacts, UserAndroid, UserAndroids};
 use dsa_host_core::memory::{summary_lines, HostMemory, LOG_INTERVAL};
@@ -73,14 +73,14 @@ pub struct Updates {
 }
 
 /// Sizes the guest's display for the monitors the user's session recorded. This process runs
-/// in session 0 and cannot see them itself.
+/// in session 0 and cannot see them itself. Without a record the display is the smallest
+/// square, so a window can still be taller than the image's default display.
 fn follow_monitors(vm: &mut AndroidVmConfig, sid: &str) {
     let display = local_app_data(sid)
         .ok()
         .and_then(|dir| recorded_display(&dir));
-    if let Some(size) = display {
-        vm.kernel_cmdline = with_display_size(&vm.kernel_cmdline, size);
-    }
+    let size = display.unwrap_or_else(|| display_or_smallest(None));
+    vm.kernel_cmdline = with_display_size(&vm.kernel_cmdline, size);
 }
 
 /// The kernel command line setting that turns the guest's input trace on.

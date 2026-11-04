@@ -435,6 +435,22 @@ Davey는 이 로그에 2건뿐이고 둘 다 액티비티 전환이다. 리플�
 - 누름 뒤 첫 프레임이 언제 그려지는가: `agent.inject`에서 첫 `app.frame`까지. 100 ms 근처면 탭 타임아웃 오버레이가 적용되지 않은 것이다.
 - 스왑체인이 프레임 통계를 주지 않으면 창 호스트 로그에 한 번 남는다. 그때는 `app.shown` 대신 외부 캡처로 이 구간을 잰다.
 
+## 클릭 지연 경로 재점검과 Esc, 창 높이 (FR-4, FR-5, FR-16)
+
+**확인 대상**: develop f3be88e. 코드만 읽었고 빌드도 실행도 하지 않았다. 아래 시간은 측정값이 아니다.
+
+**방법**: 호스트 창의 입력(`app_window/pointer.rs`, `keys.rs`)부터 제어 채널(`dsa-channeld`의 `pump`), 에이전트(`ChannelClient`의 `intercept`, `PointerQueue`, `AndroidInputInjector`), hwcomposer(`VsyncThread`, `FramePipeline`), 창 관리자(`hosts.rs`), 창 호스트의 표시(`present.rs`)까지 대기열, 타이머, 폴링, vsync 대기를 찾았다.
+
+**찾은 것**
+
+- 입력 경로에는 지연을 더하는 곳이 없다. `dsa-channeld`의 두 방향은 각자 스레드에서 이벤트로 깨어나고, 20 ms 대기는 멈춤 확인용이라 프레임이 오면 바로 돌아온다. 포인터 프레임은 에이전트의 주 스레드를 거치지 않고 입력 스레드로 바로 가며, 주입은 비동기다. 키는 주 스레드를 거치지만 클릭 지연과는 관계가 없다.
+- 창 호스트의 `Present(0, 0)`은 flip 모델의 컴퍼지션 스왑체인이다. sync interval 0에서는 DWM이 다음 vsync 전에 더 새 present가 오면 앞의 것을 버린다(PresentMon의 `Discarded`). 앞 절에서 걱정한 present 큐 누적은 이 경우 생기지 않는다고 본다(추론). 그래서 `SetMaximumFrameLatency`는 넣지 않는다. 넣으면 복사 스레드가 막혀 게스트의 다음 프레임이 늦어진다.
+- 남은 큰 몫은 앞 절과 같다: Settings 행의 탭 타임아웃(오버레이로 0), 처음 80 ms쯤 거의 보이지 않는 리플, 클릭 뒤 액티비티 시작과 첫 그리기(약 300 ms). 마지막은 앱이 쓰는 시간이라 입력 경로를 고쳐서 줄지 않는다. 코드로 정당화할 수 있는 새 수정은 찾지 못했다. 측정은 `scripts/input-trace.py`로 `agent.inject`, `app.frame`, `sf.frame`, `hwc.frame`, `app.present`, `app.shown` 구간을 나눠 한다.
+
+**Esc**: 에이전트는 `KEYCODE_ESCAPE`를 그대로 넣었다. 프레임워크의 키 맵(`Virtual.kcm`)은 앱이 처리하지 않은 Escape를 Back으로 바꾸지만, 그 대체 키는 앱이 키를 거절한 뒤 입력 디스패처가 만들며, 주입한 키에서 일어나지 않을 수 있다(실측에서 Settings 하위 페이지가 돌아가지 않았다). 이제 수정 키 없는 Esc는 에이전트가 처음부터 `KEYCODE_BACK`으로 넣는다. 대가로 Escape를 직접 보는 앱은 수정 키 없는 Esc를 받지 못한다. Shift, Ctrl, Alt, Meta와 함께 누른 Esc는 Escape로 남는다.
+
+**창 높이**: 게스트 디스플레이는 모니터 기록이 있으면 가장 긴 변의 정사각형이지만, 기록이 없으면 이미지 기본값 1920x1080이 남았다. 태스크는 디스플레이보다 클 수 없으므로 그때 창 높이가 1080에서 멈춘다. 이제 기록이 없어도 1920 정사각형으로 둔다.
+
 ## R6. 커널 명령줄에서 같은 `androidboot` 값을 두 번 주면 어느 쪽이 이기는가 (FR-4)
 
 **배경**: 게스트 디스플레이 크기를 호스트가 정하려면, 이미지의 `kernel_cmdline`에 이미 있는 `androidboot.dsa.display_width` 뒤에 값을 덧붙이면 되는지 확인해야 했다.
