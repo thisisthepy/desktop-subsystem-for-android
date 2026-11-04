@@ -809,6 +809,10 @@ pub struct Settings {
     /// On unless the user turns it off.
     #[prost(bool, tag = "9")]
     pub clipboard: bool,
+    /// The version of the Android image the caller's next start boots, such as
+    /// "17.0.0-16373615-7". Empty when the service does not know it. A client cannot change it.
+    #[prost(string, tag = "11")]
+    pub android_version: ::prost::alloc::string::String,
 }
 /// Turns the connection into the accessibility tree of one of the caller's task windows, for a
 /// host accessibility client (a screen reader, an inspection tool) that reads that window.
