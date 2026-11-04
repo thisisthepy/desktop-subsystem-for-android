@@ -393,6 +393,34 @@ pub fn summary_lines(androids: &dyn UserAndroids, host: &dyn HostMemory) -> Vec<
         .collect()
 }
 
+/// What a host process holds, in KiB, as far as the platform can tell; `None` where it
+/// cannot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HeldMemory {
+    /// Resident in RAM.
+    pub working_set_kb: Option<u64>,
+    /// Committed to the process alone, resident or not.
+    pub private_kb: Option<u64>,
+    /// The GPU's own memory the process uses.
+    pub gpu_local_kb: Option<u64>,
+    /// System memory the GPU maps for the process.
+    pub gpu_non_local_kb: Option<u64>,
+}
+
+/// The log line a give-back writes: what the process held before it and holds after, in
+/// MiB, with `?` for what could not be read.
+pub fn held_line(before: &HeldMemory, after: &HeldMemory) -> String {
+    let show = |kb: Option<u64>| kb.map_or("?".to_string(), |kb| mib(kb).to_string());
+    let part = |b: Option<u64>, a: Option<u64>| format!("{} -> {} MiB", show(b), show(a));
+    format!(
+        "working set {}, private {}, GPU memory {}, GPU-mapped system memory {}",
+        part(before.working_set_kb, after.working_set_kb),
+        part(before.private_kb, after.private_kb),
+        part(before.gpu_local_kb, after.gpu_local_kb),
+        part(before.gpu_non_local_kb, after.gpu_non_local_kb),
+    )
+}
+
 /// How long the window manager waits after the last task window closed before it gives back
 /// the memory it is not using.
 pub const IDLE_TRIM_DELAY: Duration = Duration::from_secs(30);

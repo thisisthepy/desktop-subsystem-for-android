@@ -10,9 +10,31 @@ use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{HostApiClient, HostApiService, PerUser, UserAndroid, UserAndroids};
 use dsa_host_core::host_api_conformance::RunningService;
 use dsa_host_core::memory::{
-    snapshot_from_wire, snapshot_to_wire, summary_lines, GuestMemory, GuestMemoryReport,
-    HostMemory, HostProcessMemory, HostRole, IdleTrim, MemorySnapshot,
+    held_line, snapshot_from_wire, snapshot_to_wire, summary_lines, GuestMemory,
+    GuestMemoryReport, HeldMemory, HostMemory, HostProcessMemory, HostRole, IdleTrim,
+    MemorySnapshot,
 };
+
+#[test]
+fn nfr1_a_give_back_logs_what_the_window_manager_still_holds() {
+    let before = HeldMemory {
+        working_set_kb: Some(119 * MIB),
+        private_kb: Some(501 * MIB),
+        gpu_local_kb: Some(300 * MIB),
+        gpu_non_local_kb: None,
+    };
+    let after = HeldMemory {
+        working_set_kb: Some(2 * MIB),
+        private_kb: Some(420 * MIB),
+        gpu_local_kb: Some(250 * MIB),
+        gpu_non_local_kb: None,
+    };
+    assert_eq!(
+        held_line(&before, &after),
+        "working set 119 -> 2 MiB, private 501 -> 420 MiB, GPU memory 300 -> 250 MiB, \
+         GPU-mapped system memory ? -> ? MiB"
+    );
+}
 use dsa_host_core::session::{GuestLauncher, Session, SessionConfig, SessionState};
 use dsa_host_core::tasks::{Task, TaskEvent};
 use dsa_protocol::auth::BootSecret;

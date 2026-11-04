@@ -66,8 +66,10 @@ use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory2, IDXGIAdapter, IDXGIDevice, IDXGIFactory2, IDXGIFactory4, IDXGIResource1,
-    IDXGISwapChain2, DXGI_CREATE_FACTORY_FLAGS, DXGI_ERROR_FRAME_STATISTICS_DISJOINT,
+    CreateDXGIFactory2, IDXGIAdapter, IDXGIAdapter3, IDXGIDevice, IDXGIDevice3, IDXGIFactory2,
+    IDXGIFactory4, IDXGIResource1, IDXGISwapChain2, DXGI_CREATE_FACTORY_FLAGS,
+    DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL,
+    DXGI_QUERY_VIDEO_MEMORY_INFO, DXGI_ERROR_FRAME_STATISTICS_DISJOINT,
     DXGI_FRAME_STATISTICS, DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SHARED_RESOURCE_READ,
     DXGI_SHARED_RESOURCE_WRITE, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_CHAIN_FLAG,
     DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
@@ -175,6 +177,48 @@ impl Gpu {
                 Some(error) => failed("creating the Direct3D 11 device", error),
                 None => "creating the Direct3D 11 device returned no device".into(),
             })
+        }
+    }
+
+    /// Asks the driver to free the memory it keeps for this device beyond the resources that
+    /// are alive (its command buffers, caches and pools), as an app does on suspend. Called when
+    /// no task window is shown; the driver makes what it needs again on the next copy.
+    pub fn trim(&self) {
+        let context = self.context.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: plain COM calls under the context's lock. Every copy binds nothing, so
+        // clearing the context's state loses nothing a later copy needs.
+        unsafe {
+            context.ClearState();
+            context.Flush();
+            if let Ok(dxgi) = self.device.cast::<IDXGIDevice3>() {
+                dxgi.Trim();
+            }
+        }
+    }
+
+    /// The GPU memory this whole process uses on this device's GPU, in KiB: its dedicated
+    /// video memory (local) and the system memory the GPU maps for it (non-local). It counts
+    /// every API in the process, so the renderer's Vulkan memory is in it too.
+    pub fn video_memory_kb(&self) -> Option<(u64, u64)> {
+        // SAFETY: plain COM calls; the out structures are locals.
+        unsafe {
+            let adapter: IDXGIAdapter3 = self
+                .device
+                .cast::<IDXGIDevice>()
+                .ok()?
+                .GetAdapter()
+                .ok()?
+                .cast()
+                .ok()?;
+            let mut local = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
+            let mut non_local = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
+            adapter
+                .QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut local)
+                .ok()?;
+            adapter
+                .QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &mut non_local)
+                .ok()?;
+            Some((local.CurrentUsage / 1024, non_local.CurrentUsage / 1024))
         }
     }
 
