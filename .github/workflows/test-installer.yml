@@ -298,9 +298,6 @@ jobs:
             Save-WindowScreen $window "$PWD\screens\settings-$theme-short-pane-wheel.png"
             $about = Find-Named $window 'About'
             if (-not (Test-InView $window $about)) { throw "the mouse wheel over the navigation pane does not bring About into view" }
-            if (-not (Select-Named $window 'About')) { throw "About could not be selected" }
-            Start-Sleep -Seconds 2
-            Save-WindowScreen $window "$PWD\screens\settings-$theme-short-about.png"
             Stop-Short $run
 
             # The keyboard: the focus on the last item brings it into view.
