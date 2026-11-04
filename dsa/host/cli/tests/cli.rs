@@ -38,7 +38,10 @@ fn pr5_the_command_line_is_parsed() {
 #[test]
 fn fr21_dsa_logcat_takes_buffers_tag_filters_and_a_dump() {
     use dsa_host_core::guest_log::{LogBuffer, LogFilter, DEFAULT_BUFFERS, INFO, SILENT};
-    let invocation = parse(&args("logcat -d -b main,crash ActivityManager:I *:S --json")).unwrap();
+    let invocation = parse(&args(
+        "logcat -d -b main,crash ActivityManager:I *:S --json",
+    ))
+    .unwrap();
     assert_eq!(invocation.command, Cmd::Logcat);
     assert!(invocation.dump);
     assert!(invocation.json);

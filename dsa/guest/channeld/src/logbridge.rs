@@ -186,7 +186,13 @@ impl LogBridge {
             Body::LogDump(dump) => {
                 let (source, connect) = (Arc::clone(&self.source), Arc::clone(&self.connect));
                 spawn("dsa-log-dump", move || {
-                    run_dump(&*source, &*connect, dump.request_id, dump.buffers, dump.min_priority)
+                    run_dump(
+                        &*source,
+                        &*connect,
+                        dump.request_id,
+                        dump.buffers,
+                        dump.min_priority,
+                    )
                 });
                 true
             }
@@ -486,7 +492,13 @@ fn run_dump(
         let mut each = |record: LogRecord| -> Result<(), String> {
             batch.push(record);
             if batch.len() >= BATCH {
-                send_records(&mut **connection, request_id, &mut batch, false, String::new())?;
+                send_records(
+                    &mut **connection,
+                    request_id,
+                    &mut batch,
+                    false,
+                    String::new(),
+                )?;
             }
             Ok(())
         };
@@ -642,7 +654,10 @@ pub fn files_in(dir: &std::path::Path, prefix: &str) -> Vec<(String, Result<Vec<
         .flatten()
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
         .map(|e| {
-            let name = e.file_name().to_string_lossy().replace(['/', '\\', ':'], "_");
+            let name = e
+                .file_name()
+                .to_string_lossy()
+                .replace(['/', '\\', ':'], "_");
             (
                 format!("{prefix}/{name}"),
                 std::fs::read(e.path()).map_err(|error| error.to_string()),

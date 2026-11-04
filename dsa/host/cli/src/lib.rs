@@ -326,12 +326,10 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "logcat" if command.is_none() => command = Some(Command::Logcat),
-            "logs" if command.is_none() => {
-                match args.next().map(String::as_str) {
-                    Some("collect") => command = Some(Command::LogsCollect),
-                    _ => return Err(format!("dsa logs takes collect -o <file.zip>\n{USAGE}")),
-                }
-            }
+            "logs" if command.is_none() => match args.next().map(String::as_str) {
+                Some("collect") => command = Some(Command::LogsCollect),
+                _ => return Err(format!("dsa logs takes collect -o <file.zip>\n{USAGE}")),
+            },
             "-d" if command == Some(Command::Logcat) => dump = true,
             "-b" if command == Some(Command::Logcat) => {
                 let names = args

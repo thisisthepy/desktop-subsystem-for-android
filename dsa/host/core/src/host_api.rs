@@ -996,10 +996,7 @@ impl HostApiService {
             if let Some(request::Body::WatchLog(watch)) = &request.body {
                 let android = self.androids.android(&peer.user);
                 return crate::guest_log_api::serve_watch_log(
-                    connection,
-                    android,
-                    request.id,
-                    watch,
+                    connection, android, request.id, watch,
                 );
             }
             if let Some(request::Body::CollectDiagnostics(_)) = request.body {
@@ -2235,12 +2232,10 @@ impl HostApiService {
                     Err(TaskRequestError::Failed(why)) => error(ErrorCode::Unavailable, why),
                 },
             },
-            Some(request::Body::WatchLog(_)) | Some(request::Body::CollectDiagnostics(_)) => {
-                error(
-                    ErrorCode::UnknownRequest,
-                    "the log and the diagnostics are read on a connection of their own".into(),
-                )
-            }
+            Some(request::Body::WatchLog(_)) | Some(request::Body::CollectDiagnostics(_)) => error(
+                ErrorCode::UnknownRequest,
+                "the log and the diagnostics are read on a connection of their own".into(),
+            ),
             Some(body) => match self.androids.android(&peer.user) {
                 Err(why) => error(ErrorCode::Unavailable, why),
                 Ok(android) => {

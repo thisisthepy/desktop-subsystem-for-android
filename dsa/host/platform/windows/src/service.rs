@@ -307,7 +307,9 @@ pub fn create_user_android(
             .name("dsa-boot-signs".into())
             .spawn(move || watch_boot_signs(watched, boot_signs))
         {
-            eprintln!("{user_name}: guest log: cannot read Android's boot for its problems: {error}");
+            eprintln!(
+                "{user_name}: guest log: cannot read Android's boot for its problems: {error}"
+            );
         }
     }
     if let Some(power) = power {

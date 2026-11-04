@@ -891,7 +891,9 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
         ),
         (
             "collect_diagnostics",
-            wrap(Body::CollectDiagnostics(CollectDiagnostics { request_id: 3 })),
+            wrap(Body::CollectDiagnostics(CollectDiagnostics {
+                request_id: 3,
+            })),
         ),
         (
             "diagnostics_file",

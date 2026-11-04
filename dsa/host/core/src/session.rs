@@ -2016,7 +2016,9 @@ fn deliver_log(shared: &Shared, commands: &Sender<Command>, message: LogPortMess
         } => {
             let mut hub = shared.logs.lock().unwrap_or_else(|e| e.into_inner());
             if !hub.dump_records(request_id, entries, end, &error) {
-                eprintln!("guest log: dropped records of dump {request_id}, which nobody waits for");
+                eprintln!(
+                    "guest log: dropped records of dump {request_id}, which nobody waits for"
+                );
             }
         }
         LogPortMessage::Diagnostics { request_id, event } => {

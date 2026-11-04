@@ -256,10 +256,7 @@ impl UserAndroid for UpdatingAndroid {
     fn watch_tasks(&self) -> Option<TaskWatch> {
         UserAndroid::watch_tasks(&*self.session)
     }
-    fn watch_log(
-        &self,
-        filter: crate::guest_log::LogFilter,
-    ) -> Option<crate::guest_log::LogWatch> {
+    fn watch_log(&self, filter: crate::guest_log::LogFilter) -> Option<crate::guest_log::LogWatch> {
         UserAndroid::watch_log(&*self.session, filter)
     }
     fn dump_log(

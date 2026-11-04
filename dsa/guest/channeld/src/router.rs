@@ -219,10 +219,7 @@ impl Router {
     /// Sends the diagnostics the agent gathers (`DiagnosticsFile`, `DiagnosticsDone`) to `to`
     /// instead of the host's control channel. Without it the agent's diagnostics are refused.
     pub fn divert_diagnostics(&self, to: Sender<Vec<u8>>) {
-        *self
-            .diagnostics
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(to);
+        *self.diagnostics.lock().unwrap_or_else(|e| e.into_inner()) = Some(to);
     }
 
     /// Adds a listener for `peer` and tells it the live tasks other processes reported. It

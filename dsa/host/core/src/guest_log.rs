@@ -194,7 +194,12 @@ impl LogEntry {
         let buffer = u32::try_from(record.buffer)
             .ok()
             .and_then(LogBuffer::from_number)
-            .ok_or_else(|| format!("a record names buffer {}, which logd has not", record.buffer))?;
+            .ok_or_else(|| {
+                format!(
+                    "a record names buffer {}, which logd has not",
+                    record.buffer
+                )
+            })?;
         Self::checked(
             buffer,
             record.priority,
@@ -395,7 +400,9 @@ impl LogFilter {
             None => (spec, "V"),
         };
         if tag.is_empty() {
-            return Err(format!("{spec:?} names no tag; write TAG:P, such as ActivityManager:I"));
+            return Err(format!(
+                "{spec:?} names no tag; write TAG:P, such as ActivityManager:I"
+            ));
         }
         let priority = priority_from_letter(letter).ok_or_else(|| {
             format!("{spec:?} has no priority Android knows; P is one of V, D, I, W, E, F or S")
@@ -485,10 +492,16 @@ impl LogFilter {
     /// A filter as a client sent it, checked: no buffer means logcat's default ones.
     pub fn from_host_api(watch: &wire::WatchLog) -> Result<LogFilter, String> {
         if watch.buffers & !ALL_BUFFERS != 0 {
-            return Err(format!("the buffers {:#x} include one logd has not", watch.buffers));
+            return Err(format!(
+                "the buffers {:#x} include one logd has not",
+                watch.buffers
+            ));
         }
         if watch.tags.len() > 256 {
-            return Err(format!("{} tag filters is more than the 256 allowed", watch.tags.len()));
+            return Err(format!(
+                "{} tag filters is more than the 256 allowed",
+                watch.tags.len()
+            ));
         }
         let mut tags = Vec::with_capacity(watch.tags.len());
         for filter in &watch.tags {
@@ -741,7 +754,13 @@ impl LogHub {
     }
 
     /// Hands a dump's records to whoever waits for it. Returns false for a dump nobody waits for.
-    pub fn dump_records(&mut self, id: u32, entries: Vec<LogEntry>, end: bool, error: &str) -> bool {
+    pub fn dump_records(
+        &mut self,
+        id: u32,
+        entries: Vec<LogEntry>,
+        end: bool,
+        error: &str,
+    ) -> bool {
         let Some((filter, tx)) = self.dumps.get(&id) else {
             return false;
         };
@@ -848,8 +867,7 @@ pub enum LogPortMessage {
 /// Reads one frame of the log port. An error says what is wrong with it; the connection it
 /// came on is then closed.
 pub fn read_log_frame(frame: &[u8]) -> Result<LogPortMessage, String> {
-    let envelope =
-        dsa_protocol::decode(frame).map_err(|e| format!("an unreadable frame ({e})"))?;
+    let envelope = dsa_protocol::decode(frame).map_err(|e| format!("an unreadable frame ({e})"))?;
     match envelope.body {
         Some(Body::LogRecords(records)) => {
             if records.records.len() > MAX_RECORDS_PER_FRAME {
@@ -902,9 +920,13 @@ pub fn check_archive_name(name: &str) -> Result<(), String> {
         || name.contains('\\')
         || name.contains(':')
         || name.chars().any(char::is_control)
-        || name.split('/').any(|part| part.is_empty() || part == "." || part == "..");
+        || name
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..");
     if bad {
-        return Err(format!("{name:?} is not a name the guest may give a diagnostics file"));
+        return Err(format!(
+            "{name:?} is not a name the guest may give a diagnostics file"
+        ));
     }
     Ok(())
 }

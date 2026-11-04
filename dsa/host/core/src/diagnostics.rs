@@ -283,9 +283,9 @@ fn add<W: Write>(
     data: Vec<u8>,
 ) -> io::Result<()> {
     if names.len() >= MAX_FILES {
-        report
-            .problems
-            .push(format!("{name} was left out: the archive holds {MAX_FILES} files at most"));
+        report.problems.push(format!(
+            "{name} was left out: the archive holds {MAX_FILES} files at most"
+        ));
         return Ok(());
     }
     let name = unique(names, name);

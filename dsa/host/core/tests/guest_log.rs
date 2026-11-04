@@ -48,7 +48,12 @@ fn fr21_the_host_ring_stays_within_its_size_and_drops_the_oldest_first() {
     let kept: Vec<_> = ring.iter().map(|e| e.message.clone()).collect();
     assert_eq!(kept, ["0000000002", "0000000003", "0000000004"]);
     // A record larger than the whole ring is not kept, and nothing else is lost for it.
-    ring.push(entry(LogBuffer::Main, INFO, "tag", &"x".repeat(one.size() * 4)));
+    ring.push(entry(
+        LogBuffer::Main,
+        INFO,
+        "tag",
+        &"x".repeat(one.size() * 4),
+    ));
     assert_eq!(ring.len(), 3);
 }
 
@@ -67,13 +72,21 @@ fn fr21_filters_pick_records_by_buffer_priority_and_tag() {
     assert!(!filter.passes(&entry(LogBuffer::Main, ERROR, "chatty", "silenced")));
     assert!(!filter.passes(&entry(LogBuffer::Main, INFO, "Other", "below W")));
     assert!(filter.passes(&entry(LogBuffer::Crash, WARN, "Other", "W")));
-    assert!(!filter.passes(&entry(LogBuffer::System, ERROR, "Other", "not a wanted buffer")));
+    assert!(!filter.passes(&entry(
+        LogBuffer::System,
+        ERROR,
+        "Other",
+        "not a wanted buffer"
+    )));
     // A record that stands for dropped ones always passes, so the reader learns of the gap.
     assert!(filter.passes(&LogEntry::dropped(3)));
     assert_eq!(filter.least_priority(), INFO);
 
     assert_eq!(LogFilter::default().buffers, DEFAULT_BUFFERS);
-    assert_eq!(LogFilter::parse_spec("Tag").unwrap(), ("Tag".into(), VERBOSE));
+    assert_eq!(
+        LogFilter::parse_spec("Tag").unwrap(),
+        ("Tag".into(), VERBOSE)
+    );
     assert_eq!(LogFilter::parse_spec("*:S").unwrap(), ("*".into(), SILENT));
     assert!(LogFilter::parse_spec("Tag:Q").is_err());
     assert!(LogFilter::parse_spec(":I").is_err());
@@ -98,7 +111,10 @@ fn fr21_without_a_reader_the_guest_is_told_to_send_nothing() {
     });
     let stream = hub.stream();
     assert!(stream.on);
-    assert_eq!(stream.buffers, LogBuffer::Main.bit() | LogBuffer::Crash.bit());
+    assert_eq!(
+        stream.buffers,
+        LogBuffer::Main.bit() | LogBuffer::Crash.bit()
+    );
     assert_eq!(stream.min_priority, u32::from(INFO));
     hub.unsubscribe(first);
     hub.unsubscribe(second);
@@ -153,7 +169,13 @@ fn fr21_a_malformed_record_is_an_error_never_a_panic() {
         body: Some(Body::ScreenState(control::ScreenState { on: true })),
     });
     assert!(read_log_frame(&control_message).is_err());
-    for name in ["../escape", "android/../../x", "/abs", "android/a\\b", "android/"] {
+    for name in [
+        "../escape",
+        "android/../../x",
+        "/abs",
+        "android/a\\b",
+        "android/",
+    ] {
         let file = encode(&Envelope {
             body: Some(Body::DiagnosticsFile(control::DiagnosticsFile {
                 request_id: 1,
@@ -184,7 +206,10 @@ fn fr21_records_print_as_logcat_threadtime() {
         "2023-11-14 22:13:20.000   100   101 W Tag: first\n\
          2023-11-14 22:13:20.000   100   101 W Tag: second"
     );
-    assert_eq!(LogEntry::dropped(4).threadtime(), "--------- 4 records dropped");
+    assert_eq!(
+        LogEntry::dropped(4).threadtime(),
+        "--------- 4 records dropped"
+    );
 }
 
 /// Reads one zip archive's stored files.
@@ -273,7 +298,9 @@ fn fr21_the_archive_is_a_zip_of_the_guest_and_host_files() {
     assert_eq!(report.problems.len(), 1);
 
     // An archive with nothing in it is still a valid one.
-    let empty = ZipWriter::new(Vec::new(), SystemTime::now()).finish().unwrap();
+    let empty = ZipWriter::new(Vec::new(), SystemTime::now())
+        .finish()
+        .unwrap();
     assert!(unzip(&empty).is_empty());
 }
 
@@ -432,7 +459,10 @@ fn fr21_the_guest_streams_only_while_a_reader_is_attached() {
     );
     let got = watch.entries.recv_timeout(WAIT).unwrap();
     assert_eq!(got.message, "wanted");
-    assert!(watch.entries.recv_timeout(Duration::from_millis(200)).is_err());
+    assert!(watch
+        .entries
+        .recv_timeout(Duration::from_millis(200))
+        .is_err());
 
     drop(watch);
     assert!(!guest.next_stream().on);
@@ -475,7 +505,12 @@ fn fr21_a_malformed_record_closes_only_the_log_connection() {
         }))
         .unwrap();
     let mut again = guest.connect_log();
-    send_records(&mut again, 0, &[entry(LogBuffer::Main, INFO, "T", "after")], false);
+    send_records(
+        &mut again,
+        0,
+        &[entry(LogBuffer::Main, INFO, "T", "after")],
+        false,
+    );
     assert_eq!(watch.entries.recv_timeout(WAIT).unwrap().message, "after");
 }
 
@@ -561,7 +596,10 @@ fn fr21_the_guest_diagnostics_arrive_on_the_log_port() {
             last: true
         }
     );
-    assert_eq!(events.recv_timeout(WAIT).unwrap(), DiagnosticsEvent::Done(None));
+    assert_eq!(
+        events.recv_timeout(WAIT).unwrap(),
+        DiagnosticsEvent::Done(None)
+    );
 }
 
 #[test]
@@ -618,8 +656,7 @@ fn fr21_the_local_api_gives_each_caller_only_their_own_androids_log() {
     let mut alice = running_guest();
     let mut bob = running_guest();
     let (connector, stop) = service_for(&alice, &bob);
-    let client =
-        HostApiClient::connect(&mut AsUser(connector, "alice"), "dsa test", WAIT).unwrap();
+    let client = HostApiClient::connect(&mut AsUser(connector, "alice"), "dsa test", WAIT).unwrap();
     let mut reader = client.watch_log(&LogFilter::default(), false).unwrap();
     assert!(alice.next_stream().on);
     // Bob's Android is never asked for its log.
@@ -630,7 +667,12 @@ fn fr21_the_local_api_gives_each_caller_only_their_own_androids_log() {
         );
     }
     let mut log = alice.connect_log();
-    send_records(&mut log, 0, &[entry(LogBuffer::Main, INFO, "T", "alice's")], false);
+    send_records(
+        &mut log,
+        0,
+        &[entry(LogBuffer::Main, INFO, "T", "alice's")],
+        false,
+    );
     let deadline = Instant::now() + WAIT;
     let got = loop {
         assert!(Instant::now() < deadline, "no record came");
@@ -653,8 +695,7 @@ fn fr21_the_local_api_saves_the_diagnostics_as_one_zip() {
     let mut alice = running_guest();
     let bob = running_guest();
     let (connector, stop) = service_for(&alice, &bob);
-    let client =
-        HostApiClient::connect(&mut AsUser(connector, "alice"), "dsa test", WAIT).unwrap();
+    let client = HostApiClient::connect(&mut AsUser(connector, "alice"), "dsa test", WAIT).unwrap();
     let saving = thread::spawn(move || {
         let mut archive = Vec::new();
         let mut reader = client.collect_diagnostics().unwrap();

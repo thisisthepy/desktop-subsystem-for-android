@@ -85,7 +85,11 @@ pub fn parse_entry(packet: &[u8]) -> Result<LogRecord, String> {
     }
     let (priority, tag, message) = if BINARY_IDS.contains(&lid) {
         let tag = u32_at(payload, 0).ok_or("a binary entry without its tag")?;
-        (4, tag.to_string(), event_text(payload.get(4..).unwrap_or_default()))
+        (
+            4,
+            tag.to_string(),
+            event_text(payload.get(4..).unwrap_or_default()),
+        )
     } else {
         let priority = *payload.first().ok_or("an entry without a priority")?;
         let (tag, used) = c_text(payload.get(1..).unwrap_or_default());
@@ -254,13 +258,8 @@ impl LogdSocket {
         use std::io::{Error, ErrorKind};
         use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
         // SAFETY: plain socket creation; the result is checked.
-        let fd = unsafe {
-            libc::socket(
-                libc::AF_UNIX,
-                libc::SOCK_SEQPACKET | libc::SOCK_CLOEXEC,
-                0,
-            )
-        };
+        let fd =
+            unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_SEQPACKET | libc::SOCK_CLOEXEC, 0) };
         if fd < 0 {
             return Err(Error::last_os_error());
         }
@@ -271,7 +270,10 @@ impl LogdSocket {
         address.sun_family = libc::AF_UNIX as libc::sa_family_t;
         let bytes = path.as_bytes();
         if bytes.len() >= address.sun_path.len() {
-            return Err(Error::new(ErrorKind::InvalidInput, "the socket path is too long"));
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "the socket path is too long",
+            ));
         }
         for (slot, byte) in address.sun_path.iter_mut().zip(bytes) {
             *slot = *byte as libc::c_char;

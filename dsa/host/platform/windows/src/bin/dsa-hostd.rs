@@ -234,8 +234,7 @@ mod windows_host {
         let log_listener = VmBoundListener::new(
             launcher.vm_id_slot(),
             Box::new(move |vm_id| {
-                HvSocketListener::bind(vm_id, log_service)
-                    .map(|l| Box::new(l) as Box<dyn Listener>)
+                HvSocketListener::bind(vm_id, log_service).map(|l| Box::new(l) as Box<dyn Listener>)
             }),
         );
         let session_config = config.session_config();

@@ -64,10 +64,7 @@ mod daemon {
     struct LogdPackets(LogdSocket);
 
     impl LogPackets for LogdPackets {
-        fn next(
-            &mut self,
-            timeout: std::time::Duration,
-        ) -> Result<Option<Vec<u8>>, String> {
+        fn next(&mut self, timeout: std::time::Duration) -> Result<Option<Vec<u8>>, String> {
             let millis = timeout.as_millis().min(i32::MAX as u128) as i32;
             self.0.next(millis).map_err(|e| e.to_string())
         }

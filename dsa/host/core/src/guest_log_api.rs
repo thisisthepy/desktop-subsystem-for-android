@@ -12,7 +12,9 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use dsa_protocol::host_api::types::{self, envelope::Body, response, ErrorCode, Envelope, Response};
+use dsa_protocol::host_api::types::{
+    self, envelope::Body, response, Envelope, ErrorCode, Response,
+};
 use dsa_protocol::host_api::{decode, send};
 use dsa_transport::{Connection, TransportError};
 
@@ -35,7 +37,14 @@ const DUMP_WAIT: Duration = Duration::from_secs(30);
 const ARCHIVE_PIECE: usize = 256 * 1024;
 
 fn answer(connection: &mut dyn Connection, id: u64, body: response::Body) -> bool {
-    send(connection, Body::Response(Response { id, body: Some(body) })).is_ok()
+    send(
+        connection,
+        Body::Response(Response {
+            id,
+            body: Some(body),
+        }),
+    )
+    .is_ok()
 }
 
 fn error(code: ErrorCode, detail: String) -> response::Body {
@@ -277,15 +286,16 @@ pub fn serve_collect_diagnostics(
     let started = Instant::now();
     let (guest, missing) = match android.collect_diagnostics() {
         Ok(events) => (Some(events), None),
-        Err(TaskRequestError::NotRunning(why) | TaskRequestError::Failed(why)) => {
-            (None, Some(why))
-        }
+        Err(TaskRequestError::NotRunning(why) | TaskRequestError::Failed(why)) => (None, Some(why)),
     };
     let recent = android.recent_log();
     let extra = if recent.is_empty() {
         Vec::new()
     } else {
-        vec![("host/android-recent.log".to_string(), recent_log_text(&recent))]
+        vec![(
+            "host/android-recent.log".to_string(),
+            recent_log_text(&recent),
+        )]
     };
     let about = format!(
         "DSA diagnostics, made by {build} for the Android of the user who asked, with the logs \

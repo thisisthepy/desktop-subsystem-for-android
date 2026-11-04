@@ -185,7 +185,8 @@ fn fr21_the_guest_reads_no_log_and_sends_nothing_until_the_host_asks() {
     }))));
     let mut connection = listener.accept(WAIT).expect("the log port is opened");
     assert!(logd.requests.lock().unwrap()[0].starts_with("stream lids=0 tail=10"));
-    feed.send(packet(0, 4, "Tag", "below the priority", 2)).unwrap();
+    feed.send(packet(0, 4, "Tag", "below the priority", 2))
+        .unwrap();
     feed.send(packet(0, 6, "Tag", "wanted", 3)).unwrap();
     let got = records(&mut connection, 1);
     assert_eq!(got[0].message, "wanted");
@@ -194,7 +195,9 @@ fn fr21_the_guest_reads_no_log_and_sends_nothing_until_the_host_asks() {
     assert_eq!(got[0].time_ns, 3_500_000_000);
 
     assert!(bridge.from_host(&host(Body::LogStream(LogStream::default()))));
-    wait_until("logd's reader closing", || logd.open.load(Ordering::SeqCst) == 0);
+    wait_until("logd's reader closing", || {
+        logd.open.load(Ordering::SeqCst) == 0
+    });
     assert!(!bridge.streaming());
     feed.send(packet(0, 6, "Tag", "after the end", 4)).unwrap();
     thread::sleep(Duration::from_millis(300));
@@ -218,7 +221,9 @@ fn fr21_a_full_queue_drops_records_and_says_how_many_in_order() {
     for i in 0..10 {
         feed.send(packet(0, 4, "T", &format!("r{i}"), i)).unwrap();
     }
-    wait_until("logd being read", || logd.consumed.load(Ordering::SeqCst) == 10);
+    wait_until("logd being read", || {
+        logd.consumed.load(Ordering::SeqCst) == 10
+    });
     open.store(true, Ordering::SeqCst);
     let mut connection = listener.accept(WAIT).expect("the log port is opened");
     let first = records(&mut connection, 4);
@@ -271,9 +276,11 @@ fn fr21_diagnostics_carry_the_log_pstore_and_the_agents_part() {
     feed.send(packet(0, 4, "Tag", "a line", 1)).unwrap();
     drop(feed);
     // The agent gathers its part too, so the frame goes on to it.
-    assert!(!bridge.from_host(&host(Body::CollectDiagnostics(CollectDiagnostics {
-        request_id: 9
-    }))));
+    assert!(
+        !bridge.from_host(&host(Body::CollectDiagnostics(CollectDiagnostics {
+            request_id: 9
+        })))
+    );
     let mut connection = listener.accept(WAIT).unwrap();
     agent
         .send(host(Body::DiagnosticsFile(DiagnosticsFile {

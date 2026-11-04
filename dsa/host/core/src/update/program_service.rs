@@ -739,10 +739,7 @@ impl UserAndroid for WithProgramStatus {
     fn watch_tasks(&self) -> Option<TaskWatch> {
         self.android.watch_tasks()
     }
-    fn watch_log(
-        &self,
-        filter: crate::guest_log::LogFilter,
-    ) -> Option<crate::guest_log::LogWatch> {
+    fn watch_log(&self, filter: crate::guest_log::LogFilter) -> Option<crate::guest_log::LogWatch> {
         self.android.watch_log(filter)
     }
     fn dump_log(
