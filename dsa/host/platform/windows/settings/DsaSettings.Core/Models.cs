@@ -37,6 +37,7 @@ public sealed record SettingsInfo(
     string? LogDir,
     bool Clipboard = true,
     bool LinksInAndroid = false,
+    string? AndroidVersion = null,
     bool DeveloperMode = false,
     int AdbPort = SettingsInfo.DefaultAdbPort)
 {

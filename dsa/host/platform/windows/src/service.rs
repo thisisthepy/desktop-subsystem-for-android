@@ -617,7 +617,19 @@ where
             .map(|dir| dir.to_string_lossy().into_owned()),
         program_updates_available: program.is_some() && config.program_updates_available(),
         image_updates_available,
+        android_version: config
+            .first_image
+            .as_ref()
+            .map(|image| image.version.clone()),
     };
+    // With an update store the image the next start boots is the store's current one, which
+    // an update changes while the service runs.
+    let android_version: Option<dsa_host_core::host_api::AndroidVersionSource> =
+        updates.as_ref().map(|updates| {
+            let store = Arc::clone(&updates.store);
+            Arc::new(move || store.state().ok().map(|state| state.current.version))
+                as dsa_host_core::host_api::AndroidVersionSource
+        });
     let program_status = Arc::new(ProgramStatus::default());
     // Every user's Android follows the computer's power.
     let power = Arc::new(PowerHub::new());
@@ -715,6 +727,9 @@ where
         {
             eprintln!("{build}: starting the memory log failed: {error}");
         }
+    }
+    if let Some(source) = android_version {
+        service = service.with_android_version(source);
     }
     if let Some(settings) = program {
         let check_interval = config

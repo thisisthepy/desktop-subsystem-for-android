@@ -101,6 +101,7 @@ public sealed class DsaService
         OptionalString(json, "log_dir"),
         Bool(json, "clipboard", missing: true),
         Bool(json, "links_in_android"),
+        OptionalString(json, "android_version"),
         Bool(json, "developer_mode"),
         Int(json, "adb_port") is > 0 and var port ? port : SettingsInfo.DefaultAdbPort);
 

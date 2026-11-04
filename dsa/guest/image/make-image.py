@@ -2,7 +2,7 @@
 
     uv run dsa/guest/image/make-image.py --major 17 --keys .scratch/image-keys
 
-It takes the pinned target_files and otatools (fetch.sh downloads them) and:
+It takes the pinned target_files, otatools and dexpreopt_tools (fetch.sh downloads them) and:
 
 1. removes the launcher, SystemUI and the keyboard app, because the host is the shell, and
    the apps a desktop subsystem has no use for (UNNEEDED_APPS);
@@ -14,7 +14,9 @@ It takes the pinned target_files and otatools (fetch.sh downloads them) and:
    platform app that reports each app task to the host;
 4. re-signs every APK, APEX and verified boot image with the keys in --keys, because the
    published build is signed with AOSP's test keys, whose private halves are public;
-5. builds the images, and lays them out on the template of a user's Android disk.
+5. compiles the system apps users open (COMPILED_APPS) with the build's own dex2oat
+   (dexpreopt_tools.zip), against the guest's boot image, so they do not run interpreted;
+6. builds the images, and lays them out on the template of a user's Android disk.
 
 The results go to dsa/target/image/<version>/:
 
@@ -1588,6 +1590,342 @@ def extract_tree(z, prefix, dest):
             path.write_bytes(z.read(info))
 
 
+# The system apps users open, compiled to machine code when the image is made. The build
+# compiles them only into system_other, which the guest does not have, and only with the
+# verify filter. On first boot ART verifies them too and nothing more, so they run
+# interpreted and through the JIT, and each screen of Settings took 100 to 350 ms to open.
+# Settings' dex is edited above, so no published odex could match it anyway. Each app is
+# compiled with speed-profile when it carries a profile (assets/dexopt/baseline.prof), and
+# with speed otherwise; Settings always with speed. The odex goes next to the APK, where ART
+# takes it as the factory build's (compilation reason prebuilt), so first boot has nothing
+# left to compile for these apps. Apps the image lacks are skipped.
+# PermissionController is not here: it lives inside the permission APEX, which is signed
+# and read-only, and ART takes no odex beside an APK inside an APEX.
+SETTINGS_APP = "SYSTEM_EXT/priv-app/Settings/Settings.apk"
+COMPILED_APPS = [
+    SETTINGS_APP,
+    "SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk",
+    "SYSTEM/priv-app/PackageInstaller/PackageInstaller.apk",
+    "SYSTEM/priv-app/IntentResolver/IntentResolver.apk",
+    "SYSTEM/priv-app/SoundPicker/SoundPicker.apk",
+    "SYSTEM/app/PrintSpooler/PrintSpooler.apk",
+    "SYSTEM_EXT/priv-app/StorageManager/StorageManager.apk",
+    "PRODUCT/app/webview/webview.apk",
+    AGENT_APK,
+]
+COMPILED_ISA = "x86_64"
+CAPEX_ORIGINAL = "original_apex"
+EMBEDDED_PROFILE = "assets/dexopt/baseline.prof"
+# Where an app's shared libraries are listed when the build left no odex to read them from:
+# the agent declares none.
+DEFAULT_CLASS_LOADER_CONTEXT = "PCL[]"
+# Compiled against the same boot image as the framework's own odex files.
+FRAMEWORK_ODEX = "SYSTEM/framework/oat/x86_64/services.odex"
+PARTITION_DIRS = {"SYSTEM": "system", "SYSTEM_EXT": "system_ext", "PRODUCT": "product",
+                  "VENDOR": "vendor", "ODM": "odm"}
+PARTITION_FS_CONFIG = {
+    "SYSTEM": "META/filesystem_config.txt",
+    "SYSTEM_EXT": "META/system_ext_filesystem_config.txt",
+    "PRODUCT": "META/product_filesystem_config.txt",
+}
+OAT_KEYS = ["bootclasspath", "bootclasspath-checksums", "classpath", "compilation-reason",
+            "compiler-filter"]
+
+
+def oat_key_values(odex):
+    """The key-value store of an odex's oat header: the filter, the boot class path and its
+    checksums, and the class loader context (classpath) it was compiled for."""
+    start = odex.find(b"oat\n")
+    if start < 0:
+        raise ValueError("not an oat file")
+    header = odex[start:start + (1 << 20)]
+    values = {}
+    for key in OAT_KEYS:
+        at = header.find(b"\0" + key.encode() + b"\0")
+        if at < 0:
+            continue
+        at += len(key) + 2
+        values[key] = header[at:header.index(b"\0", at)].decode()
+    return values
+
+
+def vdex_checksums(vdex):
+    """The dex checksums a vdex was made for: the CRC-32 of each classes*.dex in the APK."""
+    if vdex[:4] != b"vdex":
+        raise ValueError("not a vdex file")
+    (sections,) = struct.unpack_from("<I", vdex, 8)
+    for i in range(sections):
+        kind, offset, size = struct.unpack_from("<III", vdex, 12 + 12 * i)
+        if kind == 0:
+            return list(struct.unpack_from(f"<{size // 4}I", vdex, offset))
+    raise ValueError("the vdex has no checksum section")
+
+
+def apk_dex_checksums(apk):
+    """The CRC-32 of each classes*.dex in an APK, in the order ART reads them."""
+    with zipfile.ZipFile(io.BytesIO(apk)) as z:
+        dexes = {i.filename: i.CRC for i in z.infolist() if re.fullmatch(r"classes\d*\.dex", i.filename)}
+    order = sorted(dexes, key=lambda n: int(n[len("classes"):-len(".dex")] or 1))
+    return [dexes[n] for n in order]
+
+
+def device_path(name):
+    """/system_ext/priv-app/... for SYSTEM_EXT/priv-app/..."""
+    partition, rest = name.split("/", 1)
+    return f"/{PARTITION_DIRS[partition]}/{rest}"
+
+
+def oat_files(apk):
+    """The odex and vdex target_files members ART looks for beside an APK."""
+    folder, file = apk.rsplit("/", 1)
+    stem = file[:-len(".apk")]
+    return (f"{folder}/oat/{COMPILED_ISA}/{stem}.odex", f"{folder}/oat/{COMPILED_ISA}/{stem}.vdex")
+
+
+def factory_odex(apk):
+    """Where the build put the app's own (verify only) odex: in system_other."""
+    odex, _ = oat_files(apk)
+    return "SYSTEM_OTHER" + device_path(odex)
+
+
+def oat_filesystem_config(apk):
+    """The filesystem configuration member and the rules for an APK's oat folder and files."""
+    partition = apk.split("/", 1)[0]
+    folder = device_path(apk).rsplit("/", 1)[0].lstrip("/")
+    odex, vdex = (device_path(n).lstrip("/") for n in oat_files(apk))
+    return PARTITION_FS_CONFIG[partition], [
+        f"{folder}/oat 0 0 755 capabilities=0x0",
+        f"{folder}/oat/{COMPILED_ISA} 0 0 755 capabilities=0x0",
+        f"{odex} 0 0 644 capabilities=0x0",
+        f"{vdex} 0 0 644 capabilities=0x0",
+    ]
+
+
+def compiler_filter(apk, has_profile):
+    """speed for Settings, speed-profile for an app that carries a profile, speed otherwise."""
+    if apk == SETTINGS_APP:
+        return "speed"
+    return "speed-profile" if has_profile else "speed"
+
+
+def class_loader_contexts(context, root):
+    """The class loader context dex2oat opens (each library at its copy under root) and the
+    one it stores (the device's paths). The checksums of the published odex are dropped:
+    dex2oat records the ones of the files it opens."""
+    stored = re.sub(r"\*\d+", "", context)
+    host = re.sub(r"(?<=[\[:#])(/[^\]:#*]+)", lambda m: str(root) + m.group(1), stored)
+    return host, stored
+
+
+def boot_image_locations(bootclasspath, checksums):
+    """The device's boot image, as dex2oat names it: the primary image and each extension,
+    one per "i;<count>/<checksum>" in the framework odex's bootclasspath-checksums."""
+    jars = bootclasspath.split(":")
+    locations, first = [], 0
+    for part in checksums.split(":"):
+        m = re.fullmatch(r"i;(\d+)/[0-9a-f]+", part)
+        if not m:
+            break
+        name = "boot.art" if first == 0 else f"boot-{Path(jars[first]).stem}.art"
+        locations.append(f"/system/framework/{name}")
+        first += int(m.group(1))
+    if not locations:
+        raise ValueError(f"no boot image in the checksums {checksums!r}")
+    return locations
+
+
+def apex_jar_sources(bootclasspath, names):
+    """The APEX files (target_files members) that hold the boot class path's /apex jars."""
+    sources = {}
+    for jar in bootclasspath.split(":"):
+        if not jar.startswith("/apex/"):
+            continue
+        apex = jar.split("/")[2]
+        found = [f"{p}/apex/{apex}{ext}" for p in PARTITION_DIRS for ext in (".apex", ".capex")
+                 if f"{p}/apex/{apex}{ext}" in names]
+        if not found:
+            raise ValueError(f"the boot class path needs {jar}, but no partition has the {apex} APEX")
+        sources[apex] = found[0]
+    return sources
+
+
+def dex2oat_command(dex2oat, apk, dex_location, odex, root, bootclasspath, boot_images, contexts,
+                    filter, profile=None, extra=()):
+    """The dex2oat command line the build itself uses to compile a system app, aimed at the
+    guest's x86_64 boot image."""
+    host_context, stored_context = contexts
+    jars = bootclasspath.split(":")
+    cmd = [
+        dex2oat, "--avoid-storing-invocation",
+        # The build's own heap size: the heap must fit in the low 4 GiB, and 2 GiB did not.
+        "--runtime-arg", "-Xms64m", "--runtime-arg", "-Xmx512m",
+        "--runtime-arg", "-Xbootclasspath:" + ":".join(f"{root}{j}" for j in jars),
+        "--runtime-arg", "-Xbootclasspath-locations:" + bootclasspath,
+        f"--class-loader-context={host_context}",
+        f"--stored-class-loader-context={stored_context}",
+        "--boot-image=" + ":".join(f"{root}{i}" for i in boot_images),
+        f"--dex-file={apk}", f"--dex-location={dex_location}",
+        f"--oat-file={odex}", f"--oat-location={dex_location.rsplit('/', 1)[0]}/oat/{COMPILED_ISA}/{Path(odex).name}",
+        f"--android-root={root}/empty",
+        f"--instruction-set={COMPILED_ISA}", f"--instruction-set-variant={COMPILED_ISA}",
+        "--instruction-set-features=default",
+        "--no-generate-debug-info", "--generate-build-id", "--force-determinism",
+        "--no-inline-from=core-oj.jar",
+        f"--compiler-filter={filter}", "--compilation-reason=prebuilt",
+        *extra,
+    ]
+    if profile is not None:
+        cmd += [f"--profile-file={profile}", "--resolve-startup-const-strings=true"]
+    return cmd
+
+
+def compiled_app_problems(z):
+    """What is wrong with the compiled system apps in a target_files: an odex or vdex
+    missing, made for another dex than the APK's, with a filter other than speed or
+    speed-profile, against another boot image than the framework's, or for other shared
+    libraries than the build's own."""
+    names = set(z.namelist())
+    problems = []
+    framework = oat_key_values(z.read(FRAMEWORK_ODEX)) if FRAMEWORK_ODEX in names else {}
+    for apk in COMPILED_APPS:
+        if apk not in names:
+            if apk == SETTINGS_APP:
+                problems.append(f"{apk} is missing")
+            continue
+        odex, vdex = oat_files(apk)
+        if odex not in names or vdex not in names:
+            problems.append(f"{apk} is not compiled ({odex} or its vdex is missing), so it runs "
+                            "interpreted and every screen opens slowly")
+            continue
+        made_for = vdex_checksums(z.read(vdex))
+        dex = apk_dex_checksums(z.read(apk))
+        if made_for != dex:
+            problems.append(f"{vdex} was made for dex checksums {made_for}, but the APK's are {dex}, "
+                            "so ART throws the odex away")
+        keys = oat_key_values(z.read(odex))
+        if keys.get("compiler-filter") not in ("speed", "speed-profile"):
+            problems.append(f"{odex} is compiled with {keys.get('compiler-filter')}, not speed")
+        if apk == SETTINGS_APP and keys.get("compiler-filter") != "speed":
+            problems.append(f"{odex} is compiled with {keys.get('compiler-filter')}, not speed")
+        if framework and keys.get("bootclasspath-checksums") != framework.get("bootclasspath-checksums"):
+            problems.append(f"{odex} was compiled against boot image {keys.get('bootclasspath-checksums')}, "
+                            f"but the guest's is {framework.get('bootclasspath-checksums')}")
+        published = factory_odex(apk)
+        expected = (oat_key_values(z.read(published)).get("classpath") if published in names
+                    else DEFAULT_CLASS_LOADER_CONTEXT)
+        if keys.get("classpath") != expected:
+            problems.append(f"{odex} was compiled for shared libraries {keys.get('classpath')}, but "
+                            f"the app loads {expected}")
+    return problems
+
+
+def compile_apps(signed, tools_zip, otatools, work, env):
+    """Compiles COMPILED_APPS in the signed target_files and adds their odex and vdex files
+    and filesystem rules to it. Returns the bytes each app's compiled files take."""
+    tools = work / "dexpreopt-tools"
+    with zipfile.ZipFile(tools_zip) as z:
+        z.extractall(tools)
+    for f in tools.iterdir():
+        f.chmod(0o755)
+    dex2oat = tools / "dex2oatd64"
+    profman = tools / "profman"
+    extra = (tools / "uffd_gc_flag.txt").read_text().split() if (tools / "uffd_gc_flag.txt").exists() else []
+    root = (work / "dexpreopt-root").resolve()
+    out = work / "dexpreopt-out"
+    out.mkdir(parents=True, exist_ok=True)
+    (root / "empty").mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(signed) as z:
+        names = set(z.namelist())
+        framework = oat_key_values(z.read(FRAMEWORK_ODEX))
+        bootclasspath = framework["bootclasspath"]
+        boot_images = boot_image_locations(bootclasspath, framework["bootclasspath-checksums"])
+        for partition, folder in PARTITION_DIRS.items():
+            extract_tree(z, f"{partition}/framework/", root / folder / "framework")
+        for apex, member in apex_jar_sources(bootclasspath, names).items():
+            packed = work / "apex" / Path(member).name
+            packed.parent.mkdir(parents=True, exist_ok=True)
+            packed.write_bytes(z.read(member))
+            if packed.suffix == ".capex":
+                # A compressed APEX is a zip that holds the original one.
+                decompressed = packed.with_suffix(".apex")
+                with zipfile.ZipFile(packed) as capex:
+                    decompressed.write_bytes(capex.read(CAPEX_ORIGINAL))
+                packed = decompressed
+            run(otatools / "bin/deapexer", "--debugfs_path", otatools / "bin/debugfs_static",
+                "--fsckerofs_path", otatools / "bin/fsck.erofs", "extract", packed, root / "apex" / apex,
+                env=env)
+        for image in boot_images:
+            if not (root / image.lstrip("/")).parent.joinpath(COMPILED_ISA, Path(image).name).exists():
+                raise ValueError(f"the image has no {COMPILED_ISA} boot image at {image}")
+
+        compiled, sizes, rules = {}, {}, {}
+        for apk in COMPILED_APPS:
+            if apk not in names:
+                print(f"not compiling {apk}: the image does not have it", flush=True)
+                continue
+            data = z.read(apk)
+            host_apk = out / apk
+            host_apk.parent.mkdir(parents=True, exist_ok=True)
+            host_apk.write_bytes(data)
+            location = device_path(apk)
+            published = factory_odex(apk)
+            context = (oat_key_values(z.read(published)).get("classpath", DEFAULT_CLASS_LOADER_CONTEXT)
+                       if published in names else DEFAULT_CLASS_LOADER_CONTEXT)
+            profile = None
+            with zipfile.ZipFile(io.BytesIO(data)) as a:
+                if EMBEDDED_PROFILE in a.namelist():
+                    embedded = host_apk.with_suffix(".baseline.prof")
+                    embedded.write_bytes(a.read(EMBEDDED_PROFILE))
+                    profile = host_apk.with_suffix(".prof")
+                    try:
+                        run(profman, f"--profile-file={embedded}", f"--reference-profile-file={profile}",
+                            f"--apk={host_apk}", f"--dex-location={location}",
+                            "--copy-and-update-profile-key", env=env)
+                    except subprocess.CalledProcessError:
+                        print(f"{apk}: profman could not read its profile, so it is compiled with speed",
+                              flush=True)
+                        profile = None
+            filter = compiler_filter(apk, profile is not None)
+            odex_member, vdex_member = oat_files(apk)
+            odex = out / odex_member
+            odex.parent.mkdir(parents=True, exist_ok=True)
+            run(*dex2oat_command(dex2oat, host_apk, location, odex, root, bootclasspath, boot_images,
+                                 class_loader_contexts(context, root), filter,
+                                 profile=profile if filter == "speed-profile" else None, extra=extra),
+                env=dict(env, ANDROID_LOG_TAGS="*:e"))
+            vdex = odex.with_suffix(".vdex")
+            compiled[odex_member] = odex.read_bytes()
+            compiled[vdex_member] = vdex.read_bytes()
+            sizes[apk] = len(compiled[odex_member]) + len(compiled[vdex_member])
+            print(f"compiled {apk} with {filter}: {sizes[apk] >> 10} KiB of odex and vdex", flush=True)
+            config, app_rules = oat_filesystem_config(apk)
+            rules.setdefault(config, []).extend(app_rules)
+
+        updated = signed.with_name(signed.stem + "-compiled.zip")
+        with zipfile.ZipFile(updated, "w", allowZip64=True) as zout:
+            for info in z.infolist():
+                if info.filename in compiled:
+                    continue
+                data = z.read(info)
+                if info.filename in rules:
+                    data = add_filesystem_config(data.decode(), rules[info.filename]).encode()
+                zout.writestr(info, data)
+            for member, data in compiled.items():
+                info = zipfile.ZipInfo(member, date_time=(2008, 1, 1, 0, 0, 0))
+                info.external_attr = 0o100644 << 16
+                zout.writestr(info, data)
+    updated.replace(signed)
+    with zipfile.ZipFile(signed) as z:
+        problems = compiled_app_problems(z)
+    if problems:
+        raise ValueError("; ".join(problems))
+    print(f"compiled system apps: {sum(sizes.values()) >> 20} MiB in all", flush=True)
+    shutil.rmtree(root, ignore_errors=True)
+    shutil.rmtree(out, ignore_errors=True)
+    return sizes
+
+
 def ramdisk(signed, otatools, work, out):
     """The vendor ramdisk followed by the generic one, as one gzip'd initrd."""
     parts = []
@@ -1842,6 +2180,7 @@ def main():
         *key_arguments(modified, str(Path(keys).resolve())), modified.resolve(), signed.resolve(),
         env=env, cwd=aosp_root)
     modified.unlink()
+    compile_apps(signed, inputs / spec["files"]["dexpreopt_tools"]["name"], otatools, work, env)
     run(otatools / "bin/add_img_to_target_files", "-p", otatools, "-a", signed, env=env)
 
     images = work / "images"

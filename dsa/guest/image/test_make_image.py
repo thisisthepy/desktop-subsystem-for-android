@@ -2204,5 +2204,201 @@ class DeveloperModeTests(unittest.TestCase):
                 self.assertIn("service.adb.listen_addrs=vsock:5555", props)
 
 
+BOOTCLASSPATH = ("/apex/com.android.art/javalib/core-oj.jar:/system/framework/framework.jar:"
+                 "/apex/com.android.adservices/javalib/framework-adservices.jar:"
+                 "/apex/com.android.wifi/javalib/framework-wifi.jar")
+SETTINGS_CONTEXT = ("PCL[]{PCL[/system/framework/org.apache.http.legacy.jar*3144028450]#"
+                    "PCL[/system_ext/framework/androidx.window.extensions.jar*1635530414]}")
+
+
+def fake_odex(**keys):
+    """An odex whose oat header holds the given key-value store, padded like the real ones."""
+    store = b"".join(k.encode() + b"\0" + v.encode() + b"\0" + b"\0" * 7 for k, v in sorted(keys.items()))
+    return b"\x7fELF" + b"\0" * 60 + b"oat\n275\0" + b"\0" * 64 + store
+
+
+def fake_vdex(checksums):
+    """A vdex with only its checksum section."""
+    header = b"vdex027\0" + struct.pack("<I", 1)
+    offset = len(header) + 12
+    return header + struct.pack("<III", 0, offset, 4 * len(checksums)) + struct.pack(
+        f"<{len(checksums)}I", *checksums)
+
+
+def fake_apk(*dexes):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as z:
+        for i, content in enumerate(dexes):
+            z.writestr("classes.dex" if i == 0 else f"classes{i + 1}.dex", content)
+        z.writestr("AndroidManifest.xml", b"manifest")
+    return buffer.getvalue()
+
+
+class CompiledSystemAppTests(unittest.TestCase):
+    """The system apps users open are compiled when the image is made, so their screens do
+    not open interpreted (the first visible response to a click)."""
+
+    def test_fr5_settings_and_the_apps_users_open_are_compiled(self):
+        for apk in ["SYSTEM_EXT/priv-app/Settings/Settings.apk",
+                    "SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk",
+                    "SYSTEM/priv-app/PackageInstaller/PackageInstaller.apk",
+                    "PRODUCT/app/webview/webview.apk",
+                    make_image.AGENT_APK]:
+            self.assertIn(apk, make_image.COMPILED_APPS)
+
+    def test_fr5_settings_is_compiled_with_speed_and_others_follow_their_profile(self):
+        self.assertEqual(make_image.compiler_filter(make_image.SETTINGS_APP, True), "speed")
+        self.assertEqual(make_image.compiler_filter(make_image.SETTINGS_APP, False), "speed")
+        docs = "SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk"
+        self.assertEqual(make_image.compiler_filter(docs, True), "speed-profile")
+        self.assertEqual(make_image.compiler_filter(docs, False), "speed")
+
+    def test_fr5_oat_header_keys_are_read(self):
+        keys = make_image.oat_key_values(fake_odex(**{
+            "bootclasspath": BOOTCLASSPATH, "bootclasspath-checksums": "i;2/cb8fc4a6:i;2/f8c5165e",
+            "classpath": SETTINGS_CONTEXT, "compiler-filter": "speed", "compilation-reason": "prebuilt"}))
+        self.assertEqual(keys["compiler-filter"], "speed")
+        self.assertEqual(keys["classpath"], SETTINGS_CONTEXT)
+        self.assertEqual(keys["bootclasspath"], BOOTCLASSPATH)
+        self.assertEqual(keys["bootclasspath-checksums"], "i;2/cb8fc4a6:i;2/f8c5165e")
+
+    def test_fr5_vdex_checksums_match_the_apk_dex_crcs(self):
+        apk = fake_apk(b"dex\n035\0first", b"dex\n035\0second", b"dex\n035\0third")
+        crcs = [zlib.crc32(b"dex\n035\0first"), zlib.crc32(b"dex\n035\0second"), zlib.crc32(b"dex\n035\0third")]
+        self.assertEqual(make_image.apk_dex_checksums(apk), crcs)
+        self.assertEqual(make_image.vdex_checksums(fake_vdex(crcs)), crcs)
+
+    def test_fr5_odex_sits_beside_the_apk_for_x86_64(self):
+        self.assertEqual(make_image.oat_files(make_image.SETTINGS_APP), (
+            "SYSTEM_EXT/priv-app/Settings/oat/x86_64/Settings.odex",
+            "SYSTEM_EXT/priv-app/Settings/oat/x86_64/Settings.vdex"))
+        self.assertEqual(make_image.factory_odex(make_image.SETTINGS_APP),
+                         "SYSTEM_OTHER/system_ext/priv-app/Settings/oat/x86_64/Settings.odex")
+        self.assertEqual(make_image.device_path("PRODUCT/app/webview/webview.apk"),
+                         "/product/app/webview/webview.apk")
+
+    def test_fr5_compiled_files_are_in_the_partition_filesystem_config(self):
+        config, rules = make_image.oat_filesystem_config("SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk")
+        self.assertEqual(config, "META/filesystem_config.txt")
+        self.assertEqual(rules, [
+            "system/priv-app/DocumentsUI/oat 0 0 755 capabilities=0x0",
+            "system/priv-app/DocumentsUI/oat/x86_64 0 0 755 capabilities=0x0",
+            "system/priv-app/DocumentsUI/oat/x86_64/DocumentsUI.odex 0 0 644 capabilities=0x0",
+            "system/priv-app/DocumentsUI/oat/x86_64/DocumentsUI.vdex 0 0 644 capabilities=0x0",
+        ])
+        config, _ = make_image.oat_filesystem_config(make_image.SETTINGS_APP)
+        self.assertEqual(config, "META/system_ext_filesystem_config.txt")
+
+    def test_fr5_class_loader_context_opens_host_copies_and_stores_device_paths(self):
+        host, stored = make_image.class_loader_contexts(SETTINGS_CONTEXT, Path("/w/root"))
+        self.assertEqual(stored, "PCL[]{PCL[/system/framework/org.apache.http.legacy.jar]#"
+                                 "PCL[/system_ext/framework/androidx.window.extensions.jar]}")
+        self.assertEqual(host, "PCL[]{PCL[/w/root/system/framework/org.apache.http.legacy.jar]#"
+                               "PCL[/w/root/system_ext/framework/androidx.window.extensions.jar]}")
+        self.assertEqual(make_image.class_loader_contexts("PCL[]", Path("/w/root")), ("PCL[]", "PCL[]"))
+
+    def test_fr5_boot_image_is_the_primary_image_and_its_extension(self):
+        self.assertEqual(
+            make_image.boot_image_locations(BOOTCLASSPATH, "i;2/cb8fc4a6:i;2/f8c5165e"),
+            ["/system/framework/boot.art", "/system/framework/boot-framework-adservices.art"])
+        with self.assertRaises(ValueError):
+            make_image.boot_image_locations(BOOTCLASSPATH, "")
+
+    def test_fr5_boot_class_path_apex_jars_come_from_their_apexes(self):
+        names = {"SYSTEM/apex/com.android.art.capex", "SYSTEM/apex/com.android.adservices.apex",
+                 "SYSTEM/apex/com.android.wifi.apex"}
+        self.assertEqual(make_image.apex_jar_sources(BOOTCLASSPATH, names), {
+            "com.android.art": "SYSTEM/apex/com.android.art.capex",
+            "com.android.adservices": "SYSTEM/apex/com.android.adservices.apex",
+            "com.android.wifi": "SYSTEM/apex/com.android.wifi.apex",
+        })
+        with self.assertRaises(ValueError):
+            make_image.apex_jar_sources(BOOTCLASSPATH, names - {"SYSTEM/apex/com.android.wifi.apex"})
+
+    def test_fr5_dex2oat_targets_the_guest_x86_64_boot_image_as_a_factory_build(self):
+        contexts = make_image.class_loader_contexts(SETTINGS_CONTEXT, Path("/r"))
+        cmd = make_image.dex2oat_command(
+            "dex2oatd64", "/o/Settings.apk", "/system_ext/priv-app/Settings/Settings.apk",
+            "/o/Settings.odex", Path("/r"), BOOTCLASSPATH,
+            ["/system/framework/boot.art", "/system/framework/boot-framework-adservices.art"],
+            contexts, "speed", extra=["--runtime-arg", "-Xgc:CMC"])
+        self.assertIn("--instruction-set=x86_64", cmd)
+        self.assertIn("--compiler-filter=speed", cmd)
+        self.assertIn("--compilation-reason=prebuilt", cmd)
+        self.assertIn("--dex-location=/system_ext/priv-app/Settings/Settings.apk", cmd)
+        self.assertIn("--oat-location=/system_ext/priv-app/Settings/oat/x86_64/Settings.odex", cmd)
+        self.assertIn("-Xbootclasspath-locations:" + BOOTCLASSPATH, cmd)
+        self.assertIn("-Xbootclasspath:/r/apex/com.android.art/javalib/core-oj.jar:/r/system/framework/framework.jar:"
+                      "/r/apex/com.android.adservices/javalib/framework-adservices.jar:"
+                      "/r/apex/com.android.wifi/javalib/framework-wifi.jar", cmd)
+        self.assertIn("--boot-image=/r/system/framework/boot.art:/r/system/framework/boot-framework-adservices.art", cmd)
+        self.assertIn(f"--stored-class-loader-context={contexts[1]}", cmd)
+        self.assertIn("-Xgc:CMC", cmd)
+        # dex2oat's heap must fit in the low 4 GiB: -Xmx2g aborted on the CI runner.
+        self.assertIn("-Xmx512m", cmd)
+        self.assertFalse(any(a.startswith("--profile-file") for a in cmd))
+        with_profile = make_image.dex2oat_command(
+            "dex2oatd64", "/o/D.apk", "/system/priv-app/D/D.apk", "/o/D.odex", Path("/r"), BOOTCLASSPATH,
+            ["/system/framework/boot.art"], ("PCL[]", "PCL[]"), "speed-profile", profile="/o/D.prof")
+        self.assertIn("--profile-file=/o/D.prof", with_profile)
+
+    def _image(self, apk, odex, vdex, framework_checksums="i;2/cb8fc4a6:i;2/f8c5165e", factory=SETTINGS_CONTEXT):
+        buffer = io.BytesIO()
+        odex_name, vdex_name = make_image.oat_files(make_image.SETTINGS_APP)
+        with zipfile.ZipFile(buffer, "w") as z:
+            z.writestr(make_image.SETTINGS_APP, apk)
+            z.writestr(make_image.FRAMEWORK_ODEX, fake_odex(**{
+                "bootclasspath": BOOTCLASSPATH, "bootclasspath-checksums": framework_checksums}))
+            z.writestr(make_image.factory_odex(make_image.SETTINGS_APP), fake_odex(classpath=factory, **{
+                "compiler-filter": "verify"}))
+            if odex is not None:
+                z.writestr(odex_name, odex)
+            if vdex is not None:
+                z.writestr(vdex_name, vdex)
+        return zipfile.ZipFile(io.BytesIO(buffer.getvalue()))
+
+    def _settings_odex(self, filter="speed", checksums="i;2/cb8fc4a6:i;2/f8c5165e", context=SETTINGS_CONTEXT):
+        return fake_odex(**{"bootclasspath": BOOTCLASSPATH, "bootclasspath-checksums": checksums,
+                            "classpath": context, "compiler-filter": filter,
+                            "compilation-reason": "prebuilt"})
+
+    def test_fr5_check_accepts_settings_compiled_for_its_own_dex(self):
+        apk = fake_apk(b"dex\n035\0edited", b"dex\n035\0two")
+        vdex = fake_vdex(make_image.apk_dex_checksums(apk))
+        self.assertEqual(make_image.compiled_app_problems(self._image(apk, self._settings_odex(), vdex)), [])
+
+    def test_fr5_check_rejects_settings_without_an_odex(self):
+        apk = fake_apk(b"dex\n035\0edited")
+        problems = make_image.compiled_app_problems(self._image(apk, None, None))
+        self.assertTrue(any("not compiled" in p for p in problems), problems)
+
+    def test_fr5_check_rejects_an_odex_made_for_the_unedited_dex(self):
+        apk = fake_apk(b"dex\n035\0edited")
+        vdex = fake_vdex([zlib.crc32(b"dex\n035\0original")])
+        problems = make_image.compiled_app_problems(self._image(apk, self._settings_odex(), vdex))
+        self.assertTrue(any("dex checksums" in p for p in problems), problems)
+
+    def test_fr5_check_rejects_verify_another_boot_image_or_other_libraries(self):
+        apk = fake_apk(b"dex\n035\0edited")
+        vdex = fake_vdex(make_image.apk_dex_checksums(apk))
+        for odex, words in [
+            (self._settings_odex(filter="verify"), "not speed"),
+            (self._settings_odex(filter="speed-profile"), "not speed"),
+            (self._settings_odex(checksums="i;2/00000000:i;2/f8c5165e"), "boot image"),
+            (self._settings_odex(context="PCL[]"), "shared libraries"),
+        ]:
+            problems = make_image.compiled_app_problems(self._image(apk, odex, vdex))
+            self.assertTrue(any(words in p for p in problems), (words, problems))
+
+    def test_fr5_inputs_pin_the_build_dexpreopt_tools(self):
+        inputs = json.loads((Path(make_image.__file__).parent / "inputs.json").read_text())
+        for image in inputs["images"]:
+            tools = image["files"]["dexpreopt_tools"]
+            self.assertEqual(tools["name"], "dexpreopt_tools.zip")
+            self.assertRegex(tools["sha256"], r"^[0-9a-f]{64}$")
+        fetch = (Path(make_image.__file__).parent / "fetch.sh").read_text()
+        self.assertIn(".files | keys[]", fetch)
+
+
 if __name__ == "__main__":
     unittest.main()

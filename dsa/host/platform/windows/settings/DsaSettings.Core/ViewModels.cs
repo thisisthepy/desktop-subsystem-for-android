@@ -196,6 +196,8 @@ public sealed class SettingsViewModel : ObservableObject
     public bool CanUpdateNow => Loaded && !_busy && ProgramUpdatesAvailable;
     public bool CanChange => Loaded && !_busy;
     public string ServiceVersion => _settings?.Version ?? "";
+    public string AndroidVersion => _settings?.AndroidVersion ?? "";
+    public bool HasAndroidVersion => !string.IsNullOrEmpty(_settings?.AndroidVersion);
     public string LogDir => _settings?.LogDir ?? "";
     public bool HasLogDir => !string.IsNullOrEmpty(_settings?.LogDir);
     public string RenderGpu => _settings?.RenderGpu ?? "display";
