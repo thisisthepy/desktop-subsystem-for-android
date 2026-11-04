@@ -63,7 +63,10 @@ fn pr4_a_boost_lasts_as_long_as_asked_and_then_ends() {
         now,
     );
     assert_eq!(hints.performance(now), Performance::Full);
-    assert_eq!(hints.next_change(now), Some(now + Duration::from_millis(80)));
+    assert_eq!(
+        hints.next_change(now),
+        Some(now + Duration::from_millis(80))
+    );
     let later = now + Duration::from_millis(81);
     assert_eq!(hints.performance(later), Performance::Efficient);
     assert_eq!(hints.next_change(later), None);

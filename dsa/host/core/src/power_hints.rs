@@ -99,9 +99,15 @@ pub enum Performance {
 /// One power hint, as the guest's power HAL sent it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PowerHint {
-    Mode { id: i32, enabled: bool },
+    Mode {
+        id: i32,
+        enabled: bool,
+    },
     /// A boost for `duration_ms` (0 for the default, negative to end it).
-    Boost { id: i32, duration_ms: i32 },
+    Boost {
+        id: i32,
+        duration_ms: i32,
+    },
 }
 
 impl PowerHint {
@@ -194,6 +200,10 @@ impl PowerHints {
     /// When the performance may next change without a new hint: the end of the next boost.
     /// `None` when no boost is under way.
     pub fn next_change(&self, now: Instant) -> Option<Instant> {
-        self.boosts.values().copied().filter(|until| *until > now).min()
+        self.boosts
+            .values()
+            .copied()
+            .filter(|until| *until > now)
+            .min()
     }
 }
