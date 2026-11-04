@@ -1,6 +1,20 @@
 //! The copy of a decoded picture out of the decoder's padded surface.
 
-use dsa_host_windows::video_decoder::picture_from_planes;
+use dsa_host_core::video::Codec;
+use dsa_host_windows::video_decoder::{parse_probe, picture_from_planes, probe_line};
+
+#[test]
+fn nfr1_the_video_probe_report_round_trips_the_formats_the_gpu_decodes() {
+    let text = [
+        probe_line(Codec::H264, &Ok(())),
+        probe_line(Codec::Hevc, &Err("no decoder\nhere".into())),
+        probe_line(Codec::Av1, &Ok(())),
+        "garbage".to_string(),
+    ]
+    .join("\n");
+    assert_eq!(parse_probe(&text), vec![Codec::H264, Codec::Av1]);
+    assert_eq!(probe_line(Codec::Hevc, &Err("a\nb".into())), "no HEVC: a b");
+}
 
 /// A 4x2 visible picture in a surface of pitch 8 and 4 rows: luma rows are 10, 11 (then
 /// padding rows), chroma row 20 starts after 4 rows.

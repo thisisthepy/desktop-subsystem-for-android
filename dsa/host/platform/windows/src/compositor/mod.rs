@@ -556,7 +556,10 @@ impl Compositor {
                         logger.log(line);
                     }
                 });
-                let decoders = crate::video_decoder::MediaFoundationDecoders::probe(&*log);
+                let probe_log = Arc::clone(&log);
+                let decoders = crate::video_decoder::MediaFoundationDecoders::lazy(Box::new(
+                    move |line: &str| probe_log(line),
+                ));
                 let build = format!("dsa-wm {}", crate::VERSION);
                 dsa_host_core::video::serve(
                     Box::new(listener),
