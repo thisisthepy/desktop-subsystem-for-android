@@ -15,7 +15,7 @@ grep -Fq 'vulkan.ranchu.so' "$workflow"
 grep -Fq 'test "$exports" = "HMI"' "$workflow"
 grep -Fq 'HMI' "$workflow"
 grep -Fq 'Build the host graphics renderer (windows, ' "$workflow"
-# ARM64 Windows hosts get their own renderer, built on an ARM64 runner (FR-25).
+# ARM64 Windows hosts get their own renderer, built on an ARM64 runner (FR-27).
 grep -Fq 'windows-11-arm' "$workflow"
 grep -Fq 'host-gfxstream-windows-arm64' "$workflow"
 grep -Fq 'dsa/graphics/host/build.ps1' "$workflow"

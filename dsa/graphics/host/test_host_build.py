@@ -139,7 +139,7 @@ class HostGraphicsBuildTests(unittest.TestCase):
             source,
         )
 
-    def test_fr25_host_renderer_builds_for_arm64_windows(self):
+    def test_fr27_host_renderer_builds_for_arm64_windows(self):
         script = BUILD_SCRIPT.read_text(encoding="utf-8")
         # The platform picks the Visual Studio environment and the compiler's target, and
         # an ARM64 build on an x64 machine is a cross build.
