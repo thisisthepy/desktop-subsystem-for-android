@@ -12,6 +12,8 @@
 //! transport and over vsock. The binder service (`binder`, Android only) is the thin layer
 //! that lets those users in; [`aidl`] holds the values it shares with their generated code.
 //! [`reclaim`] decides when the guest drops its caches so the host gets the memory back.
+//! [`logbridge`] sends the guest's log on the log port, only while the host asks for it, and
+//! the guest's diagnostics; [`logd`] reads logd for it.
 //!
 //! The daemon answers the host's clock probes itself ([`clock_answer`]), from the thread that
 //! reads the connection, so the answer carries the guest's clock as close to the probe's
@@ -20,6 +22,8 @@
 pub mod aidl;
 #[cfg(target_os = "android")]
 pub mod binder;
+pub mod logbridge;
+pub mod logd;
 pub mod reclaim;
 pub mod router;
 

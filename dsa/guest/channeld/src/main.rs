@@ -1,9 +1,11 @@
 //! `dsa-channeld`: the guest's control channel daemon, as init starts it.
 //!
-//!     dsa-channeld [--port <port>] [--bootconfig <path>] [--cid <cid>]
+//!     dsa-channeld [--port <port>] [--log-port <port>] [--bootconfig <path>] [--cid <cid>]
 //!
 //! It reads the boot's secret from the kernel's bootconfig, connects to the host over
-//! vsock, and keeps the connection, connecting again whenever it is lost. It exits only
+//! vsock, and keeps the connection, connecting again whenever it is lost. While the host
+//! asks for Android's log, it reads logd and sends the records on the log port, a vsock port
+//! of its own. It exits only
 //! when it cannot work at all: no secret, or a host that refuses this guest for good.
 //! Messages go to standard error, which init sends to the kernel log.
 
@@ -36,20 +38,62 @@ mod daemon {
     use std::sync::Arc;
     use std::thread;
 
+    use dsa_guest_channeld::logbridge::{
+        files_in, DiagnosticFiles, LogBridge, LogPackets, LogSource, PortConnector,
+    };
+    use dsa_guest_channeld::logd::{LogdSocket, LOGDR_SOCKET};
     use dsa_guest_channeld::router::{Peer, Router};
     use dsa_guest_channeld::{ChannelEvent, Credentials, RetryPolicy};
     use dsa_guest_transport::vsock::{VsockConnector, VMADDR_CID_HOST};
     use dsa_protocol::auth::{secret_from_bootconfig, BOOTCONFIG_KEY};
     use dsa_protocol::control::Role;
-    use dsa_protocol::handshake::local_hello;
+    use dsa_protocol::handshake::{guest_connect, local_hello};
+    use dsa_transport::Connector;
 
     /// The host's control channel port unless the command line names another. The host's
     /// configuration has the same default.
     const DEFAULT_PORT: u32 = 5000;
+    /// The host's log port unless the command line names another; the host's configuration
+    /// has the same default.
+    const DEFAULT_LOG_PORT: u32 = 5001;
     const DEFAULT_BOOTCONFIG: &str = "/proc/bootconfig";
+
+    /// logd's reader socket.
+    struct Logd;
+
+    struct LogdPackets(LogdSocket);
+
+    impl LogPackets for LogdPackets {
+        fn next(
+            &mut self,
+            timeout: std::time::Duration,
+        ) -> Result<Option<Vec<u8>>, String> {
+            let millis = timeout.as_millis().min(i32::MAX as u128) as i32;
+            self.0.next(millis).map_err(|e| e.to_string())
+        }
+    }
+
+    impl LogSource for Logd {
+        fn open(&self, request: &str) -> Result<Box<dyn LogPackets>, String> {
+            LogdSocket::open(LOGDR_SOCKET, request)
+                .map(|socket| Box::new(LogdPackets(socket)) as Box<dyn LogPackets>)
+                .map_err(|e| format!("{LOGDR_SOCKET}: {e}"))
+        }
+    }
+
+    /// What the kernel kept of the boot before, in pstore: the last kernel log of a guest that
+    /// crashed, and Android's last log lines.
+    struct Pstore;
+
+    impl DiagnosticFiles for Pstore {
+        fn files(&self) -> Vec<(String, Result<Vec<u8>, String>)> {
+            files_in(std::path::Path::new("/sys/fs/pstore"), "android/pstore")
+        }
+    }
 
     struct Options {
         port: u32,
+        log_port: u32,
         bootconfig: String,
         /// The host's vsock address; another only for a test over vsock loopback.
         cid: u32,
@@ -58,6 +102,7 @@ mod daemon {
     fn options() -> Result<Options, String> {
         let mut options = Options {
             port: DEFAULT_PORT,
+            log_port: DEFAULT_LOG_PORT,
             bootconfig: DEFAULT_BOOTCONFIG.into(),
             cid: VMADDR_CID_HOST,
         };
@@ -70,6 +115,12 @@ mod daemon {
                     options.port = text
                         .parse()
                         .map_err(|_| format!("--port {text} is not a port number"))?;
+                }
+                "--log-port" => {
+                    let text = value()?;
+                    options.log_port = text
+                        .parse()
+                        .map_err(|_| format!("--log-port {text} is not a port number"))?;
                 }
                 "--bootconfig" => options.bootconfig = value()?,
                 "--cid" => {
@@ -255,11 +306,41 @@ mod daemon {
         let (to_host, from_guest) = mpsc::channel::<Vec<u8>>();
         let router = Arc::new(Router::new(to_host, check_agent));
         let (to_guest, from_host) = mpsc::channel::<Vec<u8>>();
-        {
+        // The guest's log goes on a port of its own, past the same handshake as the control
+        // channel, and only while the host asks for it.
+        let connect_log: Arc<PortConnector> = {
+            let (credentials, cid, port) = (credentials.clone(), options.cid, options.log_port);
+            Arc::new(move || {
+                let mut connection = VsockConnector { cid, port }
+                    .connect(std::time::Duration::from_secs(10))
+                    .map_err(|e| e.to_string())?;
+                guest_connect(
+                    connection.as_mut(),
+                    &credentials.hello,
+                    &credentials.secret,
+                    std::time::Duration::from_secs(10),
+                )
+                .map_err(|e| e.to_string())?;
+                Ok(connection)
+            })
+        };
+        let bridge = {
             let router = Arc::clone(&router);
+            Arc::new(LogBridge::new(
+                Arc::new(Logd),
+                Arc::new(Pstore),
+                connect_log,
+                Arc::new(move || router.agent_connected()),
+            ))
+        };
+        router.divert_diagnostics(bridge.agent_frames());
+        {
+            let (router, bridge) = (Arc::clone(&router), Arc::clone(&bridge));
             thread::spawn(move || {
                 for frame in from_host {
-                    router.from_host(&frame);
+                    if !bridge.from_host(&frame) {
+                        router.from_host(&frame);
+                    }
                 }
             });
         }
@@ -283,6 +364,8 @@ mod daemon {
                         router.host_connected();
                     }
                     ChannelEvent::Lost(why) => {
+                        // Nobody reads the log until a host asks again.
+                        bridge.host_lost();
                         say!("lost the host ({why}); connecting again")
                     }
                 }
