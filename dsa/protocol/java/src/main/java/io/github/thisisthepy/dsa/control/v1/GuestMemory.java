@@ -562,6 +562,262 @@ public  final class GuestMemory extends
     topProcesses_.remove(index);
   }
 
+  public static final int SLAB_UNRECLAIMABLE_KB_FIELD_NUMBER = 15;
+  private long slabUnreclaimableKb_;
+  /**
+   * <pre>
+   * What the kernel itself holds, from /proc/meminfo: slab it cannot free (SUnreclaim),
+   * kernel stacks, page tables, vmalloc, per-CPU areas, and the contiguous memory area (CMA)
+   * set aside for drivers.
+   * </pre>
+   *
+   * <code>uint64 slab_unreclaimable_kb = 15;</code>
+   * @return The slabUnreclaimableKb.
+   */
+  @java.lang.Override
+  public long getSlabUnreclaimableKb() {
+    return slabUnreclaimableKb_;
+  }
+  /**
+   * <pre>
+   * What the kernel itself holds, from /proc/meminfo: slab it cannot free (SUnreclaim),
+   * kernel stacks, page tables, vmalloc, per-CPU areas, and the contiguous memory area (CMA)
+   * set aside for drivers.
+   * </pre>
+   *
+   * <code>uint64 slab_unreclaimable_kb = 15;</code>
+   * @param value The slabUnreclaimableKb to set.
+   */
+  private void setSlabUnreclaimableKb(long value) {
+    
+    slabUnreclaimableKb_ = value;
+  }
+  /**
+   * <pre>
+   * What the kernel itself holds, from /proc/meminfo: slab it cannot free (SUnreclaim),
+   * kernel stacks, page tables, vmalloc, per-CPU areas, and the contiguous memory area (CMA)
+   * set aside for drivers.
+   * </pre>
+   *
+   * <code>uint64 slab_unreclaimable_kb = 15;</code>
+   */
+  private void clearSlabUnreclaimableKb() {
+    
+    slabUnreclaimableKb_ = 0L;
+  }
+
+  public static final int KERNEL_STACK_KB_FIELD_NUMBER = 16;
+  private long kernelStackKb_;
+  /**
+   * <code>uint64 kernel_stack_kb = 16;</code>
+   * @return The kernelStackKb.
+   */
+  @java.lang.Override
+  public long getKernelStackKb() {
+    return kernelStackKb_;
+  }
+  /**
+   * <code>uint64 kernel_stack_kb = 16;</code>
+   * @param value The kernelStackKb to set.
+   */
+  private void setKernelStackKb(long value) {
+    
+    kernelStackKb_ = value;
+  }
+  /**
+   * <code>uint64 kernel_stack_kb = 16;</code>
+   */
+  private void clearKernelStackKb() {
+    
+    kernelStackKb_ = 0L;
+  }
+
+  public static final int PAGE_TABLES_KB_FIELD_NUMBER = 17;
+  private long pageTablesKb_;
+  /**
+   * <code>uint64 page_tables_kb = 17;</code>
+   * @return The pageTablesKb.
+   */
+  @java.lang.Override
+  public long getPageTablesKb() {
+    return pageTablesKb_;
+  }
+  /**
+   * <code>uint64 page_tables_kb = 17;</code>
+   * @param value The pageTablesKb to set.
+   */
+  private void setPageTablesKb(long value) {
+    
+    pageTablesKb_ = value;
+  }
+  /**
+   * <code>uint64 page_tables_kb = 17;</code>
+   */
+  private void clearPageTablesKb() {
+    
+    pageTablesKb_ = 0L;
+  }
+
+  public static final int VMALLOC_USED_KB_FIELD_NUMBER = 18;
+  private long vmallocUsedKb_;
+  /**
+   * <code>uint64 vmalloc_used_kb = 18;</code>
+   * @return The vmallocUsedKb.
+   */
+  @java.lang.Override
+  public long getVmallocUsedKb() {
+    return vmallocUsedKb_;
+  }
+  /**
+   * <code>uint64 vmalloc_used_kb = 18;</code>
+   * @param value The vmallocUsedKb to set.
+   */
+  private void setVmallocUsedKb(long value) {
+    
+    vmallocUsedKb_ = value;
+  }
+  /**
+   * <code>uint64 vmalloc_used_kb = 18;</code>
+   */
+  private void clearVmallocUsedKb() {
+    
+    vmallocUsedKb_ = 0L;
+  }
+
+  public static final int PERCPU_KB_FIELD_NUMBER = 19;
+  private long percpuKb_;
+  /**
+   * <code>uint64 percpu_kb = 19;</code>
+   * @return The percpuKb.
+   */
+  @java.lang.Override
+  public long getPercpuKb() {
+    return percpuKb_;
+  }
+  /**
+   * <code>uint64 percpu_kb = 19;</code>
+   * @param value The percpuKb to set.
+   */
+  private void setPercpuKb(long value) {
+    
+    percpuKb_ = value;
+  }
+  /**
+   * <code>uint64 percpu_kb = 19;</code>
+   */
+  private void clearPercpuKb() {
+    
+    percpuKb_ = 0L;
+  }
+
+  public static final int CMA_TOTAL_KB_FIELD_NUMBER = 20;
+  private long cmaTotalKb_;
+  /**
+   * <code>uint64 cma_total_kb = 20;</code>
+   * @return The cmaTotalKb.
+   */
+  @java.lang.Override
+  public long getCmaTotalKb() {
+    return cmaTotalKb_;
+  }
+  /**
+   * <code>uint64 cma_total_kb = 20;</code>
+   * @param value The cmaTotalKb to set.
+   */
+  private void setCmaTotalKb(long value) {
+    
+    cmaTotalKb_ = value;
+  }
+  /**
+   * <code>uint64 cma_total_kb = 20;</code>
+   */
+  private void clearCmaTotalKb() {
+    
+    cmaTotalKb_ = 0L;
+  }
+
+  public static final int HUGETLB_KB_FIELD_NUMBER = 21;
+  private long hugetlbKb_;
+  /**
+   * <pre>
+   * Huge pages reserved (HugePages_Total times Hugepagesize).
+   * </pre>
+   *
+   * <code>uint64 hugetlb_kb = 21;</code>
+   * @return The hugetlbKb.
+   */
+  @java.lang.Override
+  public long getHugetlbKb() {
+    return hugetlbKb_;
+  }
+  /**
+   * <pre>
+   * Huge pages reserved (HugePages_Total times Hugepagesize).
+   * </pre>
+   *
+   * <code>uint64 hugetlb_kb = 21;</code>
+   * @param value The hugetlbKb to set.
+   */
+  private void setHugetlbKb(long value) {
+    
+    hugetlbKb_ = value;
+  }
+  /**
+   * <pre>
+   * Huge pages reserved (HugePages_Total times Hugepagesize).
+   * </pre>
+   *
+   * <code>uint64 hugetlb_kb = 21;</code>
+   */
+  private void clearHugetlbKb() {
+    
+    hugetlbKb_ = 0L;
+  }
+
+  public static final int MEM_ONLINE_KB_FIELD_NUMBER = 22;
+  private long memOnlineKb_;
+  /**
+   * <pre>
+   * The memory the kernel was given, counted from its online memory blocks; what it gave to
+   * MemTotal is this less what it reserved at boot (its own code, page structures, swiotlb,
+   * pstore). 0 when the guest cannot read it.
+   * </pre>
+   *
+   * <code>uint64 mem_online_kb = 22;</code>
+   * @return The memOnlineKb.
+   */
+  @java.lang.Override
+  public long getMemOnlineKb() {
+    return memOnlineKb_;
+  }
+  /**
+   * <pre>
+   * The memory the kernel was given, counted from its online memory blocks; what it gave to
+   * MemTotal is this less what it reserved at boot (its own code, page structures, swiotlb,
+   * pstore). 0 when the guest cannot read it.
+   * </pre>
+   *
+   * <code>uint64 mem_online_kb = 22;</code>
+   * @param value The memOnlineKb to set.
+   */
+  private void setMemOnlineKb(long value) {
+    
+    memOnlineKb_ = value;
+  }
+  /**
+   * <pre>
+   * The memory the kernel was given, counted from its online memory blocks; what it gave to
+   * MemTotal is this less what it reserved at boot (its own code, page structures, swiotlb,
+   * pstore). 0 when the guest cannot read it.
+   * </pre>
+   *
+   * <code>uint64 mem_online_kb = 22;</code>
+   */
+  private void clearMemOnlineKb() {
+    
+    memOnlineKb_ = 0L;
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.GuestMemory parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -1243,6 +1499,278 @@ public  final class GuestMemory extends
       return this;
     }
 
+    /**
+     * <pre>
+     * What the kernel itself holds, from /proc/meminfo: slab it cannot free (SUnreclaim),
+     * kernel stacks, page tables, vmalloc, per-CPU areas, and the contiguous memory area (CMA)
+     * set aside for drivers.
+     * </pre>
+     *
+     * <code>uint64 slab_unreclaimable_kb = 15;</code>
+     * @return The slabUnreclaimableKb.
+     */
+    @java.lang.Override
+    public long getSlabUnreclaimableKb() {
+      return instance.getSlabUnreclaimableKb();
+    }
+    /**
+     * <pre>
+     * What the kernel itself holds, from /proc/meminfo: slab it cannot free (SUnreclaim),
+     * kernel stacks, page tables, vmalloc, per-CPU areas, and the contiguous memory area (CMA)
+     * set aside for drivers.
+     * </pre>
+     *
+     * <code>uint64 slab_unreclaimable_kb = 15;</code>
+     * @param value The slabUnreclaimableKb to set.
+     * @return This builder for chaining.
+     */
+    public Builder setSlabUnreclaimableKb(long value) {
+      copyOnWrite();
+      instance.setSlabUnreclaimableKb(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * What the kernel itself holds, from /proc/meminfo: slab it cannot free (SUnreclaim),
+     * kernel stacks, page tables, vmalloc, per-CPU areas, and the contiguous memory area (CMA)
+     * set aside for drivers.
+     * </pre>
+     *
+     * <code>uint64 slab_unreclaimable_kb = 15;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearSlabUnreclaimableKb() {
+      copyOnWrite();
+      instance.clearSlabUnreclaimableKb();
+      return this;
+    }
+
+    /**
+     * <code>uint64 kernel_stack_kb = 16;</code>
+     * @return The kernelStackKb.
+     */
+    @java.lang.Override
+    public long getKernelStackKb() {
+      return instance.getKernelStackKb();
+    }
+    /**
+     * <code>uint64 kernel_stack_kb = 16;</code>
+     * @param value The kernelStackKb to set.
+     * @return This builder for chaining.
+     */
+    public Builder setKernelStackKb(long value) {
+      copyOnWrite();
+      instance.setKernelStackKb(value);
+      return this;
+    }
+    /**
+     * <code>uint64 kernel_stack_kb = 16;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearKernelStackKb() {
+      copyOnWrite();
+      instance.clearKernelStackKb();
+      return this;
+    }
+
+    /**
+     * <code>uint64 page_tables_kb = 17;</code>
+     * @return The pageTablesKb.
+     */
+    @java.lang.Override
+    public long getPageTablesKb() {
+      return instance.getPageTablesKb();
+    }
+    /**
+     * <code>uint64 page_tables_kb = 17;</code>
+     * @param value The pageTablesKb to set.
+     * @return This builder for chaining.
+     */
+    public Builder setPageTablesKb(long value) {
+      copyOnWrite();
+      instance.setPageTablesKb(value);
+      return this;
+    }
+    /**
+     * <code>uint64 page_tables_kb = 17;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearPageTablesKb() {
+      copyOnWrite();
+      instance.clearPageTablesKb();
+      return this;
+    }
+
+    /**
+     * <code>uint64 vmalloc_used_kb = 18;</code>
+     * @return The vmallocUsedKb.
+     */
+    @java.lang.Override
+    public long getVmallocUsedKb() {
+      return instance.getVmallocUsedKb();
+    }
+    /**
+     * <code>uint64 vmalloc_used_kb = 18;</code>
+     * @param value The vmallocUsedKb to set.
+     * @return This builder for chaining.
+     */
+    public Builder setVmallocUsedKb(long value) {
+      copyOnWrite();
+      instance.setVmallocUsedKb(value);
+      return this;
+    }
+    /**
+     * <code>uint64 vmalloc_used_kb = 18;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearVmallocUsedKb() {
+      copyOnWrite();
+      instance.clearVmallocUsedKb();
+      return this;
+    }
+
+    /**
+     * <code>uint64 percpu_kb = 19;</code>
+     * @return The percpuKb.
+     */
+    @java.lang.Override
+    public long getPercpuKb() {
+      return instance.getPercpuKb();
+    }
+    /**
+     * <code>uint64 percpu_kb = 19;</code>
+     * @param value The percpuKb to set.
+     * @return This builder for chaining.
+     */
+    public Builder setPercpuKb(long value) {
+      copyOnWrite();
+      instance.setPercpuKb(value);
+      return this;
+    }
+    /**
+     * <code>uint64 percpu_kb = 19;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearPercpuKb() {
+      copyOnWrite();
+      instance.clearPercpuKb();
+      return this;
+    }
+
+    /**
+     * <code>uint64 cma_total_kb = 20;</code>
+     * @return The cmaTotalKb.
+     */
+    @java.lang.Override
+    public long getCmaTotalKb() {
+      return instance.getCmaTotalKb();
+    }
+    /**
+     * <code>uint64 cma_total_kb = 20;</code>
+     * @param value The cmaTotalKb to set.
+     * @return This builder for chaining.
+     */
+    public Builder setCmaTotalKb(long value) {
+      copyOnWrite();
+      instance.setCmaTotalKb(value);
+      return this;
+    }
+    /**
+     * <code>uint64 cma_total_kb = 20;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearCmaTotalKb() {
+      copyOnWrite();
+      instance.clearCmaTotalKb();
+      return this;
+    }
+
+    /**
+     * <pre>
+     * Huge pages reserved (HugePages_Total times Hugepagesize).
+     * </pre>
+     *
+     * <code>uint64 hugetlb_kb = 21;</code>
+     * @return The hugetlbKb.
+     */
+    @java.lang.Override
+    public long getHugetlbKb() {
+      return instance.getHugetlbKb();
+    }
+    /**
+     * <pre>
+     * Huge pages reserved (HugePages_Total times Hugepagesize).
+     * </pre>
+     *
+     * <code>uint64 hugetlb_kb = 21;</code>
+     * @param value The hugetlbKb to set.
+     * @return This builder for chaining.
+     */
+    public Builder setHugetlbKb(long value) {
+      copyOnWrite();
+      instance.setHugetlbKb(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * Huge pages reserved (HugePages_Total times Hugepagesize).
+     * </pre>
+     *
+     * <code>uint64 hugetlb_kb = 21;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearHugetlbKb() {
+      copyOnWrite();
+      instance.clearHugetlbKb();
+      return this;
+    }
+
+    /**
+     * <pre>
+     * The memory the kernel was given, counted from its online memory blocks; what it gave to
+     * MemTotal is this less what it reserved at boot (its own code, page structures, swiotlb,
+     * pstore). 0 when the guest cannot read it.
+     * </pre>
+     *
+     * <code>uint64 mem_online_kb = 22;</code>
+     * @return The memOnlineKb.
+     */
+    @java.lang.Override
+    public long getMemOnlineKb() {
+      return instance.getMemOnlineKb();
+    }
+    /**
+     * <pre>
+     * The memory the kernel was given, counted from its online memory blocks; what it gave to
+     * MemTotal is this less what it reserved at boot (its own code, page structures, swiotlb,
+     * pstore). 0 when the guest cannot read it.
+     * </pre>
+     *
+     * <code>uint64 mem_online_kb = 22;</code>
+     * @param value The memOnlineKb to set.
+     * @return This builder for chaining.
+     */
+    public Builder setMemOnlineKb(long value) {
+      copyOnWrite();
+      instance.setMemOnlineKb(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The memory the kernel was given, counted from its online memory blocks; what it gave to
+     * MemTotal is this less what it reserved at boot (its own code, page structures, swiotlb,
+     * pstore). 0 when the guest cannot read it.
+     * </pre>
+     *
+     * <code>uint64 mem_online_kb = 22;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearMemOnlineKb() {
+      copyOnWrite();
+      instance.clearMemOnlineKb();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.GuestMemory)
   }
   @java.lang.Override
@@ -1274,11 +1802,20 @@ public  final class GuestMemory extends
             "totalPssKb_",
             "topProcesses_",
             io.github.thisisthepy.dsa.control.v1.ProcessMemory.class,
+            "slabUnreclaimableKb_",
+            "kernelStackKb_",
+            "pageTablesKb_",
+            "vmallocUsedKb_",
+            "percpuKb_",
+            "cmaTotalKb_",
+            "hugetlbKb_",
+            "memOnlineKb_",
           };
           java.lang.String info =
-              "\u0000\u000e\u0000\u0000\u0001\u000e\u000e\u0000\u0001\u0000\u0001\u0003\u0002\u0003" +
+              "\u0000\u0016\u0000\u0000\u0001\u0016\u0016\u0000\u0001\u0000\u0001\u0003\u0002\u0003" +
               "\u0003\u0003\u0004\u0003\u0005\u0003\u0006\u0003\u0007\u0003\b\u0003\t\u0003\n\u0003" +
-              "\u000b\u0003\f\u0003\r\u0003\u000e\u001b";
+              "\u000b\u0003\f\u0003\r\u0003\u000e\u001b\u000f\u0003\u0010\u0003\u0011\u0003\u0012" +
+              "\u0003\u0013\u0003\u0014\u0003\u0015\u0003\u0016\u0003";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

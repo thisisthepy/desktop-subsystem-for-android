@@ -132,4 +132,68 @@ public interface GuestMemoryOrBuilder extends
    * <code>repeated .dsa.control.v1.ProcessMemory top_processes = 14;</code>
    */
   int getTopProcessesCount();
+
+  /**
+   * <pre>
+   * What the kernel itself holds, from /proc/meminfo: slab it cannot free (SUnreclaim),
+   * kernel stacks, page tables, vmalloc, per-CPU areas, and the contiguous memory area (CMA)
+   * set aside for drivers.
+   * </pre>
+   *
+   * <code>uint64 slab_unreclaimable_kb = 15;</code>
+   * @return The slabUnreclaimableKb.
+   */
+  long getSlabUnreclaimableKb();
+
+  /**
+   * <code>uint64 kernel_stack_kb = 16;</code>
+   * @return The kernelStackKb.
+   */
+  long getKernelStackKb();
+
+  /**
+   * <code>uint64 page_tables_kb = 17;</code>
+   * @return The pageTablesKb.
+   */
+  long getPageTablesKb();
+
+  /**
+   * <code>uint64 vmalloc_used_kb = 18;</code>
+   * @return The vmallocUsedKb.
+   */
+  long getVmallocUsedKb();
+
+  /**
+   * <code>uint64 percpu_kb = 19;</code>
+   * @return The percpuKb.
+   */
+  long getPercpuKb();
+
+  /**
+   * <code>uint64 cma_total_kb = 20;</code>
+   * @return The cmaTotalKb.
+   */
+  long getCmaTotalKb();
+
+  /**
+   * <pre>
+   * Huge pages reserved (HugePages_Total times Hugepagesize).
+   * </pre>
+   *
+   * <code>uint64 hugetlb_kb = 21;</code>
+   * @return The hugetlbKb.
+   */
+  long getHugetlbKb();
+
+  /**
+   * <pre>
+   * The memory the kernel was given, counted from its online memory blocks; what it gave to
+   * MemTotal is this less what it reserved at boot (its own code, page structures, swiotlb,
+   * pstore). 0 when the guest cannot read it.
+   * </pre>
+   *
+   * <code>uint64 mem_online_kb = 22;</code>
+   * @return The memOnlineKb.
+   */
+  long getMemOnlineKb();
 }

@@ -99,6 +99,7 @@ public  final class Envelope extends
     COLLECT_DIAGNOSTICS(133),
     DIAGNOSTICS_FILE(134),
     DIAGNOSTICS_DONE(135),
+    STOP_APP(136),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -193,6 +194,7 @@ public  final class Envelope extends
         case 133: return COLLECT_DIAGNOSTICS;
         case 134: return DIAGNOSTICS_FILE;
         case 135: return DIAGNOSTICS_DONE;
+        case 136: return STOP_APP;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -4164,6 +4166,56 @@ public  final class Envelope extends
     }
   }
 
+  public static final int STOP_APP_FIELD_NUMBER = 136;
+  /**
+   * <code>.dsa.control.v1.StopApp stop_app = 136;</code>
+   */
+  @java.lang.Override
+  public boolean hasStopApp() {
+    return bodyCase_ == 136;
+  }
+  /**
+   * <code>.dsa.control.v1.StopApp stop_app = 136;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.StopApp getStopApp() {
+    if (bodyCase_ == 136) {
+       return (io.github.thisisthepy.dsa.control.v1.StopApp) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.StopApp.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.StopApp stop_app = 136;</code>
+   */
+  private void setStopApp(io.github.thisisthepy.dsa.control.v1.StopApp value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 136;
+  }
+  /**
+   * <code>.dsa.control.v1.StopApp stop_app = 136;</code>
+   */
+  private void mergeStopApp(io.github.thisisthepy.dsa.control.v1.StopApp value) {
+    value.getClass();
+  if (bodyCase_ == 136 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.StopApp.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.StopApp.newBuilder((io.github.thisisthepy.dsa.control.v1.StopApp) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 136;
+  }
+  /**
+   * <code>.dsa.control.v1.StopApp stop_app = 136;</code>
+   */
+  private void clearStopApp() {
+    if (bodyCase_ == 136) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.Envelope parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -8067,6 +8119,54 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.StopApp stop_app = 136;</code>
+     */
+    @java.lang.Override
+    public boolean hasStopApp() {
+      return instance.hasStopApp();
+    }
+    /**
+     * <code>.dsa.control.v1.StopApp stop_app = 136;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.StopApp getStopApp() {
+      return instance.getStopApp();
+    }
+    /**
+     * <code>.dsa.control.v1.StopApp stop_app = 136;</code>
+     */
+    public Builder setStopApp(io.github.thisisthepy.dsa.control.v1.StopApp value) {
+      copyOnWrite();
+      instance.setStopApp(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.StopApp stop_app = 136;</code>
+     */
+    public Builder setStopApp(
+        io.github.thisisthepy.dsa.control.v1.StopApp.Builder builderForValue) {
+      copyOnWrite();
+      instance.setStopApp(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.StopApp stop_app = 136;</code>
+     */
+    public Builder mergeStopApp(io.github.thisisthepy.dsa.control.v1.StopApp value) {
+      copyOnWrite();
+      instance.mergeStopApp(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.StopApp stop_app = 136;</code>
+     */
+    public Builder clearStopApp() {
+      copyOnWrite();
+      instance.clearStopApp();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -8164,9 +8264,10 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.CollectDiagnostics.class,
             io.github.thisisthepy.dsa.control.v1.DiagnosticsFile.class,
             io.github.thisisthepy.dsa.control.v1.DiagnosticsDone.class,
+            io.github.thisisthepy.dsa.control.v1.StopApp.class,
           };
           java.lang.String info =
-              "\u0000O\u0001\u0000\u0001\u0087O\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003" +
+              "\u0000P\u0001\u0000\u0001\u0088P\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003" +
               "<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<" +
               "\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012" +
               "<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000" +
@@ -8176,7 +8277,7 @@ public  final class Envelope extends
               "P<\u0000Q<\u0000R<\u0000S<\u0000Z<\u0000[<\u0000\\<\u0000]<\u0000^<\u0000_<\u0000" +
               "`<\u0000a<\u0000b<\u0000c<\u0000n<\u0000x<\u0000y<\u0000z<\u0000{<\u0000|<\u0000" +
               "}<\u0000~<\u0000<\u0000\u0082<\u0000\u0083<\u0000\u0084<\u0000\u0085<\u0000\u0086" +
-              "<\u0000\u0087<\u0000";
+              "<\u0000\u0087<\u0000\u0088<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through
