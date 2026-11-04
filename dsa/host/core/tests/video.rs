@@ -39,7 +39,10 @@ fn picture(id: u64, value: u8) -> Picture {
 
 impl VideoDecoder for FakeDecoder {
     fn decode(&mut self, packet: Packet) -> Result<Vec<Picture>, String> {
-        self.log.lock().unwrap().push(format!("decode {}", packet.id));
+        self.log
+            .lock()
+            .unwrap()
+            .push(format!("decode {}", packet.id));
         if packet.data == b"bad" {
             return Err("the stream is corrupt".into());
         }
@@ -93,7 +96,9 @@ fn send(connection: &mut dyn Connection, body: Body) {
 }
 
 fn next(connection: &mut dyn Connection) -> Body {
-    let frame = connection.recv(Some(WAIT)).expect("a message from the host");
+    let frame = connection
+        .recv(Some(WAIT))
+        .expect("a message from the host");
     decode(&frame).expect("decodes").body.expect("has a body")
 }
 
@@ -206,7 +211,13 @@ fn pr4_a_guest_h264_stream_decodes_on_the_host_in_order() {
     assert_eq!(host.join().unwrap(), VideoEnd::Closed);
     assert_eq!(
         *log.lock().unwrap(),
-        ["open H.264 1280x720", "decode 0", "decode 1", "decode 2", "drain"]
+        [
+            "open H.264 1280x720",
+            "decode 0",
+            "decode 1",
+            "decode 2",
+            "drain"
+        ]
     );
 }
 

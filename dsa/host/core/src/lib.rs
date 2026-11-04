@@ -52,7 +52,7 @@ pub mod resize_trace;
 pub mod session;
 pub mod settings;
 pub mod tasks;
-pub mod video;
 pub mod update;
+pub mod video;
 pub mod widgets;
 pub mod window_manager;

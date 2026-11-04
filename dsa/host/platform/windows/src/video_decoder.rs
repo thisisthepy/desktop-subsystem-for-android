@@ -79,15 +79,15 @@ mod system {
     use windows::Win32::Media::MediaFoundation::{
         IMF2DBuffer, IMFActivate, IMFDXGIDeviceManager, IMFMediaType, IMFSample, IMFTransform,
         MFCreateDXGIDeviceManager, MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample,
-        MFMediaType_Video, MFStartup, MFTEnumEx, MFVideoFormat_AV1, MFVideoFormat_H264,
-        MFVideoFormat_HEVC, MFVideoFormat_NV12, MFVideoFormat_VP90, MFSTARTUP_NOSOCKET,
-        MFT_CATEGORY_VIDEO_DECODER, MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT,
-        MFT_MESSAGE_COMMAND_FLUSH, MFT_MESSAGE_COMMAND_DRAIN, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING,
-        MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_MESSAGE_SET_D3D_MANAGER, MFT_OUTPUT_DATA_BUFFER,
-        MFT_OUTPUT_STREAM_PROVIDES_SAMPLES, MFT_REGISTER_TYPE_INFO, MF_E_NOTACCEPTING,
-        MF_E_TRANSFORM_NEED_MORE_INPUT, MF_E_TRANSFORM_STREAM_CHANGE, MF_MT_FRAME_SIZE,
-        MF_MT_MAJOR_TYPE, MF_MT_MINIMUM_DISPLAY_APERTURE, MF_MT_SUBTYPE, MF_SA_D3D11_AWARE,
-        MF_VERSION, MFVideoArea,
+        MFMediaType_Video, MFStartup, MFTEnumEx, MFVideoArea, MFVideoFormat_AV1,
+        MFVideoFormat_H264, MFVideoFormat_HEVC, MFVideoFormat_NV12, MFVideoFormat_VP90,
+        MFSTARTUP_NOSOCKET, MFT_CATEGORY_VIDEO_DECODER, MFT_ENUM_FLAG_SORTANDFILTER,
+        MFT_ENUM_FLAG_SYNCMFT, MFT_MESSAGE_COMMAND_DRAIN, MFT_MESSAGE_COMMAND_FLUSH,
+        MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, MFT_MESSAGE_NOTIFY_START_OF_STREAM,
+        MFT_MESSAGE_SET_D3D_MANAGER, MFT_OUTPUT_DATA_BUFFER, MFT_OUTPUT_STREAM_PROVIDES_SAMPLES,
+        MFT_REGISTER_TYPE_INFO, MF_E_NOTACCEPTING, MF_E_TRANSFORM_NEED_MORE_INPUT,
+        MF_E_TRANSFORM_STREAM_CHANGE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE,
+        MF_MT_MINIMUM_DISPLAY_APERTURE, MF_MT_SUBTYPE, MF_SA_D3D11_AWARE, MF_VERSION,
     };
     use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_MULTITHREADED};
 
@@ -304,13 +304,12 @@ mod system {
             unsafe {
                 decoder.ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, gpu.manager.as_raw() as usize)
             }
-            .map_err(|e| {
-                format!("the {} decoder did not take the GPU: {e}", codec.name())
-            })?;
+            .map_err(|e| format!("the {} decoder did not take the GPU: {e}", codec.name()))?;
             let input = video_type(&subtype(codec), width, height)?;
             // SAFETY: plain Media Foundation calls.
-            unsafe { decoder.SetInputType(0, &input, 0) }
-                .map_err(|e| format!("the {} decoder did not take the stream: {e}", codec.name()))?;
+            unsafe { decoder.SetInputType(0, &input, 0) }.map_err(|e| {
+                format!("the {} decoder did not take the stream: {e}", codec.name())
+            })?;
             let (coded, shown) = choose_nv12(&decoder)?;
             // SAFETY: as above.
             let info = unsafe { decoder.GetOutputStreamInfo(0) }
@@ -394,9 +393,7 @@ mod system {
                         self.shown = shown;
                         continue;
                     }
-                    Err(e) => {
-                        return Err(format!("the {} decoder failed: {e}", self.codec.name()))
-                    }
+                    Err(e) => return Err(format!("the {} decoder failed: {e}", self.codec.name())),
                 }
                 let Some(sample) = sample else {
                     continue;
@@ -486,7 +483,9 @@ mod system {
             let pictures = self.pictures();
             // SAFETY: as above; the stream goes on after a drain.
             unsafe {
-                let _ = self.decoder.ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
+                let _ = self
+                    .decoder
+                    .ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
             }
             pictures
         }
@@ -537,7 +536,9 @@ mod system {
             width: u32,
             height: u32,
         ) -> Result<Box<dyn VideoDecoder>, String> {
-            Ok(Box::new(MediaFoundationDecoder::open(codec, width, height)?))
+            Ok(Box::new(MediaFoundationDecoder::open(
+                codec, width, height,
+            )?))
         }
     }
 }

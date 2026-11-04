@@ -397,7 +397,9 @@ pub fn serve(
             Ok(connection) => connection,
             Err(TransportError::Timeout) => continue,
             Err(error) => {
-                log(&format!("video: the video port took no connection: {error}"));
+                log(&format!(
+                    "video: the video port took no connection: {error}"
+                ));
                 thread::sleep(Duration::from_secs(1));
                 continue;
             }
