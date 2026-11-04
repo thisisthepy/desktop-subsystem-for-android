@@ -115,7 +115,7 @@ d="$tmp/many"; make_origin "$d"
 for b in feat/a feat/b feat/c feat/d; do
     change "$d" "$b" 'message A { int32 a = 1; }\n\n\n\n\n\n\n\nmessage Z {}\n' yes
 done
-change "$d" feat/b 'message A { int64 b = 2; }\n\n\n\n\n\n\n\nmessage Z {}\n' yes
+change "$d" feat/b 'message A { int32 a = 1; }\n\n\n\n\n\n\n\nmessage Z { int64 y = 9; }\n' yes
 change "$d" develop 'message A {}\n\n\n\n\n\n\n\nmessage Z { int32 z = 1; }\n' yes
 rm -rf "$d/work"
 git clone -q "$d/origin.git" "$d/work" 2> /dev/null
