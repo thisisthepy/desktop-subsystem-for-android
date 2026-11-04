@@ -49,3 +49,32 @@ fn fr10_an_unknown_charge_reads_as_full() {
 fn fr10_this_computers_power_can_be_read() {
     assert!(dsa_host_windows::power::read().is_some());
 }
+
+#[test]
+fn fr10_windows_suspend_and_resume_notifications_are_the_hosts_sleep() {
+    use dsa_host_windows::power::{sleep_event, SleepEvent};
+    assert_eq!(sleep_event(0x4), Some(SleepEvent::Sleeping));
+    assert_eq!(sleep_event(0x12), Some(SleepEvent::Woke));
+    assert_eq!(sleep_event(0x7), Some(SleepEvent::Woke));
+    // A power status or setting change is not sleep.
+    assert_eq!(sleep_event(0xA), None);
+    assert_eq!(sleep_event(0x8013), None);
+}
+
+#[test]
+fn fr10_the_hosts_sleep_with_no_android_running_does_not_wait() {
+    use dsa_host_windows::power::{on_sleep_event, SleepEvent};
+    let hub = dsa_host_core::power::PowerHub::new();
+    let started = std::time::Instant::now();
+    on_sleep_event(&hub, SleepEvent::Sleeping);
+    on_sleep_event(&hub, SleepEvent::Woke);
+    assert!(started.elapsed() < std::time::Duration::from_millis(500));
+}
+
+#[cfg(windows)]
+#[test]
+fn fr10_the_service_can_follow_this_computers_sleep() {
+    let hub = std::sync::Arc::new(dsa_host_core::power::PowerHub::new());
+    let watch = dsa_host_windows::power::watch_sleep(hub).expect("the registration");
+    drop(watch);
+}

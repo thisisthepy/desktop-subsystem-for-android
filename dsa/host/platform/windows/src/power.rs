@@ -116,3 +116,159 @@ pub fn follow(
         }
     }
 }
+
+/// What a suspend or resume notification from Windows says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SleepEvent {
+    /// The computer is about to sleep, hibernate or enter modern standby's sleep.
+    Sleeping,
+    /// The computer woke.
+    Woke,
+}
+
+/// `PBT_APMSUSPEND`.
+const PBT_APMSUSPEND: u32 = 0x4;
+/// `PBT_APMRESUMESUSPEND`: woke, and a person is there.
+const PBT_APMRESUMESUSPEND: u32 = 0x7;
+/// `PBT_APMRESUMEAUTOMATIC`: woke, whatever woke it. Always sent on waking.
+const PBT_APMRESUMEAUTOMATIC: u32 = 0x12;
+
+/// The event a power broadcast type of a suspend and resume notification stands for, or
+/// `None` for one that says neither.
+pub fn sleep_event(broadcast_type: u32) -> Option<SleepEvent> {
+    match broadcast_type {
+        PBT_APMSUSPEND => Some(SleepEvent::Sleeping),
+        PBT_APMRESUMEAUTOMATIC | PBT_APMRESUMESUSPEND => Some(SleepEvent::Woke),
+        _ => None,
+    }
+}
+
+/// How long the computer's sleep waits for the guests to put their data on disk. Windows
+/// gives a suspend notification only a short time.
+pub const SLEEP_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Hands `event` to `hub`: before the computer sleeps every Android writes its data, waited
+/// for at most [`SLEEP_WAIT`]; when it wakes every Android has its clock set.
+pub fn on_sleep_event(hub: &dsa_host_core::power::PowerHub, event: SleepEvent) {
+    match event {
+        SleepEvent::Sleeping => {
+            eprintln!("power: the computer is going to sleep");
+            if !hub.host_sleeping(SLEEP_WAIT) {
+                eprintln!(
+                    "power: an Android did not say its data was written within {} s; the \
+                     computer sleeps anyway",
+                    SLEEP_WAIT.as_secs()
+                );
+            }
+        }
+        SleepEvent::Woke => {
+            eprintln!("power: the computer woke");
+            hub.host_woke(std::time::SystemTime::now());
+        }
+    }
+}
+
+/// `DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS`.
+#[cfg(windows)]
+#[repr(C)]
+struct DeviceNotifySubscribeParameters {
+    callback:
+        unsafe extern "system" fn(*const std::ffi::c_void, u32, *const std::ffi::c_void) -> u32,
+    context: *mut std::ffi::c_void,
+}
+
+#[cfg(windows)]
+#[link(name = "powrprof")]
+extern "system" {
+    fn PowerRegisterSuspendResumeNotification(
+        flags: u32,
+        recipient: *const std::ffi::c_void,
+        handle: *mut *mut std::ffi::c_void,
+    ) -> u32;
+    fn PowerUnregisterSuspendResumeNotification(handle: *mut std::ffi::c_void) -> u32;
+}
+
+/// `DEVICE_NOTIFY_CALLBACK`.
+#[cfg(windows)]
+const DEVICE_NOTIFY_CALLBACK: u32 = 2;
+
+/// Windows' suspend and resume notifications, handed to a hub for as long as this lives.
+/// They come for sleep, hibernation and, on a computer with modern standby, when it goes
+/// from the screen being off into its sleep.
+#[cfg(windows)]
+pub struct SleepWatch {
+    handle: *mut std::ffi::c_void,
+    /// The callback's context; freed only after the registration ends.
+    context: *mut std::sync::Arc<dsa_host_core::power::PowerHub>,
+    /// The parameters Windows was handed, kept for as long as the registration.
+    _params: Box<DeviceNotifySubscribeParameters>,
+}
+
+// SAFETY: the handle and context are used only to end the registration, from whichever thread
+// drops the watch; the hub behind the context is shared across threads already.
+#[cfg(windows)]
+unsafe impl Send for SleepWatch {}
+
+#[cfg(windows)]
+unsafe extern "system" fn sleep_callback(
+    context: *const std::ffi::c_void,
+    broadcast_type: u32,
+    _setting: *const std::ffi::c_void,
+) -> u32 {
+    if let Some(event) = sleep_event(broadcast_type) {
+        // SAFETY: the context is the hub the watch keeps alive until it ends the registration.
+        let hub = unsafe { &*(context as *const std::sync::Arc<dsa_host_core::power::PowerHub>) };
+        // A panic must not cross into Windows.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            on_sleep_event(hub, event)
+        }));
+    }
+    0
+}
+
+/// Starts handing Windows' suspend and resume notifications to `hub`, until the watch is
+/// dropped.
+#[cfg(windows)]
+pub fn watch_sleep(
+    hub: std::sync::Arc<dsa_host_core::power::PowerHub>,
+) -> Result<SleepWatch, String> {
+    let context = Box::into_raw(Box::new(hub));
+    let params = Box::new(DeviceNotifySubscribeParameters {
+        callback: sleep_callback,
+        context: context.cast(),
+    });
+    let mut handle: *mut std::ffi::c_void = std::ptr::null_mut();
+    // SAFETY: the parameters and the context outlive the registration, which the watch ends.
+    let code = unsafe {
+        PowerRegisterSuspendResumeNotification(
+            DEVICE_NOTIFY_CALLBACK,
+            (&*params as *const DeviceNotifySubscribeParameters).cast(),
+            &mut handle,
+        )
+    };
+    if code != 0 {
+        // SAFETY: made above and never handed out.
+        drop(unsafe { Box::from_raw(context) });
+        return Err(format!(
+            "registering for suspend and resume notifications: {}",
+            std::io::Error::from_raw_os_error(code as i32)
+        ));
+    }
+    Ok(SleepWatch {
+        handle,
+        context,
+        _params: params,
+    })
+}
+
+#[cfg(windows)]
+impl Drop for SleepWatch {
+    fn drop(&mut self) {
+        // SAFETY: the registration made in watch_sleep; once it ends no callback runs, so the
+        // context can be freed.
+        unsafe {
+            PowerUnregisterSuspendResumeNotification(self.handle);
+            drop(Box::from_raw(self.context));
+        }
+    }
+}

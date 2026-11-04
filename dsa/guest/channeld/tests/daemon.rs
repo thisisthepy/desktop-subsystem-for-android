@@ -324,3 +324,36 @@ fn fr5_only_a_clock_probe_gets_an_answer() {
         None
     );
 }
+
+#[test]
+fn fr10_the_daemon_writes_the_guests_data_and_answers_before_the_host_sleeps() {
+    use dsa_protocol::control::{envelope::Body, Envelope, GuestSleepReady, HostSleep};
+    let frame = |asleep: bool, ms: u64| {
+        dsa_protocol::encode(&Envelope {
+            body: Some(Body::HostSleep(HostSleep {
+                asleep,
+                host_unix_time_ms: ms,
+            })),
+        })
+    };
+    let written = AtomicBool::new(false);
+    let answer = dsa_guest_channeld::sleep_answer(&frame(true, 0), || {
+        written.store(true, Ordering::Relaxed)
+    })
+    .expect("an answer to the host");
+    assert!(written.load(Ordering::Relaxed), "the data is written first");
+    assert_eq!(
+        dsa_protocol::decode(&answer).unwrap().body,
+        Some(Body::GuestSleepReady(GuestSleepReady {}))
+    );
+    // The word that the host woke, with its clock, goes on to the agent.
+    let woke = AtomicBool::new(false);
+    assert_eq!(
+        dsa_guest_channeld::sleep_answer(&frame(false, 1_700_000_000_000), || {
+            woke.store(true, Ordering::Relaxed)
+        }),
+        None
+    );
+    assert!(!woke.load(Ordering::Relaxed));
+    assert_eq!(dsa_guest_channeld::sleep_answer(b"not a message", || {}), None);
+}

@@ -507,6 +507,14 @@ where
             eprintln!("{build}: following the computer's power failed: {error}");
         }
     }
+    // And its sleep: kept for as long as the service runs.
+    let _sleep_watch = match crate::power::watch_sleep(Arc::clone(&power)) {
+        Ok(watch) => Some(watch),
+        Err(why) => {
+            eprintln!("{build}: Android will not hear when the computer sleeps: {why}");
+            None
+        }
+    };
     let factory_config = config.clone();
     let factory_build = build.to_string();
     let factory_status = program.as_ref().map(|_| Arc::clone(&program_status));

@@ -24,5 +24,6 @@
         <permission name="android.permission.MANAGE_ROLE_HOLDERS" />
         <permission name="android.permission.MANAGE_NOTIFICATION_LISTENERS" />
         <permission name="android.permission.BIND_APPWIDGET" />
+        <permission name="android.permission.SET_TIME" />
     </privapp-permissions>
 </permissions>
