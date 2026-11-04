@@ -208,10 +208,10 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
             problems.append(f"VENDOR/bin/hw/{name} is missing from the image")
         if f"VENDOR/etc/init/{name}.rc" not in names:
             problems.append(f"VENDOR/etc/init/{name}.rc is missing, so init never starts {name}")
-        manifest = f"VENDOR/etc/vintf/manifest/{name}.xml"
-        if manifest not in names:
-            problems.append(f"{manifest} is missing, so its HAL is not declared")
-        elif f"<fqname>{what}</fqname>" not in z.read(manifest).decode():
+        hal_manifest = f"VENDOR/etc/vintf/manifest/{name}.xml"
+        if hal_manifest not in names:
+            problems.append(f"{hal_manifest} is missing, so its HAL is not declared")
+        elif f"<fqname>{what}</fqname>" not in z.read(hal_manifest).decode():
             problems.append(f"{name}.xml does not declare {what}")
         if "META/file_contexts.bin" in names and f"/vendor/bin/hw/{name}".encode() not in z.read("META/file_contexts.bin"):
             problems.append(f"META/file_contexts.bin does not label {name}, so init refuses to start it")

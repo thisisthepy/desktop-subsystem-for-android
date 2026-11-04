@@ -338,6 +338,17 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.PowerState getPowerState();
 
   /**
+   * <code>.dsa.control.v1.PowerHint power_hint = 110;</code>
+   * @return Whether the powerHint field is set.
+   */
+  boolean hasPowerHint();
+  /**
+   * <code>.dsa.control.v1.PowerHint power_hint = 110;</code>
+   * @return The powerHint.
+   */
+  io.github.thisisthepy.dsa.control.v1.PowerHint getPowerHint();
+
+  /**
    * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
    * @return Whether the deviceIdle field is set.
    */
