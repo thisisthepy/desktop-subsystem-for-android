@@ -191,7 +191,7 @@ fn file_uri(path: &Path) -> String {
 
 /// Where the toasts' icons go: `%LOCALAPPDATA%\DSA\notifications`.
 pub fn default_icon_dir() -> Option<PathBuf> {
-    std::env::var_os("LOCALAPPDATA").map(|dir| PathBuf::from(dir).join("DSA").join("notifications"))
+    crate::paths::UserRoot::current().map(|root| root.notifications())
 }
 
 /// One toast to show.

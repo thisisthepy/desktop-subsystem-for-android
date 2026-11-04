@@ -16,7 +16,9 @@
 //! profile, `%LOCALAPPDATA%\DSA\android.vhdx`, as WSL keeps each user's distributions in
 //! theirs. `data_dir` keeps every user's disk in one protected folder instead, as
 //! `<data_dir>\<SID>\data.vhdx`, and `data_disk` names a single disk, for running one VM
-//! by hand.
+//! by hand. Both are for tests and development: an installation names neither, and the
+//! service moves a disk the first releases kept in `%ProgramData%\DSA\users` into the
+//! user's profile.
 //!
 //! With `images_dir`, the Android image comes from the update store there instead of
 //! `system_image`: `first_image` names the image the installer put in it, and `update`
@@ -118,8 +120,7 @@ pub fn expand_locations(text: &str, data: &std::path::Path, program: &std::path:
 
 /// Where a user's Android disk is kept in their profile, below their local application data.
 pub fn profile_disk(local_app_data: &std::path::Path) -> PathBuf {
-    let dir = local_app_data.to_string_lossy();
-    PathBuf::from(format!("{}\\DSA\\android.vhdx", dir.trim_end_matches('\\')))
+    crate::paths::UserRoot::in_local_app_data(local_app_data).android_disk()
 }
 
 fn default_vm_name() -> String {
@@ -267,6 +268,10 @@ pub struct HostConfig {
     /// (`dsa-hostd <config.json>`), the setting alone turns freezing on.
     #[serde(default)]
     pub freeze_after_minutes: Option<u64>,
+    /// The machine's DSA folder: the folder the configuration file is in, which `dsa-hostd`
+    /// fills in when it reads the file. Not a key of the file.
+    #[serde(skip)]
+    pub machine_root: Option<PathBuf>,
 }
 
 fn default_ready_timeout_secs() -> u64 {
@@ -369,6 +374,22 @@ impl HostConfig {
             }
         }
         Ok(config)
+    }
+
+    /// The machine's DSA folder: where the configuration file is, or `%ProgramData%\DSA` for
+    /// a configuration that was not read from a file.
+    pub fn machine_root(&self) -> crate::paths::MachineRoot {
+        match &self.machine_root {
+            Some(dir) => crate::paths::MachineRoot::at(dir.clone()),
+            None => crate::paths::MachineRoot::default_location(),
+        }
+    }
+
+    /// Where the service keeps the settings: `settings_dir`, or the machine root's `settings`.
+    pub fn settings_dir(&self) -> PathBuf {
+        self.settings_dir
+            .clone()
+            .unwrap_or_else(|| self.machine_root().settings())
     }
 
     /// How the service updates DSA itself, running version `running`. `None` when the

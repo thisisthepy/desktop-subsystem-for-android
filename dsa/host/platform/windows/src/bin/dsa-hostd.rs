@@ -6,7 +6,9 @@
 //! dsa-hostd service <config.json>  the same, as a Windows service
 //! dsa-hostd remove-images <folder> removes the downloaded images (the uninstaller runs it)
 //! dsa-hostd remove-updates <folder> removes the downloaded setup files (the same)
-//! dsa-hostd remove-start-menu      removes every user's app shortcuts DSA made (the same)
+//! dsa-hostd remove-machine-data <folder> removes the settings, logs and tmp folder (the same)
+//! dsa-hostd remove-user-data       removes every user's shortcuts, files and keys DSA made,
+//!                                  keeping their Android disk (the same)
 //! ```
 //!
 //! Without a mode it starts one VM, waits for the guest's channel daemon to connect and
@@ -54,7 +56,7 @@ mod windows_host {
         SetConsoleCtrlHandler, SetStdHandle, STD_ERROR_HANDLE,
     };
 
-    use dsa_host_core::guest_display::{display_for, with_display_size};
+    use dsa_host_core::guest_display::{display_or_smallest, with_display_size};
     use dsa_host_core::handshake::ControlHandshake;
     use dsa_host_core::power::PowerHub;
     use dsa_host_core::session::{Session, SessionState};
@@ -69,7 +71,7 @@ mod windows_host {
 
     const USAGE: &str = "usage: dsa-hostd [serve | service] <config.json> | \
                          dsa-hostd remove-images <folder> | dsa-hostd remove-updates <folder> | \
-                         dsa-hostd remove-start-menu";
+                         dsa-hostd remove-machine-data <folder> | dsa-hostd remove-user-data";
 
     fn build() -> String {
         format!("dsa-hostd {}", dsa_host_windows::VERSION)
@@ -87,7 +89,10 @@ mod windows_host {
             .ok()
             .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
             .unwrap_or_default();
-        HostConfig::parse(&expand_locations(&text, &data, &program)).map_err(|e| e.to_string())
+        let mut config = HostConfig::parse(&expand_locations(&text, &data, &program))
+            .map_err(|e| e.to_string())?;
+        config.machine_root = Some(data);
+        Ok(config)
     }
 
     pub fn run() -> Result<(), String> {
@@ -103,30 +108,49 @@ mod windows_host {
                 use dsa_host_windows::uninstall::{installer_folder, remove_downloaded_updates};
                 remove_downloaded_updates(&installer_folder(path))
             }
-            [mode] if mode == "remove-start-menu" => {
-                use dsa_host_windows::uninstall::remove_start_menu_shortcuts;
-                // Every user's, as the window manager made them in each profile.
-                for profile in dsa_host_windows::profile::profile_folders() {
-                    let note = profile
-                        .join("AppData")
-                        .join("Local")
-                        .join("DSA")
-                        .join(dsa_host_windows::start_menu::NOTE_NAME);
-                    let programs = profile
-                        .join("AppData")
-                        .join("Roaming")
-                        .join("Microsoft")
-                        .join("Windows")
-                        .join("Start Menu")
-                        .join("Programs");
-                    if let Err(why) = remove_start_menu_shortcuts(&note, &programs) {
-                        eprintln!("{}: {why}", profile.display());
-                    }
+            [mode, path] if mode == "remove-machine-data" => {
+                use dsa_host_windows::paths::MachineRoot;
+                use dsa_host_windows::uninstall::{installer_folder, remove_machine_files};
+                for why in remove_machine_files(&MachineRoot::at(installer_folder(path))) {
+                    eprintln!("{why}");
                 }
+                Ok(())
+            }
+            // remove-start-menu is the name earlier packages used.
+            [mode] if mode == "remove-user-data" || mode == "remove-start-menu" => {
+                remove_every_users_data();
                 Ok(())
             }
             [path] if path != "serve" && path != "service" => one_vm(read_config(path)?),
             _ => Err(USAGE.into()),
+        }
+    }
+
+    /// Removes, for every user with a profile, the Start menu shortcuts, files and registry
+    /// keys DSA made for them, keeping their Android disk. A user whose local application data
+    /// was moved is found where it went, and also where it would be by default.
+    fn remove_every_users_data() {
+        use dsa_host_windows::paths::{
+            default_local_app_data, start_menu_programs_in_profile, UserRoot,
+        };
+        use dsa_host_windows::uninstall::remove_user_files;
+        for (sid, profile) in dsa_host_windows::profile::profiles() {
+            let programs = start_menu_programs_in_profile(&profile);
+            let default_local = default_local_app_data(&profile);
+            let local = dsa_host_windows::profile::local_app_data(&sid)
+                .unwrap_or_else(|_| default_local.clone());
+            let mut roots = vec![UserRoot::in_local_app_data(&local)];
+            if local != default_local {
+                roots.push(UserRoot::in_profile(&profile));
+            }
+            for root in &roots {
+                for why in remove_user_files(root, &programs) {
+                    eprintln!("{sid}: {why}");
+                }
+            }
+            for why in dsa_host_windows::user_registry::remove_user_keys(&sid, &local) {
+                eprintln!("{sid}: {why}");
+            }
         }
     }
 
@@ -191,9 +215,9 @@ mod windows_host {
             .vm_config(fallback_sid.as_deref())
             .map_err(|e| e.to_string())?;
         // Run by hand, this process is in the user's session and sees their monitors.
-        if let Some(size) = display_for(&dsa_host_windows::monitors::current()) {
-            vm.kernel_cmdline = with_display_size(&vm.kernel_cmdline, size);
-        }
+        let monitors = dsa_host_windows::monitors::current();
+        let size = display_or_smallest(Some(&monitors));
+        vm.kernel_cmdline = with_display_size(&vm.kernel_cmdline, size);
         let user = config.user_sid.clone().or(fallback_sid).unwrap_or_default();
         let console_log = config.console_log_path(&user, &vm.data_disk);
         println!("the Android console is kept in {}", console_log.display());

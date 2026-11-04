@@ -40,10 +40,50 @@ Service Control Manager; the installer registers it, and it writes its messages 
 
 - Each caller is identified by the SID Windows reports for the pipe connection, never by
   anything the caller sends. The first request of a user creates their data disk at
-  `<data_dir>\<SID>\data.vhdx` and their VM `<vm_name>-<SID>`; later requests reach the
-  same VM.
-- A user's folder is readable only by SYSTEM, Administrators and Hyper-V's virtual
-  machines, so other users cannot read someone's Android data.
+  `%LOCALAPPDATA%\DSA\android.vhdx` in their own profile and their VM `<vm_name>-<SID>`;
+  later requests reach the same VM. `data_dir` (`<data_dir>\<SID>\data.vhdx`) is for tests
+  and development only; an installation never sets it.
+- A user's profile admits only them, SYSTEM and Administrators, and a `data_dir` folder
+  only SYSTEM, Administrators and Hyper-V's virtual machines, so other users cannot read
+  someone's Android data.
+
+### Where files go
+
+Everything DSA makes at run time is in two folders, and `src/paths.rs` is the one place
+that builds their paths. The settings app and the installer follow the same layout.
+
+| Machine (`%ProgramData%\DSA`, or the data folder chosen at install) | |
+|---|---|
+| `dsa-hostd.json` | the service's configuration |
+| `images\` | the Android image store |
+| `updates\` | downloaded setup files and the update state |
+| `settings\` | the settings users change in DSA Settings, and widget placements |
+| `logs\` | `dsa-hostd.log` and each user's Android console, `android-<SID>.log` |
+| `tmp\` | each boot's initrd while the VM starts; SYSTEM and Administrators only |
+
+| Each user (`%LOCALAPPDATA%\DSA`) | |
+|---|---|
+| `android.vhdx`, `android.image-version` | the user's Android disk and the image it holds |
+| `apps\<package>\` | each app's window program |
+| `notifications\` | the icons notifications show |
+| `logs\` | `dsa-wm.log`, `dsa-app-window.log` |
+| `compositor.json` | the render GPU chosen before DSA Settings kept it |
+| `monitors.txt` | the user's monitors, for sizing the guest display |
+| `start-menu.json` | the Start menu shortcuts the window manager made |
+| `tmp\` | temporary files of the user's processes, when one cannot be avoided |
+
+Outside them DSA writes only the Start menu shortcuts, its key `HKLM\SOFTWARE\thisisthepy\DSA`,
+the `Run` value that starts `dsa-wm`, the `.apk` association and context menu entries, the
+Hyper-V socket service registrations, and in each user's classes the notification protocol
+and each app's AppUserModelID.
+
+- No program uses the system's or the user's temporary folder. The service clears what
+  earlier runs left in the machine's `tmp` when it starts.
+- A disk the first releases kept in `%ProgramData%\DSA\users\<SID>\data.vhdx` moves into the
+  user's profile when their Android is first set up. A disk already there is never replaced:
+  the old one then stays, and the service log says so, as it does when the move fails.
+- Uninstalling removes everything above, for every user, signed in or not, except each
+  user's Android disk (`dsa-hostd remove-machine-data` and `dsa-hostd remove-user-data`).
 - The pipe admits SYSTEM and interactively signed-in users unless `pipe_sddl` says
   otherwise. Remote clients are always refused.
 - Stopping the service stops every user's VM first.
@@ -284,7 +324,7 @@ menu, so Windows search finds it by name and opens it, even while Android is sto
 - When an app is removed from Android, its shortcut goes, and so does its window program
   once it no longer runs.
 - Uninstalling DSA removes the shortcuts the note names in each profile's default Start
-  menu folder (`dsa-hostd remove-start-menu`). A Start menu moved elsewhere by folder
+  menu folder (`dsa-hostd remove-user-data`). A Start menu moved elsewhere by folder
   redirection keeps its shortcuts, because the uninstaller cannot read another user's
   redirection.
 
@@ -506,3 +546,19 @@ dotnet publish DsaSettings/DsaSettings.csproj -c Release -r win-x64
 
 The installer publishes it self-contained, with the .NET runtime in its folder, into `C:\Program Files\DSA\settings\`, and adds the Start menu shortcut
 "DSA Settings".
+
+## Measuring on a PC
+
+`tools/measure.ps1` measures the signed-in user's Android on a real PC and prints the
+numbers with the environment they were taken in: the memory of a dozing Android (guest PSS,
+the VM, the window processes and the service, against 800 MB), its idle CPU as a share of
+one logical core, how long an app's window takes to show from Dozing (and, with `-Cold`,
+from Stopped), and how long the VM's memory takes to go back to the host after a stop.
+
+```
+pwsh -File tools\measure.ps1 -Part all -Package com.android.settings -Cold
+```
+
+Run it from an elevated prompt: only an administrator may read the VM process's CPU time
+and the service's memory. Without that, those numbers print as `null` and the figure is
+marked incomplete. `-Json` prints one JSON object.

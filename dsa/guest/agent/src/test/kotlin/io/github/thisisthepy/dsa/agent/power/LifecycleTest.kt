@@ -218,8 +218,31 @@ class LifecycleTest {
         daemon.deliver(Envelope.newBuilder().setPowerState(desktop).build().toByteArray())
         scheduler.runDue()
 
-        assertEquals(listOf(Battery(acOnline = true, present = false, percent = 100, charging = false)), power.batteries)
+        // Plugged in and full, not a missing battery: charging-gated jobs such as background
+        // dexopt wait for exactly this.
+        assertEquals(listOf(Battery(acOnline = true, present = true, percent = 100, charging = false)), power.batteries)
+        assertEquals(BatteryStatus.FULL, power.batteries.single().status)
         assertEquals(false, power.saver)
+    }
+
+    @Test
+    fun fr10_a_host_without_a_battery_reports_ac_power_even_if_the_host_says_otherwise() {
+        started()
+        // Windows may not know the AC line status of a computer without a battery.
+        val desktop = PowerState.newBuilder().setAcOnline(false).setBatteryPresent(false).build()
+        daemon.deliver(Envelope.newBuilder().setPowerState(desktop).build().toByteArray())
+        scheduler.runDue()
+
+        assertEquals(BatteryStatus.FULL, power.batteries.single().status)
+        assertTrue(power.batteries.single().acOnline)
+    }
+
+    @Test
+    fun fr10_a_host_battery_keeps_its_real_status() {
+        assertEquals(BatteryStatus.DISCHARGING, Battery(acOnline = false, present = true, percent = 57, charging = false).status)
+        assertEquals(BatteryStatus.CHARGING, Battery(acOnline = true, present = true, percent = 40, charging = true).status)
+        assertEquals(BatteryStatus.NOT_CHARGING, Battery(acOnline = true, present = true, percent = 80, charging = false).status)
+        assertEquals(BatteryStatus.FULL, Battery(acOnline = true, present = true, percent = 100, charging = false).status)
     }
 
     @Test

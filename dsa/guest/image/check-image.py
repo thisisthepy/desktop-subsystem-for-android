@@ -5,7 +5,7 @@
 It fails when the shell apps are still there, when the build is still debuggable, when an
 app is not signed with one of the keys in the key folder, when the framework overlay or the
 trace script is missing, when the agent is missing or not signed with the platform key, when
-Settings still has the preferences that crash it without the Bluetooth service, when the files
+Settings still has the preferences or code that crash it without Bluetooth, when the files
 do not match image.json, or when the ramdisk lacks the directories and links Android's first
 stage init needs.
 
@@ -110,6 +110,14 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
                 if left:
                     problems.append(f"{name}:{xml} still has {', '.join(left)}, which crash Settings "
                                     "without the Bluetooth service")
+            for dex in sorted(f for f in files if re.fullmatch(r"classes\d*\.dex", f)):
+                content = apk.read(dex)
+                if content[:4] != b"dex\n":
+                    continue
+                _, left = make_image.edit_dex(content, make_image.SETTINGS_CODE_WITHOUT_BLUETOOTH)
+                if left:
+                    problems.append(f"{name}:{dex} still has the code in {', '.join(sorted(set(left)))} "
+                                    "that crashes Settings without the Bluetooth adapter")
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
     if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:

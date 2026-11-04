@@ -1,10 +1,14 @@
 //! What uninstalling needs from dsa-hostd: removing the Android images and the setup
-//! files the service downloaded, and the Start menu shortcuts the window manager made in each
-//! user's profile, which the installer did not put there and so does not know about.
+//! files the service downloaded, the settings, logs and other files the service made in the
+//! machine's DSA folder, and in each user's profile the Start menu shortcuts and the files the
+//! window manager made, which the installer did not put there and so does not know about.
+//! Each user's Android disk stays.
 
 use std::path::{Path, PathBuf};
 
 use dsa_host_core::update::program::Version;
+
+use crate::paths::{MachineRoot, UserRoot};
 
 /// Removes the update store at `dir` (the `images` folder of the service's data folder).
 ///
@@ -96,6 +100,58 @@ pub fn remove_start_menu_shortcuts(note: &Path, programs: &Path) -> Result<usize
     }
     std::fs::remove_file(note).map_err(|e| format!("removing {}: {e}", note.display()))?;
     Ok(removed)
+}
+
+fn remove_entry(path: &Path) -> Result<(), String> {
+    let result = if path.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    };
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("removing {}: {error}", path.display())),
+    }
+}
+
+/// Removes one user's DSA files: the Start menu shortcuts the window manager made (in
+/// `programs`), then everything in their DSA folder but the Android disk and the image version
+/// recorded with it. The folder itself goes when nothing is left in it. Returns what could not
+/// be removed, to report; the rest is removed either way.
+pub fn remove_user_files(root: &UserRoot, programs: &Path) -> Vec<String> {
+    let mut problems = Vec::new();
+    if let Err(why) = remove_start_menu_shortcuts(&root.start_menu_note(), programs) {
+        problems.push(why);
+    }
+    if let Ok(entries) = std::fs::read_dir(root.dir()) {
+        for entry in entries.filter_map(Result::ok) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if UserRoot::kept_on_uninstall(&name) {
+                continue;
+            }
+            if let Err(why) = remove_entry(&entry.path()) {
+                problems.push(why);
+            }
+        }
+    }
+    let _ = std::fs::remove_dir(root.dir());
+    problems
+}
+
+/// Removes what the service made in the machine's DSA folder besides the images and the
+/// downloaded setup files (which [`remove_downloaded_images`] and [`remove_downloaded_updates`]
+/// remove): the settings, the logs, the `tmp` folder and the trace switch files of earlier
+/// releases. A `users` folder, where the first releases kept each user's Android disk, stays,
+/// since a disk that could not be moved into its user's profile is still there. Returns what
+/// could not be removed.
+pub fn remove_machine_files(root: &MachineRoot) -> Vec<String> {
+    let mut paths = vec![root.settings(), root.logs(), root.tmp()];
+    paths.extend(root.old_trace_markers());
+    paths
+        .iter()
+        .filter_map(|path| remove_entry(path).err())
+        .collect()
 }
 
 /// The folder an installer passed on the command line. Windows Installer folder paths end

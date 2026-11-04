@@ -11,22 +11,23 @@ use dsa_host_core::resize_trace::{self, ResizeTrace};
 
 /// Returns the default log folder for the current user: `%LOCALAPPDATA%\DSA\logs`.
 pub fn default_log_dir() -> PathBuf {
-    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
-        PathBuf::from(local_app_data).join("DSA").join("logs")
-    } else if let Some(user_profile) = std::env::var_os("USERPROFILE") {
-        PathBuf::from(user_profile)
-            .join("AppData")
-            .join("Local")
-            .join("DSA")
-            .join("logs")
-    } else {
-        PathBuf::from("logs")
-    }
+    crate::paths::UserRoot::current()
+        .map(|root| root.logs())
+        .unwrap_or_else(|| PathBuf::from("logs"))
 }
 
 /// Returns the default log file path: `%LOCALAPPDATA%\DSA\logs\dsa-wm.log`.
 pub fn default_log_file() -> PathBuf {
-    default_log_dir().join("dsa-wm.log")
+    crate::paths::UserRoot::current()
+        .map(|root| root.window_manager_log())
+        .unwrap_or_else(|| PathBuf::from("logs").join("dsa-wm.log"))
+}
+
+/// Returns the app window host's log file path: `%LOCALAPPDATA%\DSA\logs\dsa-app-window.log`.
+pub fn default_app_window_log_file() -> PathBuf {
+    crate::paths::UserRoot::current()
+        .map(|root| root.app_window_log())
+        .unwrap_or_else(|| PathBuf::from("logs").join("dsa-app-window.log"))
 }
 
 /// A thread-safe file logger.
