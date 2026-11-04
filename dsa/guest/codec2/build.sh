@@ -90,7 +90,7 @@ generate() {
 
 generate "$hardware_common" 2
 generate "$fmq" 1 "$hardware_common"
-generate "$bufferpool" 2 "$hardware_common" "$fmq"
+generate "$bufferpool" 2 "$hardware_common" "$fmq" "$hardware_buffer"
 generate "$c2" 1 "$hardware_common" "$fmq" "$bufferpool" "$hardware_buffer" "$surface"
 
 ndk_dir="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
