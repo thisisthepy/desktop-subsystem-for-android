@@ -354,6 +354,36 @@ pub fn migrate_user_disk(machine: &MachineRoot, user: &UserRoot, sid: &str) -> V
     notes
 }
 
+/// The trace switches the empty files of earlier releases (`input-trace`, `resize-trace` in
+/// either root) turn on, and the files that are there. The settings take them over; the files
+/// go once the settings are saved.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OldTraceMarkers {
+    pub input_trace: bool,
+    pub resize_trace: bool,
+    pub found: Vec<PathBuf>,
+}
+
+/// Looks for the trace switch files among `markers`.
+pub fn old_trace_markers(markers: &[PathBuf]) -> OldTraceMarkers {
+    let mut old = OldTraceMarkers::default();
+    for marker in markers.iter().filter(|marker| marker.is_file()) {
+        let name = marker
+            .to_string_lossy()
+            .rsplit(['\\', '/'])
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        match name.as_str() {
+            "input-trace" => old.input_trace = true,
+            "resize-trace" => old.resize_trace = true,
+            _ => continue,
+        }
+        old.found.push(marker.clone());
+    }
+    old
+}
+
 /// Where Windows put each boot's initrd before it was kept in the machine's `tmp` folder: the
 /// temporary folder of the account the service runs as.
 pub fn old_boot_initrd(vm_name: &str) -> PathBuf {

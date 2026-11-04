@@ -54,7 +54,10 @@
 //! Android may be frozen when idle (`freeze`), whether text copied on the host can be pasted in
 //! Android and the reverse (`clipboard`, on by default), whether web links apps in Android open
 //! go to apps in Android instead of the default browser (`links-in-android`, off by default),
-//! and whether DSA (`program-updates`) and the Android image (`image-updates`) are updated.
+//! whether DSA (`program-updates`) and the Android image (`image-updates`) are updated, and
+//! whether every DSA process writes the input trace (`input-trace`) and each stage of each
+//! resize (`resize-trace`) to its log, off by default. Those last four are the computer's, so
+//! only an administrator changes them.
 //! `dsa settings set <name> <value>` changes one;
 //! the switches take `on` or `off`. `dsa memory` shows how much memory the user's Android
 //! takes, on the host and inside Android. `dsa gpus` lists the GPUs of this machine, for
@@ -146,6 +149,8 @@ pub enum Change {
     Clipboard(bool),
     ProgramUpdates(bool),
     ImageUpdates(bool),
+    InputTrace(bool),
+    ResizeTrace(bool),
 }
 
 impl Change {
@@ -162,9 +167,12 @@ impl Change {
             "links-in-android" => switch().map(Change::LinksInAndroid),
             "program-updates" => switch().map(Change::ProgramUpdates),
             "image-updates" => switch().map(Change::ImageUpdates),
+            "input-trace" => switch().map(Change::InputTrace),
+            "resize-trace" => switch().map(Change::ResizeTrace),
             _ => Err(format!(
                 "there is no setting {name:?}; the settings are render-gpu, freeze, \
-                 clipboard, links-in-android, program-updates and image-updates"
+                 clipboard, links-in-android, program-updates, image-updates, input-trace \
+                 and resize-trace"
             )),
         }
     }
@@ -575,6 +583,8 @@ pub fn settings_json(report: &SettingsReport) -> Value {
         "clipboard": report.settings.clipboard,
         "program_updates": report.settings.program_updates,
         "image_updates": report.settings.image_updates,
+        "input_trace": report.settings.input_trace,
+        "resize_trace": report.settings.resize_trace,
         "program_updates_available": report.facts.program_updates_available,
         "image_updates_available": report.facts.image_updates_available,
         "version": report.facts.version,
@@ -621,6 +631,8 @@ pub fn describe_settings(report: &SettingsReport) -> String {
             "Image updates: {}",
             available(settings.image_updates, facts.image_updates_available)
         ),
+        format!("Input trace: {}", on_off(settings.input_trace)),
+        format!("Resize trace: {}", on_off(settings.resize_trace)),
         format!("Service version: {}", facts.version),
     ];
     if let Some(dir) = &facts.log_dir {
@@ -725,6 +737,8 @@ fn settings(invocation: &Invocation, client: &mut HostApiClient) -> Result<Strin
             Change::Clipboard(on) => wanted.clipboard = *on,
             Change::ProgramUpdates(on) => wanted.program_updates = *on,
             Change::ImageUpdates(on) => wanted.image_updates = *on,
+            Change::InputTrace(on) => wanted.input_trace = *on,
+            Change::ResizeTrace(on) => wanted.resize_trace = *on,
         }
         report = client.set_settings(&wanted).map_err(|e| e.to_string())?;
     }

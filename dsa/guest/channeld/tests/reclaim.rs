@@ -7,7 +7,7 @@ use std::time::Duration;
 use dsa_guest_channeld::reclaim::{MemInfo, Reason, ReclaimPolicy, Reclaimer, RECLAIM_PROPERTY};
 use dsa_guest_channeld::router::{Peer, Router};
 use dsa_protocol::control::envelope::Body;
-use dsa_protocol::control::{Envelope, ScreenState, TaskRemoved, TaskUpdated};
+use dsa_protocol::control::{Envelope, HostMemory, ScreenState, TaskRemoved, TaskUpdated};
 
 const MIB: u64 = 1024;
 
@@ -252,4 +252,41 @@ fn nfr2_memory_pressure_is_read_from_the_some_line_and_unreadable_counts_as_busy
     assert!(!memory_pressure(calm, 5.0));
     assert!(memory_pressure(busy, 5.0));
     assert!(memory_pressure("", 5.0));
+}
+
+#[test]
+fn nfr2_a_host_short_of_memory_gets_it_back_with_tasks_open_and_again_while_short() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    let cache = memory(2000, 600);
+    // Tasks are open and cache is not most of memory: nothing is due on the guest's account.
+    assert_eq!(reclaimer.decide_under(secs(0), 2, &cache, true), None);
+    reclaimer.host_short(true);
+    assert_eq!(
+        reclaimer.decide_under(secs(30), 2, &cache, true),
+        Some(Reason::HostShort)
+    );
+    // Not again at once, but again after the gap while the host stays short.
+    assert_eq!(reclaimer.decide_under(secs(60), 2, &cache, true), None);
+    assert_eq!(
+        reclaimer.decide_under(secs(90), 2, &cache, true),
+        Some(Reason::HostShort)
+    );
+    // Once the host is no longer short, the guest keeps what it has.
+    reclaimer.host_short(false);
+    assert_eq!(reclaimer.decide_under(secs(200), 2, &cache, true), None);
+}
+
+#[test]
+fn nfr2_the_router_remembers_whether_the_host_is_short_of_memory() {
+    let (to_host, _host) = mpsc::channel();
+    let router = Router::new(to_host, |_| Err("no agent here".to_string()));
+    assert!(!router.host_memory_low());
+    router.from_host(&frame(Body::HostMemory(HostMemory { low: true })));
+    assert!(router.host_memory_low());
+    router.from_host(&frame(Body::HostMemory(HostMemory { low: false })));
+    assert!(!router.host_memory_low());
+    // A host that connects again says so again if it still is.
+    router.from_host(&frame(Body::HostMemory(HostMemory { low: true })));
+    router.host_connected();
+    assert!(!router.host_memory_low());
 }

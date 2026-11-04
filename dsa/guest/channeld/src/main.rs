@@ -183,6 +183,7 @@ mod daemon {
                 }
             };
             let tasks = router.tasks_in_use();
+            reclaimer.host_short(router.host_memory_low());
             // Pressure stall information is optional in the kernel: unreadable counts as busy.
             let pressure = std::fs::read_to_string("/proc/pressure/memory")
                 .map(|text| memory_pressure(&text, 5.0))

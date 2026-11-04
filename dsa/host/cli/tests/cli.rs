@@ -665,6 +665,26 @@ fn fr17_dsa_settings_set_is_parsed() {
 }
 
 #[test]
+fn fr19_trace_switches_are_settings_dsa_reads_and_parses() {
+    use dsa_cli::Change;
+    assert_eq!(
+        parse(&args("settings set input-trace on")).unwrap().change,
+        Some(Change::InputTrace(true))
+    );
+    assert_eq!(
+        parse(&args("settings set resize-trace off"))
+            .unwrap()
+            .change,
+        Some(Change::ResizeTrace(false))
+    );
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let settings = json_of(&dsa(&endpoint, "settings --json"));
+    assert_eq!(settings["input_trace"], false);
+    assert_eq!(settings["resize_trace"], false);
+}
+
+#[test]
 fn fr17_dsa_status_json_reports_the_state_and_the_last_reason() {
     let ((listener, _, _), endpoint) = local_pair();
     let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
