@@ -221,7 +221,7 @@ jobs:
       - name: Verify gfxstream_backend.dll is packaged beside dsa-wm.exe
         shell: pwsh
         run: |
-          $msi = (Resolve-Path "dsa/target/installer/dsa-0.1.0.msi").Path
+          $msi = (Resolve-Path "dsa/target/installer/dsa-test-0.1.0.msi").Path
           Start-Process msiexec -Wait -ArgumentList "/a", "`"$msi`"", "/qn", "TARGETDIR=`"$PWD\msi-extracted`""
           $dll = Get-ChildItem -Recurse msi-extracted -Filter "gfxstream_backend.dll"
           if (-not $dll) {

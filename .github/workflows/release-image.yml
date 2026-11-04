@@ -548,6 +548,7 @@ jobs:
       contents: write
       pull-requests: read
       issues: read
+      actions: read
     env:
       GH_TOKEN: ${{ github.token }}
     defaults:
@@ -561,6 +562,18 @@ jobs:
           name: guest-kernel
           path: .scratch/kernel-out
 
+      # The host graphics renderer is built by the graphics workflow; the newest build that
+      # passed is the one shipped.
+      - name: Take the graphics library from the newest graphics build
+        run: |
+          $run = gh run list --repo ${{ github.repository }} --workflow test-graphics.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId'
+          if (-not $run) { throw "no graphics build has succeeded, so there is no gfxstream_backend.dll to ship" }
+          gh run download $run --repo ${{ github.repository }} --name host-gfxstream-windows --dir .scratch\host-gfxstream
+          if ($LASTEXITCODE -ne 0) { throw "downloading host-gfxstream-windows from run $run failed" }
+          $dll = Get-ChildItem -Recurse -File .scratch\host-gfxstream -Filter gfxstream_backend.dll | Select-Object -First 1
+          if (-not $dll -or $dll.Length -eq 0) { throw "run $run has no usable gfxstream_backend.dll" }
+          "GFXSTREAM_DLL=$($dll.FullName)" >> $env:GITHUB_ENV
+
       - name: Install WiX 5
         run: dotnet tool install --global wix --version 5.0.2
 
@@ -568,7 +581,7 @@ jobs:
       - name: Build the package and setup.exe
         run: >
           dsa/host/platform/windows/installer/build.ps1 -Version ${{ inputs.installer_version }}
-          -Kernel .scratch/kernel-out/bzImage
+          -Kernel .scratch/kernel-out/bzImage -GfxstreamBackend $env:GFXSTREAM_DLL
           -ListUrl https://github.com/${{ github.repository }}/releases/download/images/images.json
           -TrustedKey ${{ needs.list.outputs.public_key || needs.published.outputs.public_key }}
           -AndroidMajor ${{ needs.list.outputs.newest_major || needs.published.outputs.newest_major }}

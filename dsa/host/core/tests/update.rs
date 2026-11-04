@@ -382,3 +382,100 @@ fn fr14_an_image_that_failed_under_another_dsa_build_is_tried_again() {
     let next = ImageStore::open_as(&root, &first, "dsa-hostd 0.1.2").unwrap();
     assert!(next.state().unwrap().failed.is_empty());
 }
+
+/// An image folder made the way make-image.py lays one out, with a real VHDX signature when
+/// `real` is set and a stand-in's text otherwise.
+fn put_image(root: &Path, version: &str, major: u32, build: u64, real: bool) {
+    let dir = root.join("images").join(version);
+    std::fs::create_dir_all(&dir).unwrap();
+    let disk: &[u8] = if real {
+        b"vhdxfile and the rest of a disk"
+    } else {
+        b"a disk"
+    };
+    std::fs::write(dir.join("disk.vhdx"), disk).unwrap();
+    std::fs::write(dir.join("initrd.img"), b"a ramdisk").unwrap();
+    let manifest = serde_json::json!({
+        "version": version,
+        "android_major": major,
+        "build": build,
+        "files": {
+            "disk.vhdx": {"size": disk.len()},
+            "initrd.img": {"size": 9},
+        },
+    });
+    std::fs::write(dir.join("image.json"), manifest.to_string()).unwrap();
+}
+
+#[test]
+fn fr14_an_image_whose_disk_is_not_a_disk_is_not_usable() {
+    use dsa_host_core::update::store::image_is_usable;
+    let first = installed("16.0.1", 16, 1);
+    let (_store, root) = fresh_store(&first);
+    put_image(&root, "16.0.2", 16, 2, true);
+    put_image(&root, "17.0.0-1", 17, 1, false);
+    assert!(image_is_usable(&root.join("images").join("16.0.2")));
+    assert!(!image_is_usable(&root.join("images").join("17.0.0-1")));
+    assert!(!image_is_usable(&root.join("images").join("missing")));
+    // A file shorter than image.json says is a broken copy.
+    std::fs::write(
+        root.join("images").join("16.0.2").join("initrd.img"),
+        b"short",
+    )
+    .unwrap();
+    assert!(!image_is_usable(&root.join("images").join("16.0.2")));
+}
+
+#[test]
+fn fr14_a_current_image_that_cannot_boot_falls_back_to_a_usable_one() {
+    use dsa_host_core::update::store::Recovery;
+    let first = installed("none", 0, 0);
+    let (store, root) = fresh_store(&first);
+    put_image(&root, "16.0.2", 16, 2, true);
+    put_image(&root, "16.0.3", 16, 3, true);
+    put_image(&root, "17.0.0-1", 17, 1, false);
+    let mut state = store.state().unwrap();
+    state.current = installed("17.0.0-1", 17, 1);
+    std::fs::write(root.join("state.json"), serde_json::to_vec(&state).unwrap()).unwrap();
+
+    let recovery = store.recover(&first).unwrap();
+    assert_eq!(
+        recovery,
+        Recovery::Moved {
+            broken: installed("17.0.0-1", 17, 1),
+            current: installed("16.0.3", 16, 3),
+        }
+    );
+    assert_eq!(store.state().unwrap().current, installed("16.0.3", 16, 3));
+    assert_eq!(store.recover(&first).unwrap(), Recovery::Usable);
+}
+
+#[test]
+fn fr14_with_no_usable_image_the_installed_image_is_current_again() {
+    use dsa_host_core::update::store::Recovery;
+    // The real package bundles no image: the service then downloads its first one.
+    let first = installed("none", 0, 0);
+    let (store, root) = fresh_store(&first);
+    put_image(&root, "17.0.0-1", 17, 1, false);
+    let mut state = store.state().unwrap();
+    state.current = installed("17.0.0-1", 17, 1);
+    state.on_trial = true;
+    std::fs::write(root.join("state.json"), serde_json::to_vec(&state).unwrap()).unwrap();
+
+    let recovery = store.recover(&first).unwrap();
+    assert_eq!(
+        recovery,
+        Recovery::Moved {
+            broken: installed("17.0.0-1", 17, 1),
+            current: first.clone(),
+        }
+    );
+    let state = store.state().unwrap();
+    assert_eq!(state.current, first);
+    assert!(!state.on_trial);
+    // Nothing better than the installed image itself: it stays as it is.
+    assert_eq!(
+        store.recover(&first).unwrap(),
+        Recovery::NothingBetter { broken: first }
+    );
+}
