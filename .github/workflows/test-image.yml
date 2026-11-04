@@ -327,17 +327,17 @@ jobs:
         shell: bash {0}
         run: |
           zip=$(echo .scratch/aosp-inputs/*/*target_files*.zip)
-          unzip -l "$zip" | grep -Ei 'power|health|c2|codec|media|omx|stagefright|apex/' | grep -v 'SYSTEM/app\|framework/oat' | awk '{print $4}' | head -400
+          unzip -Z1 "$zip" | grep -E '^(VENDOR|ODM|VENDOR_BOOT)/' | grep -Evi 'firmware|\.ko$|/lib/modules' > names.txt
+          grep -Ei 'power|health|c2|codec|media|omx|apex|vintf|init/' names.txt
           mkdir x; cd x
-          unzip -q "$zip" 'VENDOR/etc/vintf/*' 'VENDOR/etc/init/*' 'VENDOR/etc/media*' 'VENDOR/etc/selinux/*' 'SYSTEM/etc/vintf/*' 'META/*filesystem_config.txt' 'VENDOR/apex/*' 2>/dev/null
-          for f in VENDOR/etc/vintf/manifest.xml VENDOR/etc/vintf/manifest/*; do echo "== $f"; cat "$f"; done 2>/dev/null | grep -i -B3 -A6 'power\|health\|media\|c2' | head -200
-          for f in VENDOR/etc/init/*; do echo "== $f"; done
-          grep -il 'power\|health\|media\|codec' VENDOR/etc/init/* | while read f; do echo "== $f"; cat "$f"; done
-          ls -la VENDOR/etc/media* ; for f in VENDOR/etc/media_codecs*.xml; do echo "== $f"; cat "$f"; done
+          for pat in 'VENDOR/etc/vintf/*' 'VENDOR/etc/init/*' 'VENDOR/etc/media*' 'VENDOR/etc/selinux/*' 'SYSTEM/etc/vintf/*' 'VENDOR/apex/*'; do unzip -q -o "../$zip" "$pat" || true; done
+          find . -type f | sort
+          for f in VENDOR/etc/vintf/manifest.xml VENDOR/etc/vintf/manifest/*; do echo "== $f"; cat "$f"; done
+          for f in $(grep -il 'power\|health\|media\|codec' VENDOR/etc/init/*); do echo "== $f"; cat "$f"; done
+          for f in VENDOR/etc/media_codecs*.xml; do echo "== $f"; cat "$f"; done
           grep -i 'power\|health\|c2\|codec\|media' VENDOR/etc/selinux/vendor_file_contexts
-          grep -i 'power\|health\|media\|c2' VENDOR/etc/selinux/vendor_service_contexts VENDOR/etc/selinux/*hwservice* 2>/dev/null
-          ls VENDOR/apex
-          sudo apt-get install -y -qq android-sdk-libsparse-utils e2fsprogs >/dev/null 2>&1 || true
-          for a in VENDOR/apex/*power* VENDOR/apex/*health* VENDOR/apex/*media* VENDOR/apex/*codec*; do [ -f "$a" ] || continue; echo "== $a"; mkdir -p ap; unzip -o -q "$a" -d ap/$(basename $a); ls -R ap/$(basename $a) | head -20; done
-          grep -i 'health\|power\|media\|c2' SYSTEM/etc/vintf/compatibility_matrix*.xml | head -60
-          for f in SYSTEM/etc/vintf/compatibility_matrix.*.xml; do echo "== $f"; grep -A4 -i 'power\|health\|media.c2' "$f"; done | head -200
+          grep -ri 'power\|health\|media\|c2' VENDOR/etc/selinux/*service_contexts
+          for a in VENDOR/apex/*; do echo "== $a"; unzip -l "$a"; mkdir -p ap; unzip -o -q "$a" apex_manifest.pb apex_payload.img -d "ap/${a##*/}" || true; done
+          for f in SYSTEM/etc/vintf/compatibility_matrix.*.xml; do echo "== $f"; grep -B2 -A8 -i 'power<\|health<\|media.c2' "$f"; done
+          cat SYSTEM/etc/vintf/manifest/manifest_media_c2_software.xml
+          for a in ap/*power* ap/*health*; do [ -f "$a/apex_payload.img" ] || continue; echo "== $a"; debugfs -R 'ls -l -p /' "$a/apex_payload.img"; for d in bin bin/hw etc etc/init etc/vintf; do debugfs -R "ls -p /$d" "$a/apex_payload.img" 2>/dev/null; done; for f in $(debugfs -R 'ls -p /etc' "$a/apex_payload.img" 2>/dev/null | awk -F/ '$6 ~ /\.(rc|xml)$/ {print $6}'); do debugfs -R "cat /etc/$f" "$a/apex_payload.img"; done; done
