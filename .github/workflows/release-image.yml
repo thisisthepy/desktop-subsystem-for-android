@@ -164,6 +164,32 @@ jobs:
           path: .scratch/build-hwcomposer/dsa-hwcomposer
           if-no-files-found: error
 
+  codec2:
+    name: Build the guest codec HAL
+    if: inputs.rebuild_images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+
+      # aidl comes from the runner's Android SDK build-tools.
+      - name: Build dsa-codec2 for the guest
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: bash dsa/guest/codec2/build.sh .scratch .scratch/build-codec2
+
+      - name: Keep the codec HAL
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-codec2
+          path: .scratch/build-codec2/dsa-codec2
+          if-no-files-found: error
+
   power-hal:
     name: Build the guest power and health HALs
     if: inputs.rebuild_images
@@ -223,7 +249,7 @@ jobs:
 
   image:
     name: Make and publish the guest image (ubuntu-latest, Android ${{ matrix.android }})
-    needs: [kernel, guest-graphics, channeld, hwcomposer, power-hal, agent]
+    needs: [kernel, guest-graphics, channeld, hwcomposer, power-hal, codec2, agent]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
@@ -287,6 +313,12 @@ jobs:
           name: guest-power-hal
           path: .scratch/power-hal
 
+      - name: Download the guest codec HAL
+        uses: actions/download-artifact@v4
+        with:
+          name: guest-codec2
+          path: .scratch/codec2
+
       - name: Download the guest agent
         uses: actions/download-artifact@v4
         with:
@@ -322,6 +354,10 @@ jobs:
         run: |
           uv run dsa/graphics/check-guest-driver.py --executable .scratch/hwcomposer/dsa-hwcomposer .scratch/aosp-inputs/*/*target_files*.zip
 
+      - name: Check the codec HAL starts on the image
+        run: |
+          uv run dsa/graphics/check-guest-driver.py --executable .scratch/codec2/dsa-codec2 .scratch/aosp-inputs/*/*target_files*.zip
+
       - name: Check the power and health HALs start on the image
         run: |
           for hal in dsa-power dsa-health; do
@@ -335,6 +371,7 @@ jobs:
           --graphics-dir .scratch/guest-graphics
           --channeld .scratch/channeld/dsa-channeld
           --hwcomposer .scratch/hwcomposer/dsa-hwcomposer
+          --codec2 .scratch/codec2/dsa-codec2
           --power-hal .scratch/power-hal
           --agent .scratch/agent/DsaAgent.apk
           --aapt2 .scratch/build-tools/aapt2

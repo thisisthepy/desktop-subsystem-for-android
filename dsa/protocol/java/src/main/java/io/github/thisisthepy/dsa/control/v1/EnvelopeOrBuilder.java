@@ -722,5 +722,93 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult getAccessibilityActionResult();
 
+  /**
+   * <code>.dsa.control.v1.VideoCapabilities video_capabilities = 120;</code>
+   * @return Whether the videoCapabilities field is set.
+   */
+  boolean hasVideoCapabilities();
+  /**
+   * <code>.dsa.control.v1.VideoCapabilities video_capabilities = 120;</code>
+   * @return The videoCapabilities.
+   */
+  io.github.thisisthepy.dsa.control.v1.VideoCapabilities getVideoCapabilities();
+
+  /**
+   * <code>.dsa.control.v1.VideoDecoderOpen video_decoder_open = 121;</code>
+   * @return Whether the videoDecoderOpen field is set.
+   */
+  boolean hasVideoDecoderOpen();
+  /**
+   * <code>.dsa.control.v1.VideoDecoderOpen video_decoder_open = 121;</code>
+   * @return The videoDecoderOpen.
+   */
+  io.github.thisisthepy.dsa.control.v1.VideoDecoderOpen getVideoDecoderOpen();
+
+  /**
+   * <code>.dsa.control.v1.VideoDecoderOpened video_decoder_opened = 122;</code>
+   * @return Whether the videoDecoderOpened field is set.
+   */
+  boolean hasVideoDecoderOpened();
+  /**
+   * <code>.dsa.control.v1.VideoDecoderOpened video_decoder_opened = 122;</code>
+   * @return The videoDecoderOpened.
+   */
+  io.github.thisisthepy.dsa.control.v1.VideoDecoderOpened getVideoDecoderOpened();
+
+  /**
+   * <code>.dsa.control.v1.VideoPacket video_packet = 123;</code>
+   * @return Whether the videoPacket field is set.
+   */
+  boolean hasVideoPacket();
+  /**
+   * <code>.dsa.control.v1.VideoPacket video_packet = 123;</code>
+   * @return The videoPacket.
+   */
+  io.github.thisisthepy.dsa.control.v1.VideoPacket getVideoPacket();
+
+  /**
+   * <code>.dsa.control.v1.VideoFrame video_frame = 124;</code>
+   * @return Whether the videoFrame field is set.
+   */
+  boolean hasVideoFrame();
+  /**
+   * <code>.dsa.control.v1.VideoFrame video_frame = 124;</code>
+   * @return The videoFrame.
+   */
+  io.github.thisisthepy.dsa.control.v1.VideoFrame getVideoFrame();
+
+  /**
+   * <code>.dsa.control.v1.VideoFlush video_flush = 125;</code>
+   * @return Whether the videoFlush field is set.
+   */
+  boolean hasVideoFlush();
+  /**
+   * <code>.dsa.control.v1.VideoFlush video_flush = 125;</code>
+   * @return The videoFlush.
+   */
+  io.github.thisisthepy.dsa.control.v1.VideoFlush getVideoFlush();
+
+  /**
+   * <code>.dsa.control.v1.VideoFlushed video_flushed = 126;</code>
+   * @return Whether the videoFlushed field is set.
+   */
+  boolean hasVideoFlushed();
+  /**
+   * <code>.dsa.control.v1.VideoFlushed video_flushed = 126;</code>
+   * @return The videoFlushed.
+   */
+  io.github.thisisthepy.dsa.control.v1.VideoFlushed getVideoFlushed();
+
+  /**
+   * <code>.dsa.control.v1.VideoError video_error = 127;</code>
+   * @return Whether the videoError field is set.
+   */
+  boolean hasVideoError();
+  /**
+   * <code>.dsa.control.v1.VideoError video_error = 127;</code>
+   * @return The videoError.
+   */
+  io.github.thisisthepy.dsa.control.v1.VideoError getVideoError();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

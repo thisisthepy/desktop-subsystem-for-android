@@ -102,6 +102,37 @@ public final class VectorsTest {
         cases.put("task_removed", Envelope.newBuilder()
                 .setTaskRemoved(TaskRemoved.newBuilder().setTaskId(42))
                 .build());
+        cases.put("video_capabilities", Envelope.newBuilder()
+                .setVideoCapabilities(VideoCapabilities.newBuilder()
+                        .addCodecs(VideoCodecSupport.newBuilder()
+                                .setCodec(VideoCodec.VIDEO_CODEC_H264)
+                                .setMaxWidth(4096)
+                                .setMaxHeight(2304)))
+                .build());
+        cases.put("video_decoder_open", Envelope.newBuilder()
+                .setVideoDecoderOpen(VideoDecoderOpen.newBuilder()
+                        .setCodec(VideoCodec.VIDEO_CODEC_H264)
+                        .setWidth(1280)
+                        .setHeight(720))
+                .build());
+        cases.put("video_flush", Envelope.newBuilder()
+                .setVideoFlush(VideoFlush.newBuilder())
+                .build());
+        cases.put("video_frame", Envelope.newBuilder()
+                .setVideoFrame(VideoFrame.newBuilder()
+                        .setFrameIndex(3)
+                        .setTimestampUs(100000)
+                        .setWidth(2)
+                        .setHeight(2)
+                        .setStride(2)
+                        .setNv12(ByteString.copyFrom(new byte[] {0x10, 0x10, 0x10, 0x10, (byte) 0x80, (byte) 0x80})))
+                .build());
+        cases.put("video_packet", Envelope.newBuilder()
+                .setVideoPacket(VideoPacket.newBuilder()
+                        .setFrameIndex(3)
+                        .setTimestampUs(100000)
+                        .setData(ByteString.copyFrom(new byte[] {0, 0, 0, 1, 0x65})))
+                .build());
         cases.put("task_frames", Envelope.newBuilder()
                 .setTaskFrames(TaskFrames.newBuilder().setTaskId(42).setDisplayId(3))
                 .build());

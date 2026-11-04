@@ -722,8 +722,9 @@ def edit_settings_apk(data, name):
     return out.getvalue()
 
 
-def edit_props(text):
-    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS, **FRP_PROPS}
+def edit_props(text, codec2=False):
+    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS, **FRP_PROPS,
+                      **(CODEC2_PROPS if codec2 else {})}
     out = []
     for line in text.splitlines():
         key = line.split("=", 1)[0]
@@ -822,6 +823,25 @@ CUTTLEFISH_POWER_APEXES = [
     "com.android.hardware.power",
     "com.google.cf.health",
 ]
+# DSA's Codec 2.0 HAL (dsa/guest/codec2), whose video decoders decode on the host's GPU. It
+# runs in the vendor codec domain (mediacodec); codec2.cil lets it reach the host's video port
+# and map the buffers it writes pictures into. Its decoders are listed in
+# media_codecs_c2.xml, which the framework reads after the vendor's media_codecs.xml.
+CODEC2_DIR = REPO / "dsa/guest/codec2"
+CODEC2_FILES = {
+    "VENDOR/bin/hw/dsa-codec2": None,
+    "VENDOR/etc/init/dsa-codec2.rc": CODEC2_DIR / "dsa-codec2.rc",
+    "VENDOR/etc/vintf/manifest/dsa-codec2.xml": CODEC2_DIR / "dsa-codec2.xml",
+    "VENDOR/etc/media_codecs_c2.xml": CODEC2_DIR / "media_codecs_c2.xml",
+}
+CODEC2_CONTEXT = "/vendor/bin/hw/dsa-codec2 u:object_r:mediacodec_exec:s0"
+CODEC2_INSTANCE = "android.hardware.media.c2.IComponentStore/default"
+CODEC2_SERVICE_CONTEXT = f"{CODEC2_INSTANCE} u:object_r:hal_codec2_service:s0"
+# The framework's codec buffers come from plain allocations, passed as handles, instead of
+# buffer pools: the guest's codec HAL takes its input as handles. Only the output to a
+# surface keeps its pool (BUFFERQUEUE, 1 << 18), which reaches the HAL as the surface's
+# allocator. The guest's software decoders take handles as well.
+CODEC2_PROPS = {"debug.stagefright.c2-poolmask": str(1 << 18)}
 # The freeform display every task window lives on, as the hwcomposer reads it from
 # ro.boot.dsa.*. The host shows windows, not this display, so its size bounds a window's.
 # These are defaults: the host replaces the width and height from the user's monitors.
@@ -904,7 +924,7 @@ AGENT_FS_CONFIG = [
 CONSOLE_UEVENTD_LINE = "/dev/ttyS0 0660 system logd"
 
 
-def update_vendor_file_contexts(fc_text, channeld=False, hwcomposer=False, power=False):
+def update_vendor_file_contexts(fc_text, channeld=False, hwcomposer=False, power=False, codec2=False):
     """Adds same_process_hal_file contexts for guest graphics libraries if not present, and
     opens the DRM cards to every graphics client.
 
@@ -929,6 +949,8 @@ def update_vendor_file_contexts(fc_text, channeld=False, hwcomposer=False, power
         entries.append((r"/vendor/bin/hw/dsa-hwcomposer", HWCOMPOSER_CONTEXT))
     if power:
         entries += POWER_CONTEXTS
+    if codec2:
+        entries.append((r"/vendor/bin/hw/dsa-codec2", CODEC2_CONTEXT))
     # Usually there already, as /(vendor|system/vendor)/overlay(/.*)?.
     entries.append(("overlay(/.*)?", VENDOR_OVERLAY_CONTEXT))
     for pattern, rule in entries:
@@ -937,11 +959,14 @@ def update_vendor_file_contexts(fc_text, channeld=False, hwcomposer=False, power
     return "\n".join(lines) + ("\n" if lines else "")
 
 
-def update_vendor_service_contexts(text):
-    """Labels the daemon's binder service in vendor_service_contexts if it is not yet."""
+def update_vendor_service_contexts(text, codec2=False, channeld=True):
+    """Labels the daemon's binder service in vendor_service_contexts if it is not yet, and the
+    codec HAL's when `codec2` is set."""
     lines = text.splitlines()
-    if not any(line.split()[:1] == [CHANNEL_INSTANCE] for line in lines):
+    if channeld and not any(line.split()[:1] == [CHANNEL_INSTANCE] for line in lines):
         lines.append(CHANNEL_SERVICE_CONTEXT)
+    if codec2 and not any(line.split()[:1] == [CODEC2_INSTANCE] for line in lines):
+        lines.append(CODEC2_SERVICE_CONTEXT)
     return "\n".join(lines) + "\n"
 
 
@@ -993,7 +1018,8 @@ def add_filesystem_config(fs_config_text, rules):
     return "\n".join(lines) + ("\n" if lines else "")
 
 
-def update_vendor_filesystem_config(fs_config_text, channeld=False, hwcomposer=False, power=False):
+def update_vendor_filesystem_config(fs_config_text, channeld=False, hwcomposer=False, power=False,
+                                    codec2=False):
     """Adds filesystem configuration entries for the files DSA adds to vendor if not present."""
     lines = fs_config_text.splitlines()
     entries = [
@@ -1022,11 +1048,10 @@ def update_vendor_filesystem_config(fs_config_text, channeld=False, hwcomposer=F
             ("vendor/etc/vintf/manifest/dsa-hwcomposer.xml",
              "vendor/etc/vintf/manifest/dsa-hwcomposer.xml 0 0 644 capabilities=0x0"),
         ]
-    if power:
-        for name in POWER_FILES:
-            path = name.lower()
-            mode = "0 2000 755" if "/bin/" in path else "0 0 644"
-            entries.append((path, f"{path} {mode} capabilities=0x0"))
+    for name in (list(POWER_FILES) if power else []) + (list(CODEC2_FILES) if codec2 else []):
+        path = name.lower()
+        mode = "0 2000 755" if "/bin/" in path else "0 0 644"
+        entries.append((path, f"{path} {mode} capabilities=0x0"))
     for path, rule in entries:
         if not any(line.startswith(path + " ") for line in lines):
             lines.append(rule)
@@ -1040,6 +1065,7 @@ GFXSTREAM_ALLOWED_PERMS = {
 SEPOLICY_FRAGMENT = HERE / "sepolicy/graphics-vsock.cil"
 CHANNELD_POLICY = HERE / "sepolicy/channeld.cil"
 POWER_POLICY = HERE / "sepolicy/power.cil"
+CODEC2_POLICY = HERE / "sepolicy/codec2.cil"
 AGENT_POLICY = HERE / "sepolicy/agent.cil"
 MEMORY_POLICY = HERE / "sepolicy/memory.cil"
 
@@ -1172,13 +1198,15 @@ def recompile_precompiled_sepolicy(otatools, cil_map, vendor_version, genfs_vers
 
 
 def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=None, channeld=None,
-           agent=None, hwcomposer=None, framework_overlay=None, power_hal=None):
+           agent=None, hwcomposer=None, framework_overlay=None, power_hal=None,
+           codec2=None):
     """Copies target_files, removing the shell apps and the published kernel modules,
     switching to a user build and adding the Hyper-V mount table, the control channel
     daemon when `channeld` names one, the agent when `agent` names its APK, DSA's
     composer in place of Cuttlefish's when `hwcomposer` names one, the framework overlay
     when `framework_overlay` names its APK, and DSA's power and health HALs in place of
-    Cuttlefish's when `power_hal` names the folder that holds dsa-power and dsa-health."""
+    Cuttlefish's when `power_hal` names the folder that holds dsa-power and dsa-health, and
+    DSA's codec HAL, whose video decoders decode on the host's GPU, when `codec2` names it."""
     fstab = (HERE / "fstab.dsa").read_bytes()
     console_logcat = (HERE / "console-logcat.rc").read_bytes()
     graphics_payload = Path(graphics_library).read_bytes() if graphics_library else None
@@ -1198,6 +1226,13 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             for name, source in POWER_FILES.items()
         }
     has_power = power_payloads is not None
+    codec2_payloads = None
+    if codec2 is not None:
+        codec2_payloads = {
+            name: Path(codec2).read_bytes() if source is None else source.read_bytes()
+            for name, source in CODEC2_FILES.items()
+        }
+    has_codec2 = codec2_payloads is not None
     replaced_graphics_payload = False
     replaced_vulkan_payload = False
     kept_modules = re.compile(r"^(VENDOR_BOOT/RAMDISK|VENDOR_DLKM|SYSTEM_DLKM)/lib/modules/.*\.ko$")
@@ -1231,6 +1266,9 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             if has_power:
                 # The power and health HALs reach the daemon.
                 plat_patched += "\n" + POWER_POLICY.read_text()
+            if has_codec2:
+                # The codec HAL reaches the host's video port.
+                plat_patched += "\n" + CODEC2_POLICY.read_text()
             if agent_payload is not None:
                 # What the agent needs to put the guest into Doze and set its battery.
                 plat_patched += "\n" + AGENT_POLICY.read_text()
@@ -1265,7 +1303,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             text = zin.read(name).decode() if name in names else ""
             if name == "VENDOR/etc/selinux/vendor_file_contexts":
                 text = update_vendor_file_contexts(text, channeld_payload is not None, has_hwcomposer,
-                                                   has_power)
+                                                   has_power, codec2=has_codec2)
             file_contexts.append(text if text.endswith("\n") or not text else text + "\n")
         compiled_file_contexts = compile_file_contexts(otatools, "".join(file_contexts))
 
@@ -1304,7 +1342,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             else:
                 data = zin.read(name)
                 if name in PROP_FILES:
-                    data = edit_props(data.decode()).encode()
+                    data = edit_props(data.decode(), codec2=has_codec2).encode()
                 elif name == WIFI_RC:
                     data = edit_wifi_rc(data.decode()).encode()
                 elif name.endswith(SETTINGS_APK):
@@ -1342,7 +1380,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                             text += f"{prefix}fstab.dsa 0 0 644 capabilities=0x0\n"
                     if name == "META/vendor_filesystem_config.txt":
                         text = update_vendor_filesystem_config(text, channeld_payload is not None, has_hwcomposer,
-                                                               has_power)
+                                                               has_power, codec2=has_codec2)
                         if overlay_payload is not None:
                             text = add_filesystem_config(text, FRAMEWORK_OVERLAY_FS_CONFIG)
                     data = text.encode()
@@ -1350,9 +1388,10 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     data = data.rstrip(b"\n") + b"\n" + CONSOLE_UEVENTD_LINE.encode() + b"\n"
                 elif name in ("VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"):
                     data = update_vendor_file_contexts(data.decode(), channeld_payload is not None,
-                                                       has_hwcomposer, has_power).encode()
-                elif name == VENDOR_SERVICE_CONTEXTS and channeld_payload is not None:
-                    data = update_vendor_service_contexts(data.decode()).encode()
+                                                       has_hwcomposer, has_power, codec2=has_codec2).encode()
+                elif name == VENDOR_SERVICE_CONTEXTS and (channeld_payload is not None or has_codec2):
+                    data = update_vendor_service_contexts(
+                        data.decode(), codec2=has_codec2, channeld=channeld_payload is not None).encode()
                 elif name == VENDOR_PROPERTY_CONTEXTS:
                     data = update_vendor_property_contexts(data.decode()).encode()
             info.compress_type = zipfile.ZIP_STORED
@@ -1376,8 +1415,12 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             zout.writestr(CHANNELD_BINARY, channeld_payload)
             zout.writestr(CHANNELD_RC, (HERE / "dsa-channeld.rc").read_bytes())
             zout.writestr(CHANNEL_MANIFEST, (HERE / "dsa-channel-manifest.xml").read_bytes())
-            if VENDOR_SERVICE_CONTEXTS not in names:
-                zout.writestr(VENDOR_SERVICE_CONTEXTS, update_vendor_service_contexts(""))
+        if has_codec2:
+            for name, payload in codec2_payloads.items():
+                zout.writestr(name, payload)
+        if (channeld_payload is not None or has_codec2) and VENDOR_SERVICE_CONTEXTS not in names:
+            zout.writestr(VENDOR_SERVICE_CONTEXTS, update_vendor_service_contexts(
+                "", codec2=has_codec2, channeld=channeld_payload is not None))
         if overlay_payload is not None:
             zout.writestr(FRAMEWORK_OVERLAY_APK, overlay_payload)
         if agent_payload is not None:
@@ -1389,7 +1432,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         if "VENDOR/etc/selinux/vendor_file_contexts" not in names:
             zout.writestr(
                 "VENDOR/etc/selinux/vendor_file_contexts",
-                update_vendor_file_contexts("", channeld_payload is not None, has_hwcomposer, has_power).encode(),
+                update_vendor_file_contexts("", channeld_payload is not None, has_hwcomposer, has_power,
+                                            codec2=has_codec2).encode(),
             )
     if graphics_payload is not None and not replaced_graphics_payload:
         dest.unlink(missing_ok=True)
@@ -1632,6 +1676,9 @@ def main():
     parser.add_argument("--hwcomposer", type=Path,
                         help="DSA's composer HAL (dsa-hwcomposer) built for the guest; it replaces "
                              "Cuttlefish's, and sends the host each task's frames")
+    parser.add_argument("--codec2", type=Path,
+                        help="DSA's codec HAL (dsa-codec2) built for the guest; its video decoders "
+                             "decode on the host's GPU")
     parser.add_argument("--power-hal", type=Path,
                         help="a folder holding DSA's power and health HALs (dsa-power, dsa-health) built "
                              "for the guest; they replace Cuttlefish's, take the guest's power hints to "
@@ -1691,7 +1738,8 @@ def main():
     modified = work / "modified.zip"
     modify(target_files, modified, graphics_library=graphics_library, vulkan_driver=vulkan_driver,
            otatools=otatools, channeld=args.channeld, agent=args.agent, hwcomposer=args.hwcomposer,
-           framework_overlay=framework_overlay, power_hal=args.power_hal)
+           framework_overlay=framework_overlay, power_hal=args.power_hal,
+           codec2=args.codec2)
 
     signed = work / "signed.zip"
     # It runs where AOSP's certificates sit at the paths apkcerts.txt names, so every path

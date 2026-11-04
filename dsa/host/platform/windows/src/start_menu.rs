@@ -39,10 +39,22 @@ use crate::compositor::log::{note, CompositorLogger};
 /// The longest AppUserModelID Windows takes, in characters.
 const MAX_APP_ID: usize = 128;
 
+/// What every app's AppUserModelID starts with. Microsoft asks for IDs of the form
+/// `CompanyName.ProductName.SubProduct`, so another vendor's IDs never collide with these:
+/// the company is thisisthepy, the product DSA, and the sub-product the app's package.
+pub const APP_ID_PREFIX: &str = "Thisisthepy.DSA.";
+
+/// What earlier versions started each app's AppUserModelID with. Their registry keys are
+/// removed on upgrade and uninstall.
+pub const OLD_APP_ID_PREFIX: &str = "DSA.";
+
 /// The AppUserModelID of `package`'s windows and Start menu shortcut. Every app has its own,
 /// so the taskbar never groups two apps together.
 pub fn app_user_model_id(package: &str) -> String {
-    format!("DSA.{package}").chars().take(MAX_APP_ID).collect()
+    format!("{APP_ID_PREFIX}{package}")
+        .chars()
+        .take(MAX_APP_ID)
+        .collect()
 }
 
 /// The folder of the user's Start menu programs: `%APPDATA%\Microsoft\Windows\Start

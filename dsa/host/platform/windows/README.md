@@ -175,7 +175,7 @@ after two minutes. `"keep_window_manager": false` turns this off.
   of the app that posted it, so it carries the app's name and icon and groups with its
   taskbar button. A new version of a notification replaces its toast, and a notification
   removed in Android removes its toast. Clicking a toast launches the
-  `dsa-notification:` protocol, which the window manager registers for the user to run
+  `io.github.thisisthepy.dsa-notification:` protocol, which the window manager registers for the user to run
   `dsa-wm.exe --notification <uri>`: that passes the click to the service and ends, and the
   app opens in Android, which leaves Doze first. Dismissing a toast dismisses the
   notification in Android too, unless the app keeps it.
@@ -292,7 +292,7 @@ installed beside the window manager:
   has a window host already, that one gets the app and this program ends, so an app never
   has two. If Android does not start, a message box says why. It writes its messages to
   `%LOCALAPPDATA%\DSA\logs\dsa-app-window.log`.
-- Every copy takes the app's own AppUserModelID, `DSA.<package>`, the one its Start menu
+- Every copy takes the app's own AppUserModelID, `Thisisthepy.DSA.<package>`, the one its Start menu
   shortcut carries, so the taskbar groups each app's windows on a button of its own with
   the app's icon, and pinning that button pins the shortcut.
 - Uninstalling DSA leaves the copies in the user's profile, like the user's Android disk,

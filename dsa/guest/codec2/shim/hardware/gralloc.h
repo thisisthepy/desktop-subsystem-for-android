@@ -1,0 +1,17 @@
+// Copyright 2026 The DSA Authors
+// SPDX-License-Identifier: Apache-2.0
+//
+// The gralloc usage bits the platform's Codec 2.0 headers name, as gralloc defines them.
+
+#pragma once
+
+enum {
+    GRALLOC_USAGE_SW_READ_OFTEN = 0x00000003U,
+    GRALLOC_USAGE_SW_WRITE_OFTEN = 0x00000030U,
+    GRALLOC_USAGE_HW_TEXTURE = 0x00000100U,
+    GRALLOC_USAGE_HW_RENDER = 0x00000200U,
+    GRALLOC_USAGE_HW_COMPOSER = 0x00000800U,
+    GRALLOC_USAGE_PROTECTED = 0x00004000U,
+    GRALLOC_USAGE_HW_VIDEO_ENCODER = 0x00010000U,
+    GRALLOC_USAGE_RENDERSCRIPT = 0x00100000U,
+};

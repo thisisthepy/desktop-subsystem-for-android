@@ -111,7 +111,7 @@ fn fr7_each_installed_app_gets_a_shortcut_that_opens_it_under_its_own_app_id() {
         format!("{PACKAGE_ARGUMENT} com.example.clock")
     );
     assert_eq!(clock.icon, (program.clone(), 0));
-    assert_eq!(clock.app_user_model_id, "DSA.com.example.clock");
+    assert_eq!(clock.app_user_model_id, "Thisisthepy.DSA.com.example.clock");
     assert_eq!(
         clock.app_user_model_id,
         app_user_model_id("com.example.clock")
@@ -192,7 +192,7 @@ fn fr7_the_app_window_program_takes_its_apps_own_id() {
     use_app_user_model_id("com.example.clock").unwrap();
     assert_eq!(
         this_process_app_user_model_id().as_deref(),
-        Some("DSA.com.example.clock")
+        Some("Thisisthepy.DSA.com.example.clock")
     );
 }
 
