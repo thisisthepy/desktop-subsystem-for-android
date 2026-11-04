@@ -710,6 +710,7 @@ fn settings_service(listener: Box<dyn dsa_transport::local::LocalListener>) -> R
                 log_dir: Some("C:\\ProgramData\\DSA\\logs".into()),
                 program_updates_available: true,
                 image_updates_available: true,
+                android_version: Some("17.0.0-16373615-7".into()),
             },
         );
     RunningService::start_service(listener, service)
@@ -794,6 +795,7 @@ fn fr17_dsa_settings_reads_and_changes_the_settings_through_the_service() {
     assert_eq!(settings["clipboard"], true);
     assert_eq!(settings["program_updates"], true);
     assert_eq!(settings["version"], "0.0.9");
+    assert_eq!(settings["android_version"], "17.0.0-16373615-7");
     assert_eq!(settings["log_dir"], "C:\\ProgramData\\DSA\\logs");
 
     let changed = json_of(&dsa(&endpoint, "settings set render-gpu Integrated --json"));
@@ -823,6 +825,11 @@ fn fr17_dsa_settings_reads_and_changes_the_settings_through_the_service() {
     );
     assert!(
         stdout(&text).contains("Freeze when idle: on"),
+        "{}",
+        stdout(&text)
+    );
+    assert!(
+        stdout(&text).contains("Android image: 17.0.0-16373615-7"),
         "{}",
         stdout(&text)
     );

@@ -5,7 +5,8 @@
 It fails when the shell apps are still there, when the build is still debuggable, when an
 app is not signed with one of the keys in the key folder, when the framework overlay or the
 trace script is missing, when the agent is missing or not signed with the platform key, when
-Settings still has the preferences or code that crash it without Bluetooth, when the files
+Settings still has the preferences or code that crash it without Bluetooth, when a system
+app users open is not compiled for the guest's boot image and its own dex, when the files
 do not match image.json, or when the ramdisk lacks the directories and links Android's first
 stage init needs.
 
@@ -122,6 +123,10 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
                 if left:
                     problems.append(f"{name}:{dex} still has the code in {', '.join(sorted(set(left)))} "
                                     "that crashes Settings without the Bluetooth adapter")
+    # The system apps users open, compiled when the image was made: each odex must be there,
+    # made for the APK's own (edited, signed) dex and the guest's boot image, or ART drops it
+    # and the app runs interpreted again.
+    problems += make_image.compiled_app_problems(z)
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
     if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:

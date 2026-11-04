@@ -939,6 +939,10 @@ pub struct Settings {
     /// On unless the user turns it off.
     #[prost(bool, tag = "9")]
     pub clipboard: bool,
+    /// The version of the Android image the caller's next start boots, such as
+    /// "17.0.0-16373615-7". Empty when the service does not know it. A client cannot change it.
+    #[prost(string, tag = "13")]
+    pub android_version: ::prost::alloc::string::String,
     /// Whether every DSA process writes the input trace (a click's path from the host to the app
     /// and back, on one clock) to its log. Off by default. It applies to the whole computer, so
     /// only an administrator may change it; a process reads it when it starts.
