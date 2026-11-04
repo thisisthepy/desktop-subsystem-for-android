@@ -1,6 +1,7 @@
 //! The guest's log stream and the diagnostics, through the session's public API and the
 //! local API, over the in-memory transport.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
@@ -16,6 +17,7 @@ use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{self, envelope::Body, Envelope, Role};
 use dsa_protocol::handshake::{guest_connect, local_hello};
 use dsa_protocol::{decode, encode};
+use dsa_transport::local::{MemoryLocalConnector, Peer};
 use dsa_transport::memory::{self, MemoryConnector};
 use dsa_transport::{Connection, Connector, TransportError};
 
@@ -304,7 +306,7 @@ impl GuestLauncher for Launcher {
 }
 
 struct Guest {
-    session: Session,
+    session: Arc<Session>,
     launcher: Launcher,
     control: Box<dyn Connection>,
     log_port: MemoryConnector,
@@ -314,7 +316,7 @@ fn running_guest() -> Guest {
     let (listener, mut connector) = memory::pair();
     let (log_listener, log_port) = memory::pair();
     let launcher = Launcher::default();
-    let session = Session::new(
+    let session = Arc::new(Session::new(
         launcher.clone(),
         Box::new(listener),
         ControlHandshake::new("dsa-host test", WAIT),
@@ -323,7 +325,7 @@ fn running_guest() -> Guest {
             stop_timeout: WAIT,
             ..SessionConfig::default()
         },
-    );
+    ));
     session.serve_log_port(Box::new(log_listener), "dsa-host test");
     session.start();
     let secret = launcher.secret();
@@ -577,4 +579,110 @@ S-1-5-21-1-1001: lifecycle: Android finished booting
 local API: refused a client
 "
     );
+}
+
+/// Connects to the local API as `user`, as the operating system would report the caller.
+struct AsUser(MemoryLocalConnector, &'static str);
+
+impl Connector for AsUser {
+    fn connect(&mut self, _timeout: Duration) -> Result<Box<dyn Connection>, TransportError> {
+        self.0.connect_as(Peer {
+            user: self.1.into(),
+            administrator: false,
+        })
+    }
+}
+
+/// The local API in front of two users' Androids.
+fn service_for(alice: &Guest, bob: &Guest) -> (MemoryLocalConnector, Arc<AtomicBool>) {
+    use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid};
+    let (alice_session, bob_session) = (Arc::clone(&alice.session), Arc::clone(&bob.session));
+    let androids = PerUser::new(move |user: &str| -> Result<Arc<dyn UserAndroid>, String> {
+        match user {
+            "alice" => Ok(alice_session.clone() as Arc<dyn UserAndroid>),
+            "bob" => Ok(bob_session.clone() as Arc<dyn UserAndroid>),
+            _ => Err("no such user".into()),
+        }
+    });
+    let service = Arc::new(HostApiService::new(Arc::new(androids), "test service"));
+    let (listener, connector) = dsa_transport::local::pair();
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&stop);
+    thread::spawn(move || service.serve(Box::new(listener), flag));
+    (connector, stop)
+}
+
+#[test]
+fn fr21_the_local_api_gives_each_caller_only_their_own_androids_log() {
+    use dsa_host_core::host_api::HostApiClient;
+    let mut alice = running_guest();
+    let mut bob = running_guest();
+    let (connector, stop) = service_for(&alice, &bob);
+    let client =
+        HostApiClient::connect(&mut AsUser(connector, "alice"), "dsa test", WAIT).unwrap();
+    let mut reader = client.watch_log(&LogFilter::default(), false).unwrap();
+    assert!(alice.next_stream().on);
+    // Bob's Android is never asked for its log.
+    if let Ok(frame) = bob.control.recv(Some(Duration::from_millis(300))) {
+        assert!(
+            !matches!(decode(&frame).unwrap().body, Some(Body::LogStream(_))),
+            "bob's Android was asked for its log"
+        );
+    }
+    let mut log = alice.connect_log();
+    send_records(&mut log, 0, &[entry(LogBuffer::Main, INFO, "T", "alice's")], false);
+    let deadline = Instant::now() + WAIT;
+    let got = loop {
+        assert!(Instant::now() < deadline, "no record came");
+        if let Some(batch) = reader.next(Duration::from_millis(100)).unwrap() {
+            if !batch.entries.is_empty() {
+                break batch.entries;
+            }
+        }
+    };
+    assert_eq!(got[0].message, "alice's");
+    // The reader leaving stops Android's log.
+    drop(reader);
+    assert!(!alice.next_stream().on);
+    stop.store(true, Ordering::Relaxed);
+}
+
+#[test]
+fn fr21_the_local_api_saves_the_diagnostics_as_one_zip() {
+    use dsa_host_core::host_api::HostApiClient;
+    let mut alice = running_guest();
+    let bob = running_guest();
+    let (connector, stop) = service_for(&alice, &bob);
+    let client =
+        HostApiClient::connect(&mut AsUser(connector, "alice"), "dsa test", WAIT).unwrap();
+    let saving = thread::spawn(move || {
+        let mut archive = Vec::new();
+        let mut reader = client.collect_diagnostics().unwrap();
+        reader.save(&mut archive, WAIT).unwrap();
+        archive
+    });
+    let request = alice.next(|body| match body {
+        Body::CollectDiagnostics(request) => Some(request),
+        _ => None,
+    });
+    let mut log = alice.connect_log();
+    for body in [
+        Body::DiagnosticsFile(control::DiagnosticsFile {
+            request_id: request.request_id,
+            name: "android/logcat.txt".into(),
+            data: b"a line\n".to_vec(),
+            last: true,
+        }),
+        Body::DiagnosticsDone(control::DiagnosticsDone {
+            request_id: request.request_id,
+            error: String::new(),
+        }),
+    ] {
+        log.send(&encode(&Envelope { body: Some(body) })).unwrap();
+    }
+    let archive = saving.join().unwrap();
+    let files = unzip(&archive);
+    let names: Vec<_> = files.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["android/logcat.txt", "summary.txt"]);
+    stop.store(true, Ordering::Relaxed);
 }

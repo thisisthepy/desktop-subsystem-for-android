@@ -35,6 +35,71 @@ fn pr5_the_command_line_is_parsed() {
     assert!(parse(&args("stop --timeout soon")).is_err());
 }
 
+#[test]
+fn fr21_dsa_logcat_takes_buffers_tag_filters_and_a_dump() {
+    use dsa_host_core::guest_log::{LogBuffer, LogFilter, DEFAULT_BUFFERS, INFO, SILENT};
+    let invocation = parse(&args("logcat -d -b main,crash ActivityManager:I *:S --json")).unwrap();
+    assert_eq!(invocation.command, Cmd::Logcat);
+    assert!(invocation.dump);
+    assert!(invocation.json);
+    assert_eq!(
+        invocation.log_filter,
+        Some(LogFilter {
+            buffers: LogBuffer::Main.bit() | LogBuffer::Crash.bit(),
+            tags: vec![("ActivityManager".into(), INFO), ("*".into(), SILENT)],
+        })
+    );
+    let plain = parse(&args("logcat")).unwrap();
+    assert!(!plain.dump);
+    assert_eq!(plain.log_filter.unwrap().buffers, DEFAULT_BUFFERS);
+    assert!(parse(&args("logcat -b nope")).is_err());
+    assert!(parse(&args("logcat Tag:Q")).is_err());
+
+    let collect = parse(&args("logs collect -o diag.zip")).unwrap();
+    assert_eq!(collect.command, Cmd::LogsCollect);
+    assert_eq!(
+        collect.output.as_deref(),
+        Some(std::path::Path::new("diag.zip"))
+    );
+    assert!(parse(&args("logs collect")).is_err());
+    assert!(parse(&args("logs")).is_err());
+}
+
+#[test]
+fn fr21_dsa_logcat_prints_threadtime_or_one_json_object_a_line() {
+    use dsa_host_core::guest_log::{LogBuffer, LogEntry, WARN};
+    let entry = LogEntry {
+        buffer: LogBuffer::System,
+        priority: WARN,
+        time_ns: 1_700_000_000_000_000_000,
+        pid: 1,
+        tid: 2,
+        uid: 1000,
+        tag: "Tag".into(),
+        message: "hello".into(),
+        dropped: 0,
+    };
+    let mut text = Vec::new();
+    assert!(dsa_cli::logs::write_entries(
+        &mut text,
+        &[entry.clone(), LogEntry::dropped(3)],
+        false
+    ));
+    assert_eq!(
+        String::from_utf8(text).unwrap(),
+        "2023-11-14 22:13:20.000     1     2 W Tag: hello\n--------- 3 records dropped\n"
+    );
+    let mut json = Vec::new();
+    assert!(dsa_cli::logs::write_entries(&mut json, &[entry], true));
+    let value: serde_json::Value =
+        serde_json::from_slice(json.split(|b| *b == b'\n').next().unwrap()).unwrap();
+    assert_eq!(value["priority"], "W");
+    assert_eq!(value["buffer"], "system");
+    assert_eq!(value["tag"], "Tag");
+    assert_eq!(value["message"], "hello");
+    assert_eq!(value["time"], "2023-11-14 22:13:20.000");
+}
+
 #[cfg(unix)]
 fn local_pair() -> (LocalPair, String) {
     use dsa_host_unix::socket::{current_uid, UnixLocalConnector, UnixLocalListener};

@@ -16,6 +16,8 @@
 //! dsa memory
 //! dsa gpus
 //! dsa widgets [list | add <provider> | remove <id>]
+//! dsa logcat [-d] [-b <buffers>] [<tag>[:<priority>] ...]
+//! dsa logs collect -o <file.zip>
 //! ```
 //!
 //! It acts on the Android of the user who runs it: the service learns that user from the
@@ -67,6 +69,22 @@
 //! `dsa freeze` stops every process of the Android until one of its windows is shown
 //! again. Its notifications, alarms and widgets stop with it.
 //!
+//! `dsa logcat` prints Android's log as logcat's `threadtime` format does, with the year and in
+//! UTC: the recent records the service holds, then each new one, until it is stopped (Ctrl+C).
+//! Android sends its log only while something reads it, and nothing writes it to a file.
+//! `-b` names the buffers, comma separated (`main`, `radio`, `events`, `system`, `crash`,
+//! `stats`, `security`, `kernel`, or `all`; `main,system,crash` when not given). Each
+//! `TAG:P` keeps the records of that tag at priority `P` and above (`V`, `D`, `I`, `W`, `E`,
+//! `F`, or `S` for none), and `*:P` sets it for every other tag, as with logcat. `-d` prints
+//! what Android's log holds now and ends. With `--json` each record is one JSON object on a
+//! line (`time`, `time_ns`, `buffer`, `priority`, `pid`, `tid`, `uid`, `tag`, `message`, or
+//! `dropped` for records that were lost because they came faster than they were read).
+//!
+//! `dsa logs collect -o <file.zip>` saves what a problem report needs as one zip archive:
+//! Android's whole log, its tombstones, ANR traces and dropbox, pstore, a summary of the
+//! system services' state, and the DSA logs of this computer that concern the user who runs
+//! it. It takes a minute or more; `summary.txt` in the archive says what could not be gathered.
+//!
 //! `dsa settings` shows the settings the service keeps: the GPU the window manager renders on
 //! (`render-gpu`: `display`, `integrated`, `discrete` or part of a GPU's name), whether
 //! Android may be frozen when idle (`freeze`), whether text copied on the host can be pasted in
@@ -116,8 +134,11 @@ use serde_json::{json, Value};
 pub const USAGE: &str = "usage: dsa <status | start | stop | freeze | update | launch <package> | \
      install <file.apk> [--progress] | apk-info <file.apk> | open <file> | share <file> | \
      tasks | settings [set <name> <value>] | memory | gpus | \
-     widgets [list | add <provider> | remove <id>]> [--wait] [--timeout <seconds>] \
-     [--json] [--pipe <name> | --socket <path>]";
+     widgets [list | add <provider> | remove <id>] | \
+     logcat [-d] [-b <buffers>] [<tag>[:<priority>] ...] | logs collect -o <file.zip>> \
+     [--wait] [--timeout <seconds>] [--json] [--pipe <name> | --socket <path>]";
+
+pub mod logs;
 
 /// What to ask the service.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,6 +170,10 @@ pub enum Command {
     Gpus,
     /// List, place or remove widgets ([`Invocation::widgets`]).
     Widgets,
+    /// Print Android's log ([`Invocation::log_filter`], [`Invocation::dump`]).
+    Logcat,
+    /// Save the diagnostics archive to [`Invocation::output`].
+    LogsCollect,
 }
 
 /// What `dsa widgets` does.
@@ -264,6 +289,12 @@ pub struct Invocation {
     pub json: bool,
     /// Print each step of `dsa install` as it happens.
     pub progress: bool,
+    /// Which records `dsa logcat` prints.
+    pub log_filter: Option<dsa_host_core::guest_log::LogFilter>,
+    /// `dsa logcat -d`: print what Android's log holds now and end.
+    pub dump: bool,
+    /// Where `dsa logs collect` saves the archive.
+    pub output: Option<std::path::PathBuf>,
 }
 
 /// Whether `name` can be an Android package name: dot-separated parts of letters, digits
@@ -287,9 +318,36 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut widgets = None;
     let mut json = false;
     let mut progress = false;
+    let mut buffers: u32 = 0;
+    let mut tags = Vec::new();
+    let mut dump = false;
+    let mut output = None;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "logcat" if command.is_none() => command = Some(Command::Logcat),
+            "logs" if command.is_none() => {
+                match args.next().map(String::as_str) {
+                    Some("collect") => command = Some(Command::LogsCollect),
+                    _ => return Err(format!("dsa logs takes collect -o <file.zip>\n{USAGE}")),
+                }
+            }
+            "-d" if command == Some(Command::Logcat) => dump = true,
+            "-b" if command == Some(Command::Logcat) => {
+                let names = args
+                    .next()
+                    .ok_or("-b needs the log buffers, such as main,system,crash")?;
+                buffers |= dsa_host_core::guest_log::LogFilter::parse_buffers(names)?;
+            }
+            "-o" | "--output" if command == Some(Command::LogsCollect) => {
+                let path = args
+                    .next()
+                    .ok_or("dsa logs collect -o needs the file to save the archive to")?;
+                output = Some(std::path::PathBuf::from(path));
+            }
+            spec if command == Some(Command::Logcat) && !spec.starts_with('-') => {
+                tags.push(dsa_host_core::guest_log::LogFilter::parse_spec(spec)?);
+            }
             "status" | "start" | "stop" | "freeze" | "update" | "launch" | "install"
             | "apk-info" | "open" | "share" | "tasks" | "settings" | "memory" | "gpus"
             | "widgets"
@@ -409,6 +467,19 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             }
         ));
     }
+    if command == Command::LogsCollect && output.is_none() {
+        return Err(format!(
+            "dsa logs collect needs the file to save the archive to, such as -o diag.zip\n{USAGE}"
+        ));
+    }
+    let log_filter = (command == Command::Logcat).then(|| dsa_host_core::guest_log::LogFilter {
+        buffers: if buffers == 0 {
+            dsa_host_core::guest_log::DEFAULT_BUFFERS
+        } else {
+            buffers
+        },
+        tags,
+    });
     if command == Command::Launch && package.is_none() {
         return Err(format!(
             "dsa launch needs the package of the app to start, such as com.android.settings\n\
@@ -430,6 +501,9 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         widgets,
         json,
         progress,
+        log_filter,
+        dump,
+        output,
     })
 }
 
@@ -1341,6 +1415,16 @@ pub fn run_with_starter(
             } else {
                 memory.to_string().trim_end().to_string()
             });
+        }
+        Command::Logcat => {
+            let filter = invocation.log_filter.clone().unwrap_or_default();
+            let stdout = std::io::stdout();
+            let mut out = stdout.lock();
+            return logs::logcat(client, &filter, invocation.dump, invocation.json, &mut out);
+        }
+        Command::LogsCollect => {
+            let path = invocation.output.clone().unwrap_or_default();
+            return logs::collect(client, &path);
         }
         Command::Gpus | Command::ApkInfo => unreachable!("answered before connecting"),
     }

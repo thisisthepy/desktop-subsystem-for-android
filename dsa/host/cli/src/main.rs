@@ -16,7 +16,10 @@ fn main() -> ExitCode {
         .and_then(|mut connector| dsa_cli::run(&invocation, &mut *connector));
     match result {
         Ok(line) => {
-            println!("{line}");
+            // `dsa logcat` has printed its records as they came, and has nothing to add.
+            if !line.is_empty() {
+                println!("{line}");
+            }
             ExitCode::SUCCESS
         }
         Err(error) => {
