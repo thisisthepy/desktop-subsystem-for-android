@@ -227,9 +227,9 @@ jobs:
           }
           Set-AppTheme
 
-      # In a window as short as the app allows, the navigation pane and the page scroll: the
-      # mouse wheel over the pane, and moving the keyboard focus to the last item, bring About
-      # into view, and the wheel over the page brings its last card into view.
+      # In a window as short as the app allows, some navigation items are out of view at
+      # first. The mouse wheel over the pane, and Tab through the pane, bring every item into
+      # view; the wheel over the page brings its last card into view.
       - name: fr17_a_short_settings_window_scrolls_to_every_page
         run: |
           . .github/scripts/installer/setup-ui.ps1
@@ -241,25 +241,32 @@ jobs:
           New-Item -ItemType Directory -Force screens | Out-Null
           $exe = "$env:PROGRAM_DIR\settings\DsaSettings.exe"
           $name = [System.Windows.Automation.AutomationElement]::NameProperty
+          $items = 'General', 'Memory', 'Widgets', 'Display & GPU', 'Updates', 'Advanced', 'Android log', 'About'
 
-          function Wheel-Over($Element, [int]$Notches) {
-            $r = $Element.Current.BoundingRectangle
-            [Dsa.Input]::SetCursorPos([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2)) | Out-Null
-            for ($i = 0; $i -lt $Notches; $i++) {
-              [Dsa.Input]::mouse_event(0x0800, 0, 0, -120, [UIntPtr]::Zero)   # MOUSEEVENTF_WHEEL, down
-              Start-Sleep -Milliseconds 100
-            }
-            Start-Sleep -Milliseconds 500
+          # The navigation item named $Text: the pane is on the left, so a page title of the
+          # same name is not it.
+          function Find-Item($Window, [string]$Text) {
+            $Window.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($name, $Text))) |
+              Where-Object { $_.Current.BoundingRectangle.X -lt ($Window.Current.BoundingRectangle.X + 280) } | Select-Object -First 1
           }
-          function Find-Named($Window, [string]$Text) {
-            $Window.FindFirst($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($name, $Text)))
-          }
-          # Whether $Element lies inside $Window's client area, not cut off at its bottom.
+          # Whether all of $Element shows inside $Window.
           function Test-InView($Window, $Element) {
             if (-not $Element -or $Element.Current.IsOffscreen) { return $false }
             $w = $Window.Current.BoundingRectangle
             $r = $Element.Current.BoundingRectangle
-            ($r.Height -gt 0) -and ($r.Bottom -le $w.Bottom - 4) -and ($r.Top -ge $w.Top)
+            ($r.Height -gt 0) -and ($r.Top -ge $w.Top) -and ($r.Bottom -le $w.Bottom)
+          }
+          function Get-ShownItems($Window) {
+            @($items | Where-Object { Test-InView $Window (Find-Item $Window $_) })
+          }
+          function Wheel-Over($Element, [int]$Notches) {
+            $r = $Element.Current.BoundingRectangle
+            [Dsa.Input]::SetCursorPos([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2)) | Out-Null
+            for ($i = 0; $i -lt $Notches; $i++) {
+              [Dsa.Input]::mouse_event(0x0800, 0, 0, -120, [UIntPtr]::Zero)   # wheel down
+              Start-Sleep -Milliseconds 100
+            }
+            Start-Sleep -Milliseconds 500
           }
           function Start-Short([string]$Page) {
             $app = Start-Process $exe -ArgumentList '--page', $Page -PassThru
@@ -271,6 +278,12 @@ jobs:
             $transform.Resize(900, 360)   # the window's least height
             [Dsa.Input]::SetForegroundWindow([IntPtr]$window.Current.NativeWindowHandle) | Out-Null
             Start-Sleep -Seconds 2
+            $shown = Get-ShownItems $window
+            Write-Host "at first: $($shown -join ', ')"
+            if ($shown.Count -eq $items.Count) {
+              Save-WindowScreen $window "$PWD\screens\settings-short-all-shown.png"
+              throw "every navigation item shows in a 360 px window before any scrolling, so this check proves nothing"
+            }
             @{ App = $app; Window = $window }
           }
           function Stop-Short($Run) {
@@ -282,58 +295,53 @@ jobs:
           foreach ($theme in 'light', 'dark') {
             Set-AppTheme -Dark:($theme -eq 'dark')
 
-            # The wheel over the navigation pane.
+            # The wheel over the pane: every item that was hidden at first comes into view.
             $run = Start-Short 'general'
             $window = $run.Window
-            # The navigation item, not the page title of the same name: the pane is on the left.
-            $general = $window.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($name, 'General'))) |
-              Where-Object { $_.Current.BoundingRectangle.X -lt ($window.Current.BoundingRectangle.X + 280) } | Select-Object -First 1
-            if (-not $general) { throw "no General item in the navigation pane" }
             Save-WindowScreen $window "$PWD\screens\settings-$theme-short-before.png"
-            $about = Find-Named $window 'About'
-            if (Test-InView $window $about) {
-              throw "About is in view in a 360 px window before any scrolling, so this check proves nothing; make the window shorter"
+            $seen = @{}
+            Get-ShownItems $window | ForEach-Object { $seen[$_] = $true }
+            for ($i = 0; $i -lt 6; $i++) {
+              $pane = Find-Item $window ($items | Where-Object { Test-InView $window (Find-Item $window $_) } | Select-Object -First 1)
+              Wheel-Over $pane 3
+              Get-ShownItems $window | ForEach-Object { $seen[$_] = $true }
             }
-            Wheel-Over $general 15
             Save-WindowScreen $window "$PWD\screens\settings-$theme-short-pane-wheel.png"
-            $about = Find-Named $window 'About'
-            if (-not (Test-InView $window $about)) { throw "the mouse wheel over the navigation pane does not bring About into view" }
+            $missing = $items | Where-Object { -not $seen[$_] }
+            if ($missing) { throw "the mouse wheel over the navigation pane never brought these into view: $($missing -join ', ')" }
             Stop-Short $run
 
-            # The keyboard: Tab from the first item moves the focus down the pane, and the
-            # focused item comes into view, About included.
+            # The keyboard: Tab from the first item moves the focus down the pane.
             $run = Start-Short 'general'
             $window = $run.Window
-            $general = $window.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($name, 'General'))) |
-              Where-Object { $_.Current.BoundingRectangle.X -lt ($window.Current.BoundingRectangle.X + 280) } | Select-Object -First 1
-            $r = $general.Current.BoundingRectangle
+            $seen = @{}
+            Get-ShownItems $window | ForEach-Object { $seen[$_] = $true }
+            $r = (Find-Item $window 'General').Current.BoundingRectangle
             [Dsa.Input]::SetCursorPos([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2)) | Out-Null
             [Dsa.Input]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)   # left down
             [Dsa.Input]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)   # left up
             Start-Sleep -Seconds 1
-            $reached = $false
-            for ($i = 0; $i -lt 12 -and -not $reached; $i++) {
+            for ($i = 0; $i -lt 10; $i++) {
               [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
-              Start-Sleep -Milliseconds 400
-              $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-              Write-Host "Tab $($i + 1): focus on '$($focused.Current.Name)'"
-              $about = Find-Named $window 'About'
-              $reached = Test-InView $window $about
-              if ($about) { Write-Host "  About at $($about.Current.BoundingRectangle), offscreen $($about.Current.IsOffscreen); window $($window.Current.BoundingRectangle)" }
+              Start-Sleep -Milliseconds 500
+              $shown = Get-ShownItems $window
+              Write-Host "Tab $($i + 1): $($shown -join ', ')"
+              $shown | ForEach-Object { $seen[$_] = $true }
             }
             Save-WindowScreen $window "$PWD\screens\settings-$theme-short-pane-keyboard.png"
-            if (-not $reached) { throw "Tab through the navigation pane does not bring About into view" }
+            $missing = $items | Where-Object { -not $seen[$_] }
+            if ($missing) { throw "Tab through the navigation pane never brought these into view: $($missing -join ', ')" }
             Stop-Short $run
 
             # The wheel over the page reaches its last card.
             $run = Start-Short 'general'
             $window = $run.Window
-            $page = $window.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition(
+            $text = $window.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition(
               [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text))) |
               Where-Object { $_.Current.BoundingRectangle.X -gt ($window.Current.BoundingRectangle.X + 320) } | Select-Object -First 1
-            if (-not $page) { throw "no text on the General page" }
-            Wheel-Over $page 25
-            $last = Find-Named $window 'Refresh'
+            if (-not $text) { throw "no text on the General page" }
+            Wheel-Over $text 25
+            $last = $window.FindFirst($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($name, 'Refresh')))
             Save-WindowScreen $window "$PWD\screens\settings-$theme-short-page-wheel.png"
             if (-not (Test-InView $window $last)) { throw "the mouse wheel over the page does not bring its last card (Refresh) into view" }
             Stop-Short $run
