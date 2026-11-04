@@ -14,8 +14,7 @@ class GraphicsBuildTests(unittest.TestCase):
     def test_pr3_build_script_invokes_cmake_for_guest_transport(self):
         script = BUILD_SCRIPT.read_text()
         self.assertIn("android.toolchain.cmake", script)
-        self.assertIn('-DANDROID_ABI="$abi"', script)
-        self.assertIn('abi="${DSA_GUEST_ABI:-x86_64}"', script)
+        self.assertIn("ANDROID_ABI=x86_64", script)
         self.assertIn("OpenglSystemCommon", script)
         self.assertIn("vulkan.ranchu", script)
 

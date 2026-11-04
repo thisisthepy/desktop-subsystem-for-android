@@ -18,7 +18,6 @@ grep -Fq 'Build the host graphics renderer (windows, ' "$workflow"
 # ARM64 Windows hosts get their own renderer, built on an ARM64 runner (FR-25).
 grep -Fq 'windows-11-arm' "$workflow"
 grep -Fq 'host-gfxstream-windows-arm64' "$workflow"
-grep -Fq 'guest-gfxstream-hvsocket-arm64' "$workflow"
 grep -Fq 'dsa/graphics/host/build.ps1' "$workflow"
 grep -Fq 'test_host_renderer.py' "$workflow"
 grep -Fq 'host-gfxstream-windows' "$workflow"

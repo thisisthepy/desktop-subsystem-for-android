@@ -1,17 +1,7 @@
 #!/usr/bin/env bash
 # Builds the guest libOpenglSystemCommon and vulkan.ranchu with Hyper-V socket transport using the
 # Android NDK, Mesa's Meson build for its shared Vulkan code, and CMake for the gfxstream parts.
-#
-# DSA_GUEST_ABI picks the guest: x86_64 (the default) or arm64-v8a, for the arm64-only guest
-# of ARM64 Windows hosts.
 set -euo pipefail
-
-abi="${DSA_GUEST_ABI:-x86_64}"
-case "$abi" in
-    x86_64) clang_target="x86_64-linux-android34"; cpu_family="x86_64"; cpu="x86_64" ;;
-    arm64-v8a) clang_target="aarch64-linux-android34"; cpu_family="aarch64"; cpu="armv8-a" ;;
-    *) echo "DSA_GUEST_ABI must be x86_64 or arm64-v8a, not $abi" >&2; exit 1 ;;
-esac
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 scratch_arg="${1:-$root/.scratch}"
@@ -67,21 +57,21 @@ case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) host_tag="windows-x86_64"; exe=".exe" ;;
 esac
 llvm_bin="$ndk_dir/toolchains/llvm/prebuilt/$host_tag/bin"
-mesa_build="$scratch/build-mesa-$abi"
+mesa_build="$scratch/build-mesa"
 mkdir -p "$mesa_build"
-cat > "$mesa_build/android-$abi.ini" <<CROSS
+cat > "$mesa_build/android-x86_64.ini" <<CROSS
 [binaries]
 ar = '$llvm_bin/llvm-ar$exe'
 nm = '$llvm_bin/llvm-nm$exe'
 strip = '$llvm_bin/llvm-strip$exe'
-c = ['$llvm_bin/clang$exe', '--target=$clang_target']
-cpp = ['$llvm_bin/clang++$exe', '--target=$clang_target', '-fno-exceptions', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-static-libstdc++']
+c = ['$llvm_bin/clang$exe', '--target=x86_64-linux-android34']
+cpp = ['$llvm_bin/clang++$exe', '--target=x86_64-linux-android34', '-fno-exceptions', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-static-libstdc++']
 c_ld = 'lld'
 cpp_ld = 'lld'
 [host_machine]
 system = 'android'
-cpu_family = '$cpu_family'
-cpu = '$cpu'
+cpu_family = 'x86_64'
+cpu = 'x86_64'
 endian = 'little'
 CROSS
 
@@ -96,7 +86,7 @@ mesa_bin="$(dirname "$mesa_python")"
 
 if [[ ! -f "$mesa_build/out/build.ninja" ]]; then
     PATH="$mesa_bin:$PATH" meson setup "$mesa_build/out" "$scratch/mesa3d" \
-        --cross-file "$mesa_build/android-$abi.ini" --buildtype=release \
+        --cross-file "$mesa_build/android-x86_64.ini" --buildtype=release \
         --force-fallback-for=libdrm \
         -Dlibdrm:intel=disabled -Dlibdrm:radeon=disabled -Dlibdrm:amdgpu=disabled \
         -Dlibdrm:nouveau=disabled -Dlibdrm:vmwgfx=disabled -Dlibdrm:tests=false \
@@ -106,11 +96,8 @@ if [[ ! -f "$mesa_build/out/build.ninja" ]]; then
         -Degl=disabled -Dopengl=false -Dglx=disabled -Dgles1=disabled -Dgles2=disabled \
         -Dzstd=disabled -Dandroid-libbacktrace=disabled
 fi
-# Mesa builds its SSE4.1 helpers only for x86.
-sse41=()
-[[ "$abi" == "x86_64" ]] && sse41=(src/util/libmesa_util_sse41.a)
 PATH="$mesa_bin:$PATH" ninja -C "$mesa_build/out" \
-    src/c11/impl/libmesa_util_c11.a src/util/libmesa_util.a "${sse41[@]}" \
+    src/c11/impl/libmesa_util_c11.a src/util/libmesa_util.a src/util/libmesa_util_sse41.a \
     src/util/libxmlconfig.a src/util/blake3/libblake3.a src/util/u_gralloc/lib_mesa_u_gralloc.a \
     src/compiler/libcompiler.a src/vulkan/util/libvulkan_util.a \
     src/vulkan/runtime/libvulkan_lite_runtime.a src/vulkan/runtime/libvulkan_lite_instance.a \
@@ -122,7 +109,7 @@ PATH="$mesa_bin:$PATH" ninja -C "$mesa_build/out" \
 "$cmake_bin" -B "$out_dir" -S "$root/dsa/graphics/cmake" \
     "${generator[@]}" \
     -DCMAKE_TOOLCHAIN_FILE="$ndk_dir/build/cmake/android.toolchain.cmake" \
-    -DANDROID_ABI="$abi" \
+    -DANDROID_ABI=x86_64 \
     -DANDROID_PLATFORM=android-34 \
     -DSCRATCH_DIR="$scratch" \
     -DMESA_BUILD_DIR="$mesa_build/out"
