@@ -427,7 +427,7 @@ fn fr14_an_image_whose_disk_is_not_a_disk_is_not_usable() {
 }
 
 #[test]
-fn fr25_an_image_of_another_architecture_is_not_usable() {
+fn fr27_an_image_of_another_architecture_is_not_usable() {
     use dsa_host_core::update::store::{guest_arch, image_is_usable};
     let first = installed("16.0.1", 16, 1);
     let (_store, root) = fresh_store(&first);
