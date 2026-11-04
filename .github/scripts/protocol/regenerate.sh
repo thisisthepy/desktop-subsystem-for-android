@@ -30,8 +30,20 @@ undo() {
   git clean -qfd -- dsa/protocol
 }
 
+# Whatever the previous branch left (a merge in progress, files the generator wrote, a run
+# that stopped half way) is thrown away first, and again when this one ends however it
+# ends, so one branch never stops the next from being checked out. Ignored files (the
+# build directory) stay, so the generator is not rebuilt for every branch.
+scrub() {
+  git merge --abort > /dev/null 2>&1 || true
+  git reset -q --hard
+  git clean -qfd
+}
+scrub
+trap scrub EXIT
+
 git fetch -q --no-tags origin "$branch" "$base"
-git checkout -q -B "$branch" "origin/$branch"
+git checkout -q -f -B "$branch" "origin/$branch"
 undo
 
 merged=clean
