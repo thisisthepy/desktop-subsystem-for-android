@@ -111,7 +111,7 @@ fn remove_old(apps_dir: &Path, package: &str, keep: &Path) {
 
 /// Where each app's window program goes: `%LOCALAPPDATA%\DSA\apps`.
 pub fn default_apps_dir() -> Option<PathBuf> {
-    std::env::var_os("LOCALAPPDATA").map(|dir| PathBuf::from(dir).join("DSA").join("apps"))
+    crate::paths::UserRoot::current().map(|root| root.apps())
 }
 
 /// The installed app window host: beside this program.

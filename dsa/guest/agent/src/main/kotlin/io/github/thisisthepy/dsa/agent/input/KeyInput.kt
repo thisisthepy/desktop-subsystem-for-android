@@ -58,7 +58,8 @@ class KeyInput(
     private val focus: (Int) -> Boolean,
     private val log: Log,
 ) {
-    private class Held(val downTime: Long, val hostDownTime: Long)
+    /** A held key: when it went down, and the key code the guest was given for it. */
+    private class Held(val downTime: Long, val hostDownTime: Long, val guestKeyCode: Int)
 
     /** The keys held in each task, by key code. */
     private val held = HashMap<Int, HashMap<Int, Held>>()
@@ -90,7 +91,7 @@ class KeyInput(
                     if (!isFocused(taskId) && !focus(taskId)) {
                         log.warn("could not give task $taskId the input focus; the key may reach another task")
                     }
-                    Held(now, hostTime).also { keys[keyCode] = it }
+                    Held(now, hostTime, guestKeyCode(keyCode, event.metaState)).also { keys[keyCode] = it }
                 } else {
                     known
                 }
@@ -99,7 +100,7 @@ class KeyInput(
                         downTime = key.downTime,
                         eventTime = eventTime(key, hostTime, now),
                         action = android.view.KeyEvent.ACTION_DOWN,
-                        keyCode = keyCode,
+                        keyCode = key.guestKeyCode,
                         repeatCount = if (known == null) 0 else event.repeatCount.coerceAtLeast(1),
                         metaState = event.metaState,
                         flags = 0,
@@ -113,7 +114,7 @@ class KeyInput(
                         downTime = key.downTime,
                         eventTime = eventTime(key, hostTime, injector.now()),
                         action = android.view.KeyEvent.ACTION_UP,
-                        keyCode = keyCode,
+                        keyCode = key.guestKeyCode,
                         repeatCount = 0,
                         metaState = event.metaState,
                         flags = if (event.canceled) android.view.KeyEvent.FLAG_CANCELED else 0,
@@ -123,6 +124,22 @@ class KeyInput(
             else -> log.warn("dropped key input with an action the agent does not know (${event.actionValue})")
         }
     }
+
+    /**
+     * The key code the guest is given for a key the host sent. Esc alone is Back: Android's
+     * apps go back, close a dialog or leave a search on Back, and most never look at Escape.
+     * The framework's own key map makes an Escape no app handled into Back only after the app
+     * has declined it, which an injected key does not reliably reach, so the agent does it up
+     * front. Esc with a modifier stays Escape, for the apps and shortcuts that use it. The
+     * choice is made when the key goes down and kept until it is released, so the app sees a
+     * whole press of one key.
+     */
+    private fun guestKeyCode(hostKeyCode: Int, metaState: Int): Int =
+        if (hostKeyCode == android.view.KeyEvent.KEYCODE_ESCAPE && metaState and MODIFIERS == 0) {
+            android.view.KeyEvent.KEYCODE_BACK
+        } else {
+            hostKeyCode
+        }
 
     /** Forgets the keys held in every task not in [taskIds], as tasks end. */
     fun retainTasks(taskIds: Set<Int>) {
@@ -159,5 +176,9 @@ class KeyInput(
     private companion object {
         // The host sends key codes up to this; the framework's own end well below it.
         const val MAX_KEY_CODE = 1023
+
+        // The modifiers that keep Esc an Escape. The locks (Caps, Num, Scroll) do not count.
+        const val MODIFIERS = android.view.KeyEvent.META_SHIFT_ON or android.view.KeyEvent.META_CTRL_ON or
+            android.view.KeyEvent.META_ALT_ON or android.view.KeyEvent.META_META_ON
     }
 }

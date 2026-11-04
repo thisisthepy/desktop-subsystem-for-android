@@ -42,6 +42,7 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -123,6 +124,35 @@ SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH = {
         "com.android.settings.sound.MediaOutputPreferenceController",
         "com.android.settings.notification.RemoteVolumeGroupController",
     ],
+    # The hearing devices entry. Its controller asks the null LocalBluetoothManager for its
+    # profile manager in its constructor, and the page behind it lists and pairs Bluetooth
+    # hearing aids.
+    "res/xml/accessibility_settings.xml": [
+        "com.android.settings.accessibility.AccessibilityHearingAidPreferenceController",
+    ],
+}
+
+# Settings code that dereferences the missing Bluetooth adapter where no preference can be
+# taken out instead, edited in the dex files of Settings.apk. Each edit keeps the size of the
+# method, so nothing else in the dex file moves.
+#
+# BluetoothUtils.isAudioSharingSupported (SettingsLib) calls isLeAudioBroadcastSourceSupported
+# on BluetoothAdapter.getDefaultAdapter(), which is null here. The connected devices screen
+# asks it in its fragment's onAttach, and so do the audio sharing and media device controllers
+# on it, so the screen took the Settings process down each time it opened. LE audio sharing is
+# a Bluetooth feature, so "not supported" is the true answer: the method returns false.
+#
+# AccessibilitySettings.onAttach hands the fragment manager to the hearing aid controller.
+# That controller cannot be made without Bluetooth (above), so the fragment's lookup returns
+# null and the call threw. The call is skipped; nothing else uses its result.
+#
+# Bluetooth comes back as a host HAL, and these edits go with it.
+SETTINGS_CODE_WITHOUT_BLUETOOTH = {
+    "Lcom/android/settingslib/bluetooth/BluetoothUtils;->isAudioSharingSupported": ("return false", None),
+    "Lcom/android/settings/accessibility/AccessibilitySettings;->onAttach": (
+        "skip call",
+        "Lcom/android/settings/accessibility/AccessibilityHearingAidPreferenceController;->setFragmentManager",
+    ),
 }
 
 # Cuttlefish's logger writes to a virtio console Hyper-V does not have, so it exits as soon as
@@ -520,11 +550,158 @@ def remove_xml_elements(axml, attribute, values):
     return result[:4] + struct.pack("<I", len(result)) + result[8:], removed_values
 
 
+def _uleb128(data, at):
+    value = shift = 0
+    while True:
+        byte = data[at]
+        at += 1
+        value |= (byte & 0x7F) << shift
+        shift += 7
+        if byte < 0x80:
+            return value, at
+
+
+# Width in 16-bit code units of each Dalvik opcode (the payload pseudo-instructions are
+# handled where they are met).
+DEX_INSTRUCTION_UNITS = [1] * 256
+for _ops, _units in [
+    ((0x02, 0x05, 0x08, 0x13, 0x15, 0x16, 0x19, 0x1A, 0x1C, 0x1F, 0x20, 0x22, 0x23, 0x29, 0xFE, 0xFF), 2),
+    ((0x03, 0x06, 0x09, 0x14, 0x17, 0x1B, 0x24, 0x25, 0x26, 0x2A, 0x2B, 0x2C, 0xFC, 0xFD), 3),
+    ((0x18,), 5),
+    ((0xFA, 0xFB), 4),
+    (tuple(range(0x2D, 0x3E)) + tuple(range(0x44, 0x6E)) + tuple(range(0x90, 0xB0)) + tuple(range(0xD0, 0xE3)), 2),
+    (tuple(range(0x6E, 0x73)) + tuple(range(0x74, 0x79)), 3),
+]:
+    for _op in _ops:
+        DEX_INSTRUCTION_UNITS[_op] = _units
+DEX_INVOKES = set(range(0x6E, 0x73)) | set(range(0x74, 0x79))
+DEX_MOVE_RESULTS = {0x0A, 0x0B, 0x0C}
+
+
+def dex_methods(dex):
+    """{"Lclass;->name": [(code_off, shorty)]} for each method a dex file defines with code,
+    and the "Lclass;->name" of each method it refers to, by method index."""
+    if dex[:4] != b"dex\n":
+        raise ValueError("not a dex file")
+    (string_count, string_off, type_count, type_off, proto_count, proto_off, _, _,
+     method_count, method_off, class_count, class_off) = struct.unpack_from("<12I", dex, 56)
+
+    def string(index):
+        _, at = _uleb128(dex, struct.unpack_from("<I", dex, string_off + 4 * index)[0])
+        return dex[at:dex.index(0, at)].decode("utf-8", "replace")
+
+    types = [string(struct.unpack_from("<I", dex, type_off + 4 * i)[0]) for i in range(type_count)]
+    shorties = [string(struct.unpack_from("<I", dex, proto_off + 12 * i)[0]) for i in range(proto_count)]
+    refs, method_shorty = [], []
+    for i in range(method_count):
+        class_index, proto_index, name_index = struct.unpack_from("<HHI", dex, method_off + 8 * i)
+        refs.append(f"{types[class_index]}->{string(name_index)}")
+        method_shorty.append(shorties[proto_index])
+    defined = {}
+    for i in range(class_count):
+        data_off = struct.unpack_from("<I", dex, class_off + 32 * i + 24)[0]
+        if not data_off:
+            continue
+        counts = []
+        at = data_off
+        for _ in range(4):
+            count, at = _uleb128(dex, at)
+            counts.append(count)
+        for _ in range(2 * (counts[0] + counts[1])):
+            _, at = _uleb128(dex, at)
+        for group in (counts[2], counts[3]):
+            index = 0
+            for _ in range(group):
+                delta, at = _uleb128(dex, at)
+                index += delta
+                _, at = _uleb128(dex, at)
+                code_off, at = _uleb128(dex, at)
+                if code_off:
+                    defined.setdefault(refs[index], []).append((code_off, method_shorty[index]))
+    return defined, refs
+
+
+def dex_instructions(dex, code_off):
+    """(offset, opcode) of each instruction in a code item, skipping switch and array data."""
+    count = struct.unpack_from("<I", dex, code_off + 12)[0]
+    start = code_off + 16
+    unit = 0
+    while unit < count:
+        at = start + 2 * unit
+        first = struct.unpack_from("<H", dex, at)[0]
+        if first == 0x0100:
+            unit += 4 + 2 * struct.unpack_from("<H", dex, at + 2)[0]
+        elif first == 0x0200:
+            unit += 2 + 4 * struct.unpack_from("<H", dex, at + 2)[0]
+        elif first == 0x0300:
+            width, size = struct.unpack_from("<HI", dex, at + 2)
+            unit += 4 + (width * size + 1) // 2
+        else:
+            yield at, first & 0xFF
+            unit += DEX_INSTRUCTION_UNITS[first & 0xFF]
+
+
+def edit_dex(dex, edits):
+    """Applies {"Lclass;->method": edit} to a dex file. An edit is ("return false", None),
+    which makes a method that returns a boolean return false at once, or ("skip call",
+    "Lclass;->method"), which turns each call to that method, whose result is not used, into
+    no-ops. Returns the new file and the methods it changed; a method already edited, or not
+    in this file, is not changed."""
+    defined, refs = dex_methods(dex)
+    out = bytearray(dex)
+    changed = []
+    for method, (kind, target) in edits.items():
+        for code_off, shorty in defined.get(method, []):
+            registers, = struct.unpack_from("<H", dex, code_off)
+            insns = code_off + 16
+            if kind == "return false":
+                if shorty[0] != "Z" or registers < 1:
+                    raise ValueError(f"{method} does not return a boolean")
+                # const/4 v0, 0; return v0, over whole instructions, the rest of which become
+                # no-ops so the verifier still reads valid code. What follows is never reached.
+                if bytes(out[insns:insns + 4]) == b"\x12\x00\x0f\x00":
+                    continue
+                end = insns
+                # A move-result left behind without its call would not verify, so it goes too.
+                for at, op in dex_instructions(dex, code_off):
+                    if end - insns >= 4 and op not in DEX_MOVE_RESULTS:
+                        break
+                    end = at + 2 * DEX_INSTRUCTION_UNITS[op]
+                if end - insns < 4:
+                    raise ValueError(f"{method} is too short to return false")
+                out[insns:end] = b"\x12\x00\x0f\x00" + bytes(end - insns - 4)
+                changed.append(method)
+            elif kind == "skip call":
+                instructions = list(dex_instructions(dex, code_off))
+                for (at, op), following in zip(instructions, instructions[1:] + [(None, None)]):
+                    if op not in DEX_INVOKES or refs[struct.unpack_from("<H", dex, at + 2)[0]] != target:
+                        continue
+                    if following[1] in DEX_MOVE_RESULTS:
+                        raise ValueError(f"{method} uses the result of {target}")
+                    out[at:at + 2 * DEX_INSTRUCTION_UNITS[op]] = bytes(2 * DEX_INSTRUCTION_UNITS[op])
+                    changed.append(method)
+            else:
+                raise ValueError(f"unknown dex edit {kind}")
+    if changed:
+        out[12:32] = hashlib.sha1(bytes(out[32:])).digest()
+        out[8:12] = struct.pack("<I", zlib.adler32(bytes(out[12:])))
+    return bytes(out), changed
+
+
 def edit_settings_apk(data, name):
-    """Settings.apk without the preferences whose controllers need the Bluetooth service."""
+    """Settings.apk without the preferences, and the code, that need the Bluetooth service."""
     replacements = {}
     with zipfile.ZipFile(io.BytesIO(data)) as apk:
         files = set(apk.namelist())
+        for dex in sorted(f for f in files if re.fullmatch(r"classes\d*\.dex", f)):
+            content = apk.read(dex)
+            if content[:4] != b"dex\n":
+                continue
+            edited, changed = edit_dex(content, SETTINGS_CODE_WITHOUT_BLUETOOTH)
+            for method in changed:
+                print(f"editing {method} in {name}:{dex}", flush=True)
+            if changed:
+                replacements[dex] = edited
         for xml, controllers in SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH.items():
             if xml not in files:
                 continue

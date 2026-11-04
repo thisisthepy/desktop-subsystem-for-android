@@ -43,6 +43,12 @@
                     <TextBlock Text="{l:Text OpenLogsCard.Description}" Style="{StaticResource CardDescription}" />
                 </StackPanel>
             </ui:CardAction>
+            <ui:CardAction Icon="{ui:SymbolIcon FolderPeople24}" Click="OnOpenServiceLogs" Margin="0,0,0,4">
+                <StackPanel>
+                    <TextBlock Text="{l:Text ServiceLogsCard.Header}" Style="{StaticResource CardTitle}" />
+                    <TextBlock Text="{l:Text ServiceLogsCard.Description}" Style="{StaticResource CardDescription}" />
+                </StackPanel>
+            </ui:CardAction>
             <ui:CardAction Icon="{ui:SymbolIcon ArrowClockwise24}" Click="OnRefresh">
                 <StackPanel>
                     <TextBlock Text="{l:Text RefreshCard.Header}" Style="{StaticResource CardTitle}" />

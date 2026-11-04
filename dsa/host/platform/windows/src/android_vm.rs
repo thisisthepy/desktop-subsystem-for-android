@@ -82,6 +82,10 @@ fn write_boot_initrd(
 ) -> Result<TransientFile, String> {
     let image = std::fs::read(initrd)
         .map_err(|e| format!("could not read the initrd {}: {e}", initrd.display()))?;
+    if let Some(folder) = path.parent() {
+        std::fs::create_dir_all(folder)
+            .map_err(|e| format!("could not create {}: {e}", folder.display()))?;
+    }
     let file = TransientFile(path.to_path_buf());
     std::fs::write(path, bootconfig::append(&image, &bootconfig_entry(secret)))
         .map_err(|e| format!("could not write the boot's initrd {}: {e}", path.display()))?;
@@ -105,7 +109,7 @@ impl AndroidVmLauncher {
             console_log: None,
             console: None,
             console_report: None,
-            boot_dir: std::env::temp_dir(),
+            boot_dir: crate::paths::MachineRoot::default_location().tmp(),
             prerequisite: None,
             data_disk: None,
         }
@@ -118,7 +122,8 @@ impl AndroidVmLauncher {
         self
     }
 
-    /// Writes each boot's initrd into `dir` instead of the temporary folder.
+    /// Writes each boot's initrd into `dir` instead of the machine's `tmp` folder in
+    /// `%ProgramData%\DSA`.
     pub fn with_boot_dir(mut self, dir: PathBuf) -> AndroidVmLauncher {
         self.boot_dir = dir;
         self
@@ -211,7 +216,9 @@ impl GuestLauncher for AndroidVmLauncher {
         let boot_initrd = write_boot_initrd(
             &initrd,
             secret,
-            &self.boot_dir.join(format!("{}.initrd", self.id)),
+            &self
+                .boot_dir
+                .join(crate::paths::unique_name(&self.id, ".initrd")),
         )?;
         config.initrd = Some(boot_initrd.0.clone());
         config.kernel_cmdline = format!("{} {}", config.kernel_cmdline, bootconfig::CMDLINE_FLAG);

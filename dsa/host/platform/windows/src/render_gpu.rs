@@ -173,7 +173,7 @@ pub fn render_gpu_setting(
 /// the `logs` folder.
 pub fn default_settings_file(local_app_data: Option<&Path>) -> PathBuf {
     match local_app_data {
-        Some(dir) => dir.join("DSA").join("compositor.json"),
+        Some(dir) => crate::paths::UserRoot::in_local_app_data(dir).compositor_settings(),
         None => PathBuf::from("compositor.json"),
     }
 }

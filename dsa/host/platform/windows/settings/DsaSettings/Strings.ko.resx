@@ -68,7 +68,7 @@
     <value>더 보기</value>
   </data>
   <data name="OpenLogsCard.Header" xml:space="preserve">
-    <value>로그 폴더 열기</value>
+    <value>내 로그 폴더 열기</value>
   </data>
   <data name="OpenLogsCard.Description" xml:space="preserve">
     <value>창 관리자와 앱 창의 로그입니다. 문제를 알릴 때 첨부합니다.</value>
@@ -345,6 +345,9 @@
   </data>
   <data name="ServiceLogsCard.Header" xml:space="preserve">
     <value>서비스 로그 폴더 열기(관리자)</value>
+  </data>
+  <data name="ServiceLogsCard.Description" xml:space="preserve">
+    <value>DSA 서비스와 안드로이드 자체의 로그입니다.</value>
   </data>
   <data name="CommandLineHeader.Text" xml:space="preserve">
     <value>명령줄</value>
