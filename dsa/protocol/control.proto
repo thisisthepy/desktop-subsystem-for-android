@@ -430,6 +430,15 @@ message ClipboardSharing {
   bool on = 1;
 }
 
+// Host to guest: whether the user turned developer mode on. While it is on, the guest's adbd
+// listens on vsock port 5555, which the host bridges to a port on its loopback address;
+// while it is off, adbd is stopped. A guest boots with it off; the host says so when it is on,
+// each time the agent connects, and on every change after that. The control daemon handles it,
+// not the agent.
+message DeveloperMode {
+  bool on = 1;
+}
+
 // Guest to host, from the agent: a notification an app posted, or a new version of one it
 // posted before under the same key, which replaces it. Only notifications a person would see
 // come: not the ongoing notice of a foreground service, and not a group's summary, whose
@@ -1163,6 +1172,7 @@ message Envelope {
     ScreenState screen_state = 40;
     PowerState power_state = 41;
     PowerHint power_hint = 110;
+    DeveloperMode developer_mode = 140;
     DeviceIdle device_idle = 42;
     HostMemory host_memory = 43;
     HostSleep host_sleep = 44;

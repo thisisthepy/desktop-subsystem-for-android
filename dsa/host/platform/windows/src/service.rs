@@ -333,6 +333,20 @@ pub fn create_user_android(
     let session_config = config.session_config();
     let handshake = ControlHandshake::new(build, session_config.connect_timeout);
     let session = Session::new(launcher, Box::new(listener), handshake, session_config);
+    // Developer mode's bridge reaches the guest's adbd over a Hyper-V socket to its vsock port.
+    session.set_adb_connect(Arc::new(|vm_id: &str| {
+        let vm: Guid = vm_id.parse().map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{vm_id} is not a VM's runtime ID"),
+            )
+        })?;
+        crate::hvsocket::connect_stream(
+            vm,
+            Guid::vsock_service(dsa_host_core::adb_bridge::GUEST_ADB_PORT),
+            Duration::from_secs(5),
+        )
+    }));
     session.serve_log_port(Box::new(log_listener), build);
     // The clock lines go to the service's log, beside the guest's console log.
     let user_name = sid.to_string();
@@ -740,6 +754,12 @@ where
                 android.freeze_when_idle(settings.as_ref().is_some_and(|s| s.freeze));
                 android.share_clipboard(settings.as_ref().is_none_or(|s| s.clipboard));
                 android.links_in_android(settings.as_ref().is_some_and(|s| s.links_in_android));
+                // So is developer mode, off unless they turned it on, and its adb port.
+                if let Some(settings) = settings.as_ref().filter(|s| s.developer_mode) {
+                    if let Err(why) = android.developer_mode(true, settings.adb_port) {
+                        eprintln!("{factory_build}: developer mode for {sid}: {why}");
+                    }
+                }
             }
             Err(why) => eprintln!("{factory_build}: no Android for {sid}: {why}"),
         }

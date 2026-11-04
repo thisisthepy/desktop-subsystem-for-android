@@ -864,7 +864,14 @@ message Settings {
   // The most memory the caller's Android may have, in MiB. 0, the default, is automatic: the
   // service's default size. It takes effect
   // the next time Android starts.
-  uint32 memory_limit_mb = 14;
+  uint32 memory_limit_mb = 16;
+  // Whether the caller's Android takes adb connections: the service then listens on
+  // 127.0.0.1:adb_port and bridges each connection to the guest's adbd. Off by default, and
+  // the caller's own. It applies at once, without restarting Android.
+  bool developer_mode = 14;
+  // The loopback port adb connects to while developer mode is on. 58526 unless the user
+  // chooses another; 0 in a request means the default.
+  uint32 adb_port = 15;
 }
 
 // Turns the connection into the accessibility tree of one of the caller's task windows, for a

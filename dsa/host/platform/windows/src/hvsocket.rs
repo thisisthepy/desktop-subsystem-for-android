@@ -318,6 +318,42 @@ impl Listener for RawHvSocketListener {
     }
 }
 
+impl dsa_host_core::adb_bridge::BridgeStream for HvSocket {
+    fn try_clone_stream(&self) -> io::Result<Box<dyn dsa_host_core::adb_bridge::BridgeStream>> {
+        Ok(Box::new(StreamSocket::try_clone(self)?))
+    }
+
+    fn shutdown_stream(&self) {
+        // SAFETY: shutting down an owned socket.
+        unsafe { shutdown(self.raw, SD_BOTH) };
+    }
+}
+
+/// Opens a plain byte stream (no framing) to a service in a VM, such as the guest's adbd for
+/// developer mode's bridge.
+pub fn connect_stream(
+    vm_id: Guid,
+    service_id: Guid,
+    timeout: Duration,
+) -> io::Result<Box<dyn dsa_host_core::adb_bridge::BridgeStream>> {
+    let socket = HvSocket::new().map_err(|error| io::Error::other(error.to_string()))?;
+    let millis = timeout.as_millis().clamp(1, u32::MAX as u128) as u32;
+    socket.set_option_u32(HV_PROTOCOL_RAW, HVSOCKET_CONNECT_TIMEOUT, millis)?;
+    let address = sockaddr(vm_id, service_id);
+    // SAFETY: address is a valid SOCKADDR_HV of the size passed.
+    let connected = unsafe {
+        connect(
+            socket.raw,
+            &address as *const SockaddrHv as *const SOCKADDR,
+            size_of::<SockaddrHv>() as i32,
+        )
+    };
+    if connected == SOCKET_ERROR {
+        return Err(last_error());
+    }
+    Ok(Box::new(socket))
+}
+
 /// Connects to a service in a VM (or on the host, with [`Guid::LOOPBACK`]).
 pub struct HvSocketConnector {
     pub vm_id: Guid,

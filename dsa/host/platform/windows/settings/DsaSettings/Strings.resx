@@ -322,6 +322,24 @@
   <data name="LinksCard.Description" xml:space="preserve">
     <value>Off by default: a web link you tap in an Android app opens in your default browser in Windows. On, it opens in an Android app, as on a phone. A link an installed app has verified as its own opens in that app either way.</value>
   </data>
+  <data name="DeveloperHeader.Text" xml:space="preserve">
+    <value>Developer</value>
+  </data>
+  <data name="DeveloperModeCard.Header" xml:space="preserve">
+    <value>Developer mode</value>
+  </data>
+  <data name="DeveloperModeCard.Description" xml:space="preserve">
+    <value>Off by default. When on, adb on this PC can connect to Android without asking in Android, through a port only this PC can reach. Turn it off when you are done.</value>
+  </data>
+  <data name="AdbCard.Header" xml:space="preserve">
+    <value>Connect adb</value>
+  </data>
+  <data name="AdbCard.Description" xml:space="preserve">
+    <value>While developer mode is on and Android is running, run this command:</value>
+  </data>
+  <data name="AdbPortLabel.Text" xml:space="preserve">
+    <value>Port</value>
+  </data>
   <data name="ClipboardCard.Header" xml:space="preserve">
     <value>Share the clipboard with Android</value>
   </data>

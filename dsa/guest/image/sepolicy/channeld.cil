@@ -98,6 +98,10 @@
 ; kernel's pressure stall information.
 (allow dsa_channeld proc_pressure_mem (file (read open getattr)))
 
+; Developer mode: the daemon sets vendor.dsa.adb (its type, dsa_adb_prop, is in adb.cil) as
+; the host says, and init starts or stops adbd (dsa-channeld.rc).
+(allow dsa_channeld dsa_adb_prop (property_service (set)))
+(allow dsa_channeld dsa_adb_prop (file (read open getattr map)))
 ; Android's log, read only while the host asks for it, through logd's reader socket
 ; (/dev/socket/logdr, a sequenced-packet socket); the records go to the host on the log port,
 ; which the vsock rules above already cover. The daemon runs as the system user, which logd

@@ -94,7 +94,9 @@
 //! whether DSA (`program-updates`) and the Android image (`image-updates`) are updated, and
 //! whether every DSA process writes the input trace (`input-trace`) and each stage of each
 //! resize (`resize-trace`) to its log, off by default. Those last four are the computer's, so
-//! only an administrator changes them.
+//! only an administrator changes them. `developer-mode` (off by default) lets adb reach the
+//! user's Android: while it is on, `adb connect 127.0.0.1:58526` connects, with no prompt to
+//! accept in Android. `adb-port` picks another loopback port than 58526.
 //! `dsa settings set <name> <value>` changes one;
 //! the switches take `on` or `off`. `dsa memory` shows how much memory the user's Android
 //! takes, on the host and inside Android. `dsa gpus` lists the GPUs of this machine, for
@@ -202,6 +204,8 @@ pub enum Change {
     ResizeTrace(bool),
     /// The most memory Android may have, in MiB; 0 for automatic.
     MemoryLimit(u32),
+    DeveloperMode(bool),
+    AdbPort(u16),
 }
 
 impl Change {
@@ -221,10 +225,17 @@ impl Change {
             "input-trace" => switch().map(Change::InputTrace),
             "resize-trace" => switch().map(Change::ResizeTrace),
             "memory-limit" => parse_memory_limit(value).map(Change::MemoryLimit),
+            "developer-mode" => switch().map(Change::DeveloperMode),
+            "adb-port" => match value.parse::<u16>() {
+                Ok(port) if port > 0 => Ok(Change::AdbPort(port)),
+                _ => Err(format!(
+                    "adb-port is a TCP port from 1 to 65535, not {value:?}"
+                )),
+            },
             _ => Err(format!(
                 "there is no setting {name:?}; the settings are render-gpu, freeze, \
                  clipboard, links-in-android, program-updates, image-updates, input-trace, \
-                 resize-trace and memory-limit"
+                 resize-trace, memory-limit, developer-mode and adb-port"
             )),
         }
     }
@@ -728,12 +739,20 @@ pub fn settings_json(report: &SettingsReport) -> Value {
         "input_trace": report.settings.input_trace,
         "resize_trace": report.settings.resize_trace,
         "memory_limit_mb": report.settings.memory_limit_mb,
+        "developer_mode": report.settings.developer_mode,
+        "adb_port": report.settings.adb_port,
+        "adb_address": adb_address(&report.settings),
         "program_updates_available": report.facts.program_updates_available,
         "image_updates_available": report.facts.image_updates_available,
         "version": report.facts.version,
         "log_dir": report.facts.log_dir,
         "android_version": report.facts.android_version,
     })
+}
+
+/// The address `adb connect` takes in developer mode.
+pub fn adb_address(settings: &dsa_host_core::settings::Settings) -> String {
+    format!("127.0.0.1:{}", settings.adb_port)
 }
 
 fn on_off(value: bool) -> &'static str {
@@ -784,6 +803,11 @@ pub fn describe_settings(report: &SettingsReport) -> String {
                 mb => format!("{mb} MiB"),
             }
         ),
+        if settings.developer_mode {
+            format!("Developer mode: on (adb connect {})", adb_address(settings))
+        } else {
+            format!("Developer mode: off (adb port {})", settings.adb_port)
+        },
         format!("Service version: {}", facts.version),
     ];
     if let Some(version) = &facts.android_version {
@@ -906,6 +930,8 @@ fn settings(invocation: &Invocation, client: &mut HostApiClient) -> Result<Strin
             Change::InputTrace(on) => wanted.input_trace = *on,
             Change::ResizeTrace(on) => wanted.resize_trace = *on,
             Change::MemoryLimit(mb) => wanted.memory_limit_mb = *mb,
+            Change::DeveloperMode(on) => wanted.developer_mode = *on,
+            Change::AdbPort(port) => wanted.adb_port = *port,
         }
         report = client.set_settings(&wanted).map_err(|e| e.to_string())?;
     }

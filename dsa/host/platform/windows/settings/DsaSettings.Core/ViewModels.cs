@@ -164,6 +164,11 @@ public sealed class SettingsViewModel : ObservableObject
     public bool LinksInAndroid => _settings?.LinksInAndroid ?? false;
     /// <summary>Whether text copied on Windows can be pasted in Android, and the reverse.</summary>
     public bool Clipboard => _settings?.Clipboard ?? true;
+    /// <summary>Whether adb reaches Android through the loopback port.</summary>
+    public bool DeveloperMode => _settings?.DeveloperMode ?? false;
+    public int AdbPort => _settings?.AdbPort ?? SettingsInfo.DefaultAdbPort;
+    /// <summary>The command that connects adb, shown while developer mode is on.</summary>
+    public string AdbConnect => _settings?.AdbConnect ?? $"adb connect 127.0.0.1:{SettingsInfo.DefaultAdbPort}";
     public bool ProgramUpdates => _settings?.ProgramUpdates ?? false;
     public bool ImageUpdates => _settings?.ImageUpdates ?? false;
     public bool ProgramUpdatesAvailable => _settings?.ProgramUpdatesAvailable ?? false;
@@ -296,6 +301,22 @@ public sealed class SettingsViewModel : ObservableObject
 
     public Task SetClipboardAsync(bool on) =>
         on == Clipboard && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetClipboardAsync(on));
+
+    public Task SetDeveloperModeAsync(bool on) =>
+        on == DeveloperMode && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetDeveloperModeAsync(on));
+
+    /// <summary>Picks the loopback port adb connects to. Text that is not a port from 1 to
+    /// 65535 changes nothing.</summary>
+    public Task SetAdbPortAsync(string text)
+    {
+        if (!int.TryParse(text.Trim(), System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var port) || port is < 1 or > 65535)
+        {
+            ChangedAll();
+            return Task.CompletedTask;
+        }
+        return port == AdbPort && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetAdbPortAsync(port));
+    }
 
     public Task SetProgramUpdatesAsync(bool on) =>
         on == ProgramUpdates && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetProgramUpdatesAsync(on));

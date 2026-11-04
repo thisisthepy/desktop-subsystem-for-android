@@ -20,8 +20,10 @@ Windows with Hyper-V and a GPU, which hosted runners do not have, so these run o
 
 ## On a PC
 
-Install a debug image (a user build has no adb), connect adb to the guest, and run from the
-repository root:
+Turn developer mode on (`dsa settings set developer-mode on`, or the Developer section of
+the settings app), start Android, and run from the repository root. The commands connect adb
+to `127.0.0.1:58526` themselves; `--serial` names another address, such as the one
+`dsa settings` shows when the `adb-port` setting picks another port:
 
 ```text
 uv run dsa/graphics/verify/verify.py fetch

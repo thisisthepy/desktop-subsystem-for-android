@@ -99,6 +99,9 @@ extern CloseTaskDefaultTypeInternal _CloseTask_default_instance_;
 class CollectDiagnostics;
 struct CollectDiagnosticsDefaultTypeInternal;
 extern CollectDiagnosticsDefaultTypeInternal _CollectDiagnostics_default_instance_;
+class DeveloperMode;
+struct DeveloperModeDefaultTypeInternal;
+extern DeveloperModeDefaultTypeInternal _DeveloperMode_default_instance_;
 class DeviceIdle;
 struct DeviceIdleDefaultTypeInternal;
 extern DeviceIdleDefaultTypeInternal _DeviceIdle_default_instance_;
@@ -331,6 +334,7 @@ template<> ::dsa::control::v1::ClockAnswer* Arena::CreateMaybeMessage<::dsa::con
 template<> ::dsa::control::v1::ClockProbe* Arena::CreateMaybeMessage<::dsa::control::v1::ClockProbe>(Arena*);
 template<> ::dsa::control::v1::CloseTask* Arena::CreateMaybeMessage<::dsa::control::v1::CloseTask>(Arena*);
 template<> ::dsa::control::v1::CollectDiagnostics* Arena::CreateMaybeMessage<::dsa::control::v1::CollectDiagnostics>(Arena*);
+template<> ::dsa::control::v1::DeveloperMode* Arena::CreateMaybeMessage<::dsa::control::v1::DeveloperMode>(Arena*);
 template<> ::dsa::control::v1::DeviceIdle* Arena::CreateMaybeMessage<::dsa::control::v1::DeviceIdle>(Arena*);
 template<> ::dsa::control::v1::DiagnosticsDone* Arena::CreateMaybeMessage<::dsa::control::v1::DiagnosticsDone>(Arena*);
 template<> ::dsa::control::v1::DiagnosticsFile* Arena::CreateMaybeMessage<::dsa::control::v1::DiagnosticsFile>(Arena*);
@@ -5428,6 +5432,136 @@ class ClipboardSharing final :
   public:
 
   // @@protoc_insertion_point(class_scope:dsa.control.v1.ClipboardSharing)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    bool on_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class DeveloperMode final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.DeveloperMode) */ {
+ public:
+  inline DeveloperMode() : DeveloperMode(nullptr) {}
+  ~DeveloperMode() override;
+  explicit PROTOBUF_CONSTEXPR DeveloperMode(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  DeveloperMode(const DeveloperMode& from);
+  DeveloperMode(DeveloperMode&& from) noexcept
+    : DeveloperMode() {
+    *this = ::std::move(from);
+  }
+
+  inline DeveloperMode& operator=(const DeveloperMode& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline DeveloperMode& operator=(DeveloperMode&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const DeveloperMode& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const DeveloperMode* internal_default_instance() {
+    return reinterpret_cast<const DeveloperMode*>(
+               &_DeveloperMode_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    30;
+
+  friend void swap(DeveloperMode& a, DeveloperMode& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(DeveloperMode* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(DeveloperMode* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  DeveloperMode* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<DeveloperMode>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const DeveloperMode& from);
+  void MergeFrom(const DeveloperMode& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(DeveloperMode* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.DeveloperMode";
+  }
+  protected:
+  explicit DeveloperMode(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kOnFieldNumber = 1,
+  };
+  // bool on = 1;
+  void clear_on();
+  bool on() const;
+  void set_on(bool value);
+  private:
+  bool _internal_on() const;
+  void _internal_set_on(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.DeveloperMode)
  private:
   class _Internal;
 
@@ -14852,6 +14986,7 @@ class Envelope final :
     kScreenState = 40,
     kPowerState = 41,
     kPowerHint = 110,
+    kDeveloperMode = 140,
     kDeviceIdle = 42,
     kHostMemory = 43,
     kHostSleep = 44,
@@ -15004,6 +15139,7 @@ class Envelope final :
     kScreenStateFieldNumber = 40,
     kPowerStateFieldNumber = 41,
     kPowerHintFieldNumber = 110,
+    kDeveloperModeFieldNumber = 140,
     kDeviceIdleFieldNumber = 42,
     kHostMemoryFieldNumber = 43,
     kHostSleepFieldNumber = 44,
@@ -15611,6 +15747,24 @@ class Envelope final :
   void unsafe_arena_set_allocated_power_hint(
       ::dsa::control::v1::PowerHint* power_hint);
   ::dsa::control::v1::PowerHint* unsafe_arena_release_power_hint();
+
+  // .dsa.control.v1.DeveloperMode developer_mode = 140;
+  bool has_developer_mode() const;
+  private:
+  bool _internal_has_developer_mode() const;
+  public:
+  void clear_developer_mode();
+  const ::dsa::control::v1::DeveloperMode& developer_mode() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::DeveloperMode* release_developer_mode();
+  ::dsa::control::v1::DeveloperMode* mutable_developer_mode();
+  void set_allocated_developer_mode(::dsa::control::v1::DeveloperMode* developer_mode);
+  private:
+  const ::dsa::control::v1::DeveloperMode& _internal_developer_mode() const;
+  ::dsa::control::v1::DeveloperMode* _internal_mutable_developer_mode();
+  public:
+  void unsafe_arena_set_allocated_developer_mode(
+      ::dsa::control::v1::DeveloperMode* developer_mode);
+  ::dsa::control::v1::DeveloperMode* unsafe_arena_release_developer_mode();
 
   // .dsa.control.v1.DeviceIdle device_idle = 42;
   bool has_device_idle() const;
@@ -16530,6 +16684,7 @@ class Envelope final :
   void set_has_screen_state();
   void set_has_power_state();
   void set_has_power_hint();
+  void set_has_developer_mode();
   void set_has_device_idle();
   void set_has_host_memory();
   void set_has_host_sleep();
@@ -16621,6 +16776,7 @@ class Envelope final :
       ::dsa::control::v1::ScreenState* screen_state_;
       ::dsa::control::v1::PowerState* power_state_;
       ::dsa::control::v1::PowerHint* power_hint_;
+      ::dsa::control::v1::DeveloperMode* developer_mode_;
       ::dsa::control::v1::DeviceIdle* device_idle_;
       ::dsa::control::v1::HostMemory* host_memory_;
       ::dsa::control::v1::HostSleep* host_sleep_;
@@ -19342,6 +19498,30 @@ inline void ClipboardSharing::_internal_set_on(bool value) {
 inline void ClipboardSharing::set_on(bool value) {
   _internal_set_on(value);
   // @@protoc_insertion_point(field_set:dsa.control.v1.ClipboardSharing.on)
+}
+
+// -------------------------------------------------------------------
+
+// DeveloperMode
+
+// bool on = 1;
+inline void DeveloperMode::clear_on() {
+  _impl_.on_ = false;
+}
+inline bool DeveloperMode::_internal_on() const {
+  return _impl_.on_;
+}
+inline bool DeveloperMode::on() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.DeveloperMode.on)
+  return _internal_on();
+}
+inline void DeveloperMode::_internal_set_on(bool value) {
+  
+  _impl_.on_ = value;
+}
+inline void DeveloperMode::set_on(bool value) {
+  _internal_set_on(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.DeveloperMode.on)
 }
 
 // -------------------------------------------------------------------
@@ -27909,6 +28089,80 @@ inline ::dsa::control::v1::PowerHint* Envelope::_internal_mutable_power_hint() {
 inline ::dsa::control::v1::PowerHint* Envelope::mutable_power_hint() {
   ::dsa::control::v1::PowerHint* _msg = _internal_mutable_power_hint();
   // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.power_hint)
+  return _msg;
+}
+
+// .dsa.control.v1.DeveloperMode developer_mode = 140;
+inline bool Envelope::_internal_has_developer_mode() const {
+  return body_case() == kDeveloperMode;
+}
+inline bool Envelope::has_developer_mode() const {
+  return _internal_has_developer_mode();
+}
+inline void Envelope::set_has_developer_mode() {
+  _impl_._oneof_case_[0] = kDeveloperMode;
+}
+inline void Envelope::clear_developer_mode() {
+  if (_internal_has_developer_mode()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.developer_mode_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::DeveloperMode* Envelope::release_developer_mode() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.developer_mode)
+  if (_internal_has_developer_mode()) {
+    clear_has_body();
+    ::dsa::control::v1::DeveloperMode* temp = _impl_.body_.developer_mode_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.developer_mode_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::DeveloperMode& Envelope::_internal_developer_mode() const {
+  return _internal_has_developer_mode()
+      ? *_impl_.body_.developer_mode_
+      : reinterpret_cast< ::dsa::control::v1::DeveloperMode&>(::dsa::control::v1::_DeveloperMode_default_instance_);
+}
+inline const ::dsa::control::v1::DeveloperMode& Envelope::developer_mode() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.developer_mode)
+  return _internal_developer_mode();
+}
+inline ::dsa::control::v1::DeveloperMode* Envelope::unsafe_arena_release_developer_mode() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.developer_mode)
+  if (_internal_has_developer_mode()) {
+    clear_has_body();
+    ::dsa::control::v1::DeveloperMode* temp = _impl_.body_.developer_mode_;
+    _impl_.body_.developer_mode_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_developer_mode(::dsa::control::v1::DeveloperMode* developer_mode) {
+  clear_body();
+  if (developer_mode) {
+    set_has_developer_mode();
+    _impl_.body_.developer_mode_ = developer_mode;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.developer_mode)
+}
+inline ::dsa::control::v1::DeveloperMode* Envelope::_internal_mutable_developer_mode() {
+  if (!_internal_has_developer_mode()) {
+    clear_body();
+    set_has_developer_mode();
+    _impl_.body_.developer_mode_ = CreateMaybeMessage< ::dsa::control::v1::DeveloperMode >(GetArenaForAllocation());
+  }
+  return _impl_.body_.developer_mode_;
+}
+inline ::dsa::control::v1::DeveloperMode* Envelope::mutable_developer_mode() {
+  ::dsa::control::v1::DeveloperMode* _msg = _internal_mutable_developer_mode();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.developer_mode)
   return _msg;
 }
 

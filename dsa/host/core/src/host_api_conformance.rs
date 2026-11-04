@@ -73,6 +73,10 @@ pub struct FakeAndroid {
     pub freeze_when_idle: Mutex<Vec<bool>>,
     /// Each word on whether web links open in it, in order.
     pub links_in_android: Mutex<Vec<bool>>,
+    /// Each word on developer mode (on, and the adb port), in order.
+    pub developer_mode: Mutex<Vec<(bool, u16)>>,
+    /// Set to refuse developer mode, as when the port is taken.
+    pub refuse_developer_mode: Mutex<Option<String>>,
     link_watchers: Mutex<Vec<Sender<String>>>,
     /// The files it was given, in order.
     pub files: Mutex<Vec<FileTransfer>>,
@@ -144,6 +148,8 @@ impl FakeAndroid {
             shown: Mutex::new(Vec::new()),
             freeze_when_idle: Mutex::new(Vec::new()),
             links_in_android: Mutex::new(Vec::new()),
+            developer_mode: Mutex::new(Vec::new()),
+            refuse_developer_mode: Mutex::new(None),
             link_watchers: Mutex::new(Vec::new()),
             files: Mutex::new(Vec::new()),
             clipboard_shared: Mutex::new(Vec::new()),
@@ -269,6 +275,13 @@ impl UserAndroid for FakeAndroid {
     }
     fn links_in_android(&self, on: bool) {
         self.links_in_android.lock().unwrap().push(on);
+    }
+    fn developer_mode(&self, on: bool, port: u16) -> Result<(), String> {
+        if let Some(why) = self.refuse_developer_mode.lock().unwrap().clone() {
+            return Err(why);
+        }
+        self.developer_mode.lock().unwrap().push((on, port));
+        Ok(())
     }
     fn watch_links(&self) -> Option<mpsc::Receiver<String>> {
         let (tx, rx) = mpsc::channel();
@@ -800,6 +813,14 @@ macro_rules! host_api_conformance {
         #[test]
         fn fr9_the_link_setting_reaches_the_callers_android() {
             $crate::host_api_conformance::link_setting_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr20_developer_mode_is_off_by_default_and_reaches_the_callers_android() {
+            $crate::host_api_conformance::developer_mode_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr20_a_developer_mode_port_that_cannot_open_is_reported() {
+            $crate::host_api_conformance::developer_mode_port_refusal_is_reported(&mut || $make);
         }
         #[test]
         fn nfr5_a_link_client_that_sends_a_frame_is_disconnected() {
@@ -2087,6 +2108,68 @@ pub fn link_reaches_the_client(make: MakeLocal<'_>) {
         links.next(WAIT).unwrap().as_deref(),
         Some("https://example.com/page")
     );
+}
+
+pub fn developer_mode_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let service =
+        HostApiService::new(androids.clone(), "test service").with_settings(store.clone(), facts());
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    let fresh = client.settings().unwrap().settings;
+    assert!(!fresh.developer_mode, "off by default");
+    assert_eq!(fresh.adb_port, 58526);
+    let on = client
+        .set_settings(&Settings {
+            developer_mode: true,
+            ..Settings::default()
+        })
+        .expect("turning developer mode on");
+    assert!(on.settings.developer_mode);
+    assert!(store.get(&user).unwrap().developer_mode);
+    client
+        .set_settings(&Settings {
+            developer_mode: true,
+            adb_port: 5037,
+            ..Settings::default()
+        })
+        .unwrap();
+    client.set_settings(&Settings::default()).unwrap();
+    assert_eq!(
+        *androids.of(&user).unwrap().developer_mode.lock().unwrap(),
+        vec![(true, 58526), (true, 5037), (false, 58526)]
+    );
+}
+
+pub fn developer_mode_port_refusal_is_reported(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let service =
+        HostApiService::new(androids.clone(), "test service").with_settings(store.clone(), facts());
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    // The caller's Android is made by the first request that needs it.
+    client.settings().unwrap();
+    client.set_settings(&Settings::default()).unwrap();
+    *androids
+        .of(&user)
+        .unwrap()
+        .refuse_developer_mode
+        .lock()
+        .unwrap() = Some("cannot listen for adb on 127.0.0.1:58526".into());
+    match client.set_settings(&Settings {
+        developer_mode: true,
+        ..Settings::default()
+    }) {
+        Err(ClientError::Service { code, detail }) => {
+            assert_eq!(code, ErrorCode::InvalidSetting);
+            assert!(detail.contains("127.0.0.1:58526"), "{detail}");
+        }
+        other => panic!("expected the service to report the port, got {other:?}"),
+    }
 }
 
 pub fn link_setting_reaches_the_caller(make: MakeLocal<'_>) {
