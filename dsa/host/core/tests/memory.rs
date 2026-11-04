@@ -10,9 +10,8 @@ use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{HostApiClient, HostApiService, PerUser, UserAndroid, UserAndroids};
 use dsa_host_core::host_api_conformance::RunningService;
 use dsa_host_core::memory::{
-    held_line, snapshot_from_wire, snapshot_to_wire, summary_lines, GuestMemory,
-    GuestMemoryReport, HeldMemory, HostMemory, HostProcessMemory, HostRole, IdleTrim,
-    MemorySnapshot,
+    held_line, snapshot_from_wire, snapshot_to_wire, summary_lines, GuestMemory, GuestMemoryReport,
+    HeldMemory, HostMemory, HostProcessMemory, HostRole, IdleTrim, MemorySnapshot,
 };
 
 #[test]

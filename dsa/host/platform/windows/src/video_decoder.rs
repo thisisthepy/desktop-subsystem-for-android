@@ -594,7 +594,9 @@ mod system {
                 }
             }
         }
-        reader.join().map_err(|_| "the probe's output was lost".to_string())
+        reader
+            .join()
+            .map_err(|_| "the probe's output was lost".to_string())
     }
 
     impl MediaFoundationDecoders {
