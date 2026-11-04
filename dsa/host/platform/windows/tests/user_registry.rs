@@ -7,8 +7,8 @@ use dsa_host_windows::start_menu::{app_user_model_id, APP_ID_PREFIX, OLD_APP_ID_
 use dsa_host_windows::user_registry::remove_old_names_for_current_user;
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
 use windows_sys::Win32::System::Registry::{
-    RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER,
-    KEY_READ, KEY_WRITE, REG_OPTION_NON_VOLATILE,
+    RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, KEY_READ,
+    KEY_WRITE, REG_OPTION_NON_VOLATILE,
 };
 
 fn wide(text: &str) -> Vec<u16> {
@@ -77,7 +77,11 @@ fn fr19_an_apps_id_is_company_product_and_package() {
     assert!(!id.starts_with(OLD_APP_ID_PREFIX));
     assert!(!id.contains(' '));
     let long = app_user_model_id(&format!("com.{}", "a".repeat(200)));
-    assert_eq!(long.chars().count(), 128, "Windows takes at most 128 characters");
+    assert_eq!(
+        long.chars().count(),
+        128,
+        "Windows takes at most 128 characters"
+    );
 }
 
 #[test]
