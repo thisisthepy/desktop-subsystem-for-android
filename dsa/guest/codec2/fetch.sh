@@ -49,7 +49,7 @@ fetch https://android.googlesource.com/platform/frameworks/av "$scratch/codec2_a
     'media/codec2/core/include/' \
     'media/codec2/vndk/include/' \
     'media/codec2/vndk/internal/' \
-    'media/codec2/vndk/util/' \
+    'media/codec2/vndk/util/'     'media/codec2/vndk/C2Config.cpp' \
     'media/codec2/components/base/SimpleC2Interface.cpp' \
     'media/codec2/components/base/include/' \
     'media/codec2/hal/common/include/' \

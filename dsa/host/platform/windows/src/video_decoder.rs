@@ -225,9 +225,12 @@ mod system {
         }
     }
 
+    /// A width and a height.
+    type Size = (u32, u32);
+
     /// Chooses NV12 among the decoder's output types. Returns the coded size and the visible
     /// size.
-    fn choose_nv12(decoder: &IMFTransform) -> Result<((u32, u32), (u32, u32)), String> {
+    fn choose_nv12(decoder: &IMFTransform) -> Result<(Size, Size), String> {
         for index in 0.. {
             // SAFETY: plain Media Foundation calls.
             let available = match unsafe { decoder.GetOutputAvailableType(0, index) } {

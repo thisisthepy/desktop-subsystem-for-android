@@ -76,6 +76,7 @@ set(PLATFORM_SOURCES
     ${AV}/codec2/vndk/util/C2InterfaceUtils.cpp
     ${AV}/codec2/vndk/util/C2ParamUtils.cpp
     ${AV}/codec2/vndk/util/C2Debug.cpp
+    ${AV}/codec2/vndk/C2Config.cpp
     ${AV}/codec2/components/base/SimpleC2Interface.cpp
     ${AV}/codec2/hal/aidl/Configurable.cpp
     ${AV}/codec2/hal/aidl/ParamTypes.cpp
