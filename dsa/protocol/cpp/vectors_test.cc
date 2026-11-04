@@ -219,6 +219,18 @@ std::map<std::string, v1::Envelope> Cases() {
     power->set_charging(false);
     power->set_power_saver(true);
   }
+  {
+    v1::PowerHint* hint = cases["power_hint_launch_mode"].mutable_power_hint();
+    hint->set_kind(v1::POWER_HINT_KIND_MODE);
+    hint->set_id(5);
+    hint->set_enabled(true);
+  }
+  {
+    v1::PowerHint* hint = cases["power_hint_interaction_boost"].mutable_power_hint();
+    hint->set_kind(v1::POWER_HINT_KIND_BOOST);
+    hint->set_id(0);
+    hint->set_duration_ms(80);
+  }
   cases["device_idle"].mutable_device_idle()->set_idle(true);
   cases["clipboard_text"].mutable_clipboard_text()->set_text("hello \xec\x95\x88\xeb\x85\x95");
   cases["clipboard_sharing_off"].mutable_clipboard_sharing()->set_on(false);

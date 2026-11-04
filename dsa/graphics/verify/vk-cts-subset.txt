@@ -1,0 +1,20 @@
+# The Vulkan CTS cases every graphics change must keep passing through the remoting path.
+#
+# One pattern per line; `*` matches any run of characters. Every pattern must match at least
+# one case of the dEQP-VK mustpass list shipped with the pinned Android CTS (verify.py checks
+# this), so a renamed case is caught instead of silently running nothing.
+#
+# The subset covers what the remoting path itself carries: device and instance queries,
+# memory allocation and host-visible mapping, shader creation, a draw into an image read back
+# by the guest, fences and semaphores, and the Android window surface a task window uses.
+
+dEQP-VK.info.*
+dEQP-VK.api.smoke.*
+dEQP-VK.memory.allocation.basic.size_4KiB.forward.count_1
+dEQP-VK.memory.allocation.basic.size_4KiB.forward.count_100
+dEQP-VK.memory.mapping.suballocation.full.*
+dEQP-VK.draw.renderpass.simple_draw.*
+dEQP-VK.synchronization.basic.fence.*
+dEQP-VK.synchronization.smoke.*
+dEQP-VK.wsi.android.surface.*
+dEQP-VK.wsi.android.swapchain.create.min_image_count

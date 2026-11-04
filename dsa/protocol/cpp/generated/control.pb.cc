@@ -368,19 +368,22 @@ struct PowerStateDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 PowerStateDefaultTypeInternal _PowerState_default_instance_;
-PROTOBUF_CONSTEXPR HostMemory::HostMemory(
+PROTOBUF_CONSTEXPR PowerHint::PowerHint(
     ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_.low_)*/false
+    /*decltype(_impl_.kind_)*/0
+  , /*decltype(_impl_.id_)*/0
+  , /*decltype(_impl_.enabled_)*/false
+  , /*decltype(_impl_.duration_ms_)*/0
   , /*decltype(_impl_._cached_size_)*/{}} {}
-struct HostMemoryDefaultTypeInternal {
-  PROTOBUF_CONSTEXPR HostMemoryDefaultTypeInternal()
+struct PowerHintDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR PowerHintDefaultTypeInternal()
       : _instance(::_pbi::ConstantInitialized{}) {}
-  ~HostMemoryDefaultTypeInternal() {}
+  ~PowerHintDefaultTypeInternal() {}
   union {
-    HostMemory _instance;
+    PowerHint _instance;
   };
 };
-PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 HostMemoryDefaultTypeInternal _HostMemory_default_instance_;
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 PowerHintDefaultTypeInternal _PowerHint_default_instance_;
 PROTOBUF_CONSTEXPR DeviceIdle::DeviceIdle(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.idle_)*/false
@@ -1410,6 +1413,61 @@ bool KeyAction_Parse(
       KeyAction_entries, 3, name, &int_value);
   if (success) {
     *value = static_cast<KeyAction>(int_value);
+  }
+  return success;
+}
+bool PowerHintKind_IsValid(int value) {
+  switch (value) {
+    case 0:
+    case 1:
+    case 2:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> PowerHintKind_strings[3] = {};
+
+static const char PowerHintKind_names[] =
+  "POWER_HINT_KIND_BOOST"
+  "POWER_HINT_KIND_MODE"
+  "POWER_HINT_KIND_UNSPECIFIED";
+
+static const ::PROTOBUF_NAMESPACE_ID::internal::EnumEntry PowerHintKind_entries[] = {
+  { {PowerHintKind_names + 0, 21}, 2 },
+  { {PowerHintKind_names + 21, 20}, 1 },
+  { {PowerHintKind_names + 41, 27}, 0 },
+};
+
+static const int PowerHintKind_entries_by_number[] = {
+  2, // 0 -> POWER_HINT_KIND_UNSPECIFIED
+  1, // 1 -> POWER_HINT_KIND_MODE
+  0, // 2 -> POWER_HINT_KIND_BOOST
+};
+
+const std::string& PowerHintKind_Name(
+    PowerHintKind value) {
+  static const bool dummy =
+      ::PROTOBUF_NAMESPACE_ID::internal::InitializeEnumStrings(
+          PowerHintKind_entries,
+          PowerHintKind_entries_by_number,
+          3, PowerHintKind_strings);
+  (void) dummy;
+  int idx = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumName(
+      PowerHintKind_entries,
+      PowerHintKind_entries_by_number,
+      3, value);
+  return idx == -1 ? ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString() :
+                     PowerHintKind_strings[idx].get();
+}
+bool PowerHintKind_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, PowerHintKind* value) {
+  int int_value;
+  bool success = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumValue(
+      PowerHintKind_entries, 3, name, &int_value);
+  if (success) {
+    *value = static_cast<PowerHintKind>(int_value);
   }
   return success;
 }
@@ -7594,40 +7652,48 @@ std::string PowerState::GetTypeName() const {
 
 // ===================================================================
 
-class HostMemory::_Internal {
+class PowerHint::_Internal {
  public:
 };
 
-HostMemory::HostMemory(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+PowerHint::PowerHint(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
   SharedCtor(arena, is_message_owned);
-  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.HostMemory)
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.PowerHint)
 }
-HostMemory::HostMemory(const HostMemory& from)
+PowerHint::PowerHint(const PowerHint& from)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
-  HostMemory* const _this = this; (void)_this;
+  PowerHint* const _this = this; (void)_this;
   new (&_impl_) Impl_{
-      decltype(_impl_.low_){}
+      decltype(_impl_.kind_){}
+    , decltype(_impl_.id_){}
+    , decltype(_impl_.enabled_){}
+    , decltype(_impl_.duration_ms_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  _this->_impl_.low_ = from._impl_.low_;
-  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.HostMemory)
+  ::memcpy(&_impl_.kind_, &from._impl_.kind_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.duration_ms_) -
+    reinterpret_cast<char*>(&_impl_.kind_)) + sizeof(_impl_.duration_ms_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.PowerHint)
 }
 
-inline void HostMemory::SharedCtor(
+inline void PowerHint::SharedCtor(
     ::_pb::Arena* arena, bool is_message_owned) {
   (void)arena;
   (void)is_message_owned;
   new (&_impl_) Impl_{
-      decltype(_impl_.low_){false}
+      decltype(_impl_.kind_){0}
+    , decltype(_impl_.id_){0}
+    , decltype(_impl_.enabled_){false}
+    , decltype(_impl_.duration_ms_){0}
     , /*decltype(_impl_._cached_size_)*/{}
   };
 }
 
-HostMemory::~HostMemory() {
-  // @@protoc_insertion_point(destructor:dsa.control.v1.HostMemory)
+PowerHint::~PowerHint() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.PowerHint)
   if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
   (void)arena;
     return;
@@ -7635,34 +7701,61 @@ HostMemory::~HostMemory() {
   SharedDtor();
 }
 
-inline void HostMemory::SharedDtor() {
+inline void PowerHint::SharedDtor() {
   GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
 }
 
-void HostMemory::SetCachedSize(int size) const {
+void PowerHint::SetCachedSize(int size) const {
   _impl_._cached_size_.Set(size);
 }
 
-void HostMemory::Clear() {
-// @@protoc_insertion_point(message_clear_start:dsa.control.v1.HostMemory)
+void PowerHint::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.PowerHint)
   uint32_t cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  _impl_.low_ = false;
+  ::memset(&_impl_.kind_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.duration_ms_) -
+      reinterpret_cast<char*>(&_impl_.kind_)) + sizeof(_impl_.duration_ms_));
   _internal_metadata_.Clear<std::string>();
 }
 
-const char* HostMemory::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+const char* PowerHint::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
 #define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
   while (!ctx->Done(&ptr)) {
     uint32_t tag;
     ptr = ::_pbi::ReadTag(ptr, &tag);
     switch (tag >> 3) {
-      // bool low = 1;
+      // .dsa.control.v1.PowerHintKind kind = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
-          _impl_.low_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          _internal_set_kind(static_cast<::dsa::control::v1::PowerHintKind>(val));
+        } else
+          goto handle_unusual;
+        continue;
+      // int32 id = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool enabled = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.enabled_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // int32 duration_ms = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.duration_ms_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -7690,37 +7783,72 @@ failure:
 #undef CHK_
 }
 
-uint8_t* HostMemory::_InternalSerialize(
+uint8_t* PowerHint::_InternalSerialize(
     uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
-  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.HostMemory)
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.PowerHint)
   uint32_t cached_has_bits = 0;
   (void) cached_has_bits;
 
-  // bool low = 1;
-  if (this->_internal_low() != 0) {
+  // .dsa.control.v1.PowerHintKind kind = 1;
+  if (this->_internal_kind() != 0) {
     target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteBoolToArray(1, this->_internal_low(), target);
+    target = ::_pbi::WireFormatLite::WriteEnumToArray(
+      1, this->_internal_kind(), target);
+  }
+
+  // int32 id = 2;
+  if (this->_internal_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(2, this->_internal_id(), target);
+  }
+
+  // bool enabled = 3;
+  if (this->_internal_enabled() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(3, this->_internal_enabled(), target);
+  }
+
+  // int32 duration_ms = 4;
+  if (this->_internal_duration_ms() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt32ToArray(4, this->_internal_duration_ms(), target);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
   }
-  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.HostMemory)
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.PowerHint)
   return target;
 }
 
-size_t HostMemory::ByteSizeLong() const {
-// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.HostMemory)
+size_t PowerHint::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.PowerHint)
   size_t total_size = 0;
 
   uint32_t cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
-  // bool low = 1;
-  if (this->_internal_low() != 0) {
+  // .dsa.control.v1.PowerHintKind kind = 1;
+  if (this->_internal_kind() != 0) {
+    total_size += 1 +
+      ::_pbi::WireFormatLite::EnumSize(this->_internal_kind());
+  }
+
+  // int32 id = 2;
+  if (this->_internal_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_id());
+  }
+
+  // bool enabled = 3;
+  if (this->_internal_enabled() != 0) {
     total_size += 1 + 1;
+  }
+
+  // int32 duration_ms = 4;
+  if (this->_internal_duration_ms() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(this->_internal_duration_ms());
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -7731,44 +7859,58 @@ size_t HostMemory::ByteSizeLong() const {
   return total_size;
 }
 
-void HostMemory::CheckTypeAndMergeFrom(
+void PowerHint::CheckTypeAndMergeFrom(
     const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
-  MergeFrom(*::_pbi::DownCast<const HostMemory*>(
+  MergeFrom(*::_pbi::DownCast<const PowerHint*>(
       &from));
 }
 
-void HostMemory::MergeFrom(const HostMemory& from) {
-  HostMemory* const _this = this;
-  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.HostMemory)
+void PowerHint::MergeFrom(const PowerHint& from) {
+  PowerHint* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.PowerHint)
   GOOGLE_DCHECK_NE(&from, _this);
   uint32_t cached_has_bits = 0;
   (void) cached_has_bits;
 
-  if (from._internal_low() != 0) {
-    _this->_internal_set_low(from._internal_low());
+  if (from._internal_kind() != 0) {
+    _this->_internal_set_kind(from._internal_kind());
+  }
+  if (from._internal_id() != 0) {
+    _this->_internal_set_id(from._internal_id());
+  }
+  if (from._internal_enabled() != 0) {
+    _this->_internal_set_enabled(from._internal_enabled());
+  }
+  if (from._internal_duration_ms() != 0) {
+    _this->_internal_set_duration_ms(from._internal_duration_ms());
   }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
-void HostMemory::CopyFrom(const HostMemory& from) {
-// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.HostMemory)
+void PowerHint::CopyFrom(const PowerHint& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.PowerHint)
   if (&from == this) return;
   Clear();
   MergeFrom(from);
 }
 
-bool HostMemory::IsInitialized() const {
+bool PowerHint::IsInitialized() const {
   return true;
 }
 
-void HostMemory::InternalSwap(HostMemory* other) {
+void PowerHint::InternalSwap(PowerHint* other) {
   using std::swap;
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
-  swap(_impl_.low_, other->_impl_.low_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(PowerHint, _impl_.duration_ms_)
+      + sizeof(PowerHint::_impl_.duration_ms_)
+      - PROTOBUF_FIELD_OFFSET(PowerHint, _impl_.kind_)>(
+          reinterpret_cast<char*>(&_impl_.kind_),
+          reinterpret_cast<char*>(&other->_impl_.kind_));
 }
 
-std::string HostMemory::GetTypeName() const {
-  return "dsa.control.v1.HostMemory";
+std::string PowerHint::GetTypeName() const {
+  return "dsa.control.v1.PowerHint";
 }
 
 
@@ -19111,8 +19253,8 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::ClockAnswer& clock_answer(const Envelope* msg);
   static const ::dsa::control::v1::ScreenState& screen_state(const Envelope* msg);
   static const ::dsa::control::v1::PowerState& power_state(const Envelope* msg);
+  static const ::dsa::control::v1::PowerHint& power_hint(const Envelope* msg);
   static const ::dsa::control::v1::DeviceIdle& device_idle(const Envelope* msg);
-  static const ::dsa::control::v1::HostMemory& host_memory(const Envelope* msg);
   static const ::dsa::control::v1::InstallApk& install_apk(const Envelope* msg);
   static const ::dsa::control::v1::ApkChunk& apk_chunk(const Envelope* msg);
   static const ::dsa::control::v1::CancelInstall& cancel_install(const Envelope* msg);
@@ -19263,13 +19405,13 @@ const ::dsa::control::v1::PowerState&
 Envelope::_Internal::power_state(const Envelope* msg) {
   return *msg->_impl_.body_.power_state_;
 }
+const ::dsa::control::v1::PowerHint&
+Envelope::_Internal::power_hint(const Envelope* msg) {
+  return *msg->_impl_.body_.power_hint_;
+}
 const ::dsa::control::v1::DeviceIdle&
 Envelope::_Internal::device_idle(const Envelope* msg) {
   return *msg->_impl_.body_.device_idle_;
-}
-const ::dsa::control::v1::HostMemory&
-Envelope::_Internal::host_memory(const Envelope* msg) {
-  return *msg->_impl_.body_.host_memory_;
 }
 const ::dsa::control::v1::InstallApk&
 Envelope::_Internal::install_apk(const Envelope* msg) {
@@ -19833,6 +19975,21 @@ void Envelope::set_allocated_power_state(::dsa::control::v1::PowerState* power_s
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.power_state)
 }
+void Envelope::set_allocated_power_hint(::dsa::control::v1::PowerHint* power_hint) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (power_hint) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(power_hint);
+    if (message_arena != submessage_arena) {
+      power_hint = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, power_hint, submessage_arena);
+    }
+    set_has_power_hint();
+    _impl_.body_.power_hint_ = power_hint;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.power_hint)
+}
 void Envelope::set_allocated_device_idle(::dsa::control::v1::DeviceIdle* device_idle) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
   clear_body();
@@ -19847,21 +20004,6 @@ void Envelope::set_allocated_device_idle(::dsa::control::v1::DeviceIdle* device_
     _impl_.body_.device_idle_ = device_idle;
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.device_idle)
-}
-void Envelope::set_allocated_host_memory(::dsa::control::v1::HostMemory* host_memory) {
-  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
-  clear_body();
-  if (host_memory) {
-    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
-      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(host_memory);
-    if (message_arena != submessage_arena) {
-      host_memory = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, host_memory, submessage_arena);
-    }
-    set_has_host_memory();
-    _impl_.body_.host_memory_ = host_memory;
-  }
-  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.host_memory)
 }
 void Envelope::set_allocated_install_apk(::dsa::control::v1::InstallApk* install_apk) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -20450,14 +20592,14 @@ Envelope::Envelope(const Envelope& from)
           from._internal_power_state());
       break;
     }
+    case kPowerHint: {
+      _this->_internal_mutable_power_hint()->::dsa::control::v1::PowerHint::MergeFrom(
+          from._internal_power_hint());
+      break;
+    }
     case kDeviceIdle: {
       _this->_internal_mutable_device_idle()->::dsa::control::v1::DeviceIdle::MergeFrom(
           from._internal_device_idle());
-      break;
-    }
-    case kHostMemory: {
-      _this->_internal_mutable_host_memory()->::dsa::control::v1::HostMemory::MergeFrom(
-          from._internal_host_memory());
       break;
     }
     case kInstallApk: {
@@ -20822,15 +20964,15 @@ void Envelope::clear_body() {
       }
       break;
     }
-    case kDeviceIdle: {
+    case kPowerHint: {
       if (GetArenaForAllocation() == nullptr) {
-        delete _impl_.body_.device_idle_;
+        delete _impl_.body_.power_hint_;
       }
       break;
     }
-    case kHostMemory: {
+    case kDeviceIdle: {
       if (GetArenaForAllocation() == nullptr) {
-        delete _impl_.body_.host_memory_;
+        delete _impl_.body_.device_idle_;
       }
       break;
     }
@@ -21274,14 +21416,6 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
-      // .dsa.control.v1.HostMemory host_memory = 43;
-      case 43:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 90)) {
-          ptr = ctx->ParseMessage(_internal_mutable_host_memory(), ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
       // .dsa.control.v1.OpenLink open_link = 50;
       case 50:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 146)) {
@@ -21502,6 +21636,14 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
       case 99:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
           ptr = ctx->ParseMessage(_internal_mutable_widget_pointer(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.PowerHint power_hint = 110;
+      case 110:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 114)) {
+          ptr = ctx->ParseMessage(_internal_mutable_power_hint(), ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -21752,13 +21894,6 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::device_idle(this).GetCachedSize(), target, stream);
   }
 
-  // .dsa.control.v1.HostMemory host_memory = 43;
-  if (_internal_has_host_memory()) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      InternalWriteMessage(43, _Internal::host_memory(this),
-        _Internal::host_memory(this).GetCachedSize(), target, stream);
-  }
-
   // .dsa.control.v1.OpenLink open_link = 50;
   if (_internal_has_open_link()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
@@ -21953,6 +22088,13 @@ uint8_t* Envelope::_InternalSerialize(
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(99, _Internal::widget_pointer(this),
         _Internal::widget_pointer(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.PowerHint power_hint = 110;
+  if (_internal_has_power_hint()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(110, _Internal::power_hint(this),
+        _Internal::power_hint(this).GetCachedSize(), target, stream);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -22182,18 +22324,18 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.power_state_);
       break;
     }
+    // .dsa.control.v1.PowerHint power_hint = 110;
+    case kPowerHint: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.power_hint_);
+      break;
+    }
     // .dsa.control.v1.DeviceIdle device_idle = 42;
     case kDeviceIdle: {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.body_.device_idle_);
-      break;
-    }
-    // .dsa.control.v1.HostMemory host_memory = 43;
-    case kHostMemory: {
-      total_size += 2 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-          *_impl_.body_.host_memory_);
       break;
     }
     // .dsa.control.v1.InstallApk install_apk = 60;
@@ -22568,14 +22710,14 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_power_state());
       break;
     }
+    case kPowerHint: {
+      _this->_internal_mutable_power_hint()->::dsa::control::v1::PowerHint::MergeFrom(
+          from._internal_power_hint());
+      break;
+    }
     case kDeviceIdle: {
       _this->_internal_mutable_device_idle()->::dsa::control::v1::DeviceIdle::MergeFrom(
           from._internal_device_idle());
-      break;
-    }
-    case kHostMemory: {
-      _this->_internal_mutable_host_memory()->::dsa::control::v1::HostMemory::MergeFrom(
-          from._internal_host_memory());
       break;
     }
     case kInstallApk: {
@@ -22845,9 +22987,9 @@ template<> PROTOBUF_NOINLINE ::dsa::control::v1::PowerState*
 Arena::CreateMaybeMessage< ::dsa::control::v1::PowerState >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::PowerState >(arena);
 }
-template<> PROTOBUF_NOINLINE ::dsa::control::v1::HostMemory*
-Arena::CreateMaybeMessage< ::dsa::control::v1::HostMemory >(Arena* arena) {
-  return Arena::CreateMessageInternal< ::dsa::control::v1::HostMemory >(arena);
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::PowerHint*
+Arena::CreateMaybeMessage< ::dsa::control::v1::PowerHint >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::PowerHint >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::DeviceIdle*
 Arena::CreateMaybeMessage< ::dsa::control::v1::DeviceIdle >(Arena* arena) {

@@ -333,15 +333,24 @@ pub struct PowerState {
     #[prost(bool, tag = "5")]
     pub power_saver: bool,
 }
-/// Host to guest: whether the host computer is short of memory. While it is, the guest gives
-/// memory back the way a phone's low memory killer would, cheapest first: the agent ends the
-/// cached app processes (apps the user is not using), and the control daemon then has the
-/// guest drop its clean caches, so free page reporting returns the pages to the host. Sent
-/// when it changes, and once after the agent connects while the host is short.
+/// Guest to host, from the guest's power HAL: the framework turned a power mode on or off, or
+/// asked for a boost. The host runs the guest's processors faster or more frugally to match.
+/// The HAL sends every mode that is on each time it subscribes to the channel, and the
+/// channel daemon each time the host connects, so a host that connects again learns them.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct HostMemory {
-    #[prost(bool, tag = "1")]
-    pub low: bool,
+pub struct PowerHint {
+    #[prost(enumeration = "PowerHintKind", tag = "1")]
+    pub kind: i32,
+    /// The mode or the boost, by its value in android.hardware.power's Mode or Boost.
+    #[prost(int32, tag = "2")]
+    pub id: i32,
+    /// A mode: whether it is now on.
+    #[prost(bool, tag = "3")]
+    pub enabled: bool,
+    /// A boost: how long it lasts, in milliseconds. 0 asks for the host's usual length; a
+    /// negative value ends the boost now.
+    #[prost(int32, tag = "4")]
+    pub duration_ms: i32,
 }
 /// Guest to host, from the agent: whether the guest's device is in Doze (the device idle
 /// controller's deep idle state). The host takes the device not to be in Doze when the agent
@@ -952,7 +961,7 @@ pub struct AccessibilityActionResult {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 42, 43, 60, 61, 62, 63, 64, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 110, 42, 60, 61, 62, 63, 64, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -1020,10 +1029,10 @@ pub mod envelope {
         ScreenState(super::ScreenState),
         #[prost(message, tag = "41")]
         PowerState(super::PowerState),
+        #[prost(message, tag = "110")]
+        PowerHint(super::PowerHint),
         #[prost(message, tag = "42")]
         DeviceIdle(super::DeviceIdle),
-        #[prost(message, tag = "43")]
-        HostMemory(super::HostMemory),
         #[prost(message, tag = "60")]
         InstallApk(super::InstallApk),
         #[prost(message, tag = "61")]
@@ -1301,6 +1310,38 @@ impl KeyAction {
             "KEY_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
             "KEY_ACTION_DOWN" => Some(Self::Down),
             "KEY_ACTION_UP" => Some(Self::Up),
+            _ => None,
+        }
+    }
+}
+/// What a PowerHint is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum PowerHintKind {
+    Unspecified = 0,
+    /// A power mode, which stays on until the guest turns it off.
+    Mode = 1,
+    /// A boost, which lasts for a while and then ends by itself.
+    Boost = 2,
+}
+impl PowerHintKind {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "POWER_HINT_KIND_UNSPECIFIED",
+            Self::Mode => "POWER_HINT_KIND_MODE",
+            Self::Boost => "POWER_HINT_KIND_BOOST",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "POWER_HINT_KIND_UNSPECIFIED" => Some(Self::Unspecified),
+            "POWER_HINT_KIND_MODE" => Some(Self::Mode),
+            "POWER_HINT_KIND_BOOST" => Some(Self::Boost),
             _ => None,
         }
     }

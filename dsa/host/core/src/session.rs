@@ -42,6 +42,9 @@
 //! - Whether the host is short of memory ([`Session::host_memory_low`]) goes to the guest
 //!   whenever it changes, and when the agent connects while the host is short. The guest
 //!   then ends its cached app processes and drops its caches, so the host gets memory back.
+//! - The guest's power HAL hints at the performance it needs; each hint goes to every
+//!   [`Session::watch_power_hints`] watcher, and [`GuestPower::Stopped`] when the guest stops,
+//!   which ends every mode and boost it asked for.
 //!
 //! The web links apps in the guest open go to every [`Session::watch_links`] watcher, which
 //! opens them in the host's browser, unless the user lets them open in the guest
@@ -103,6 +106,7 @@ use crate::links::{self, LinkGate};
 use crate::memory::{GuestMemory, GuestMemoryReport};
 use crate::notifications::{self, Notification, NotificationAction, NotificationEvent, RateLimit};
 use crate::power::PowerState;
+use crate::power_hints::PowerHint;
 use crate::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest, TaskTable, TaskWatch};
 use crate::widgets::{
     self, Placement, Widget, WidgetEvent, WidgetFrame, WidgetProvider, WidgetSize,
@@ -539,6 +543,17 @@ struct Shared {
     last_widget_request: AtomicU32,
     /// Who watches each task's accessibility tree.
     accessibility: Mutex<AccessibilityHub>,
+    /// Who hears of the guest's power hints.
+    power_hint_watchers: Mutex<Vec<Sender<GuestPower>>>,
+}
+
+/// What the guest's power HAL asks of the host's processors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestPower {
+    /// One hint, as the guest sent it.
+    Hint(PowerHint),
+    /// The guest stopped: none of its modes or boosts is on any longer.
+    Stopped,
 }
 
 /// What the agent answers about widgets.
@@ -770,6 +785,13 @@ impl Shared {
     }
 
     /// Hands a change to the guest's notifications to every watcher still listening.
+    fn publish_power(&self, event: GuestPower) {
+        self.power_hint_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|watcher| watcher.send(event).is_ok());
+    }
+
     fn publish_notification(&self, event: NotificationEvent) {
         self.notification_watchers
             .lock()
@@ -829,6 +851,7 @@ impl Session {
             widget_requests: Mutex::new(HashMap::new()),
             last_widget_request: AtomicU32::new(0),
             accessibility: Mutex::new(AccessibilityHub::default()),
+            power_hint_watchers: Mutex::new(Vec::new()),
         });
         let freeze_delay = config.freeze_after.unwrap_or(DEFAULT_FREEZE_AFTER);
         let (commands, command_rx) = mpsc::channel();
@@ -1234,6 +1257,18 @@ impl Session {
         let (tx, rx) = mpsc::channel();
         self.shared
             .clipboard_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(tx);
+        rx
+    }
+
+    /// The guest's power hints from now on, and each time the guest stops. The watch lasts
+    /// across restarts of the guest.
+    pub fn watch_power_hints(&self) -> Receiver<GuestPower> {
+        let (tx, rx) = mpsc::channel();
+        self.shared
+            .power_hint_watchers
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(tx);
@@ -3132,6 +3167,10 @@ impl Worker {
                     GuestAccessibility::ActionResult(ActionResult::from_control(result)),
                 );
             }
+            Some(Body::PowerHint(hint)) => match PowerHint::from_control(&hint) {
+                Ok(hint) => self.shared.publish_power(GuestPower::Hint(hint)),
+                Err(why) => eprintln!("power: dropped a hint from the guest: {why}"),
+            },
             Some(Body::ScreenState(_))
             | Some(Body::PowerState(_))
             | Some(Body::HostMemory(_))
@@ -3198,6 +3237,8 @@ impl Worker {
         self.shared.clear_tasks();
         // So do its notifications.
         self.clear_notifications();
+        // And the modes and boosts its power HAL asked for.
+        self.shared.publish_power(GuestPower::Stopped);
         self.shared.set_guest_memory(None);
         match self.launcher.stop(self.config.stop_timeout) {
             Ok(()) => {

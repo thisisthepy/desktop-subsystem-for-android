@@ -1,0 +1,5 @@
+# The guest's health HAL. The guest's battery is the host computer's.
+service vendor.dsa-health /vendor/bin/hw/dsa-health
+    class hal
+    user system
+    group system

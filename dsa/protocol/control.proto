@@ -356,6 +356,30 @@ message HostMemory {
   bool low = 1;
 }
 
+// What a PowerHint is about.
+enum PowerHintKind {
+  POWER_HINT_KIND_UNSPECIFIED = 0;
+  // A power mode, which stays on until the guest turns it off.
+  POWER_HINT_KIND_MODE = 1;
+  // A boost, which lasts for a while and then ends by itself.
+  POWER_HINT_KIND_BOOST = 2;
+}
+
+// Guest to host, from the guest's power HAL: the framework turned a power mode on or off, or
+// asked for a boost. The host runs the guest's processors faster or more frugally to match.
+// The HAL sends every mode that is on each time it subscribes to the channel, and the
+// channel daemon each time the host connects, so a host that connects again learns them.
+message PowerHint {
+  PowerHintKind kind = 1;
+  // The mode or the boost, by its value in android.hardware.power's Mode or Boost.
+  int32 id = 2;
+  // A mode: whether it is now on.
+  bool enabled = 3;
+  // A boost: how long it lasts, in milliseconds. 0 asks for the host's usual length; a
+  // negative value ends the boost now.
+  int32 duration_ms = 4;
+}
+
 // Guest to host, from the agent: whether the guest's device is in Doze (the device idle
 // controller's deep idle state). The host takes the device not to be in Doze when the agent
 // connects; the agent sends this on each change after that.
@@ -896,6 +920,7 @@ message Envelope {
     ClockAnswer clock_answer = 29;
     ScreenState screen_state = 40;
     PowerState power_state = 41;
+    PowerHint power_hint = 110;
     DeviceIdle device_idle = 42;
     HostMemory host_memory = 43;
     InstallApk install_apk = 60;

@@ -11,6 +11,9 @@
 //!   subscribes later, such as a restarted hwcomposer, is told the tasks already there, and
 //!   the host each time it connects again is told the apps and then the tasks, since a client
 //!   sends them only when they change.
+//! - The daemon keeps the host's latest `PowerState`, which a listener that subscribes later,
+//!   such as a restarted health HAL, is told first, and each power mode the power HAL has on
+//!   (`PowerHint`), which the host is told each time it connects again.
 //! - The agent says it is there (`AgentConnected`); that stops here. The host hears how far the
 //!   guest has got (`GuestBoot`) each time it connects and on each change: whether Android has
 //!   finished booting, and whether the agent is connected, which ends when its process dies.
@@ -26,7 +29,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use dsa_protocol::control::envelope::Body;
-use dsa_protocol::control::{Envelope, GuestBoot};
+use dsa_protocol::control::{Envelope, GuestBoot, PowerHintKind};
 
 /// The agent's package, which is the name of its process.
 pub const AGENT_PROCESS: &str = "io.github.thisisthepy.dsa.agent";
@@ -112,6 +115,9 @@ struct Subscription {
 /// host but are not kept.
 pub const MAX_APPS: usize = 1024;
 
+/// The most power modes the daemon keeps on. android.hardware.power has fewer than this.
+pub const MAX_POWER_MODES: usize = 64;
+
 /// The latest state of one live task, as the frames that carried it.
 #[derive(Default)]
 struct Task {
@@ -138,6 +144,10 @@ struct State {
     boot_completed: bool,
     /// The process of the agent, while it is connected.
     agent: Option<Peer>,
+    /// The host's last `PowerState`.
+    power_state: Option<Vec<u8>>,
+    /// The `PowerHint` that turned each power mode on, by mode, while it is on.
+    power_modes: BTreeMap<i32, Vec<u8>>,
 }
 
 impl State {
@@ -200,6 +210,11 @@ impl Router {
         let mut state = self.lock();
         state.next_id += 1;
         let id = ListenerId(state.next_id);
+        if let Some(frame) = &state.power_state {
+            if listener.deliver(frame) == Delivery::Gone {
+                return id;
+            }
+        }
         for task in state.tasks.values() {
             if let Some((sender, frame)) = &task.updated {
                 if *sender != peer && listener.deliver(frame) == Delivery::Gone {
@@ -272,6 +287,7 @@ impl Router {
         match body {
             Some(Body::ScreenState(screen)) => state.screen_off = !screen.on,
             Some(Body::HostMemory(memory)) => state.host_memory_low = memory.low,
+            Some(Body::PowerState(_)) => state.power_state = Some(frame.to_vec()),
             _ => {}
         }
         state.deliver(frame, None);
@@ -287,6 +303,9 @@ impl Router {
         state.screen_off = false;
         state.host_memory_low = false;
         let _ = self.to_host.send(state.boot_report());
+        for frame in state.power_modes.values() {
+            let _ = self.to_host.send(frame.clone());
+        }
         for frame in state.apps.values() {
             let _ = self.to_host.send(frame.clone());
         }
@@ -369,6 +388,15 @@ impl Router {
             }
             Some(Body::TaskFrames(frames)) => {
                 state.tasks.entry(frames.task_id).or_default().frames = Some(frame.clone());
+            }
+            Some(Body::PowerHint(hint)) if hint.kind == PowerHintKind::Mode as i32 => {
+                if !hint.enabled {
+                    state.power_modes.remove(&hint.id);
+                } else if state.power_modes.contains_key(&hint.id)
+                    || state.power_modes.len() < MAX_POWER_MODES
+                {
+                    state.power_modes.insert(hint.id, frame.clone());
+                }
             }
             Some(_) => {}
         }

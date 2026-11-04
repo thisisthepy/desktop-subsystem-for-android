@@ -946,6 +946,79 @@ class ImageLayoutTests(unittest.TestCase):
                         archive.read(contexts).decode(),
                     )
 
+    def test_pr4_dsa_power_and_health_hals_replace_cuttlefishs(self):
+        # The host serves the guest's power hints and its battery; Cuttlefish's example power
+        # HAL and its made-up battery go, so nothing else serves those HALs.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            hal = root / "power"
+            hal.mkdir()
+            (hal / "dsa-power").write_bytes(b"\x7fELF power")
+            (hal / "dsa-health").write_bytes(b"\x7fELF health")
+            channeld = root / "dsa-channeld"
+            channeld.write_bytes(b"\x7fELF channeld")
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+                archive.writestr("VENDOR/apex/com.android.hardware.power.apex", b"apex")
+                archive.writestr("VENDOR/apex/com.google.cf.health.apex", b"apex")
+                archive.writestr("VENDOR/apex/com.android.hardware.gatekeeper.nonsecure.apex", b"apex")
+                archive.writestr(
+                    "META/apexkeys.txt",
+                    'name="com.android.hardware.power.apex" public_key="a"\n'
+                    'name="com.google.cf.health.apex" public_key="b"\n'
+                    'name="com.android.hardware.gatekeeper.nonsecure.apex" public_key="c"\n',
+                )
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+                archive.writestr("VENDOR/etc/selinux/vendor_file_contexts", "/vendor/bin/sh u:object_r:vendor_shell_exec:s0\n")
+
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, channeld=channeld, power_hal=hal)
+
+            with zipfile.ZipFile(modified) as archive:
+                names = archive.namelist()
+                self.assertNotIn("VENDOR/apex/com.android.hardware.power.apex", names)
+                self.assertNotIn("VENDOR/apex/com.google.cf.health.apex", names)
+                self.assertIn("VENDOR/apex/com.android.hardware.gatekeeper.nonsecure.apex", names)
+                apexkeys = archive.read("META/apexkeys.txt").decode()
+                self.assertNotIn("hardware.power", apexkeys)
+                self.assertNotIn("cf.health", apexkeys)
+                self.assertIn("gatekeeper", apexkeys)
+                self.assertEqual(archive.read("VENDOR/bin/hw/dsa-power"), b"\x7fELF power")
+                self.assertEqual(archive.read("VENDOR/bin/hw/dsa-health"), b"\x7fELF health")
+                self.assertIn("service vendor.dsa-power /vendor/bin/hw/dsa-power",
+                              archive.read("VENDOR/etc/init/dsa-power.rc").decode())
+                self.assertIn("service vendor.dsa-health /vendor/bin/hw/dsa-health",
+                              archive.read("VENDOR/etc/init/dsa-health.rc").decode())
+                power = archive.read("VENDOR/etc/vintf/manifest/dsa-power.xml").decode()
+                self.assertIn("<name>android.hardware.power</name>", power)
+                self.assertIn("<version>5</version>", power)
+                self.assertIn("<fqname>IPower/default</fqname>", power)
+                health = archive.read("VENDOR/etc/vintf/manifest/dsa-health.xml").decode()
+                self.assertIn("<name>android.hardware.health</name>", health)
+                self.assertIn("<version>3</version>", health)
+                self.assertIn("<fqname>IHealth/default</fqname>", health)
+                fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
+                self.assertIn("vendor/bin/hw/dsa-power 0 2000 755 capabilities=0x0", fs_config)
+                self.assertIn("vendor/bin/hw/dsa-health 0 2000 755 capabilities=0x0", fs_config)
+                self.assertIn("vendor/etc/init/dsa-power.rc 0 0 644 capabilities=0x0", fs_config)
+                self.assertIn("vendor/etc/vintf/manifest/dsa-health.xml 0 0 644 capabilities=0x0", fs_config)
+                contexts = archive.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
+                self.assertIn("/vendor/bin/hw/dsa-power u:object_r:hal_power_default_exec:s0", contexts)
+                self.assertIn("/vendor/bin/hw/dsa-health u:object_r:hal_health_default_exec:s0", contexts)
+                policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+                self.assertIn("(allow hal_power_server dsa_channel_service (service_manager (find)))", policy)
+                self.assertIn("(allow dsa_channeld hal_health_server (binder (call transfer)))", policy)
+
+    def test_pr4_the_power_hals_need_the_channel_daemon(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+            with self.assertRaises(ValueError):
+                make_image.modify(source, root / "modified.zip", power_hal=root)
+
     def test_fr3_without_the_dsa_hwcomposer_the_cuttlefish_composer_stays(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1127,6 +1200,9 @@ class ImageLayoutTests(unittest.TestCase):
             self.assertNotIn("privapp-permissions-dsa-agent.xml is missing", proc.stdout)
             # Without DSA's composer no task window ever gets a frame.
             self.assertIn("VENDOR/bin/hw/dsa-hwcomposer is missing", proc.stdout)
+            # Without DSA's power and health HALs the host never hears the guest's power hints.
+            self.assertIn("VENDOR/bin/hw/dsa-power is missing", proc.stdout)
+            self.assertIn("VENDOR/bin/hw/dsa-health is missing", proc.stdout)
             self.assertIn("androidboot.dsa.display_width", proc.stdout)
 
     def test_fr3_check_image_rejects_the_wifi_trace_setup(self):
