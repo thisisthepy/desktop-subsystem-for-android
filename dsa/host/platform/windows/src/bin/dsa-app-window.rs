@@ -48,6 +48,17 @@ fn main() -> std::process::ExitCode {
         use dsa_host_windows::app_window::apk_install;
         use dsa_host_windows::app_window::launch::tell_user_done;
         const TITLE: &str = "Desktop Subsystem for Android";
+        // The install window shows the APK before installing it; the message box below is
+        // for a machine without it.
+        if let Some(window) = apk_install::install_window(&program) {
+            match run_program(&window, &apk_install::install_window_arguments(&path)) {
+                Ok(()) => return std::process::ExitCode::SUCCESS,
+                Err(why) => note(
+                    logger.as_deref(),
+                    &format!("the APK install window did not start ({why}); installing here"),
+                ),
+            }
+        }
         let name = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
