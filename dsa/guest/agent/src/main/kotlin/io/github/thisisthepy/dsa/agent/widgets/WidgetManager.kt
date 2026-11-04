@@ -29,6 +29,8 @@ data class WidgetInfo(
     /** 1 horizontally, 2 vertically. */
     val resizeMode: Int,
     val needsConfiguration: Boolean,
+    /** The name of the app that offers the widget, as the launcher shows it. */
+    val appLabel: String = "",
 ) {
     override fun equals(other: Any?): Boolean =
         other is WidgetInfo && provider == other.provider && packageName == other.packageName &&
@@ -36,7 +38,8 @@ data class WidgetInfo(
             minWidthDp == other.minWidthDp && minHeightDp == other.minHeightDp &&
             defaultWidthDp == other.defaultWidthDp && defaultHeightDp == other.defaultHeightDp &&
             maxWidthDp == other.maxWidthDp && maxHeightDp == other.maxHeightDp &&
-            resizeMode == other.resizeMode && needsConfiguration == other.needsConfiguration
+            resizeMode == other.resizeMode && needsConfiguration == other.needsConfiguration &&
+            appLabel == other.appLabel
 
     override fun hashCode(): Int = provider.hashCode()
 
@@ -55,6 +58,7 @@ data class WidgetInfo(
         .setMaxHeightDp(maxHeightDp.coerceAtLeast(0))
         .setResizeMode(resizeMode and 3)
         .setNeedsConfiguration(needsConfiguration)
+        .setAppLabel(appLabel)
         .build()
 }
 

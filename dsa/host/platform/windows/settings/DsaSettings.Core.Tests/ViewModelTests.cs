@@ -385,14 +385,14 @@ public class ViewModelTests
 
     private const string ClockOffer =
         "{\"provider\":\"com.example.clock/.ClockWidget\",\"package\":\"com.example.clock\",\"label\":\"Clock\"," +
-        "\"preview_png\":\"iVBORw==\",\"default_width_dp\":180,\"default_height_dp\":110,\"needs_configuration\":false}";
+        "\"preview_png\":\"iVBORw==\",\"default_width_dp\":180,\"default_height_dp\":110,\"needs_configuration\":false,\"app\":\"Clock App\"}";
 
     private const string NotesOffer =
         "{\"provider\":\"com.example.notes/.NoteWidget\",\"package\":\"com.example.notes\",\"label\":\"\"," +
         "\"preview_png\":\"\",\"default_width_dp\":250,\"default_height_dp\":250,\"needs_configuration\":true}";
 
     private const string PlacedClock =
-        "{\"id\":3,\"provider\":\"com.example.clock/.ClockWidget\",\"label\":\"Clock\"," +
+        "{\"id\":3,\"provider\":\"com.example.clock/.ClockWidget\",\"label\":\"Clock\",\"app\":\"Clock App\"," +
         "\"placement\":{\"x\":64,\"y\":64,\"width_dp\":180,\"height_dp\":110}}";
 
     [Fact]
@@ -412,7 +412,10 @@ public class ViewModelTests
         Assert.Equal("com.example.notes/.NoteWidget", vm.Offers[1].Label);
         Assert.Null(vm.Offers[1].Preview);
         Assert.Equal("250x250 · Widgets_Setup", vm.Offers[1].Detail);
-        Assert.Equal(new PlacedWidgetRow(3, "Clock", "64,64 180x110"), Assert.Single(vm.Placed));
+        Assert.Equal(new PlacedWidgetRow(3, "Clock", "Clock App", "64,64 180x110"), Assert.Single(vm.Placed));
+        // The app that offers a widget shows by its name, else by its package.
+        Assert.Equal("Clock App", vm.Offers[0].App);
+        Assert.Equal("com.example.notes", vm.Offers[1].App);
         Assert.False(vm.HasNoOffers);
         Assert.False(vm.HasNoPlaced);
     }
@@ -456,5 +459,43 @@ public class ViewModelTests
         Assert.False(vm.HasError);
         Assert.True(vm.HasNoOffers);
         Assert.True(vm.HasNoPlaced);
+    }
+
+    [Fact]
+    public async Task Fr12_widgets_page_shows_a_widget_placed_or_removed_elsewhere_without_a_restart()
+    {
+        var cli = new FakeCli().Answer("widgets list --json",
+            "{\"providers\":[" + ClockOffer + "],\"widgets\":[]}");
+        var stream = new FakeLogStream();
+        stream.Output.Add("{\"event\":\"widgets\",\"widgets\":[]}");
+        stream.Output.Add("{\"event\":\"placed\",\"widget\":" + PlacedClock + "}");
+        stream.Output.Add("not json");
+        stream.Output.Add("{\"event\":\"placed\",\"widget\":" + PlacedClock.Replace("\"id\":3", "\"id\":5") + "}");
+        stream.Output.Add("{\"event\":\"removed\",\"id\":3}");
+        var vm = new WidgetsViewModel(new DsaService(cli), new KeyText(), stream);
+        await vm.RefreshAsync();
+        Assert.True(vm.HasNoPlaced);
+        var changes = 0;
+        vm.PropertyChanged += (_, _) => changes++;
+        await vm.WatchOnceAsync(CancellationToken.None);
+        Assert.Equal(new[] { "widgets watch --json" }, stream.Calls);
+        // The widget placed from its window's menu or by dsa is listed, the one removed is
+        // gone, and the widgets on offer are still there.
+        Assert.Equal(5, Assert.Single(vm.Placed).Id);
+        Assert.Single(vm.Offers);
+        Assert.True(changes >= 4);
+    }
+
+    [Fact]
+    public void Fr12_widgets_watch_lines_are_read_and_others_ignored()
+    {
+        Assert.Equal(new WidgetChange.Removed(7), DsaService.ParseWidgetChange("{\"event\":\"removed\",\"id\":7}"));
+        var placed = Assert.IsType<WidgetChange.Placed>(
+            DsaService.ParseWidgetChange("{\"event\":\"placed\",\"widget\":" + PlacedClock + "}"));
+        Assert.Equal(new PlacedWidget(3, "com.example.clock/.ClockWidget", "Clock", "Clock App", 64, 64, 180, 110),
+            placed.Widget);
+        Assert.Null(DsaService.ParseWidgetChange("{\"event\":\"frame\"}"));
+        Assert.Null(DsaService.ParseWidgetChange("[]"));
+        Assert.Null(DsaService.ParseWidgetChange("{"));
     }
 }

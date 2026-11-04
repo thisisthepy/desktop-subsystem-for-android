@@ -234,16 +234,43 @@ public sealed class DsaService
         }
     }
 
-    private static PlacedWidget ReadPlaced(JsonElement json)
+    internal static PlacedWidget ReadPlaced(JsonElement json)
     {
         var placement = json.TryGetProperty("placement", out var p) && p.ValueKind == JsonValueKind.Object
             ? p
             : default;
-        return new PlacedWidget(Int(json, "id"), String(json, "provider"), String(json, "label"),
+        return new PlacedWidget(Int(json, "id"), String(json, "provider"), String(json, "label"), String(json, "app"),
             placement.ValueKind == JsonValueKind.Object ? Int(placement, "x") : 0,
             placement.ValueKind == JsonValueKind.Object ? Int(placement, "y") : 0,
             placement.ValueKind == JsonValueKind.Object ? Int(placement, "width_dp") : 0,
             placement.ValueKind == JsonValueKind.Object ? Int(placement, "height_dp") : 0);
+    }
+
+    /// <summary>Reads one line of <c>dsa widgets watch --json</c>; null for a line that is no
+    /// change it knows.</summary>
+    public static WidgetChange? ParseWidgetChange(string line)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var json = document.RootElement;
+            if (json.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+            return String(json, "event") switch
+            {
+                "widgets" => new WidgetChange.All(Items(json, "widgets").Select(ReadPlaced).ToList()),
+                "placed" when json.TryGetProperty("widget", out var widget) && widget.ValueKind == JsonValueKind.Object =>
+                    new WidgetChange.Placed(ReadPlaced(widget)),
+                "removed" => new WidgetChange.Removed(Int(json, "id")),
+                _ => null,
+            };
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static IEnumerable<JsonElement> Items(JsonElement element, string name) =>
@@ -259,7 +286,7 @@ public sealed class DsaService
         var offers = Items(json, "providers")
             .Select(p => new WidgetOffer(String(p, "provider"), String(p, "package"), String(p, "label"),
                 Base64(p, "preview_png"), Int(p, "default_width_dp"), Int(p, "default_height_dp"),
-                Bool(p, "needs_configuration")))
+                Bool(p, "needs_configuration"), String(p, "app")))
             .ToList();
         var placed = Items(json, "widgets").Select(ReadPlaced).ToList();
         return new WidgetList(offers, placed);

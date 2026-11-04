@@ -227,6 +227,38 @@ jobs:
           }
           Set-AppTheme
 
+      # The Widgets page, in both themes and both languages. The stand-in Android here offers
+      # no widget, so a stand-in dsa answers the page's widget commands (widgets-fixture.ps1).
+      - name: Take pictures of the settings app's Widgets page
+        run: |
+          . .github/scripts/installer/setup-ui.ps1
+          . .github/scripts/installer/widgets-fixture.ps1
+          New-Item -ItemType Directory -Force screens | Out-Null
+          $exe = "$env:PROGRAM_DIR\settings\DsaSettings.exe"
+          $env:DSA_CLI = New-WidgetsFixture "$env:RUNNER_TEMP\widgets-fixture" "$env:PROGRAM_DIR\dsa.exe"
+          try {
+            foreach ($lang in 'en-US', 'ko-KR') {
+              foreach ($theme in 'light', 'dark') {
+                Set-AppTheme -Dark:($theme -eq 'dark')
+                $app = Start-Process $exe -ArgumentList '--page', 'widgets', '--lang', $lang -PassThru
+                $window = Wait-ProcessWindow $app.Id 90
+                if (-not $window) {
+                  Show-Desktop "settings-$theme-widgets-$lang-timeout"
+                  throw "DSA Settings showed no window for the Widgets page within 90 seconds"
+                }
+                Start-Sleep -Seconds 5
+                Save-WindowScreen $window "$PWD\screens\settings-$theme-widgets-$lang.png"
+                if ($app.HasExited) { throw "DSA Settings exited while showing the Widgets page (code $($app.ExitCode))" }
+                Stop-Process -Id $app.Id -Force
+                $app.WaitForExit(10000) | Out-Null
+              }
+            }
+          } finally {
+            Set-AppTheme
+            Remove-Item Env:DSA_CLI
+            Get-Process cmd, PING -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+
       # APKs made by the Android SDK's own tools, for the APK install window.
       - name: Make the test APKs
         shell: bash

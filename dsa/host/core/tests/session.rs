@@ -3248,6 +3248,7 @@ fn clock_widget() -> dsa_protocol::control::WidgetProvider {
         max_height_dp: 0,
         resize_mode: 3,
         needs_configuration: false,
+        app_label: "Clock App".into(),
     }
 }
 

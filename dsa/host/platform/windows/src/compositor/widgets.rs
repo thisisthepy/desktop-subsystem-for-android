@@ -232,6 +232,8 @@ pub enum WindowReport {
         x: f32,
         y: f32,
     },
+    /// The user chose Remove in the window's menu.
+    Remove { widget_id: i32 },
 }
 
 /// The widget windows, as the watch drives them: the window manager's are Win32 windows on
@@ -301,6 +303,10 @@ fn send_reports(
                 x,
                 y,
             } => client.widget_pointer(widget_id, action, 0, x, y),
+            WindowReport::Remove { widget_id } => {
+                note(logger, &format!("removing widget {widget_id} from its menu"));
+                client.remove_widget(widget_id)
+            }
         };
         match result {
             Ok(()) => {}
@@ -492,7 +498,7 @@ mod win {
     use std::sync::mpsc::{Receiver, Sender};
     use std::sync::Arc;
 
-    use dsa_host_core::widgets::{Widget, WidgetFrame};
+    use dsa_host_core::widgets::{Placement, Widget, WidgetFrame};
     use dsa_protocol::host_api::types::PointerAction;
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
@@ -516,9 +522,9 @@ mod win {
         HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, HWND_BOTTOM, HWND_MESSAGE,
         IDC_ARROW, MA_NOACTIVATE, MINMAXINFO, MSG, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
         SWP_NOZORDER, SW_SHOWNOACTIVATE, ULW_ALPHA, WINDOWPOS, WM_APP, WM_CAPTURECHANGED, WM_CLOSE,
-        WM_DESTROY, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
-        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NCHITTEST, WM_SIZE,
-        WM_WINDOWPOSCHANGING, WNDCLASSEXW,
+        WM_CONTEXTMENU, WM_DESTROY, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
+        WM_GETMINMAXINFO, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE,
+        WM_NCHITTEST, WM_SIZE, WM_WINDOWPOSCHANGING, WNDCLASSEXW,
     };
 
     use super::{
@@ -526,6 +532,7 @@ mod win {
         window_size, window_styles, Hit, WindowCommand, WindowReport,
     };
     use crate::compositor::log::{note, CompositorLogger};
+    use crate::compositor::widget_menu::{self, MenuChoice};
 
     /// The message that tells the controller window commands are waiting.
     const WM_COMMANDS: u32 = WM_APP + 1;
@@ -1185,6 +1192,10 @@ mod win {
                 }
                 0
             }
+            WM_CONTEXTMENU => {
+                context_menu(hwnd, lparam);
+                0
+            }
             WM_CLOSE => 0,
             m if m != 0 && with_state(|s| s.taskbar_created).unwrap_or(0) == m => {
                 // The shell restarted: the window belongs to its new desktop.
@@ -1205,6 +1216,78 @@ mod win {
             }
             // SAFETY: the default handling of every other message.
             _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+        }
+    }
+
+    /// Shows the window's menu (Resize, Remove) where the user right-clicked, or at the
+    /// window's corner for the menu key, and does what the user chose.
+    fn context_menu(hwnd: HWND, lparam: LPARAM) {
+        let key = hwnd as isize;
+        let Some((provider, placement, widget_id)) = with_state(|s| {
+            s.windows.get(&key).map(|w| {
+                (
+                    w.widget.provider.clone(),
+                    w.widget.placement,
+                    w.widget.widget_id,
+                )
+            })
+        })
+        .flatten() else {
+            return;
+        };
+        let rect = rect_of(hwnd);
+        let (x, y) = if lparam as u32 == u32::MAX {
+            (rect.left, rect.top)
+        } else {
+            (lo(lparam), hi(lparam))
+        };
+        let dpi = dpi_of(hwnd);
+        // The size shown as current is the window's own, which a drag may have changed.
+        let shown = placement_of(
+            rect.left,
+            rect.top,
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+            dpi,
+        );
+        let placement = Placement {
+            width_dp: shown.width_dp,
+            height_dp: shown.height_dp,
+            ..placement
+        };
+        match widget_menu::show(hwnd, x, y, &provider, &placement) {
+            Some(MenuChoice::Resize {
+                width_dp,
+                height_dp,
+            }) => {
+                let (width, height) = window_size(
+                    &Placement {
+                        width_dp,
+                        height_dp,
+                        ..placement
+                    },
+                    dpi,
+                );
+                // SAFETY: a window of this thread; it keeps its place and its z-order.
+                unsafe {
+                    SetWindowPos(
+                        hwnd,
+                        null_mut(),
+                        0,
+                        0,
+                        width,
+                        height,
+                        SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOZORDER,
+                    );
+                }
+                report_placement(hwnd);
+            }
+            Some(MenuChoice::Remove) => {
+                with_state(|s| {
+                    let _ = s.reports.send(WindowReport::Remove { widget_id });
+                });
+            }
+            None => {}
         }
     }
 
@@ -1340,6 +1423,7 @@ mod tests {
             max_height_dp: 0,
             resize_mode: 3,
             needs_configuration: false,
+            app_label: "Clock App".into(),
         }
     }
 

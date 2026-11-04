@@ -211,8 +211,11 @@ after two minutes. `"keep_window_manager": false` turns this off.
   along its top moves it and dragging its edges resizes it; when the user lets go, the
   service remembers the placement (per user, beside the user's settings, as
   `users/<user>.widgets.json`) and tells Android the window's size, which the widget draws
-  at. Presses, moves and releases inside the widget go to Android. The widgets come from the
-  settings app's Widgets page or `dsa widgets list|add <provider>|remove <id>`. When the
+  at. Presses, moves and releases inside the widget go to Android. Right-clicking a widget
+  window opens its menu: Resize, with the sizes the widget allows, and Remove (in Korean
+  when that is the display language). The widgets come from the settings app's Widgets
+  page, which shows changes made elsewhere through `dsa widgets watch`, or
+  `dsa widgets list|add <provider>|remove <id>`. When the
   window manager starts at sign-in and the service remembers widgets, it starts Android so
   they come back.
 - It owns no window. Each Android app task shows in a window of the app's own window

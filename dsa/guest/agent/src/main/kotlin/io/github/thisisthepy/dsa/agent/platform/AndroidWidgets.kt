@@ -12,6 +12,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -176,7 +177,16 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
             maxHeightDp = dp(info.maxResizeHeight),
             resizeMode = info.resizeMode and (AppWidgetProviderInfo.RESIZE_HORIZONTAL or AppWidgetProviderInfo.RESIZE_VERTICAL),
             needsConfiguration = info.configure != null && !optional,
+            appLabel = appLabel(info.provider.packageName),
         )
+    }
+
+    /** The name of the app [packageName], as the launcher shows it; empty when unknown. */
+    private fun appLabel(packageName: String): String = try {
+        val pm = context.packageManager
+        pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()
+    } catch (e: PackageManager.NameNotFoundException) {
+        ""
     }
 
     /** The widget's preview, else its app's icon, as a PNG within the gallery's limits. */

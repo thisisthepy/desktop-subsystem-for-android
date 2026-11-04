@@ -15,6 +15,7 @@ public partial class MainWindow : FluentWindow
         ["updates"] = typeof(UpdatesPage),
         ["advanced"] = typeof(AdvancedPage),
         ["about"] = typeof(AboutPage),
+        ["widgets"] = typeof(WidgetsPage),
     };
 
     public MainWindow()

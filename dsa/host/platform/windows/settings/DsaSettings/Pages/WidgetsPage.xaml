@@ -31,6 +31,7 @@
                             <ui:CardControl.Header>
                                 <StackPanel>
                                     <TextBlock Text="{Binding Label}" Style="{StaticResource CardTitle}" />
+                                    <TextBlock Text="{Binding App}" Style="{StaticResource CardDescription}" />
                                     <TextBlock Text="{Binding Detail}" Style="{StaticResource CardDescription}" />
                                 </StackPanel>
                             </ui:CardControl.Header>
@@ -50,11 +51,17 @@
                         <ui:CardControl Margin="0,0,0,4">
                             <ui:CardControl.Header>
                                 <StackPanel Orientation="Horizontal">
-                                    <Border Width="64" Height="64" Margin="0,0,12,0">
-                                        <Image Source="{Binding Preview, TargetNullValue={x:Null}}" Stretch="Uniform" />
+                                    <Border Width="64" Height="64" Margin="0,0,12,0" CornerRadius="4">
+                                        <Grid>
+                                            <ui:SymbolIcon Symbol="Apps24" FontSize="32"
+                                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                           Visibility="{Binding NoPreview, Converter={StaticResource Visible}}" />
+                                            <Image Source="{Binding Preview, TargetNullValue={x:Null}}" Stretch="Uniform" />
+                                        </Grid>
                                     </Border>
                                     <StackPanel VerticalAlignment="Center">
                                         <TextBlock Text="{Binding Label}" Style="{StaticResource CardTitle}" />
+                                        <TextBlock Text="{Binding App}" Style="{StaticResource CardDescription}" />
                                         <TextBlock Text="{Binding Detail}" Style="{StaticResource CardDescription}" />
                                     </StackPanel>
                                 </StackPanel>

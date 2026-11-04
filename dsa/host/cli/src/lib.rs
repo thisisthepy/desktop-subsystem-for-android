@@ -15,7 +15,7 @@
 //! dsa settings [set <name> <value>]
 //! dsa memory
 //! dsa gpus
-//! dsa widgets [list | add <provider> | remove <id>]
+//! dsa widgets [list | add <provider> | remove <id> | watch]
 //! dsa logcat [-d] [-b <buffers>] [<tag>[:<priority>] ...]
 //! dsa logs collect -o <file.zip>
 //! ```
@@ -62,9 +62,15 @@
 //! setup shows in a window and the command waits for the user. `dsa widgets remove <id>`
 //! removes one, with its window. Android is started first when it is not running. With
 //! `--json`, `list` prints `providers` (each with `provider`, `package`, `label`,
-//! `preview_png` in base64, its sizes in dp, `resize_mode` and `needs_configuration`) and
-//! `widgets` (each with `id`, `provider`, `label` and its `placement`), `add` prints the
-//! placed widget, and `remove` prints `removed` with the widget's ID.
+//! `preview_png` in base64, its sizes in dp, `resize_mode`, `needs_configuration` and `app`,
+//! the name of the app that offers it) and `widgets` (each with `id`, `provider`, `label`,
+//! `app` and its `placement`), `add` prints the placed widget, and `remove` prints `removed`
+//! with the widget's ID.
+//!
+//! `dsa widgets watch` prints the placed widgets, then a line each time one is placed or
+//! removed, until it is stopped or Android stops. With `--json` each line is one JSON
+//! object: `{"event":"widgets","widgets":[...]}` first, then
+//! `{"event":"placed","widget":{...}}` or `{"event":"removed","id":N}`.
 //!
 //! `dsa freeze` stops every process of the Android until one of its windows is shown
 //! again. Its notifications, alarms and widgets stop with it.
@@ -127,14 +133,14 @@ use dsa_host_core::files::{FileAction, FileTransfer};
 use dsa_host_core::host_api::{ClientError, HostApiClient, SettingsReport, Status, TaskList};
 use dsa_host_core::memory::MemorySnapshot;
 use dsa_host_core::session::SessionState;
-use dsa_host_core::widgets::{Widget, WidgetProvider};
+use dsa_host_core::widgets::{Widget, WidgetEvent, WidgetProvider};
 use dsa_transport::Connector;
 use serde_json::{json, Value};
 
 pub const USAGE: &str = "usage: dsa <status | start | stop | freeze | update | launch <package> | \
      install <file.apk> [--progress] | apk-info <file.apk> | open <file> | share <file> | \
      tasks | settings [set <name> <value>] | memory | gpus | \
-     widgets [list | add <provider> | remove <id>] | \
+     widgets [list | add <provider> | remove <id> | watch] | \
      logcat [-d] [-b <buffers>] [<tag>[:<priority>] ...] | logs collect -o <file.zip>> \
      [--wait] [--timeout <seconds>] [--json] [--pipe <name> | --socket <path>]";
 
@@ -185,6 +191,8 @@ pub enum WidgetAction {
     Add(String),
     /// Remove the widget with this ID.
     Remove(i32),
+    /// Print the placed widgets, then each change, until stopped.
+    Watch,
 }
 
 /// A setting `dsa settings set` changes.
@@ -381,6 +389,9 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             "list" if command == Some(Command::Widgets) && widgets.is_none() => {
                 widgets = Some(WidgetAction::List);
             }
+            "watch" if command == Some(Command::Widgets) && widgets.is_none() => {
+                widgets = Some(WidgetAction::Watch);
+            }
             "add" if command == Some(Command::Widgets) && widgets.is_none() => {
                 let provider = args.next().ok_or(
                     "dsa widgets add needs the widget's provider; dsa widgets list shows them",
@@ -543,6 +554,7 @@ pub fn provider_json(provider: &WidgetProvider) -> Value {
         "max_height_dp": provider.max_height_dp,
         "resize_mode": provider.resize_mode,
         "needs_configuration": provider.needs_configuration,
+        "app": provider.app_label,
     })
 }
 
@@ -553,6 +565,7 @@ pub fn widget_json(widget: &Widget) -> Value {
         "provider": widget.provider.provider,
         "package": widget.provider.package_name,
         "label": widget.provider.label,
+        "app": widget.provider.app_label,
         "placement": {
             "x": widget.placement.x,
             "y": widget.placement.y,
@@ -615,7 +628,9 @@ fn widgets(
 ) -> Result<String, String> {
     let action = invocation.widgets.clone().unwrap_or(WidgetAction::List);
     #[cfg(windows)]
-    if invocation.endpoint.is_none() && action != WidgetAction::List {
+    if invocation.endpoint.is_none()
+        && matches!(action, WidgetAction::Add(_) | WidgetAction::Remove(_))
+    {
         ensure_window_manager()?;
     }
     client
@@ -666,6 +681,76 @@ fn widgets(
                 format!("Removed widget {id}")
             })
         }
+        WidgetAction::Watch => {
+            let mut stream = client.watch_widgets().map_err(|e| e.to_string())?;
+            let stdout = std::io::stdout();
+            let mut out = stdout.lock();
+            let first = widgets_now_line(stream.current(), invocation.json);
+            if !print_line(&mut out, &first) {
+                return Ok(String::new());
+            }
+            loop {
+                match stream.next(Duration::from_secs(60)) {
+                    Ok(Some(event)) => {
+                        if let Some(line) = widget_event_line(&event, invocation.json) {
+                            if !print_line(&mut out, &line) {
+                                return Ok(String::new());
+                            }
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) => return Err(format!("the watch on the widgets ended: {e}")),
+                }
+            }
+        }
+    }
+}
+
+/// Writes one line and flushes it, so a program reading the output sees it at once. False
+/// once the output is closed.
+fn print_line(out: &mut dyn std::io::Write, line: &str) -> bool {
+    writeln!(out, "{line}").is_ok() && out.flush().is_ok()
+}
+
+/// The first line `dsa widgets watch` prints: the widgets placed now.
+pub fn widgets_now_line(placed: &[Widget], json: bool) -> String {
+    if json {
+        json!({
+            "event": "widgets",
+            "widgets": placed.iter().map(widget_json).collect::<Vec<_>>(),
+        })
+        .to_string()
+    } else if placed.is_empty() {
+        "No widget is placed.".to_string()
+    } else {
+        let ids: Vec<String> = placed.iter().map(|w| w.widget_id.to_string()).collect();
+        format!("Placed widgets: {}", ids.join(", "))
+    }
+}
+
+/// The line `dsa widgets watch` prints for a change, or None for one it does not report
+/// (a widget's new picture).
+pub fn widget_event_line(event: &WidgetEvent, json: bool) -> Option<String> {
+    match event {
+        WidgetEvent::Placed(widget) => Some(if json {
+            json!({ "event": "placed", "widget": widget_json(widget) }).to_string()
+        } else {
+            format!(
+                "Placed widget {} ({})",
+                widget.widget_id,
+                if widget.provider.label.is_empty() {
+                    &widget.provider.provider
+                } else {
+                    &widget.provider.label
+                }
+            )
+        }),
+        WidgetEvent::Removed { widget_id } => Some(if json {
+            json!({ "event": "removed", "id": widget_id }).to_string()
+        } else {
+            format!("Removed widget {widget_id}")
+        }),
+        WidgetEvent::Frame(_) | WidgetEvent::Listed(_) => None,
     }
 }
 

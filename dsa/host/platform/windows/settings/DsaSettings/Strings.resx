@@ -455,7 +455,7 @@
     <value>Refresh</value>
   </data>
   <data name="WidgetsIntro.Text" xml:space="preserve">
-    <value>Place the widgets your Android apps offer on your desktop. Each widget gets a window of its own below your other windows. Drag the band along its top to move it, and its edges to resize it. Android starts when you open this page.</value>
+    <value>Place the widgets your Android apps offer on your desktop. Each widget gets a window of its own below your other windows. Drag the band along its top to move it, and its edges to resize it. Right-click a widget to resize or remove it. Android starts when you open this page.</value>
   </data>
   <data name="WidgetsErrorBar.Title" xml:space="preserve">
     <value>Widgets could not be read or changed</value>

@@ -122,6 +122,12 @@ class WidgetManagerTest {
     }
 
     @Test
+    fun fr12_a_widget_carries_the_name_of_the_app_that_offers_it() {
+        assertEquals("Clock App", clock().copy(appLabel = "Clock App").toProto().appLabel)
+        assertEquals("", clock().toProto().appLabel)
+    }
+
+    @Test
     fun fr12_placing_a_widget_binds_it_draws_it_at_its_default_size_and_tells_the_host() {
         started()
         platform.offered += clock()

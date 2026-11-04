@@ -78,6 +78,8 @@ pub struct WidgetProvider {
     /// [`RESIZE_HORIZONTAL`] and [`RESIZE_VERTICAL`] bits.
     pub resize_mode: u32,
     pub needs_configuration: bool,
+    /// The name of the app that offers the widget; empty when the guest did not say.
+    pub app_label: String,
 }
 
 /// Where a widget's window is: its top left corner in the host's physical screen pixels,
@@ -267,6 +269,7 @@ pub fn checked_provider(message: control::WidgetProvider) -> Result<WidgetProvid
         max_height_dp: side(message.max_height_dp),
         resize_mode: message.resize_mode & (RESIZE_HORIZONTAL | RESIZE_VERTICAL),
         needs_configuration: message.needs_configuration,
+        app_label: cut(message.app_label),
     })
 }
 
@@ -384,6 +387,7 @@ impl WidgetProvider {
             max_height_dp: self.max_height_dp,
             resize_mode: self.resize_mode,
             needs_configuration: self.needs_configuration,
+            app_label: self.app_label.clone(),
         }
     }
 }
@@ -527,6 +531,7 @@ mod tests {
             max_height_dp: 0,
             resize_mode: 3,
             needs_configuration: false,
+            app_label: "Clock App".into(),
         }
     }
 
@@ -552,9 +557,11 @@ mod tests {
     fn fr12_a_widget_description_is_checked_and_bounded() {
         let provider = checked_provider(clock()).unwrap();
         assert_eq!(provider.label, "Clock");
+        assert_eq!(provider.app_label, "Clock App");
         assert_eq!(provider.preview_png, b"\x89PNG....");
         let big = checked_provider(control::WidgetProvider {
             label: "x".repeat(10_000),
+            app_label: "y".repeat(10_000),
             preview_png: [b"\x89PNG".to_vec(), vec![0; MAX_PREVIEW_BYTES]].concat(),
             default_width_dp: u32::MAX,
             resize_mode: 0xff,
@@ -562,6 +569,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(big.label.chars().count(), MAX_LABEL_CHARS);
+        assert_eq!(big.app_label.chars().count(), MAX_LABEL_CHARS);
         assert!(big.preview_png.is_empty());
         assert_eq!(big.default_width_dp, MAX_SIDE);
         assert_eq!(big.resize_mode, 3);

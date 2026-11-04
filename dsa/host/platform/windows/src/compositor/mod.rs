@@ -31,6 +31,7 @@ pub mod shutdown;
 pub mod single_instance;
 pub mod tasks;
 pub mod trim;
+pub mod widget_menu;
 pub mod widgets;
 
 use std::path::PathBuf;

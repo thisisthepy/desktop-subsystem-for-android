@@ -89,11 +89,11 @@ public sealed record InstallReport(bool Installed, string Status, string? Packag
 /// <summary>A widget an app in Android offers: <see cref="Provider"/> names it to dsa, and the
 /// sizes are in device-independent pixels.</summary>
 public sealed record WidgetOffer(string Provider, string Package, string Label, byte[] PreviewPng,
-    int DefaultWidthDp, int DefaultHeightDp, bool NeedsConfiguration);
+    int DefaultWidthDp, int DefaultHeightDp, bool NeedsConfiguration, string AppLabel = "");
 
 /// <summary>A widget placed on the desktop, where its window is and how large, in
 /// device-independent pixels.</summary>
-public sealed record PlacedWidget(int Id, string Provider, string Label, int X, int Y, int WidthDp, int HeightDp);
+public sealed record PlacedWidget(int Id, string Provider, string Label, string AppLabel, int X, int Y, int WidthDp, int HeightDp);
 
 /// <summary>The widgets on offer and the ones placed.</summary>
 public sealed record WidgetList(IReadOnlyList<WidgetOffer> Offers, IReadOnlyList<PlacedWidget> Placed);

@@ -291,6 +291,8 @@ message WidgetProvider {
   uint32 resize_mode = 11;
   // Whether the app asks the user to set the widget up when it is placed.
   bool needs_configuration = 12;
+  // The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
+  string app_label = 13;
 }
 
 // The answer to ListWidgetProviders, in label order.

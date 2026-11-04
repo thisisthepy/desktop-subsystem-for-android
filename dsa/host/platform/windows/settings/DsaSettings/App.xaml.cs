@@ -14,7 +14,7 @@ public partial class App : Application
     internal static SettingsViewModel Settings { get; } = new(Service, Text);
     internal static MemoryViewModel Memory { get; } = new(Service, Text);
     internal static InstallViewModel Install { get; } = new(Service, Text);
-    internal static WidgetsViewModel Widgets { get; } = new(Service, Text);
+    internal static WidgetsViewModel Widgets { get; } = new(Service, Text, Cli);
 
     /// <summary>The argument that names an APK to install: Explorer opens APK files with it, and
     /// the app then shows the APK install window instead of the settings.</summary>
@@ -23,6 +23,21 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // `--lang ko-KR` shows the app in another language than the user's display language,
+        // for pictures of each language taken on one machine.
+        var lang = Array.IndexOf(e.Args, "--lang");
+        if (lang >= 0 && lang + 1 < e.Args.Length)
+        {
+            try
+            {
+                var culture = System.Globalization.CultureInfo.GetCultureInfo(e.Args[lang + 1]);
+                System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = culture;
+                System.Globalization.CultureInfo.CurrentUICulture = culture;
+            }
+            catch (System.Globalization.CultureNotFoundException)
+            {
+            }
+        }
         // The app opens on the settings, or, given an APK, on the APK install window alone.
         var at = Array.IndexOf(e.Args, InstallApkArgument);
         if (at >= 0 && at + 1 < e.Args.Length)

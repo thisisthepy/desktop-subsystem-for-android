@@ -3626,6 +3626,7 @@ fn provider_to_wire(provider: &WidgetProvider) -> types::WidgetProvider {
         max_height_dp: provider.max_height_dp,
         resize_mode: provider.resize_mode,
         needs_configuration: provider.needs_configuration,
+        app_label: provider.app_label.clone(),
     }
 }
 
@@ -3643,6 +3644,7 @@ fn provider_from_wire(provider: types::WidgetProvider) -> WidgetProvider {
         max_height_dp: provider.max_height_dp,
         resize_mode: provider.resize_mode,
         needs_configuration: provider.needs_configuration,
+        app_label: provider.app_label,
     }
 }
 

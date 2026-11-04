@@ -1272,11 +1272,55 @@ fn fr12_dsa_widgets_is_parsed() {
         parse(&args("widgets remove 12")).unwrap().widgets,
         Some(WidgetAction::Remove(12))
     );
+    assert_eq!(
+        parse(&args("widgets watch --json")).unwrap().widgets,
+        Some(WidgetAction::Watch)
+    );
     assert!(parse(&args("widgets add")).is_err());
     assert!(parse(&args("widgets add clock")).is_err());
     assert!(parse(&args("widgets remove twelve")).is_err());
     assert!(parse(&args("widgets remove -1")).is_err());
     assert_eq!(parse(&args("status")).unwrap().widgets, None);
+}
+
+#[test]
+fn fr12_widgets_watch_prints_one_json_line_per_change_with_the_app_name() {
+    use dsa_host_core::widgets::{Placement, Widget, WidgetEvent};
+    let widget = Widget {
+        widget_id: 3,
+        provider: dsa_host_core::host_api_conformance::sample_widget_provider(),
+        placement: Placement {
+            x: 64,
+            y: 64,
+            width_dp: 180,
+            height_dp: 110,
+        },
+    };
+    let first: serde_json::Value =
+        serde_json::from_str(&dsa_cli::widgets_now_line(std::slice::from_ref(&widget), true))
+            .unwrap();
+    assert_eq!(first["event"], "widgets");
+    assert_eq!(first["widgets"][0]["id"], 3);
+    assert_eq!(first["widgets"][0]["app"], "Clock App");
+    let placed: serde_json::Value = serde_json::from_str(
+        &dsa_cli::widget_event_line(&WidgetEvent::Placed(widget.clone()), true).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(placed["event"], "placed");
+    assert_eq!(placed["widget"]["label"], "Clock");
+    let removed: serde_json::Value = serde_json::from_str(
+        &dsa_cli::widget_event_line(&WidgetEvent::Removed { widget_id: 3 }, true).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(removed, serde_json::json!({ "event": "removed", "id": 3 }));
+    assert_eq!(
+        dsa_cli::widget_event_line(&WidgetEvent::Listed(vec![3]), true),
+        None
+    );
+    assert_eq!(
+        dsa_cli::widget_event_line(&WidgetEvent::Removed { widget_id: 3 }, false).unwrap(),
+        "Removed widget 3"
+    );
 }
 
 #[test]
