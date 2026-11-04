@@ -3,6 +3,7 @@ package io.github.thisisthepy.dsa.agent.power
 import io.github.thisisthepy.dsa.agent.Log
 import io.github.thisisthepy.dsa.control.v1.DeviceIdle
 import io.github.thisisthepy.dsa.control.v1.Envelope
+import io.github.thisisthepy.dsa.control.v1.HostMemory
 import io.github.thisisthepy.dsa.control.v1.PowerState
 
 /**
@@ -19,6 +20,10 @@ import io.github.thisisthepy.dsa.control.v1.PowerState
  * which an idle guest never does. So when it goes to sleep with no task open, the agent ends
  * them; the next start of such an app is a cold one. A minimized task's app is cached too, and
  * keeps its state, so nothing is ended while any task is open.
+ *
+ * When the host says it is short of memory, the cached apps are ended whether tasks are open
+ * or not, as a phone's low memory killer would end them first. The control daemon then has
+ * the guest drop its caches, so the memory goes back to the host.
  *
  * Every method runs on the agent's one thread.
  */
@@ -55,6 +60,7 @@ class Lifecycle(
         when (envelope.bodyCase) {
             Envelope.BodyCase.SCREEN_STATE -> screen(envelope.screenState.on)
             Envelope.BodyCase.POWER_STATE -> follow(envelope.powerState)
+            Envelope.BodyCase.HOST_MEMORY -> hostMemory(envelope.hostMemory)
             else -> return false
         }
         return true
@@ -76,6 +82,15 @@ class Lifecycle(
         }
         screenOn = on
         report()
+    }
+
+    private fun hostMemory(memory: HostMemory) {
+        if (!memory.low) {
+            log.info("the host has memory to spare again")
+            return
+        }
+        log.info("the host is short of memory: ending cached apps")
+        attempt("ending cached apps") { power.killCachedApps() }
     }
 
     private fun follow(state: PowerState) {

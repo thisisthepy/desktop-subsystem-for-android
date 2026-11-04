@@ -2,7 +2,9 @@
 //!
 //! [`from_system_status`] reads the fields of Windows' `SYSTEM_POWER_STATUS`, and [`follow`]
 //! reads them every few seconds and hands each change to the service's [`PowerHub`], which
-//! tells every running Android.
+//! tells every running Android. It also reads the computer's physical memory
+//! ([`read_memory`]) and tells the hub when the computer runs short of it, so every Android
+//! gives back what it can spare.
 
 use dsa_host_core::power::PowerState;
 
@@ -61,6 +63,21 @@ pub fn read() -> Option<PowerState> {
     ))
 }
 
+/// The computer's physical memory, total and available, in KiB, or `None` when Windows
+/// cannot say.
+#[cfg(windows)]
+pub fn read_memory() -> Option<(u64, u64)> {
+    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    // SAFETY: a plain structure Windows fills in.
+    let mut status: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+    status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+    // SAFETY: a valid pointer to that structure, its length set as Windows requires.
+    if unsafe { GlobalMemoryStatusEx(&mut status) } == 0 {
+        return None;
+    }
+    Some((status.ullTotalPhys / 1024, status.ullAvailPhys / 1024))
+}
+
 /// How often [`follow`] reads the computer's power. Reading it is cheap, and a guest that
 /// hears of a change some seconds late behaves the same.
 pub const POLL: std::time::Duration = std::time::Duration::from_secs(10);
@@ -74,9 +91,23 @@ pub fn follow(
 ) {
     use std::sync::atomic::Ordering;
     let step = std::time::Duration::from_millis(250);
+    let mut pressure = dsa_host_core::power::MemoryPressure::new();
     while !stop.load(Ordering::Relaxed) {
         if let Some(state) = read() {
             hub.update(state);
+        }
+        if let Some((total_kb, available_kb)) = read_memory() {
+            let was_low = pressure.low();
+            let low = pressure.update(total_kb, available_kb);
+            if low != was_low {
+                eprintln!(
+                    "host memory: {} MiB of {} MiB available, {}",
+                    available_kb / 1024,
+                    total_kb / 1024,
+                    if low { "short" } else { "no longer short" }
+                );
+            }
+            hub.update_memory(low);
         }
         let mut waited = std::time::Duration::ZERO;
         while waited < POLL && !stop.load(Ordering::Relaxed) {

@@ -11,6 +11,7 @@ import io.github.thisisthepy.dsa.agent.FakeTasks
 import io.github.thisisthepy.dsa.agent.FakeWindowing
 import io.github.thisisthepy.dsa.agent.RecordingLog
 import io.github.thisisthepy.dsa.control.v1.Envelope
+import io.github.thisisthepy.dsa.control.v1.HostMemory
 import io.github.thisisthepy.dsa.control.v1.PowerState
 import io.github.thisisthepy.dsa.control.v1.ScreenState
 import org.junit.Assert.assertEquals
@@ -108,6 +109,19 @@ class LifecycleTest {
         screen(false)
 
         assertEquals(1, power.killedCached)
+    }
+
+    @Test
+    fun nfr2_a_host_short_of_memory_ends_cached_apps_even_with_tasks_open() {
+        val lifecycle = Lifecycle(power, { true }, log, hasOpenTasks = { true })
+
+        assertTrue(lifecycle.handle(Envelope.newBuilder().setHostMemory(HostMemory.newBuilder().setLow(true)).build()))
+        assertEquals(1, power.killedCached)
+
+        // The end of the shortage ends nothing more, and the screen is left as it was.
+        assertTrue(lifecycle.handle(Envelope.newBuilder().setHostMemory(HostMemory.newBuilder().setLow(false)).build()))
+        assertEquals(1, power.killedCached)
+        assertEquals(emptyList<String>(), power.calls)
     }
 
     @Test

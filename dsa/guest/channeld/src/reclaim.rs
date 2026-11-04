@@ -16,6 +16,11 @@
 //! Dropping caches costs reading those files again later, and swapped pages cost decompressing
 //! them, so neither is done often: once each time the guest goes idle, again while idle only
 //! when memory has grown back, and otherwise at most every few minutes while cache dominates.
+//! When the host says it is short of memory, the guest gives back what it can at once, as a
+//! phone's low memory killer would: the agent ends the cached app processes first, and the
+//! daemon's next look reclaims whatever that and the caches freed, whether tasks are open or
+//! not, and again every so often while the host stays short.
+//!
 //! This module is the decision alone, so it runs and is tested on any platform; the daemon
 //! applies it on Android by setting [`RECLAIM_PROPERTY`], which the image's init script acts on.
 
@@ -117,6 +122,8 @@ pub enum Reason {
     /// Tasks are open and cold cache has piled up past what the guest keeps for itself: a
     /// slice of page cache goes back to the host, as WSL's gradual reclaim does.
     Gradual,
+    /// The host is short of memory.
+    HostShort,
 }
 
 /// The decision's settings.
@@ -145,6 +152,8 @@ pub struct ReclaimPolicy {
     /// The least cache above `keep_cache_kb` worth a trim, in KiB. It is also the amount a
     /// trim asks for (init's script), so a trim never takes the cache below `keep_cache_kb`.
     pub min_trim_kb: u64,
+    /// The least time between two reclaims while the host is short of memory.
+    pub host_short_gap: Duration,
 }
 
 impl Default for ReclaimPolicy {
@@ -159,6 +168,7 @@ impl Default for ReclaimPolicy {
             trim_gap: Duration::from_secs(45),
             keep_cache_kb: 256 * 1024,
             min_trim_kb: 64 * 1024,
+            host_short_gap: Duration::from_secs(60),
         }
     }
 }
@@ -177,6 +187,8 @@ pub struct Reclaimer {
     measure_floor: bool,
     /// What was left reclaimable just after the last reclaim, in KiB.
     idle_floor_kb: Option<u64>,
+    /// The host said it is short of memory.
+    host_short: bool,
 }
 
 impl Reclaimer {
@@ -189,7 +201,13 @@ impl Reclaimer {
             last_trim: None,
             measure_floor: false,
             idle_floor_kb: None,
+            host_short: false,
         }
+    }
+
+    /// Takes in whether the host is short of memory, for the decisions that follow.
+    pub fn host_short(&mut self, short: bool) {
+        self.host_short = short;
     }
 
     /// Whether to reclaim at `now` (any monotonic clock), with `tasks` app tasks open and
@@ -240,9 +258,16 @@ impl Reclaimer {
             >= memory.used_kb().saturating_mul(self.policy.cache_percent);
         // Going idle is the moment the guest stops needing its cache, so the gap does not hold
         // the idle reclaim back.
+        let host_short_due = self.host_short
+            && idle_worth_it
+            && self
+                .last_reclaim
+                .is_none_or(|last| now.saturating_sub(last) >= self.policy.host_short_gap);
         let reason = if (idle_due || idle_grew) && idle_worth_it {
             self.idle_reclaimed = true;
             Some(Reason::Idle)
+        } else if host_short_due {
+            Some(Reason::HostShort)
         } else if gap_passed && worth_it && mostly_cache {
             Some(Reason::MostlyCache)
         } else if tasks > 0

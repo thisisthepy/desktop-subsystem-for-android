@@ -347,6 +347,15 @@ message PowerState {
   bool power_saver = 5;
 }
 
+// Host to guest: whether the host computer is short of memory. While it is, the guest gives
+// memory back the way a phone's low memory killer would, cheapest first: the agent ends the
+// cached app processes (apps the user is not using), and the control daemon then has the
+// guest drop its clean caches, so free page reporting returns the pages to the host. Sent
+// when it changes, and once after the agent connects while the host is short.
+message HostMemory {
+  bool low = 1;
+}
+
 // Guest to host, from the agent: whether the guest's device is in Doze (the device idle
 // controller's deep idle state). The host takes the device not to be in Doze when the agent
 // connects; the agent sends this on each change after that.
@@ -888,6 +897,7 @@ message Envelope {
     ScreenState screen_state = 40;
     PowerState power_state = 41;
     DeviceIdle device_idle = 42;
+    HostMemory host_memory = 43;
     InstallApk install_apk = 60;
     ApkChunk apk_chunk = 61;
     CancelInstall cancel_install = 62;

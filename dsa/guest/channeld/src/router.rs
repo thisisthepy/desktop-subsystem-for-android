@@ -131,6 +131,8 @@ struct State {
     apps: BTreeMap<String, Vec<u8>>,
     /// The host said no task window is shown: open tasks are minimized, and the guest dozes.
     screen_off: bool,
+    /// The host said it is short of memory.
+    host_memory_low: bool,
     next_id: u64,
     /// Android has finished booting.
     boot_completed: bool,
@@ -258,15 +260,19 @@ impl Router {
         }
     }
 
+    /// Whether the host last said it is short of memory.
+    pub fn host_memory_low(&self) -> bool {
+        self.lock().host_memory_low
+    }
+
     /// Passes a frame from the host to every listener.
     pub fn from_host(&self, frame: &[u8]) {
-        let screen = dsa_protocol::decode(frame).ok().and_then(|e| match e.body {
-            Some(Body::ScreenState(screen)) => Some(screen),
-            _ => None,
-        });
+        let body = dsa_protocol::decode(frame).ok().and_then(|e| e.body);
         let mut state = self.lock();
-        if let Some(screen) = screen {
-            state.screen_off = !screen.on;
+        match body {
+            Some(Body::ScreenState(screen)) => state.screen_off = !screen.on,
+            Some(Body::HostMemory(memory)) => state.host_memory_low = memory.low,
+            _ => {}
         }
         state.deliver(frame, None);
         self.tell_host_if_agent_left(&mut state);
@@ -276,8 +282,10 @@ impl Router {
     /// waiting for the connection go first, so the host ends with the latest state.
     pub fn host_connected(&self) {
         let mut state = self.lock();
-        // The host takes the screen to be on when it connects, and says so if not.
+        // The host takes the screen to be on when it connects, and says so if not; it says
+        // again if it is short of memory.
         state.screen_off = false;
+        state.host_memory_low = false;
         let _ = self.to_host.send(state.boot_report());
         for frame in state.apps.values() {
             let _ = self.to_host.send(frame.clone());

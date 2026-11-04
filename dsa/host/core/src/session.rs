@@ -39,6 +39,9 @@
 //!   the guest and wakes it.
 //! - The host's power ([`Session::set_power`]) goes to the guest whenever it changes and
 //!   each time the agent connects.
+//! - Whether the host is short of memory ([`Session::host_memory_low`]) goes to the guest
+//!   whenever it changes, and when the agent connects while the host is short. The guest
+//!   then ends its cached app processes and drops its caches, so the host gets memory back.
 //!
 //! The web links apps in the guest open go to every [`Session::watch_links`] watcher, which
 //! opens them in the host's browser, unless the user lets them open in the guest
@@ -476,6 +479,8 @@ enum Command {
     WindowsShown(bool),
     /// The host's power changed.
     Power(PowerState),
+    /// Whether the host is short of memory changed.
+    HostMemoryLow(bool),
     /// Freeze the guest after this long in Doze, or never.
     FreezeAfter(Option<Duration>),
     /// Freeze the guest now.
@@ -845,6 +850,8 @@ impl Session {
             dozing_since: None,
             power: None,
             power_pending: false,
+            host_memory_low: false,
+            host_memory_pending: false,
             started_at: Instant::now(),
             boot_completed_at: None,
             agent_connected: false,
@@ -1200,6 +1207,12 @@ impl Session {
     /// agent connects.
     pub fn set_power(&self, state: PowerState) {
         let _ = self.commands.send(Command::Power(state));
+    }
+
+    /// Records whether the host is short of memory. The guest is told now if it is up, and
+    /// when its agent connects while the host is short, so it gives back what it can spare.
+    pub fn host_memory_low(&self, low: bool) {
+        let _ = self.commands.send(Command::HostMemoryLow(low));
     }
 
     /// Says that the host's clipboard got `text`. It goes to the guest while sharing is on and
@@ -1775,6 +1788,10 @@ struct Worker {
     power: Option<PowerState>,
     /// Set when the power changed while the guest was frozen, so it is told after the thaw.
     power_pending: bool,
+    /// Whether the host is short of memory, as last recorded.
+    host_memory_low: bool,
+    /// Set when that changed while the guest was frozen, so it is told after the thaw.
+    host_memory_pending: bool,
     /// When the guest was started.
     started_at: Instant,
     /// When the guest said it had finished booting.
@@ -1842,6 +1859,7 @@ impl Worker {
                         }
                         Ok(Command::WindowsShown(shown)) => self.set_shown(shown),
                         Ok(Command::Power(state)) => self.set_power(state),
+                        Ok(Command::HostMemoryLow(low)) => self.set_host_memory_low(low),
                         Ok(Command::FreezeAfter(after)) => self.config.freeze_after = after,
                         Ok(Command::LinksInAndroid(on)) => self.set_links_in_android(on),
                         Ok(Command::HostClipboard(text)) => self.host_clipboard(text),
@@ -1868,6 +1886,7 @@ impl Worker {
                         }
                         Ok(Command::WindowsShown(shown)) => self.set_shown(shown),
                         Ok(Command::Power(state)) => self.set_power(state),
+                        Ok(Command::HostMemoryLow(low)) => self.set_host_memory_low(low),
                         Ok(Command::FreezeAfter(after)) => self.config.freeze_after = after,
                         Ok(Command::LinksInAndroid(on)) => self.set_links_in_android(on),
                         Ok(Command::HostClipboard(text)) => self.host_clipboard(text),
@@ -1931,6 +1950,10 @@ impl Worker {
             }
             Command::Power(state) => {
                 self.set_power(state);
+                true
+            }
+            Command::HostMemoryLow(low) => {
+                self.set_host_memory_low(low);
                 true
             }
             Command::LinksInAndroid(on) => {
@@ -2367,6 +2390,10 @@ impl Worker {
                     self.send_body(Body::PowerState(power.to_control()));
                 }
             }
+            if std::mem::take(&mut self.host_memory_pending) {
+                let low = self.host_memory_low;
+                self.send_body(Body::HostMemory(control::HostMemory { low }));
+            }
         }
         if !self.screen_on {
             self.screen_on = true;
@@ -2410,6 +2437,27 @@ impl Worker {
             | SessionState::Active
             | SessionState::Dozing => self.send_body(Body::PowerState(state.to_control())),
             SessionState::Frozen => self.power_pending = true,
+            _ => {}
+        }
+    }
+
+    /// Records whether the host is short of memory and tells a guest that can hear it.
+    fn set_host_memory_low(&mut self, low: bool) {
+        if self.host_memory_low == low {
+            return;
+        }
+        self.host_memory_low = low;
+        if low {
+            eprintln!("lifecycle: the host is short of memory; asking the guest to give some back");
+        }
+        match self.state() {
+            SessionState::Starting
+            | SessionState::Stalled
+            | SessionState::Active
+            | SessionState::Dozing => {
+                self.send_body(Body::HostMemory(control::HostMemory { low }));
+            }
+            SessionState::Frozen => self.host_memory_pending = true,
             _ => {}
         }
     }
@@ -2498,6 +2546,9 @@ impl Worker {
             eprintln!("lifecycle: the agent is connected");
             if let Some(power) = self.power {
                 self.send_body(Body::PowerState(power.to_control()));
+            }
+            if self.host_memory_low {
+                self.send_body(Body::HostMemory(control::HostMemory { low: true }));
             }
             if !self.screen_on {
                 self.send_body(Body::ScreenState(control::ScreenState { on: false }));
@@ -2787,6 +2838,7 @@ impl Worker {
                             self.hidden_since = Instant::now();
                             self.dozing_since = None;
                             self.power_pending = false;
+                            self.host_memory_pending = false;
                             return;
                         }
                         Err(Refusal::NotTheGuest(why)) => {
@@ -2827,6 +2879,10 @@ impl Worker {
             }
             Command::Power(state) => {
                 self.set_power(state);
+                true
+            }
+            Command::HostMemoryLow(low) => {
+                self.set_host_memory_low(low);
                 true
             }
             Command::LinksInAndroid(on) => {
@@ -3078,6 +3134,7 @@ impl Worker {
             }
             Some(Body::ScreenState(_))
             | Some(Body::PowerState(_))
+            | Some(Body::HostMemory(_))
             | Some(Body::CloseTask(_))
             | Some(Body::LaunchApp(_))
             | Some(Body::ResizeTask(_))
