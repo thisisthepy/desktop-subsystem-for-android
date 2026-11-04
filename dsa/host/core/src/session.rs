@@ -3142,7 +3142,15 @@ impl Worker {
             | Some(Body::WidgetPointer(_))
             | Some(Body::AccessibilityWatch(_))
             | Some(Body::AccessibilityAction(_))
-            | Some(Body::ClockProbe(_)) => {
+            | Some(Body::ClockProbe(_))
+            | Some(Body::VideoCapabilities(_))
+            | Some(Body::VideoDecoderOpen(_))
+            | Some(Body::VideoDecoderOpened(_))
+            | Some(Body::VideoPacket(_))
+            | Some(Body::VideoFrame(_))
+            | Some(Body::VideoFlush(_))
+            | Some(Body::VideoFlushed(_))
+            | Some(Body::VideoError(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
             }
             None => {

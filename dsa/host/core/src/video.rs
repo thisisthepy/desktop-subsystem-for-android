@@ -412,7 +412,7 @@ pub fn serve(
             continue;
         }
         running.fetch_add(1, Ordering::SeqCst);
-        let (decoders, build, running, log) = (
+        let (decoders, build, counter, log) = (
             Arc::clone(&decoders),
             build.clone(),
             Arc::clone(&running),
@@ -425,7 +425,7 @@ pub fn serve(
                 if let VideoEnd::Failed(why) = end {
                     log(&format!("video: a decoder ended: {why}"));
                 }
-                running.fetch_sub(1, Ordering::SeqCst);
+                counter.fetch_sub(1, Ordering::SeqCst);
             });
         if spawned.is_err() {
             running.fetch_sub(1, Ordering::SeqCst);
