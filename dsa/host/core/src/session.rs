@@ -116,7 +116,7 @@ use crate::guest_log::{
     LogPortMessage, LogWatch, STREAM_TAIL,
 };
 use crate::ime::{ImeCursor, ImeEvent};
-use crate::input::PointerEvent;
+use crate::input::{PointerAction, PointerEvent};
 use crate::keys::KeyEvent;
 use crate::links::{self, LinkGate};
 use crate::memory::{GuestMemory, GuestMemoryReport};
@@ -587,6 +587,11 @@ pub enum GuestPower {
     Hint(PowerHint),
     /// The guest stopped: none of its modes or boosts is on any longer.
     Stopped,
+    /// Whether any task window is shown on the host, as the host said it.
+    WindowsShown(bool),
+    /// The host passed the user's input (a press, a release, a scroll or a key) to the guest.
+    /// The host hears of it before Android does, so its boost starts here.
+    HostInput,
 }
 
 /// What the agent answers about widgets.
@@ -1262,6 +1267,7 @@ impl Session {
     /// Says whether any task window is shown. The session keeps the latest word in every
     /// state, so a guest that starts with no window shown goes into Doze after the delay.
     pub fn windows_shown(&self, shown: bool) -> Result<(), SessionError> {
+        self.shared.publish_power(GuestPower::WindowsShown(shown));
         self.commands
             .send(Command::WindowsShown(shown))
             .map_err(|_| SessionError::Gone)
@@ -1823,6 +1829,12 @@ impl Session {
 
     /// Passes pointer input in a task's window to the guest. Needs an active session.
     pub fn pointer(&self, event: &PointerEvent) -> Result<(), SessionError> {
+        if matches!(
+            event.action,
+            PointerAction::Down | PointerAction::Up | PointerAction::Scroll
+        ) {
+            self.shared.publish_power(GuestPower::HostInput);
+        }
         self.send(dsa_protocol::encode(&control::Envelope {
             body: Some(Body::PointerEvent(event.to_control())),
         }))
@@ -1831,6 +1843,7 @@ impl Session {
     /// Passes a key pressed or released in a task's window to the guest. Needs an active
     /// session.
     pub fn key(&self, event: &KeyEvent) -> Result<(), SessionError> {
+        self.shared.publish_power(GuestPower::HostInput);
         self.send(dsa_protocol::encode(&control::Envelope {
             body: Some(Body::KeyEvent(event.to_control())),
         }))

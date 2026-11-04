@@ -516,3 +516,46 @@ Davey는 이 로그에 2건뿐이고 둘 다 액티비티 전환이다. 리플�
 - **고친 것**: `make-image.py`가 이미지 내용(DSA가 넣는 파일과 `dsa/guest/image/`의 파일)의 요약으로 `dsa<12자리>` 태그를 만들어, 모든 build.prop의 `ro.*build.version.incremental`과 `ro.*build.fingerprint`의 incremental 부분에 붙인다. 모든 파티션에 같은 태그가 붙어 서로 같다. 새 이미지의 첫 부팅은 OTA 뒤처럼 앱을 다시 컴파일하므로 조금 길어진다.
 
 **실제 PC에서 확인할 것**: 새 이미지로 부팅한 뒤 `getprop ro.build.fingerprint`에 `.dsa`가 붙는지, 로그에 `Unable to load input method`가 없고 `ime list -s`에 `io.github.thisisthepy.dsa.agent/.platform.HostInputMethod`가 있는지, 호스트에서 한글을 입력할 수 있는지, `DsaAgent`의 권한 거절이 없는지. `kauditd hold queue overflow`, `type=1325`, `type=1334`, `kdevtmpfs` 거절, `vendor_init`의 `{ set }` 거절이 사라졌는지.
+
+## 클릭 지연과 게스트 처리기 성능 (FR-5)
+
+**확인 대상**: develop dcbb771이 설치된 소유자 PC(Intel Arc, Settings 앱, 20 ms 클릭 15회, 1픽셀 임계값의 연속 화면 캡처, `scripts/input-trace.py`로 합친 추적). 이미지 16.0.0-15581820-7의 `signed-target_files.zip`. AOSP ART Service의 `ArtManagerLocal.getDefaultPackages`.
+
+**실측**
+
+- 호스트: `app.pointer`에서 `app.present`까지 13~25 ms, present에서 표시까지 한 번의 새로 고침 안(`app.shown exact=true`가 대부분).
+- 클릭에서 첫 화면 변화까지 p50 252 ms, p90 302 ms, 최대 488 ms(11회). 첫 변화는 언제나 새 화면 전체(300x80 캡처에서 약 23,000픽셀)였고, 누름 표시나 리플은 한 번도 잡히지 않았다.
+- 누름과 뗌 직후 앱 프레임 2~3개(순번이 오른다)에는 보이는 변화가 없고, 그 뒤 131~351 ms 동안 앱 프레임이 없다. 그동안 메인 스레드는 `SubSettings`를 시작한다(`Displayed SubSettings +106..+326ms`).
+- 서비스 로그: 부팅 직후 `power: running Android's processors frugally`가 한 번 나오고, 12:14~12:16 UTC의 클릭 동안 `full speed` 줄이 없다.
+
+**찾은 것**
+
+1. **로그만으로는 클릭 중 성능을 알 수 없었다.** `guest_performance::follow`는 성능마다 VM당 처음 한 번만 로그를 남겼다. 그래서 `full speed` 줄이 없다는 것은 부스트가 오지 않았다는 증거가 못 된다. 다만 부스트가 왔더라도, 부스트가 끝나면 frugal로 돌아갔다.
+2. **창이 보이는 동안에도 frugal이 될 수 있었다.** 정책은 `LOW_POWER`, `DEVICE_IDLE`, `DISPLAY_INACTIVE` 중 하나가 켜져 있고 성능 모드나 부스트가 없으면 frugal(EcoQoS, 낮은 우선순위)이었다. 호스트가 셸이라 게스트의 기본 디스플레이는 사용자가 보는 화면이 아니며, 이 모드들은 작업 창이 보이는 것과 무관하게 켜져 있을 수 있다. 실측의 "부팅 직후 frugal, 그 뒤 변화 없음"과 맞는다.
+3. **호스트는 클릭을 Android보다 먼저 안다.** 게스트의 `INTERACTION` 부스트는 입력이 게스트에 닿고, 입력 디스패처와 전원 관리자를 거친 뒤 제어 채널로 돌아온다. 그동안 vCPU는 frugal 상태로 입력을 처리한다.
+4. **Settings는 컴파일되지 않은 채로 돈다.** 이미지의 Settings odex/vdex는 `SYSTEM_OTHER/system_ext/priv-app/Settings/oat/x86_64/`에만 있고, DSA 디스크는 system_other를 싣지 않는다. 게다가 `make-image.py`가 블루투스 때문에 `Settings.apk`의 dex를 고치므로, 그 odex를 실어도 dex 체크섬이 맞지 않는다. APK 안에는 기준 프로파일(`assets/dexopt/baseline.prof`)이 없다. 첫 부팅 dexopt는 모든 패키지를 `pm.dexopt.first-boot=verify`로 처리하므로 Settings는 검사만 되고 인터프리터와 JIT로 돈다. 이것은 앞 절의 `CompilerFilter=verify` 관찰의 원인이다.
+5. **vCPU와 cgroup**: 기본 vCPU는 4개(`host_config.rs`)다. top-app cpuset과 uclamp는 앞 절의 커널 패치(cgroup v1 쓰기 예외) 뒤로 다시 적용된다. 이번 빌드의 게스트에서 `/dev/cpuset/top-app/cpus`는 확인하지 않았다.
+6. **누름 프레임이 비어 보이는 이유**: 앞 절의 2대로 패턴 리플은 `setPressed` 뒤 33 ms에 알파 5%, 반지름 0.7%, 67 ms에 25%, 3.2%다. 누름과 뗌 직후의 2~3프레임은 이 구간에 들어가므로, 리플은 클릭 지점의 몇 픽셀에 거의 투명하게 그려진다. 그다음 프레임들은 메인 스레드가 액티비티를 시작하는 동안 나오지 않는다. 리플 진행이 메인 스레드의 애니메이터에 묶여 있다는 뜻이다(추론, 게스트에서 확인하지 않음). DSA의 hwcomposer와 호스트가 레이어를 버리거나 합친 흔적은 없다: 프레임 순번이 오르고 호스트가 present를 했다.
+
+**고친 것**
+
+- 작업 창이 하나라도 보이면 frugal로 가지 않는다(`PowerHints::windows_shown`). frugal은 창이 없고 게스트가 frugal 모드를 말할 때만이다.
+- 호스트가 누름, 뗌, 스크롤, 키를 게스트로 보낼 때 그 자리에서 1.5초 부스트를 건다(`Session::pointer`, `Session::key`가 `GuestPower::HostInput`을 낸다). 감시 스레드는 채널에서 깨어나 바로 적용하므로 폴링이 없다. 게스트의 `LAUNCH` 모드와 `INTERACTION` 부스트도 같은 경로로 바로 적용된다.
+- 성능이 바뀔 때마다 UTC 시각, 원인, 받은 뒤 적용까지 걸린 시간을 로그에 남긴다.
+
+**하지 못한 것과 이유**
+
+- **이미지 빌드에서 Settings 컴파일**: 고친 dex로 odex를 만들려면 호스트용 `dex2oat`가 필요하다. 이 프로젝트가 받는 `otatools.zip`과 target_files에는 없고, ART 호스트 도구를 새로 받거나 빌드하는 것은 소유자에게 먼저 물어야 하는 새 도구다. 첫 부팅의 `pm.dexopt.first-boot`를 `speed`로 올리면 101개 APK(312 MiB)를 모두 첫 부팅에 컴파일하고, `speed-profile`은 프로파일이 없는 Settings에는 `verify`와 같다.
+- **누름 리플을 앞당기는 것**: 리플의 진입 곡선은 프레임워크의 컴파일 시점 상수라 이미지 오버레이로 바꿀 수 없다.
+
+**제안 (SPEC은 바꾸지 않았다)**
+
+1. ART 호스트 도구(`dex2oat64`, 부트 이미지 포함)를 `.scratch/`로 받는 단계를 `fetch.sh`에 더하고, 이미지 빌드에서 고친 Settings를 `speed`로 컴파일해 `oat/`를 같이 싣는다. 비용: 이미지 빌드 도구 하나와 수 MB. 얻는 것: 첫 실행부터 컴파일된 Settings. 소유자의 도구 승인이 필요하다.
+2. 대안으로, 에이전트가 부팅 완료 뒤 한 번 시스템 서버에 Settings의 `speed` dexopt를 요청하는 vendor 서비스를 둔다. `cmd package compile`은 root나 shell만 부를 수 있으므로 별도 SELinux 도메인과 init 서비스가 필요하다.
+3. 누름 표시는 FR-5의 수용 기준을 "클릭 뒤 첫 시각 변화"로 볼지 "새 화면"으로 볼지를 소유자가 정해야 한다. 리플은 Android가 의도적으로 처음 수십 ms 동안 거의 투명하게 그린다.
+
+**실제 PC에서 확인할 것**
+
+- 창을 연 뒤 서비스 로그에 `power: <UTC> running Android's processors as any program (..., a window shown; took N us)`가 나오고, frugal은 창을 모두 닫은 뒤에만 나오는지.
+- 클릭마다 `power: <UTC> running Android's processors at full speed (the user's input, ...; took N us)`가 누름 시각(`app.pointer`)과 1 ms 안에 나오고, 약 1.5초 뒤 `as any program`으로 돌아오는지.
+- 같은 15회 클릭에서 첫 화면 변화의 p50과 p90, `Displayed SubSettings`의 시간이 줄었는지.

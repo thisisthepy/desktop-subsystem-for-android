@@ -9,7 +9,11 @@
 //!   game, or the user touches it;
 //! - `Normal`: as Windows decides for any program;
 //! - `Efficient`: throttled onto the efficient cores and clocks, below normal priority, while
-//!   the guest's display is off, it is in Doze, or low power is on.
+//!   the guest's display is off, it is in Doze, or low power is on, and no task window is
+//!   shown.
+//!
+//! Each press, release, scroll or key the host passes on boosts at once, before the guest's
+//! own interaction boost could arrive, and each change is logged with its time and cause.
 //!
 //! [`settings`] is the rule and is tested on every platform; `follow` applies it.
 
@@ -77,6 +81,7 @@ mod system {
     use std::time::Instant;
 
     use dsa_host_core::power_hints::{Performance, PowerHints};
+    use dsa_host_core::resize_trace::{utc_stamp, wall_now};
     use dsa_host_core::session::{GuestPower, Session};
     use windows_sys::Win32::System::Threading::{
         OpenProcess, ProcessPowerThrottling, SetPriorityClass, SetProcessInformation,
@@ -172,7 +177,6 @@ mod system {
         let mut policy = PowerHints::new();
         let mut processes: Option<VmProcesses> = None;
         let mut applied: Option<Performance> = None;
-        let mut logged: HashSet<Performance> = HashSet::new();
         let mut failed: HashSet<Performance> = HashSet::new();
         loop {
             let now = Instant::now();
@@ -182,19 +186,21 @@ mod system {
             };
             match event {
                 Ok(GuestPower::Hint(hint)) => policy.hint(hint, Instant::now()),
+                Ok(GuestPower::WindowsShown(shown)) => policy.windows_shown(shown),
+                Ok(GuestPower::HostInput) => policy.host_input(Instant::now()),
                 Ok(GuestPower::Stopped) => {
                     // The VM and its processes are gone; the next one starts as Windows runs
                     // any program.
                     policy.clear();
                     processes = None;
                     applied = None;
-                    logged.clear();
                     failed.clear();
                     continue;
                 }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
+            let received = Instant::now();
             let wanted = policy.performance(Instant::now());
             if applied == Some(wanted) {
                 continue;
@@ -223,12 +229,14 @@ mod system {
             match found.apply(wanted) {
                 Ok(()) => {
                     applied = Some(wanted);
-                    if logged.insert(wanted) {
-                        eprintln!(
-                            "{user}: power: running Android's processors {}",
-                            describe(wanted)
-                        );
-                    }
+                    let now = Instant::now();
+                    eprintln!(
+                        "{user}: power: {} running Android's processors {} ({}; took {} us)",
+                        utc_stamp(wall_now()),
+                        describe(wanted),
+                        policy.explain(now),
+                        now.saturating_duration_since(received).as_micros()
+                    );
                 }
                 Err(why) => {
                     if failed.insert(wanted) {

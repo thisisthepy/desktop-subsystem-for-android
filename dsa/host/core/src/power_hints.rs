@@ -84,11 +84,21 @@ pub const DEFAULT_BOOST: Duration = Duration::from_millis(1000);
 /// it, one that stops cannot hold the host's processors for long.
 pub const MAX_BOOST: Duration = Duration::from_secs(5);
 
+/// How long the host keeps the guest at full speed after it passes the user's input on: the
+/// press, the app's response and the start of whatever the press opens. The host hears of a
+/// press before Android does, so it boosts at once rather than waiting for the guest's own
+/// interaction boost to come back over the control channel.
+pub const HOST_INPUT_BOOST: Duration = Duration::from_millis(1500);
+
+/// The key the host's own input boost is kept under, apart from the guest's boosts (which are
+/// never negative).
+const HOST_INPUT: i32 = -1;
+
 /// How the host runs the guest's processors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Performance {
     /// Slowly, on the host's efficient cores and clocks: the guest's display is off, it is in
-    /// Doze, or low power is on, and no performance mode or boost is.
+    /// Doze, or low power is on, no performance mode or boost is, and no task window is shown.
     Efficient,
     /// As the host schedules any program.
     Normal,
@@ -133,6 +143,8 @@ pub struct PowerHints {
     modes: BTreeSet<i32>,
     /// Each boost under way, until when.
     boosts: BTreeMap<i32, Instant>,
+    /// Whether any task window is shown on the host.
+    windows_shown: bool,
 }
 
 impl PowerHints {
@@ -174,7 +186,22 @@ impl PowerHints {
         }
     }
 
+    /// Says whether any task window is shown. While one is, the guest never runs frugally,
+    /// whatever its modes say: the user is looking at it.
+    pub fn windows_shown(&mut self, shown: bool) {
+        self.windows_shown = shown;
+    }
+
+    /// Says that the host passed the user's input (a press, a release, a key, a scroll) to
+    /// the guest at `now`: the guest runs at full speed for [`HOST_INPUT_BOOST`].
+    pub fn host_input(&mut self, now: Instant) {
+        let until = now + HOST_INPUT_BOOST;
+        let entry = self.boosts.entry(HOST_INPUT).or_insert(until);
+        *entry = (*entry).max(until);
+    }
+
     /// Forgets every mode and boost, as when the guest stops: a new guest starts with none.
+    /// Whether a window is shown is the host's to say, and stays.
     pub fn clear(&mut self) {
         self.modes.clear();
         self.boosts.clear();
@@ -190,11 +217,35 @@ impl PowerHints {
         let boosted = self.boosts.values().any(|until| *until > now);
         if boosted || PERFORMANCE_MODES.iter().any(|m| self.modes.contains(m)) {
             Performance::Full
-        } else if FRUGAL_MODES.iter().any(|m| self.modes.contains(m)) {
+        } else if !self.windows_shown && FRUGAL_MODES.iter().any(|m| self.modes.contains(m)) {
             Performance::Efficient
         } else {
             Performance::Normal
         }
+    }
+
+    /// What sets the performance at `now`, in words for the log: the boosts under way, the
+    /// modes that are on and whether a window is shown.
+    pub fn explain(&self, now: Instant) -> String {
+        let mut parts = Vec::new();
+        for (id, until) in &self.boosts {
+            if *until > now {
+                if *id == HOST_INPUT {
+                    parts.push("the user's input".to_string());
+                } else {
+                    parts.push(format!("boost {id}"));
+                }
+            }
+        }
+        for id in &self.modes {
+            parts.push(format!("mode {id}"));
+        }
+        parts.push(if self.windows_shown {
+            "a window shown".to_string()
+        } else {
+            "no window shown".to_string()
+        });
+        parts.join(", ")
     }
 
     /// When the performance may next change without a new hint: the end of the next boost.
