@@ -156,7 +156,7 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertIn("kernel/cgroup/cgroup-v1.c", patch)
         self.assertIn("+\t    !file_ns_capable(of->file, tcred->user_ns, CAP_SYS_NICE))", patch)
 
-    def test_fr25_the_arm64_kernel_keeps_what_hyper_v_on_arm64_boots_and_returns_memory_with(self):
+    def test_fr27_the_arm64_kernel_keeps_what_hyper_v_on_arm64_boots_and_returns_memory_with(self):
         # Hyper-V on ARM64 boots the kernel's EFI stub from UEFI and describes the machine
         # with ACPI; the console is a PL011 UART. VMBus, its storage, network, sockets and
         # integration services, and the balloon driver's free page reporting are what the
@@ -181,12 +181,12 @@ class AndroidKernelConfigTests(unittest.TestCase):
         ]:
             self.assertIn(option, config)
 
-    def test_fr25_the_arm64_kernel_uses_4k_pages(self):
+    def test_fr27_the_arm64_kernel_uses_4k_pages(self):
         # The host's free page reporting order counts 4 KiB pages (5 is 128 KiB), and
         # Android's arm64 userspace and apps are built for 4 KiB pages.
         self.assertIn("CONFIG_ARM64_4K_PAGES=y", ARM64_CONFIG.read_text())
 
-    def test_fr25_the_build_makes_an_arm64_image_from_the_wsl_arm64_configuration(self):
+    def test_fr27_the_build_makes_an_arm64_image_from_the_wsl_arm64_configuration(self):
         script = BUILD.read_text()
         self.assertIn("Microsoft/config-wsl-arm64", script)
         self.assertIn("android-arm64.config", script)
@@ -196,7 +196,7 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertIn("Microsoft/config-wsl\"", script)
         self.assertIn("arch/x86/boot/bzImage", script)
 
-    def test_fr25_the_arm64_fragment_does_not_repeat_or_contradict_the_common_one(self):
+    def test_fr27_the_arm64_fragment_does_not_repeat_or_contradict_the_common_one(self):
         common = {line.split("=")[0].removeprefix("# ").split(" ")[0] for line in fragment_lines(CONFIG)}
         for line in fragment_lines(ARM64_CONFIG):
             name = line.split("=")[0].removeprefix("# ").split(" ")[0]
@@ -204,14 +204,14 @@ class AndroidKernelConfigTests(unittest.TestCase):
                 # Allowed only when it says the same thing.
                 self.assertIn(line, CONFIG.read_text().splitlines(), name)
 
-    def test_fr25_no_patch_touches_x86_only_code(self):
+    def test_fr27_no_patch_touches_x86_only_code(self):
         # The same patches apply to both architectures' builds.
         for patch in PATCHES.glob("*.patch"):
             for line in patch.read_text().splitlines():
                 if line.startswith(("--- a/", "+++ b/")):
                     self.assertNotIn("arch/x86", line, patch.name)
 
-    def test_fr25_a_merged_configuration_kept_every_fragment_line(self):
+    def test_fr27_a_merged_configuration_kept_every_fragment_line(self):
         # build.sh --config-only leaves the merged .config; CI points this at each one.
         merged = os.environ.get("DSA_KERNEL_MERGED_CONFIG")
         if not merged:
