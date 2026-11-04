@@ -227,6 +227,108 @@ jobs:
           }
           Set-AppTheme
 
+      # In a window as short as the app allows, the navigation pane and the page scroll: the
+      # mouse wheel over the pane, and moving the keyboard focus to the last item, bring About
+      # into view, and the wheel over the page brings its last card into view.
+      - name: fr17_a_short_settings_window_scrolls_to_every_page
+        run: |
+          . .github/scripts/installer/setup-ui.ps1
+          Add-Type -Namespace Dsa -Name Input -MemberDefinition @'
+          [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+          [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, int data, System.UIntPtr extra);
+          [DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr window);
+          '@
+          New-Item -ItemType Directory -Force screens | Out-Null
+          $exe = "$env:PROGRAM_DIR\settings\DsaSettings.exe"
+          $name = [System.Windows.Automation.AutomationElement]::NameProperty
+
+          function Wheel-Over($Element, [int]$Notches) {
+            $r = $Element.Current.BoundingRectangle
+            [Dsa.Input]::SetCursorPos([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2)) | Out-Null
+            for ($i = 0; $i -lt $Notches; $i++) {
+              [Dsa.Input]::mouse_event(0x0800, 0, 0, -120, [UIntPtr]::Zero)   # MOUSEEVENTF_WHEEL, down
+              Start-Sleep -Milliseconds 100
+            }
+            Start-Sleep -Milliseconds 500
+          }
+          function Find-Named($Window, [string]$Text) {
+            $Window.FindFirst($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($name, $Text)))
+          }
+          # Whether $Element lies inside $Window's client area, not cut off at its bottom.
+          function Test-InView($Window, $Element) {
+            if (-not $Element -or $Element.Current.IsOffscreen) { return $false }
+            $w = $Window.Current.BoundingRectangle
+            $r = $Element.Current.BoundingRectangle
+            ($r.Height -gt 0) -and ($r.Bottom -le $w.Bottom - 4) -and ($r.Top -ge $w.Top)
+          }
+          function Start-Short([string]$Page) {
+            $app = Start-Process $exe -ArgumentList '--page', $Page -PassThru
+            $window = Wait-ProcessWindow $app.Id 90
+            if (-not $window) { throw "DSA Settings showed no window within 90 seconds" }
+            Start-Sleep -Seconds 4
+            $transform = $window.GetCurrentPattern([System.Windows.Automation.TransformPattern]::Pattern)
+            $transform.Move(40, 40)
+            $transform.Resize(900, 360)   # the window's least height
+            [Dsa.Input]::SetForegroundWindow([IntPtr]$window.Current.NativeWindowHandle) | Out-Null
+            Start-Sleep -Seconds 2
+            @{ App = $app; Window = $window }
+          }
+          function Stop-Short($Run) {
+            if ($Run.App.HasExited) { throw "DSA Settings exited (code $($Run.App.ExitCode))" }
+            Stop-Process -Id $Run.App.Id -Force
+            $Run.App.WaitForExit(10000) | Out-Null
+          }
+
+          foreach ($theme in 'light', 'dark') {
+            Set-AppTheme -Dark:($theme -eq 'dark')
+
+            # The wheel over the navigation pane.
+            $run = Start-Short 'general'
+            $window = $run.Window
+            # The navigation item, not the page title of the same name: the pane is on the left.
+            $general = $window.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($name, 'General'))) |
+              Where-Object { $_.Current.BoundingRectangle.X -lt ($window.Current.BoundingRectangle.X + 280) } | Select-Object -First 1
+            if (-not $general) { throw "no General item in the navigation pane" }
+            Save-WindowScreen $window "$PWD\screens\settings-$theme-short-before.png"
+            $about = Find-Named $window 'About'
+            if (Test-InView $window $about) {
+              throw "About is in view in a 360 px window before any scrolling, so this check proves nothing; make the window shorter"
+            }
+            Wheel-Over $general 15
+            Save-WindowScreen $window "$PWD\screens\settings-$theme-short-pane-wheel.png"
+            $about = Find-Named $window 'About'
+            if (-not (Test-InView $window $about)) { throw "the mouse wheel over the navigation pane does not bring About into view" }
+            if (-not (Select-Named $window 'About')) { throw "About could not be selected" }
+            Start-Sleep -Seconds 2
+            Save-WindowScreen $window "$PWD\screens\settings-$theme-short-about.png"
+            Stop-Short $run
+
+            # The keyboard: the focus on the last item brings it into view.
+            $run = Start-Short 'general'
+            $window = $run.Window
+            $about = Find-Named $window 'About'
+            $about.SetFocus()
+            Start-Sleep -Seconds 1
+            $about = Find-Named $window 'About'
+            Save-WindowScreen $window "$PWD\screens\settings-$theme-short-pane-keyboard.png"
+            if (-not (Test-InView $window $about)) { throw "moving the keyboard focus to About does not bring it into view" }
+            Stop-Short $run
+
+            # The wheel over the page reaches its last card.
+            $run = Start-Short 'general'
+            $window = $run.Window
+            $page = $window.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition(
+              [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text))) |
+              Where-Object { $_.Current.BoundingRectangle.X -gt ($window.Current.BoundingRectangle.X + 320) } | Select-Object -First 1
+            if (-not $page) { throw "no text on the General page" }
+            Wheel-Over $page 25
+            $last = Find-Named $window 'Refresh'
+            Save-WindowScreen $window "$PWD\screens\settings-$theme-short-page-wheel.png"
+            if (-not (Test-InView $window $last)) { throw "the mouse wheel over the page does not bring its last card (Refresh) into view" }
+            Stop-Short $run
+          }
+          Set-AppTheme
+
       # APKs made by the Android SDK's own tools, for the APK install window.
       - name: Make the test APKs
         shell: bash

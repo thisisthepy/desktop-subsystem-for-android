@@ -13,7 +13,7 @@
                         <TextBlock Text="{Binding Detail}" Style="{StaticResource CardDescription}" />
                     </StackPanel>
                 </ui:CardControl.Header>
-                <TextBlock Text="{Binding Size}" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <TextBlock Text="{Binding Size}" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
             </ui:CardControl>
         </DataTemplate>
     </Page.Resources>
@@ -57,7 +57,7 @@
                     </ui:CardControl.Header>
                     <StackPanel MinWidth="220">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                            <TextBlock Text="{Binding GuestAvailable, Mode=OneWay}" FontWeight="SemiBold"
+                            <TextBlock Text="{Binding GuestAvailable, Mode=OneWay}"
                                        Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
                             <TextBlock Text="{l:Text MemoryAvailableOf.Text}" Margin="6,0"
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
