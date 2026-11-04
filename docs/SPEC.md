@@ -193,6 +193,7 @@ DSA가 실행 중에 만드는 파일은 정해진 두 루트 아래 정해진 �
 | 자리 | 담는 것 | 이유 |
 |---|---|---|
 | `android.vhdx` | 그 사용자의 안드로이드 디스크 | 사용자의 데이터다. 제거해도 남는다 |
+| `android.image-version` | 그 디스크가 담은 이미지의 버전 | 디스크를 어느 이미지에서 올릴지 판단한다. 디스크와 함께 남는다 |
 | `apps\<package>\` | 앱마다 만든 창 프로그램과 그 기록 | 앱 이름과 아이콘을 단 실행 파일 |
 | `notifications\` | 알림에 쓰는 앱 아이콘 | Windows 알림이 파일 경로로 아이콘을 읽는다 |
 | `logs\` | `dsa-wm.log`, `dsa-app-window.log` | 사용자 세션에서 도는 프로세스의 로그 |
@@ -201,12 +202,14 @@ DSA가 실행 중에 만드는 파일은 정해진 두 루트 아래 정해진 �
 | `start-menu.json` | 창 관리자가 만든 시작 메뉴 바로 가기의 목록 | 자기가 만든 것만 고치고 지우기 위해서다 |
 | `tmp\` | 사용자 프로세스의 피할 수 없는 임시 파일 | 아래 임시 파일 규칙 |
 
-- DSA 폴더 밖에는 다음만 둔다: 시작 메뉴 바로 가기(설정 앱, 그리고 앱마다 창 관리자가 만든 것), 설치 프로그램의 레지스트리 키(`HKLM\SOFTWARE\thisisthepy\DSA`), 로그인 때 창 관리자를 시작하는 `Run` 값, `.apk` 연결과 파일 상황에 맞는 메뉴 항목, Hyper-V 소켓 서비스 등록(`GuestCommunicationServices`), 알림에 쓰는 AppUserModelId 키. 이 밖에는 아무것도 두지 않는다.
+- DSA 폴더 밖에는 다음만 둔다: 시작 메뉴 바로 가기(설정 앱, 그리고 앱마다 창 관리자가 만든 것), 설치 프로그램의 레지스트리 키(`HKLM\SOFTWARE\thisisthepy\DSA`), 로그인 때 창 관리자를 시작하는 `Run` 값, `.apk` 연결과 파일 상황에 맞는 메뉴 항목, Hyper-V 소켓 서비스 등록(`GuestCommunicationServices`), 알림을 누르면 실행되는 URL 프로토콜 키(`HKCU\Software\Classes\io.github.thisisthepy.dsa-notification`), 알림에 쓰는 앱별 AppUserModelId 키(`HKCU\Software\Classes\AppUserModelId\Thisisthepy.DSA.<package>`). 이 밖에는 아무것도 두지 않는다.
+- 이름은 Microsoft와 IETF의 관례를 따른다. URL 프로토콜 이름은 다른 프로그램과 겹치지 않도록 프로젝트가 가진 도메인(`thisisthepy.github.io`)을 뒤집어 앞에 붙인다(RFC 7595 3.8절). 패키지 앱의 프로토콜 이름 규칙(소문자, 39자 이하)에도 맞는다. AppUserModelID는 `CompanyName.ProductName.SubProduct` 꼴(`Thisisthepy.DSA.<package>`)이고 128자를 넘지 않는다. 예전 이름(`dsa-notification`, `DSA.<package>`)의 키는 업그레이드 뒤 창 관리자가 처음 시작할 때와 제거할 때 지운다.
+- 제거하면 알림 프로토콜 키와 AppUserModelId 키는 지우고, `android.image-version`은 안드로이드 디스크와 함께 남긴다.
 - 임시 파일은 되도록 만들지 않고 데이터를 메모리나 파이프로 넘긴다. 피할 수 없으면 해당 루트의 `tmp\` 안에만, 프로세스마다 겹치지 않는 이름으로 만들고, 쓴 쪽이 다 쓰면 지운다. 서비스는 시작할 때 이전 실행이 남긴 것을 지운다. 기계 루트의 `tmp\`는 SYSTEM과 Administrators만 쓸 수 있다. 제품 코드는 시스템이나 사용자의 `%TEMP%`, `std::env::temp_dir()`, `Path.GetTempPath()`를 쓰지 않는다(테스트는 예외).
 - 로그는 둘로 나눈다. SYSTEM으로 도는 서비스와 안드로이드(게스트 콘솔)의 로그는 기계 루트의 `logs\`에, 사용자 세션에서 도는 창 관리자와 앱 창의 로그는 사용자 루트의 `logs\`에 둔다. 설정 앱은 두 폴더를 모두 보여 주고 열 수 있다.
 - 추적 스위치(`input-trace`, `resize-trace`)는 설정 값이다. 빈 표시 파일로 켜지 않는다. 업그레이드할 때 예전 표시 파일이 있으면 그 값을 설정으로 옮기고 파일을 지운다.
 - 수용 기준: `dsa/host`의 제품 코드가 경로 모듈 밖에서 `LOCALAPPDATA`, `ProgramData`, 임시 폴더로 경로를 만들면 실패하는 테스트가 있고, 통과한다.
-- 수용 기준: 제거하면 안드로이드 디스크(`android.vhdx`)를 뺀 DSA의 파일, 폴더, 레지스트리 키, 바로 가기가 모든 사용자 프로필에서 사라진다. (수동 확인)
+- 수용 기준: 제거하면 안드로이드 디스크(`android.vhdx`와 `android.image-version`)를 뺀 DSA의 파일, 폴더, 레지스트리 키, 바로 가기가 모든 사용자 프로필에서 사라진다. (수동 확인)
 - 수용 기준: 예전 위치에 파일이 있는 PC에 설치하면 파일이 새 위치로 옮겨지고, 사용자의 안드로이드 디스크를 그대로 쓴다. 옮기기 전에 확인하고, 안드로이드 디스크는 지우거나 덮어쓰지 않으며, 옮기지 못하면 예전 위치에 두고 로그에 남긴다.
 
 ## 4. 비기능 요구사항
