@@ -742,6 +742,89 @@ pub struct Memory {
 /// The answer to a request that has nothing to report but that it was carried out.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Done {}
+/// One tag's least priority in a log filter, as logcat's TAG:P. The tag "*" sets the
+/// priority of every tag not named.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LogTagFilter {
+    #[prost(string, tag = "1")]
+    pub tag: ::prost::alloc::string::String,
+    /// Android's priority (2 verbose to 7 fatal); 8 silences the tag.
+    #[prost(uint32, tag = "2")]
+    pub min_priority: u32,
+}
+/// Reads the guest log of the caller's Android. The service answers Done, then the
+/// connection carries only LogEntries frames from the service: the recent records it holds,
+/// then each new one that passes, until the client closes the connection. With `dump`, the
+/// service sends what Android's log holds now and ends with a LogEntries whose `end` is set.
+/// The service reads Android's log only while such a connection is open.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct WatchLog {
+    /// Bit (1 << buffer) for each buffer to read, with the buffers numbered as LogEntry's;
+    /// 0 reads main, system and crash, as logcat does.
+    #[prost(uint32, tag = "1")]
+    pub buffers: u32,
+    #[prost(message, repeated, tag = "2")]
+    pub tags: ::prost::alloc::vec::Vec<LogTagFilter>,
+    #[prost(bool, tag = "3")]
+    pub dump: bool,
+}
+/// One record of the guest log.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LogEntry {
+    /// logd's log ID plus one: 1 main, 2 radio, 3 events, 4 system, 5 crash, 6 stats,
+    /// 7 security, 8 kernel.
+    #[prost(uint32, tag = "1")]
+    pub buffer: u32,
+    #[prost(uint32, tag = "2")]
+    pub priority: u32,
+    /// Nanoseconds since the Unix epoch, by Android's clock.
+    #[prost(uint64, tag = "3")]
+    pub time_ns: u64,
+    #[prost(int32, tag = "4")]
+    pub pid: i32,
+    #[prost(int32, tag = "5")]
+    pub tid: i32,
+    #[prost(uint32, tag = "6")]
+    pub uid: u32,
+    #[prost(string, tag = "7")]
+    pub tag: ::prost::alloc::string::String,
+    #[prost(string, tag = "8")]
+    pub message: ::prost::alloc::string::String,
+    /// Not 0: stands for that many records that were dropped, by Android or by the service,
+    /// because they came faster than they were read.
+    #[prost(uint64, tag = "9")]
+    pub dropped: u64,
+}
+/// Records of the guest log, on a connection that reads it.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct LogEntries {
+    #[prost(message, repeated, tag = "1")]
+    pub entries: ::prost::alloc::vec::Vec<LogEntry>,
+    /// The last frame of a dump.
+    #[prost(bool, tag = "2")]
+    pub end: bool,
+    /// Why the log could not be read, or why a dump ended early.
+    #[prost(string, tag = "3")]
+    pub error: ::prost::alloc::string::String,
+}
+/// Gathers the diagnostics of the caller's Android and of DSA on this computer into one zip
+/// archive. The service answers Done, then the connection carries only DiagnosticsData frames
+/// from the service, the archive's bytes in order, the last with `end` set.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CollectDiagnostics {}
+/// A piece of the diagnostics archive.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DiagnosticsData {
+    #[prost(bytes = "vec", tag = "1")]
+    pub data: ::prost::alloc::vec::Vec<u8>,
+    /// The archive's last piece.
+    #[prost(bool, tag = "2")]
+    pub end: bool,
+    /// Why the archive could not be made at all. A part that could not be gathered is named in
+    /// the archive's own summary instead.
+    #[prost(string, tag = "3")]
+    pub error: ::prost::alloc::string::String,
+}
 /// The caller's Android as the service sees it.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Status {
@@ -988,7 +1071,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 32, 33, 34, 28, 35, 36"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 32, 33, 34, 28, 35, 36, 70, 71"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -1062,6 +1145,10 @@ pub mod request {
         WidgetPointer(super::WidgetPointer),
         #[prost(message, tag = "36")]
         GetPackage(super::GetPackage),
+        #[prost(message, tag = "70")]
+        WatchLog(super::WatchLog),
+        #[prost(message, tag = "71")]
+        CollectDiagnostics(super::CollectDiagnostics),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1113,7 +1200,7 @@ pub mod response {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11, 15, 16, 14, 17, 18, 19, 20"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11, 15, 16, 14, 17, 18, 19, 20, 50, 51"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -1161,6 +1248,10 @@ pub mod envelope {
         AccessibilityActionResult(super::AccessibilityActionResult),
         #[prost(message, tag = "20")]
         WidgetEvent(super::WidgetEvent),
+        #[prost(message, tag = "50")]
+        LogEntries(super::LogEntries),
+        #[prost(message, tag = "51")]
+        DiagnosticsData(super::DiagnosticsData),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.

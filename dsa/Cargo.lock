@@ -190,6 +190,7 @@ dependencies = [
  "dsa-protocol",
  "dsa-protocol-schema",
  "dsa-transport",
+ "libc",
 ]
 
 [[package]]

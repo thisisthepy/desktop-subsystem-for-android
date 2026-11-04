@@ -13,7 +13,7 @@ them with the project's keys.
 | `make-image.py` | Changes, re-signs and lays out the image |
 | `check-image.py` | Checks a made image |
 | `fstab.dsa` | The guest's mount table on Hyper-V |
-| `console-logcat.rc` | The service that writes Android's log to the serial console |
+| `dsa-console.rc` | Quiets the serial console once boot completes, so it carries only the kernel's early boot and a panic |
 | `unavailable-features.xml` | Hardware features the VM lacks, withdrawn from the system |
 | `dsa-channeld.rc` | The service that runs the control channel daemon, and the trigger that drops the guest's caches when it asks |
 | `dsa-memory.rc` | Turns on the zram swap and tunes the kernel for it |
@@ -123,11 +123,14 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
 - `fstab.dsa` replaces the mount table. All partitions are on the user's one Android
   disk, found by the super partition's UUID, because Android creates its partition links
   for Hyper-V's SCSI disks only on that disk.
-- Android's log (`logcat`) goes to the serial console, which the host keeps as the VM's
-  console log (`C:\ProgramData\DSA\logs\android-*.log` on Windows). Cuttlefish writes it to a
-  virtio console, which Hyper-V does not have, and adb is there only in developer mode.
-  Only informational messages and above go there, because each byte written to the emulated
-  port traps out of the VM and takes time from vsync and input.
+- Android's log (`logcat`) stays in logd's memory and is never written to a file or to the
+  serial console. The control daemon reads it only while the host asks (`dsa logcat`, the
+  settings app's log view, `dsa logs collect`) and sends it on a vsock port of its own.
+  Cuttlefish's logger, which writes to a virtio console Hyper-V does not have, is removed.
+  logd also keeps the kernel's log (`ro.logd.kernel`), and once boot completes the serial
+  console prints only emergencies (`dsa-console.rc`), because each byte written to the
+  emulated port traps out of the VM and takes time from vsync and input. The console keeps
+  the kernel's early boot and a panic, which the host keeps as the VM's console log.
 - Every APK, APEX and verified boot image is re-signed. The published build is signed with
   AOSP's test keys, whose private halves are public.
 
@@ -175,8 +178,10 @@ To take a trace:
 
    With no arguments it reads `%LOCALAPPDATA%\DSA\logs\*.log` and the machine's
    `%ProgramData%\DSA\logs\*.log`, or the `logs` folder of the data folder chosen at install
-   (the service's log, with the `clock` lines, and the guest console, `android-<user>.log`).
-   Files or folders given as arguments are read instead.
+   (the service's log, with the `clock` lines), and Android's log, with the guest's stages,
+   through `dsa logcat -d -b all`. Android keeps its log in memory, so run it soon after the
+   clicks. Files or folders given as arguments are read instead, such as the output of
+   `dsa logcat -d -b all` saved to a file.
    For each press and release it prints the stages that follow on the same task or app,
    until the next press or release, with the time since the press and the gap to the stage
    before.

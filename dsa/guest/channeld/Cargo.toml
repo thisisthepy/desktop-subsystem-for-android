@@ -21,6 +21,7 @@ dsa-protocol.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 dsa-guest-transport = { path = "../transport" }
+libc = "0.2"
 
 [dev-dependencies]
 dsa-protocol-schema.workspace = true

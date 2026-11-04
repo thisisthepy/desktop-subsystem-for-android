@@ -57,7 +57,7 @@ use self::log::{note, CompositorLogger};
 use self::present::Gpu;
 use self::single_instance::DEFAULT_MUTEX_NAME;
 use crate::guid::Guid;
-use crate::hvsocket::RawHvSocketListener;
+use crate::hvsocket::{HvSocketListener, RawHvSocketListener};
 use crate::pipe::{current_user_only_sddl, NamedPipeConnector, NamedPipeListener};
 use crate::start_menu::StartMenuSetup;
 use crate::vm_listener::{BindFn, VmBoundListener, VmIdSlot};
@@ -102,6 +102,9 @@ pub struct Compositor {
     local_api_connector: Box<dyn Fn() -> Box<dyn Connector> + Send>,
     bind_command: Option<BindFn>,
     bind_process_pipe: Option<BindFn>,
+    /// Binds the video port, where the guest's codec HAL has its streams decoded. None in
+    /// tests, which have no GPU decoders.
+    bind_video: Option<BindFn>,
     logger: Option<Arc<CompositorLogger>>,
     /// What copies each display's frames into the task windows, when there is one.
     presenter: Option<Arc<dyn DisplayPresenter>>,
@@ -180,6 +183,11 @@ impl Compositor {
             RawHvSocketListener::bind(vm_id, service_id).map(|l| Box::new(l) as Box<dyn Listener>)
         });
 
+        let bind_video: BindFn = Box::new(move |vm_id| {
+            let service_id = Guid::vsock_service(dsa_host_core::video::VIDEO_PORT);
+            HvSocketListener::bind(vm_id, service_id).map(|l| Box::new(l) as Box<dyn Listener>)
+        });
+
         Compositor {
             config,
             renderer,
@@ -188,6 +196,7 @@ impl Compositor {
             local_api_connector,
             bind_command: Some(bind_command),
             bind_process_pipe: Some(bind_process_pipe),
+            bind_video: Some(bind_video),
             logger: None,
             presenter: None,
             host_listener: Some(session_host_listener()),
@@ -217,6 +226,7 @@ impl Compositor {
             local_api_connector,
             bind_command: Some(bind_command),
             bind_process_pipe: Some(bind_process_pipe),
+            bind_video: None,
             logger: None,
             presenter: None,
             host_listener: None,
@@ -328,6 +338,7 @@ impl Compositor {
         let clipboard_thread = self.start_clipboard(&stop);
         let notifications_thread = self.start_notifications(&stop);
         let widgets_thread = self.start_widgets(&stop);
+        let video_thread = self.start_video(&stop);
 
         // 1. Monitor thread that tracks the VM ID and state via the local API.
         let monitor_stop = Arc::clone(&stop);
@@ -520,10 +531,42 @@ impl Compositor {
         if let Some(thread) = widgets_thread {
             let _ = thread.join();
         }
+        if let Some(thread) = video_thread {
+            let _ = thread.join();
+        }
 
         if let Some(logger) = &self.logger {
             logger.log("dsa-wm stopped cleanly");
         }
+    }
+
+    /// Starts decoding the guest's video on this computer's GPU, on a thread of its own that
+    /// ends with `stop`: the guest's codec HAL connects to the video port for each decoder.
+    /// The formats offered are those this computer's GPU decodes, found once at start.
+    fn start_video(&mut self, stop: &Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
+        let bind = self.bind_video.take()?;
+        let listener = VmBoundListener::new(Arc::clone(&self.vm_id_slot), bind);
+        let stop = Arc::clone(stop);
+        let logger = self.logger.clone();
+        thread::Builder::new()
+            .name("dsa-wm-video".into())
+            .spawn(move || {
+                let log: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(move |line: &str| {
+                    if let Some(logger) = &logger {
+                        logger.log(line);
+                    }
+                });
+                let decoders = crate::video_decoder::MediaFoundationDecoders::probe(&*log);
+                let build = format!("dsa-wm {}", crate::VERSION);
+                dsa_host_core::video::serve(
+                    Box::new(listener),
+                    Arc::new(decoders),
+                    build,
+                    stop,
+                    log,
+                );
+            })
+            .ok()
     }
 
     /// Starts carrying the text clipboard between the user and their Android, on a thread of

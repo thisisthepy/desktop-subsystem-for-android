@@ -48,6 +48,12 @@
     -->
     <uses-permission android:name="android.permission.DUMP" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+    <!--
+      Reading the system's dropbox (tombstones, ANR traces, crashes, the boot before's kernel
+      log) for the diagnostics the host gathers on request; DUMP and PACKAGE_USAGE_STATS above
+      are needed for it too.
+    -->
+    <uses-permission android:name="android.permission.READ_LOGS" />
     <!-- Installing the APKs the host sends, without asking the user to confirm each one. -->
     <uses-permission android:name="android.permission.INSTALL_PACKAGES" />
 
@@ -66,6 +72,11 @@
       the guest has no screen to ask on.
     -->
     <uses-permission android:name="android.permission.BIND_APPWIDGET" />
+    <!--
+      Setting the guest's clock to the host's when the host wakes from sleep: the guest's
+      clock stands still or drifts while the host sleeps.
+    -->
+    <uses-permission android:name="android.permission.SET_TIME" />
 
     <application
         android:name=".platform.AgentApplication"

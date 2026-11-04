@@ -4,6 +4,7 @@ import io.github.thisisthepy.dsa.agent.Log
 import io.github.thisisthepy.dsa.control.v1.DeviceIdle
 import io.github.thisisthepy.dsa.control.v1.Envelope
 import io.github.thisisthepy.dsa.control.v1.HostMemory
+import io.github.thisisthepy.dsa.control.v1.HostSleep
 import io.github.thisisthepy.dsa.control.v1.PowerState
 
 /**
@@ -61,6 +62,7 @@ class Lifecycle(
             Envelope.BodyCase.SCREEN_STATE -> screen(envelope.screenState.on)
             Envelope.BodyCase.POWER_STATE -> follow(envelope.powerState)
             Envelope.BodyCase.HOST_MEMORY -> hostMemory(envelope.hostMemory)
+            Envelope.BodyCase.HOST_SLEEP -> hostSleep(envelope.hostSleep)
             else -> return false
         }
         return true
@@ -91,6 +93,21 @@ class Lifecycle(
         }
         log.info("the host is short of memory: ending cached apps")
         attempt("ending cached apps") { power.killCachedApps() }
+    }
+
+    /**
+     * The host sleeps or woke. Its screen word comes separately, and the control daemon writes
+     * the guest's data before it sleeps; on waking the guest's clock, which stood still or
+     * drifted while the host slept, is set to the host's.
+     */
+    private fun hostSleep(sleep: HostSleep) {
+        if (sleep.asleep) {
+            log.info("the host is going to sleep")
+            return
+        }
+        if (sleep.hostUnixTimeMs <= 0L) return
+        log.info("the host woke: setting the clock to the host's")
+        attempt("setting the clock") { power.setTime(sleep.hostUnixTimeMs) }
     }
 
     private fun follow(state: PowerState) {

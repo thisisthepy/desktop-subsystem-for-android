@@ -1,0 +1,12 @@
+; Desktop Subsystem for Android (DSA)
+; What the kernel's own threads do that the platform's policy does not expect.
+
+; The guest kernel keeps devtmpfs, and its kdevtmpfs thread adds a node to it for each device
+; the kernel finds after the policy is loaded. Android never mounts that devtmpfs: init mounts
+; a tmpfs on /dev and ueventd makes the nodes there. The platform's policy does not let the
+; kernel write devtmpfs's root, so each node was refused, and the denials (over a hundred a
+; boot) filled the kernel's audit queue before logd read it. The nodes are not needed, so the
+; refusal stays and is not logged.
+(dontaudit kernel device (dir (write add_name create search)))
+(dontaudit kernel device (chr_file (create setattr getattr)))
+(dontaudit kernel device (blk_file (create setattr getattr)))

@@ -73,6 +73,7 @@ fn role_name(role: i32) -> String {
     match Role::try_from(role) {
         Ok(Role::Host) => "the host".into(),
         Ok(Role::Guest) => "the guest".into(),
+        Ok(Role::GuestVideo) => "the guest's video codec HAL".into(),
         Ok(Role::Unspecified) => "no role".into(),
         Err(_) => format!("an unknown role ({role})"),
     }
@@ -221,6 +222,53 @@ pub fn host_accept(
             RejectReason::AuthenticationFailed,
             detail,
         ));
+    }
+    send(
+        connection,
+        Body::HelloAccepted(HelloAccepted {
+            host: Some(local.clone()),
+        }),
+    )?;
+    Ok(peer)
+}
+
+/// The host side of a port that asks for no secret, such as the video port: waits at most
+/// `timeout` for the peer's `Hello`, checks its version, its schema hash and that it says it
+/// is `role`, and answers. Returns the peer's `Hello` when accepted.
+///
+/// Any guest process can reach such a port, so what it carries must be harmless from any of
+/// them. The control port never uses this.
+pub fn host_accept_open(
+    connection: &mut dyn Connection,
+    local: &Hello,
+    role: Role,
+    timeout: Duration,
+) -> Result<Hello, HandshakeError> {
+    let frame = connection.recv(Some(timeout))?;
+    let peer = match decode(&frame) {
+        Ok(Envelope {
+            body: Some(Body::Hello(hello)),
+        }) => hello,
+        Ok(_) => {
+            let detail = "the first message on the connection was not a Hello".to_string();
+            return Err(refuse(
+                connection,
+                local,
+                RejectReason::MalformedHello,
+                detail,
+            ));
+        }
+        Err(error) => {
+            return Err(refuse(
+                connection,
+                local,
+                RejectReason::MalformedHello,
+                error.to_string(),
+            ));
+        }
+    };
+    if let Err((reason, detail)) = check(&peer, local, role) {
+        return Err(refuse(connection, local, reason, detail));
     }
     send(
         connection,

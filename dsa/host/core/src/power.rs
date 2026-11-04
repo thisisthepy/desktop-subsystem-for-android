@@ -5,11 +5,17 @@
 //! agent makes the guest's battery state match, so apps and Doze behave as they would on a
 //! device running on that power.
 //!
+//! The host's sleep travels the same way: before the host sleeps every running Android is
+//! told and puts its data on disk, and when it wakes each one has its clock set and returns
+//! to the state it had ([`PowerHub::host_sleeping`], [`PowerHub::host_woke`]).
+//!
 //! The host's memory travels the same way: when the host runs short of memory, every running
 //! Android is told, and gives back what it can spare, cached app processes first (see
 //! [`MemoryPressure`]).
 
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, Weak};
+use std::time::{Duration, Instant, SystemTime};
 
 use dsa_protocol::control;
 
@@ -153,6 +159,50 @@ impl PowerHub {
             }
             None => false,
         });
+    }
+
+    /// Says that the host is about to sleep, to every session, and waits until each guest has
+    /// put its data on disk, for at most `wait` in all. Returns whether every guest answered in
+    /// time. The host's platform calls this from its suspend notification, which Windows (and
+    /// the other hosts) give only a short time.
+    pub fn host_sleeping(&self, wait: Duration) -> bool {
+        let answers: Vec<_> = self
+            .live_sessions()
+            .iter()
+            .map(|session| session.host_sleeping())
+            .collect();
+        let deadline = Instant::now() + wait;
+        let mut all = true;
+        for answer in answers {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match answer.recv_timeout(left) {
+                Ok(()) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => all = false,
+            }
+        }
+        all
+    }
+
+    /// Says that the host woke, its wall clock reading `wall_clock`, to every session.
+    pub fn host_woke(&self, wall_clock: SystemTime) {
+        for session in self.live_sessions() {
+            session.host_woke(wall_clock);
+        }
+    }
+
+    /// The sessions still alive, forgetting those that are not.
+    fn live_sessions(&self) -> Vec<Arc<Session>> {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut live = Vec::new();
+        inner.sessions.retain(|session| match session.upgrade() {
+            Some(session) => {
+                live.push(session);
+                true
+            }
+            None => false,
+        });
+        live
     }
 
     /// Whether the host was last said to be short of memory.

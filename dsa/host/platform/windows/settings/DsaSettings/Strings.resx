@@ -688,4 +688,61 @@
   <data name="ApkWindow_Reason_other" xml:space="preserve">
     <value>Android did not install the app.</value>
   </data>
+  <data name="NavLogs.Content" xml:space="preserve">
+    <value>Android log</value>
+  </data>
+  <data name="LogsTitle.Text" xml:space="preserve">
+    <value>Android log</value>
+  </data>
+  <data name="LogsNote.Text" xml:space="preserve">
+    <value>Android sends its log only while this page is open, and nothing is written to disk. Save diagnostics gathers what a problem report needs into one zip file.</value>
+  </data>
+  <data name="LogsSaveButton.Content" xml:space="preserve">
+    <value>Save diagnostics</value>
+  </data>
+  <data name="LogsFilter.PlaceholderText" xml:space="preserve">
+    <value>Filter by tag or text</value>
+  </data>
+  <data name="LogsPause.Content" xml:space="preserve">
+    <value>Pause</value>
+  </data>
+  <data name="LogsErrorBar.Title" xml:space="preserve">
+    <value>The log cannot be read</value>
+  </data>
+  <data name="LogsStatusBar.Title" xml:space="preserve">
+    <value>Diagnostics</value>
+  </data>
+  <data name="Logs_Paused" xml:space="preserve">
+    <value>Paused. {0} new lines are waiting.</value>
+  </data>
+  <data name="Logs_Saving" xml:space="preserve">
+    <value>Gathering the diagnostics. This takes a minute or more.</value>
+  </data>
+  <data name="Logs_Saved" xml:space="preserve">
+    <value>Saved the diagnostics to {0}.</value>
+  </data>
+  <data name="Logs_SaveDialogTitle" xml:space="preserve">
+    <value>Save diagnostics</value>
+  </data>
+  <data name="Logs_SaveDialogFilter" xml:space="preserve">
+    <value>Zip archive</value>
+  </data>
+  <data name="Logs_Priority_V" xml:space="preserve">
+    <value>Verbose</value>
+  </data>
+  <data name="Logs_Priority_D" xml:space="preserve">
+    <value>Debug</value>
+  </data>
+  <data name="Logs_Priority_I" xml:space="preserve">
+    <value>Info</value>
+  </data>
+  <data name="Logs_Priority_W" xml:space="preserve">
+    <value>Warning</value>
+  </data>
+  <data name="Logs_Priority_E" xml:space="preserve">
+    <value>Error</value>
+  </data>
+  <data name="Logs_Priority_F" xml:space="preserve">
+    <value>Fatal</value>
+  </data>
 </root>

@@ -102,3 +102,15 @@
 ; the host says, and init starts or stops adbd (dsa-channeld.rc).
 (allow dsa_channeld dsa_adb_prop (property_service (set)))
 (allow dsa_channeld dsa_adb_prop (file (read open getattr map)))
+; Android's log, read only while the host asks for it, through logd's reader socket
+; (/dev/socket/logdr, a sequenced-packet socket); the records go to the host on the log port,
+; which the vsock rules above already cover. The daemon runs as the system user, which logd
+; lets read every app's log. It writes no log of its own anywhere.
+(allow dsa_channeld self (unix_stream_socket (create connect read write getattr setopt shutdown)))
+(allow dsa_channeld logdr_socket (sock_file (write)))
+(allow dsa_channeld logd (unix_stream_socket (connectto)))
+
+; What the kernel kept of the boot before in pstore (/sys/fs/pstore), for the diagnostics the
+; host asks for. Read only.
+(allow dsa_channeld pstorefs (dir (search read open getattr)))
+(allow dsa_channeld pstorefs (file (read open getattr)))

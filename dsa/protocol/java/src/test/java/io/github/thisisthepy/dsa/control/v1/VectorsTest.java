@@ -102,6 +102,37 @@ public final class VectorsTest {
         cases.put("task_removed", Envelope.newBuilder()
                 .setTaskRemoved(TaskRemoved.newBuilder().setTaskId(42))
                 .build());
+        cases.put("video_capabilities", Envelope.newBuilder()
+                .setVideoCapabilities(VideoCapabilities.newBuilder()
+                        .addCodecs(VideoCodecSupport.newBuilder()
+                                .setCodec(VideoCodec.VIDEO_CODEC_H264)
+                                .setMaxWidth(4096)
+                                .setMaxHeight(2304)))
+                .build());
+        cases.put("video_decoder_open", Envelope.newBuilder()
+                .setVideoDecoderOpen(VideoDecoderOpen.newBuilder()
+                        .setCodec(VideoCodec.VIDEO_CODEC_H264)
+                        .setWidth(1280)
+                        .setHeight(720))
+                .build());
+        cases.put("video_flush", Envelope.newBuilder()
+                .setVideoFlush(VideoFlush.newBuilder())
+                .build());
+        cases.put("video_frame", Envelope.newBuilder()
+                .setVideoFrame(VideoFrame.newBuilder()
+                        .setFrameIndex(3)
+                        .setTimestampUs(100000)
+                        .setWidth(2)
+                        .setHeight(2)
+                        .setStride(2)
+                        .setNv12(ByteString.copyFrom(new byte[] {0x10, 0x10, 0x10, 0x10, (byte) 0x80, (byte) 0x80})))
+                .build());
+        cases.put("video_packet", Envelope.newBuilder()
+                .setVideoPacket(VideoPacket.newBuilder()
+                        .setFrameIndex(3)
+                        .setTimestampUs(100000)
+                        .setData(ByteString.copyFrom(new byte[] {0, 0, 0, 1, 0x65})))
+                .build());
         cases.put("task_frames", Envelope.newBuilder()
                 .setTaskFrames(TaskFrames.newBuilder().setTaskId(42).setDisplayId(3))
                 .build());
@@ -444,6 +475,47 @@ public final class VectorsTest {
                         .setRequestId(7)
                         .setDone(false)
                         .setError("the node is gone"))
+                .build());
+        cases.put("log_stream_on", Envelope.newBuilder()
+                .setLogStream(LogStream.newBuilder()
+                        .setOn(true).setBuffers(50).setMinPriority(4).setTail(500))
+                .build());
+        cases.put("log_stream_off", Envelope.newBuilder()
+                .setLogStream(LogStream.getDefaultInstance())
+                .build());
+        cases.put("log_dump", Envelope.newBuilder()
+                .setLogDump(LogDump.newBuilder().setRequestId(7).setBuffers(50).setMinPriority(2))
+                .build());
+        cases.put("log_records", Envelope.newBuilder()
+                .setLogRecords(LogRecords.newBuilder()
+                        .addRecords(LogRecord.newBuilder()
+                                .setBuffer(LogBuffer.LOG_BUFFER_MAIN)
+                                .setPriority(4)
+                                .setTimeNs(1_700_000_000_123_456_789L)
+                                .setPid(1234)
+                                .setTid(1240)
+                                .setUid(1000)
+                                .setTag("ActivityManager")
+                                .setMessage("Start proc 1234"))
+                        .addRecords(LogRecord.newBuilder().setDropped(12)))
+                .build());
+        cases.put("log_records_dump_end", Envelope.newBuilder()
+                .setLogRecords(LogRecords.newBuilder().setRequestId(7).setEnd(true))
+                .build());
+        cases.put("collect_diagnostics", Envelope.newBuilder()
+                .setCollectDiagnostics(CollectDiagnostics.newBuilder().setRequestId(3))
+                .build());
+        cases.put("diagnostics_file", Envelope.newBuilder()
+                .setDiagnosticsFile(DiagnosticsFile.newBuilder()
+                        .setRequestId(3)
+                        .setName("android/pstore/console-ramoops-0")
+                        .setData(com.google.protobuf.ByteString.copyFromUtf8("boot"))
+                        .setLast(true))
+                .build());
+        cases.put("diagnostics_done", Envelope.newBuilder()
+                .setDiagnosticsDone(DiagnosticsDone.newBuilder()
+                        .setRequestId(3)
+                        .setError("the agent did not answer"))
                 .build());
         WidgetProvider clock = WidgetProvider.newBuilder()
                 .setProvider("com.example.clock/.ClockWidget")
