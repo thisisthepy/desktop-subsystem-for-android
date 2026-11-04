@@ -910,6 +910,95 @@ message AccessibilityActionResult {
   string error = 4;
 }
 
+// The guest's log, as logd keeps it in memory. A record's buffer is logd's log ID plus one,
+// so 0 stays "unspecified".
+enum LogBuffer {
+  LOG_BUFFER_UNSPECIFIED = 0;
+  LOG_BUFFER_MAIN = 1;
+  LOG_BUFFER_RADIO = 2;
+  LOG_BUFFER_EVENTS = 3;
+  LOG_BUFFER_SYSTEM = 4;
+  LOG_BUFFER_CRASH = 5;
+  LOG_BUFFER_STATS = 6;
+  LOG_BUFFER_SECURITY = 7;
+  LOG_BUFFER_KERNEL = 8;
+}
+
+// Host to guest, to the channel daemon: what the guest's log stream carries from now on.
+// While `on`, the daemon reads logd and sends the records that pass on the log port (a
+// vsock port of its own, so a busy log never delays input or window messages). With `on`
+// false the daemon closes its logd reader and sends nothing, so a guest whose log nobody
+// reads pays nothing for it. The host says this again each time the daemon connects.
+message LogStream {
+  bool on = 1;
+  // Bit (1 << LogBuffer) for each buffer to read.
+  uint32 buffers = 2;
+  // The least Android priority to send (2 verbose to 7 fatal); 0 sends every record.
+  uint32 min_priority = 3;
+  // How many of the newest records logd holds to send first when the stream starts.
+  uint32 tail = 4;
+}
+
+// Host to guest, to the channel daemon: sends what logd holds now, once, on the log port, as
+// LogRecords carrying this request_id, the last of them with `end` set.
+message LogDump {
+  uint32 request_id = 1;
+  uint32 buffers = 2;
+  uint32 min_priority = 3;
+}
+
+// One record of the guest's log.
+message LogRecord {
+  LogBuffer buffer = 1;
+  // Android's priority: 2 verbose, 3 debug, 4 info, 5 warning, 6 error, 7 fatal.
+  uint32 priority = 2;
+  // When it was logged, by the guest's wall clock, in nanoseconds since the Unix epoch.
+  uint64 time_ns = 3;
+  int32 pid = 4;
+  int32 tid = 5;
+  uint32 uid = 6;
+  string tag = 7;
+  string message = 8;
+  // Not 0: this record stands for that many records the guest dropped, because they came
+  // faster than the host read them.
+  uint64 dropped = 9;
+}
+
+// Guest to host, on the log port: records of the stream (request_id 0) or of a dump.
+message LogRecords {
+  uint32 request_id = 1;
+  repeated LogRecord records = 2;
+  // The last frame of a dump.
+  bool end = 3;
+  // Why a dump ended early, or why the stream could not read logd.
+  string error = 4;
+}
+
+// Host to guest, to the channel daemon and the agent: gathers the guest's diagnostics now.
+// Both send what they gather as DiagnosticsFile on the log port (the agent through the
+// daemon), and the daemon ends it with DiagnosticsDone. Nothing is written to the guest's
+// disk for it.
+message CollectDiagnostics {
+  uint32 request_id = 1;
+}
+
+// Guest to host, on the log port: one piece of one file of the diagnostics.
+message DiagnosticsFile {
+  uint32 request_id = 1;
+  // The file's path in the archive, such as "android/pstore/console-ramoops-0".
+  string name = 2;
+  bytes data = 3;
+  // The file's last piece.
+  bool last = 4;
+}
+
+// Guest to host, on the log port: the diagnostics are complete. `error` names what could not
+// be gathered, if anything; the rest was sent.
+message DiagnosticsDone {
+  uint32 request_id = 1;
+  string error = 2;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -976,5 +1065,11 @@ message Envelope {
     AccessibilityTree accessibility_tree = 81;
     AccessibilityAction accessibility_action = 82;
     AccessibilityActionResult accessibility_action_result = 83;
+    LogStream log_stream = 130;
+    LogDump log_dump = 131;
+    LogRecords log_records = 132;
+    CollectDiagnostics collect_diagnostics = 133;
+    DiagnosticsFile diagnostics_file = 134;
+    DiagnosticsDone diagnostics_done = 135;
   }
 }

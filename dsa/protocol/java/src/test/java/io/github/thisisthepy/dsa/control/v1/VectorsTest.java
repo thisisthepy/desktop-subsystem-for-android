@@ -445,6 +445,47 @@ public final class VectorsTest {
                         .setDone(false)
                         .setError("the node is gone"))
                 .build());
+        cases.put("log_stream_on", Envelope.newBuilder()
+                .setLogStream(LogStream.newBuilder()
+                        .setOn(true).setBuffers(50).setMinPriority(4).setTail(500))
+                .build());
+        cases.put("log_stream_off", Envelope.newBuilder()
+                .setLogStream(LogStream.getDefaultInstance())
+                .build());
+        cases.put("log_dump", Envelope.newBuilder()
+                .setLogDump(LogDump.newBuilder().setRequestId(7).setBuffers(50).setMinPriority(2))
+                .build());
+        cases.put("log_records", Envelope.newBuilder()
+                .setLogRecords(LogRecords.newBuilder()
+                        .addRecords(LogRecord.newBuilder()
+                                .setBuffer(LogBuffer.LOG_BUFFER_MAIN)
+                                .setPriority(4)
+                                .setTimeNs(1_700_000_000_123_456_789L)
+                                .setPid(1234)
+                                .setTid(1240)
+                                .setUid(1000)
+                                .setTag("ActivityManager")
+                                .setMessage("Start proc 1234"))
+                        .addRecords(LogRecord.newBuilder().setDropped(12)))
+                .build());
+        cases.put("log_records_dump_end", Envelope.newBuilder()
+                .setLogRecords(LogRecords.newBuilder().setRequestId(7).setEnd(true))
+                .build());
+        cases.put("collect_diagnostics", Envelope.newBuilder()
+                .setCollectDiagnostics(CollectDiagnostics.newBuilder().setRequestId(3))
+                .build());
+        cases.put("diagnostics_file", Envelope.newBuilder()
+                .setDiagnosticsFile(DiagnosticsFile.newBuilder()
+                        .setRequestId(3)
+                        .setName("android/pstore/console-ramoops-0")
+                        .setData(com.google.protobuf.ByteString.copyFromUtf8("boot"))
+                        .setLast(true))
+                .build());
+        cases.put("diagnostics_done", Envelope.newBuilder()
+                .setDiagnosticsDone(DiagnosticsDone.newBuilder()
+                        .setRequestId(3)
+                        .setError("the agent did not answer"))
+                .build());
         WidgetProvider clock = WidgetProvider.newBuilder()
                 .setProvider("com.example.clock/.ClockWidget")
                 .setPackageName("com.example.clock")

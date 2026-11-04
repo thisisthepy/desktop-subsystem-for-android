@@ -10,6 +10,8 @@
 // the service; a client that sends anything more on it is disconnected. In the same way,
 // from the answer to StreamInput on, the connection carries only PointerEvent, KeyEvent,
 // ImeComposition and ImeCommit frames from the client, and the service answers none of them.
+// From the answer to WatchLog on, the connection carries only LogEntries frames from the
+// service, and from the answer to CollectDiagnostics on, only DiagnosticsData frames.
 //
 // The caller's identity is the user the operating system reports for the connection.
 // Nothing in these messages names a user, so a client cannot claim to be someone else, and
@@ -700,6 +702,69 @@ message Memory {
 // The answer to a request that has nothing to report but that it was carried out.
 message Done {}
 
+// One tag's least priority in a log filter, as logcat's TAG:P. The tag "*" sets the
+// priority of every tag not named.
+message LogTagFilter {
+  string tag = 1;
+  // Android's priority (2 verbose to 7 fatal); 8 silences the tag.
+  uint32 min_priority = 2;
+}
+
+// Reads the guest log of the caller's Android. The service answers Done, then the
+// connection carries only LogEntries frames from the service: the recent records it holds,
+// then each new one that passes, until the client closes the connection. With `dump`, the
+// service sends what Android's log holds now and ends with a LogEntries whose `end` is set.
+// The service reads Android's log only while such a connection is open.
+message WatchLog {
+  // Bit (1 << buffer) for each buffer to read, with the buffers numbered as LogEntry's;
+  // 0 reads main, system and crash, as logcat does.
+  uint32 buffers = 1;
+  repeated LogTagFilter tags = 2;
+  bool dump = 3;
+}
+
+// One record of the guest log.
+message LogEntry {
+  // logd's log ID plus one: 1 main, 2 radio, 3 events, 4 system, 5 crash, 6 stats,
+  // 7 security, 8 kernel.
+  uint32 buffer = 1;
+  uint32 priority = 2;
+  // Nanoseconds since the Unix epoch, by Android's clock.
+  uint64 time_ns = 3;
+  int32 pid = 4;
+  int32 tid = 5;
+  uint32 uid = 6;
+  string tag = 7;
+  string message = 8;
+  // Not 0: stands for that many records that were dropped, by Android or by the service,
+  // because they came faster than they were read.
+  uint64 dropped = 9;
+}
+
+// Records of the guest log, on a connection that reads it.
+message LogEntries {
+  repeated LogEntry entries = 1;
+  // The last frame of a dump.
+  bool end = 2;
+  // Why the log could not be read, or why a dump ended early.
+  string error = 3;
+}
+
+// Gathers the diagnostics of the caller's Android and of DSA on this computer into one zip
+// archive. The service answers Done, then the connection carries only DiagnosticsData frames
+// from the service, the archive's bytes in order, the last with `end` set.
+message CollectDiagnostics {}
+
+// A piece of the diagnostics archive.
+message DiagnosticsData {
+  bytes data = 1;
+  // The archive's last piece.
+  bool end = 2;
+  // Why the archive could not be made at all. A part that could not be gathered is named in
+  // the archive's own summary instead.
+  string error = 3;
+}
+
 // The caller's Android as the service sees it.
 message Status {
   SessionState state = 1;
@@ -944,6 +1009,8 @@ message Request {
     WatchAccessibility watch_accessibility = 28;
     WidgetPointer widget_pointer = 35;
     GetPackage get_package = 36;
+    WatchLog watch_log = 70;
+    CollectDiagnostics collect_diagnostics = 71;
   }
 }
 
@@ -990,5 +1057,7 @@ message Envelope {
     AccessibilityAction accessibility_action = 18;
     AccessibilityActionResult accessibility_action_result = 19;
     WidgetEvent widget_event = 20;
+    LogEntries log_entries = 50;
+    DiagnosticsData diagnostics_data = 51;
   }
 }

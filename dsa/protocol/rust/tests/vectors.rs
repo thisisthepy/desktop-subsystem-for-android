@@ -25,6 +25,10 @@ use dsa_protocol::control::{
     AddWidget, ListWidgetProviders, RemoveWidget, ResizeWidget, WidgetAdded, WidgetFrame,
     WidgetList, WidgetPointer, WidgetProvider, WidgetProviders, WidgetUpdated,
 };
+use dsa_protocol::control::{
+    CollectDiagnostics, DiagnosticsDone, DiagnosticsFile, LogBuffer, LogDump, LogRecord,
+    LogRecords, LogStream,
+};
 use dsa_protocol::{decode, encode};
 
 /// The key of the notification in the notification cases.
@@ -786,6 +790,81 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                 request_id: 7,
                 done: false,
                 error: "the node is gone".into(),
+            })),
+        ),
+        (
+            "log_stream_on",
+            wrap(Body::LogStream(LogStream {
+                on: true,
+                buffers: 50,
+                min_priority: 4,
+                tail: 500,
+            })),
+        ),
+        (
+            "log_stream_off",
+            wrap(Body::LogStream(LogStream::default())),
+        ),
+        (
+            "log_dump",
+            wrap(Body::LogDump(LogDump {
+                request_id: 7,
+                buffers: 50,
+                min_priority: 2,
+            })),
+        ),
+        (
+            "log_records",
+            wrap(Body::LogRecords(LogRecords {
+                request_id: 0,
+                records: vec![
+                    LogRecord {
+                        buffer: LogBuffer::Main as i32,
+                        priority: 4,
+                        time_ns: 1_700_000_000_123_456_789,
+                        pid: 1234,
+                        tid: 1240,
+                        uid: 1000,
+                        tag: "ActivityManager".into(),
+                        message: "Start proc 1234".into(),
+                        dropped: 0,
+                    },
+                    LogRecord {
+                        dropped: 12,
+                        ..LogRecord::default()
+                    },
+                ],
+                end: false,
+                error: String::new(),
+            })),
+        ),
+        (
+            "log_records_dump_end",
+            wrap(Body::LogRecords(LogRecords {
+                request_id: 7,
+                records: Vec::new(),
+                end: true,
+                error: String::new(),
+            })),
+        ),
+        (
+            "collect_diagnostics",
+            wrap(Body::CollectDiagnostics(CollectDiagnostics { request_id: 3 })),
+        ),
+        (
+            "diagnostics_file",
+            wrap(Body::DiagnosticsFile(DiagnosticsFile {
+                request_id: 3,
+                name: "android/pstore/console-ramoops-0".into(),
+                data: b"boot".to_vec(),
+                last: true,
+            })),
+        ),
+        (
+            "diagnostics_done",
+            wrap(Body::DiagnosticsDone(DiagnosticsDone {
+                request_id: 3,
+                error: "the agent did not answer".into(),
             })),
         ),
     ])
