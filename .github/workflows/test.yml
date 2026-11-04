@@ -118,6 +118,31 @@ jobs:
       - name: Run the tests and build the agent
         run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
 
+  # The host's APK reader against APKs the Android SDK's own tools make (aapt2, zipalign,
+  # apksigner), not only against the ones its unit tests write.
+  apk-reader:
+    name: Read APKs made by the Android SDK (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make the test APKs
+        run: .github/scripts/apk/make-test-apks.sh .scratch/test-apks
+
+      - name: Build dsa
+        working-directory: dsa
+        run: cargo build -q -p dsa-cli
+
+      - name: Read them with dsa apk-info
+        run: .github/scripts/apk/check-apk-info.sh dsa/target/debug/dsa .scratch/test-apks
+
+      - name: Keep the APKs and what dsa said of them
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-apks
+          path: .scratch/test-apks
+
   protocol:
     name: Check the generated protocol code (ubuntu-latest)
     runs-on: ubuntu-latest

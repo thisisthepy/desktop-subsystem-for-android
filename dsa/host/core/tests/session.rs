@@ -2746,6 +2746,59 @@ fn fr11_an_installed_app_reaches_the_start_menu_through_the_installed_apps_repor
 }
 
 #[test]
+fn fr11_the_install_window_learns_the_installed_version_and_signer_from_the_agent() {
+    let (session, mut agent, _launcher) = active_session();
+    let session = Arc::new(session);
+    let asking = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.package_state("com.example.notes", WAIT))
+    };
+    let request_id = loop {
+        if let Body::QueryPackage(query) = next_body(&mut agent) {
+            assert_eq!(query.package_name, "com.example.notes");
+            break query.request_id;
+        }
+    };
+    send_body(
+        &mut agent,
+        Body::PackageState(dsa_protocol::control::PackageState {
+            request_id,
+            installed: true,
+            version_code: 41,
+            version_name: "4.1".into(),
+            signer_sha256: vec![vec![5u8; 32]],
+        }),
+    );
+    let installed = asking
+        .join()
+        .unwrap()
+        .expect("an answer")
+        .expect("installed");
+    assert_eq!(installed.version_code, 41);
+    assert_eq!(installed.version_name, "4.1");
+    assert_eq!(installed.signer_sha256, vec![vec![5u8; 32]]);
+
+    // A package the guest does not have is answered as not installed.
+    let asking = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.package_state("com.example.missing", WAIT))
+    };
+    let request_id = loop {
+        if let Body::QueryPackage(query) = next_body(&mut agent) {
+            break query.request_id;
+        }
+    };
+    send_body(
+        &mut agent,
+        Body::PackageState(dsa_protocol::control::PackageState {
+            request_id,
+            ..Default::default()
+        }),
+    );
+    assert_eq!(asking.join().unwrap().expect("an answer"), None);
+}
+
+#[test]
 fn fr11_a_refusal_from_android_carries_its_reason_and_words() {
     let (session, mut agent, _launcher) = active_session();
     let session = Arc::new(session);

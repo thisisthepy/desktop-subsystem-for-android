@@ -7,7 +7,8 @@
 //! dsa freeze
 //! dsa update [--wait]
 //! dsa launch <package>
-//! dsa install <file.apk>
+//! dsa install <file.apk> [--progress]
+//! dsa apk-info <file.apk>
 //! dsa open <file>
 //! dsa share <file>
 //! dsa tasks
@@ -30,7 +31,24 @@
 //! for the first. With `--json` it prints `installed`, `status` (`installed`, or the reason:
 //! `incompatible`, `conflicting-signature`, `invalid-apk`, `insufficient-storage`, `downgrade`,
 //! `blocked` or `other`), `package` and `message`. A refusal's line on standard error starts
-//! with `not installed (<reason>):`.
+//! with `not installed (<reason>):`. With `--progress` it first prints a line for each step,
+//! for programs such as the install window: `stage starting` while Android starts,
+//! `stage sending` and then `progress <percent>` as the APK goes to Android, and
+//! `stage installing` once Android has all of it.
+//!
+//! `dsa apk-info` reads an APK on this computer and says what it is: its package, its name and
+//! icon, its version, the Android versions it is made for, the permissions it asks for and the
+//! certificate it is signed with. When Android is running it also says what Android has of the
+//! package, and whether installing the APK would be a new install, an update, the same version
+//! again, a downgrade or an APK signed with another key; Android refuses the last two. It never
+//! starts Android. With `--json` it prints `package`, `label`, `version_code`, `version_name`,
+//! `min_sdk`, `min_android`, `target_sdk`, `target_android`, `size`, `permissions` (each with
+//! `name`, `description` and `sensitive`), `icon` (`kind` `image` with `png` in base64, or
+//! `adaptive` with a `background` and a `foreground` layer, each an `image`, a `color` as
+//! `#AARRGGBB` or `unknown`), `signer` (`scheme` and `sha256`), `abis`, `android` (`running`,
+//! `stopped` or `unreachable`), `installed` (`version_code`, `version_name` and `signers`, or
+//! null) and `install` (`new`, `update`, `reinstall`, `downgrade`, `signature-mismatch`, or
+//! null while Android is not running).
 //!
 //! `dsa open` sends a file from this computer to Android, which asks which app opens it; that
 //! app shows in a window of its own. `dsa share` does the same for sharing the file with an
@@ -85,7 +103,8 @@ use std::fmt::Write as _;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dsa_host_core::apk::{ApkFile, InstallOutcome};
+use dsa_host_core::apk::{ApkFile, InstallKind, InstallOutcome, InstalledPackage};
+use dsa_host_core::apk_info::{signing, ApkInfo, Icon, Layer};
 use dsa_host_core::files::{FileAction, FileTransfer};
 use dsa_host_core::host_api::{ClientError, HostApiClient, SettingsReport, Status, TaskList};
 use dsa_host_core::memory::MemorySnapshot;
@@ -95,7 +114,7 @@ use dsa_transport::Connector;
 use serde_json::{json, Value};
 
 pub const USAGE: &str = "usage: dsa <status | start | stop | freeze | update | launch <package> | \
-     install <file.apk> | open <file> | share <file> | \
+     install <file.apk> [--progress] | apk-info <file.apk> | open <file> | share <file> | \
      tasks | settings [set <name> <value>] | memory | gpus | \
      widgets [list | add <provider> | remove <id>]> [--wait] [--timeout <seconds>] \
      [--json] [--pipe <name> | --socket <path>]";
@@ -113,6 +132,9 @@ pub enum Command {
     Launch,
     /// Install an APK; the file is in [`Invocation::file`].
     Install,
+    /// Say what an APK is, and what installing it would do; the file is in
+    /// [`Invocation::file`].
+    ApkInfo,
     /// Open a file in an app in Android; the file is in [`Invocation::file`].
     Open,
     /// Share a file with an app in Android; the file is in [`Invocation::file`].
@@ -240,6 +262,8 @@ pub struct Invocation {
     pub widgets: Option<WidgetAction>,
     /// Print the answer as JSON.
     pub json: bool,
+    /// Print each step of `dsa install` as it happens.
+    pub progress: bool,
 }
 
 /// Whether `name` can be an Android package name: dot-separated parts of letters, digits
@@ -262,11 +286,13 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut change = None;
     let mut widgets = None;
     let mut json = false;
+    let mut progress = false;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "status" | "start" | "stop" | "freeze" | "update" | "launch" | "install" | "open"
-            | "share" | "tasks" | "settings" | "memory" | "gpus" | "widgets"
+            "status" | "start" | "stop" | "freeze" | "update" | "launch" | "install"
+            | "apk-info" | "open" | "share" | "tasks" | "settings" | "memory" | "gpus"
+            | "widgets"
                 if command.is_none() =>
             {
                 command = Some(match arg.as_str() {
@@ -276,6 +302,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                     "update" => Command::Update,
                     "launch" => Command::Launch,
                     "install" => Command::Install,
+                    "apk-info" => Command::ApkInfo,
                     "open" => Command::Open,
                     "share" => Command::Share,
                     "tasks" => Command::Tasks,
@@ -322,6 +349,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                 widgets = Some(WidgetAction::Remove(id));
             }
             "--json" => json = true,
+            "--progress" if command == Some(Command::Install) => progress = true,
             name if command == Some(Command::Launch)
                 && package.is_none()
                 && !name.starts_with('-') =>
@@ -334,7 +362,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                 }
                 package = Some(name.to_string());
             }
-            name if command == Some(Command::Install)
+            name if matches!(command, Some(Command::Install | Command::ApkInfo))
                 && file.is_none()
                 && !name.starts_with("--") =>
             {
@@ -368,6 +396,9 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             "dsa install needs the APK file to install\n{USAGE}"
         ));
     }
+    if command == Command::ApkInfo && file.is_none() {
+        return Err(format!("dsa apk-info needs the APK file to read\n{USAGE}"));
+    }
     if matches!(command, Command::Open | Command::Share) && file.is_none() {
         return Err(format!(
             "dsa {} needs the file to send to Android\n{USAGE}",
@@ -398,6 +429,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         change,
         widgets,
         json,
+        progress,
     })
 }
 
@@ -932,9 +964,25 @@ fn install(
         .unwrap_or(std::path::Path::new(""));
     // A file that cannot be installed is refused before Android is started for it.
     let mut apk = ApkFile::open(path)?;
+    let step = |line: &str| {
+        if invocation.progress {
+            use std::io::Write as _;
+            let mut out = std::io::stdout().lock();
+            let _ = writeln!(out, "{line}");
+            let _ = out.flush();
+        }
+    };
     #[cfg(windows)]
     if invocation.endpoint.is_none() {
         ensure_window_manager()?;
+    }
+    if !client.status().is_ok_and(|status| {
+        matches!(
+            status.state,
+            SessionState::Active | SessionState::Dozing | SessionState::Frozen
+        )
+    }) {
+        step("stage starting");
     }
     client
         .ensure_running(invocation.timeout, Duration::from_millis(250), |_| {})
@@ -942,8 +990,16 @@ fn install(
     drop(client);
     let name = apk.name.clone();
     let size = apk.size;
+    step("stage sending");
+    let mut sending = Progress {
+        inner: apk.reader(),
+        sent: 0,
+        size,
+        shown: None,
+        step: &step,
+    };
     let outcome = connect(connector, None, false, Duration::from_secs(10))?
-        .install_apk(&name, size, apk.reader())
+        .install_apk(&name, size, &mut sending)
         .map_err(|e| format!("{name} was not installed: {e}"))?;
     if !outcome.installed() {
         return Err(describe_refusal(&name, &outcome));
@@ -955,6 +1011,206 @@ fn install(
             "Installed {} from {name}",
             outcome.package_name.as_deref().unwrap_or("the app")
         )
+    })
+}
+
+/// The APK as it is read to be sent, saying how much of it has gone.
+struct Progress<'a, F: Fn(&str)> {
+    inner: &'a mut dyn std::io::Read,
+    sent: u64,
+    size: u64,
+    shown: Option<u64>,
+    step: &'a F,
+}
+
+impl<F: Fn(&str)> std::io::Read for Progress<'_, F> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        self.sent += read as u64;
+        let percent = (self.sent * 100)
+            .checked_div(self.size)
+            .unwrap_or(100)
+            .min(100);
+        if self.shown != Some(percent) {
+            self.shown = Some(percent);
+            (self.step)(&format!("progress {percent}"));
+            if percent == 100 {
+                (self.step)("stage installing");
+            }
+        }
+        Ok(read)
+    }
+}
+
+/// What `dsa apk-info` says of an APK, as one JSON object.
+pub fn apk_info_json(
+    info: &ApkInfo,
+    android: &str,
+    installed: Option<&InstalledPackage>,
+    kind: Option<InstallKind>,
+) -> Value {
+    let layer = |layer: &Layer| match layer {
+        Layer::Image(png) => json!({ "kind": "image", "png": base64(png) }),
+        Layer::Color(argb) => json!({ "kind": "color", "color": format!("#{argb:08X}") }),
+        Layer::Unknown => json!({ "kind": "unknown" }),
+    };
+    let icon = match &info.icon {
+        Some(Icon::Image(png)) => json!({ "kind": "image", "png": base64(png) }),
+        Some(Icon::Adaptive {
+            background,
+            foreground,
+        }) => json!({
+            "kind": "adaptive",
+            "background": layer(background),
+            "foreground": layer(foreground),
+        }),
+        None => Value::Null,
+    };
+    json!({
+        "package": info.package,
+        "label": info.label,
+        "version_code": info.version_code,
+        "version_name": info.version_name,
+        "min_sdk": info.min_sdk,
+        "min_android": dsa_host_core::apk_info::permissions::android_version(info.min_sdk),
+        "target_sdk": info.target_sdk,
+        "target_android": dsa_host_core::apk_info::permissions::android_version(info.target_sdk),
+        "size": info.size,
+        "permissions": info.permissions.iter().map(|p| json!({
+            "name": p.name,
+            "description": p.description,
+            "sensitive": p.sensitive,
+        })).collect::<Vec<_>>(),
+        "icon": icon,
+        "signer": info.signer.as_ref().map(|signer| json!({
+            "scheme": signer.scheme.name(),
+            "sha256": signing::fingerprint(&signer.sha256()),
+        })),
+        "abis": info.abis,
+        "android": android,
+        "installed": installed.map(|installed| json!({
+            "version_code": installed.version_code,
+            "version_name": installed.version_name,
+            "signers": installed
+                .signer_sha256
+                .iter()
+                .map(|digest| signing::fingerprint(digest))
+                .collect::<Vec<_>>(),
+        })),
+        "install": kind.map(InstallKind::code),
+    })
+}
+
+/// What `dsa apk-info` prints of an APK for a person.
+pub fn describe_apk(
+    info: &ApkInfo,
+    installed: Option<&InstalledPackage>,
+    kind: Option<InstallKind>,
+) -> String {
+    let android = |sdk: u32| {
+        dsa_host_core::apk_info::permissions::android_version(sdk)
+            .map(|version| format!("Android {version} (API {sdk})"))
+            .unwrap_or_else(|| format!("API {sdk}"))
+    };
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "{} ({})",
+        info.label.as_deref().unwrap_or(&info.package),
+        info.package
+    );
+    let _ = writeln!(
+        out,
+        "version {} ({})",
+        info.version_name.as_deref().unwrap_or("-"),
+        info.version_code
+    );
+    let _ = writeln!(
+        out,
+        "needs {}, made for {}",
+        android(info.min_sdk),
+        android(info.target_sdk)
+    );
+    let _ = writeln!(out, "{} bytes", info.size);
+    match &info.signer {
+        Some(signer) => {
+            let _ = writeln!(
+                out,
+                "signed ({}) by SHA-256 {}",
+                signer.scheme.name(),
+                signing::fingerprint(&signer.sha256())
+            );
+        }
+        None => {
+            let _ = writeln!(out, "not signed; Android will not install it");
+        }
+    }
+    if info.permissions.is_empty() {
+        let _ = writeln!(out, "asks for no permissions");
+    } else {
+        let _ = writeln!(out, "asks for:");
+        for permission in &info.permissions {
+            let _ = writeln!(out, "  {} ({})", permission.description, permission.name);
+        }
+    }
+    let _ = write!(
+        out,
+        "{}",
+        match (kind, installed) {
+            (None, _) => "Android is not running, so what it has of the app is not known".to_string(),
+            (Some(InstallKind::New), _) => "not installed yet".to_string(),
+            (Some(kind), Some(installed)) => format!(
+                "installed: version {} ({}); {}",
+                installed.version_name,
+                installed.version_code,
+                match kind {
+                    InstallKind::Update => "this APK updates it",
+                    InstallKind::Reinstall => "this APK installs the same version again",
+                    InstallKind::Downgrade =>
+                        "this APK is an older version, which Android does not install over it",
+                    InstallKind::SignatureMismatch =>
+                        "this APK is signed with another key, which Android does not install over it",
+                    InstallKind::New => "",
+                }
+            ),
+            (Some(_), None) => String::new(),
+        }
+    );
+    out
+}
+
+/// `dsa apk-info`: reads the APK, and when Android runs, asks what it has of the package.
+/// Never starts Android or the service.
+fn apk_info(invocation: &Invocation, connector: &mut dyn Connector) -> Result<String, String> {
+    let path = invocation
+        .file
+        .as_deref()
+        .unwrap_or(std::path::Path::new(""));
+    let info = ApkInfo::read(path)?;
+    let mut android = "unreachable";
+    let mut installed = None;
+    let mut kind = None;
+    if let Ok(mut client) = connect(connector, None, false, Duration::from_secs(5)) {
+        android = "stopped";
+        if client
+            .status()
+            .is_ok_and(|status| matches!(status.state, SessionState::Active | SessionState::Dozing))
+        {
+            if let Ok(state) = client.package_state(&info.package) {
+                android = "running";
+                kind = Some(InstallKind::decide(
+                    info.version_code,
+                    &info.signers(),
+                    state.as_ref(),
+                ));
+                installed = state;
+            }
+        }
+    }
+    Ok(if invocation.json {
+        apk_info_json(&info, android, installed.as_ref(), kind).to_string()
+    } else {
+        describe_apk(&info, installed.as_ref(), kind)
     })
 }
 
@@ -1036,6 +1292,9 @@ pub fn run_with_starter(
     connector: &mut dyn Connector,
     starter: Option<&dyn ServiceStarter>,
 ) -> Result<String, String> {
+    if invocation.command == Command::ApkInfo {
+        return apk_info(invocation, connector);
+    }
     if invocation.command == Command::Gpus {
         let gpus = gpus_json();
         return Ok(if invocation.json {
@@ -1083,7 +1342,7 @@ pub fn run_with_starter(
                 memory.to_string().trim_end().to_string()
             });
         }
-        Command::Gpus => unreachable!("answered before connecting"),
+        Command::Gpus | Command::ApkInfo => unreachable!("answered before connecting"),
     }
     .map_err(|e| e.to_string())?;
     if !invocation.wait || matches!(invocation.command, Command::Status | Command::Freeze) {

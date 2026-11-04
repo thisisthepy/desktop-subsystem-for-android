@@ -299,6 +299,19 @@ std::map<std::string, v1::Envelope> Cases() {
     progress->set_received(131072);
   }
   {
+    v1::QueryPackage* query = cases["query_package"].mutable_query_package();
+    query->set_request_id(7);
+    query->set_package_name("com.example.notes");
+  }
+  {
+    v1::PackageState* state = cases["package_state_installed"].mutable_package_state();
+    state->set_request_id(7);
+    state->set_installed(true);
+    state->set_version_code(42);
+    state->set_version_name("1.2");
+    state->add_signer_sha256(Bytes(0x00, 32));
+  }
+  {
     v1::InstallResult* result = cases["install_result_success"].mutable_install_result();
     result->set_transfer_id(3);
     result->set_status(v1::INSTALL_STATUS_SUCCESS);

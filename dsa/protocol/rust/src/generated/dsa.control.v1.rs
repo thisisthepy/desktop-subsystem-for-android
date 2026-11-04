@@ -555,6 +555,36 @@ pub struct ApkChunk {
     #[prost(bytes = "vec", tag = "3")]
     pub data: ::prost::alloc::vec::Vec<u8>,
 }
+/// Host to guest: asks whether a package is installed, and at which version and with which
+/// signing certificates, so the host can tell a new install from an update, a downgrade or an
+/// APK signed with another key before it sends the APK. The agent answers with PackageState of
+/// the same `request_id`.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct QueryPackage {
+    #[prost(uint32, tag = "1")]
+    pub request_id: u32,
+    #[prost(string, tag = "2")]
+    pub package_name: ::prost::alloc::string::String,
+}
+/// Guest to host, from the agent: the answer to QueryPackage.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PackageState {
+    #[prost(uint32, tag = "1")]
+    pub request_id: u32,
+    /// False when the package is not installed for the guest's user; the fields below are then
+    /// empty.
+    #[prost(bool, tag = "2")]
+    pub installed: bool,
+    /// The installed version, as PackageInfo.getLongVersionCode says.
+    #[prost(int64, tag = "3")]
+    pub version_code: i64,
+    #[prost(string, tag = "4")]
+    pub version_name: ::prost::alloc::string::String,
+    /// The SHA-256 digest of each certificate the installed package is signed with now, in
+    /// the order the package manager lists them.
+    #[prost(bytes = "vec", repeated, tag = "5")]
+    pub signer_sha256: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+}
 /// Guest to host, from the agent: an app in the guest opened a web link, which the host opens
 /// in the user's default browser. Only http and https links are sent; the host checks the link
 /// again and drops anything else, so an app in the guest can never make the host run a
@@ -658,96 +688,6 @@ pub struct ClockProbe {
     /// process shares.
     #[prost(uint64, tag = "1")]
     pub host_sent_ns: u64,
-}
-/// One format the host decodes, and the largest picture it decodes in it.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct VideoCodecSupport {
-    #[prost(enumeration = "VideoCodec", tag = "1")]
-    pub codec: i32,
-    #[prost(uint32, tag = "2")]
-    pub max_width: u32,
-    #[prost(uint32, tag = "3")]
-    pub max_height: u32,
-}
-/// Host to guest, first on each connection: the formats the host's hardware decodes. A
-/// format not listed is not decoded on the host.
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct VideoCapabilities {
-    #[prost(message, repeated, tag = "1")]
-    pub codecs: ::prost::alloc::vec::Vec<VideoCodecSupport>,
-}
-/// Guest to host: open a decoder for `codec`. `width` and `height` are the stream's coded
-/// size as the app gave it, or 0 when it is not known yet; the bitstream has the last word.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct VideoDecoderOpen {
-    #[prost(enumeration = "VideoCodec", tag = "1")]
-    pub codec: i32,
-    #[prost(uint32, tag = "2")]
-    pub width: u32,
-    #[prost(uint32, tag = "3")]
-    pub height: u32,
-}
-/// Host to guest: the answer to VideoDecoderOpen. When `ok` is false, `error` says, in words
-/// a person can act on, why there is no decoder, and the host closes the connection.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct VideoDecoderOpened {
-    #[prost(bool, tag = "1")]
-    pub ok: bool,
-    #[prost(string, tag = "2")]
-    pub error: ::prost::alloc::string::String,
-}
-/// Guest to host: one access unit of the stream, in decode order. `frame_index` is the
-/// guest's, and comes back on the picture it becomes.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct VideoPacket {
-    #[prost(uint64, tag = "1")]
-    pub frame_index: u64,
-    #[prost(int64, tag = "2")]
-    pub timestamp_us: i64,
-    #[prost(bytes = "vec", tag = "3")]
-    pub data: ::prost::alloc::vec::Vec<u8>,
-    /// Codec configuration (parameter sets) rather than a picture.
-    #[prost(bool, tag = "4")]
-    pub codec_config: bool,
-    /// The last packet: the host outputs every picture still held, then a VideoFrame with
-    /// `end_of_stream` set.
-    #[prost(bool, tag = "5")]
-    pub end_of_stream: bool,
-}
-/// Host to guest: one decoded picture, in presentation order, as 8-bit 4:2:0 with the luma
-/// plane then the interleaved chroma plane (NV12), each row `stride` bytes long. `width` and
-/// `height` are the visible size; the planes are `stride` by `height` and `stride` by
-/// `height / 2` (rounded up) bytes. A frame with `end_of_stream` set carries no picture.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct VideoFrame {
-    #[prost(uint64, tag = "1")]
-    pub frame_index: u64,
-    #[prost(int64, tag = "2")]
-    pub timestamp_us: i64,
-    #[prost(uint32, tag = "3")]
-    pub width: u32,
-    #[prost(uint32, tag = "4")]
-    pub height: u32,
-    #[prost(uint32, tag = "5")]
-    pub stride: u32,
-    #[prost(bytes = "vec", tag = "6")]
-    pub nv12: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bool, tag = "7")]
-    pub end_of_stream: bool,
-}
-/// Guest to host: drop every packet and picture held, as for a seek. The host answers with
-/// VideoFlushed once nothing from before is left to send.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct VideoFlush {}
-/// Host to guest: the answer to VideoFlush.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct VideoFlushed {}
-/// Host to guest: the decoder failed; `error` says how. The connection stays open, and the
-/// next packet after a key frame may decode again.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct VideoError {
-    #[prost(string, tag = "1")]
-    pub error: ::prost::alloc::string::String,
 }
 /// Guest to host, from the control daemon: the answer to a ClockProbe, sent as soon as the
 /// probe is read.
@@ -1061,7 +1001,7 @@ pub struct AccessibilityActionResult {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 110, 42, 43, 60, 61, 62, 63, 64, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 120, 121, 122, 123, 124, 125, 126, 127"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 110, 42, 43, 60, 61, 62, 63, 64, 65, 66, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -1145,6 +1085,10 @@ pub mod envelope {
         InstallProgress(super::InstallProgress),
         #[prost(message, tag = "64")]
         InstallResult(super::InstallResult),
+        #[prost(message, tag = "65")]
+        QueryPackage(super::QueryPackage),
+        #[prost(message, tag = "66")]
+        PackageState(super::PackageState),
         #[prost(message, tag = "50")]
         OpenLink(super::OpenLink),
         #[prost(message, tag = "51")]
@@ -1191,22 +1135,6 @@ pub mod envelope {
         AccessibilityAction(super::AccessibilityAction),
         #[prost(message, tag = "83")]
         AccessibilityActionResult(super::AccessibilityActionResult),
-        #[prost(message, tag = "120")]
-        VideoCapabilities(super::VideoCapabilities),
-        #[prost(message, tag = "121")]
-        VideoDecoderOpen(super::VideoDecoderOpen),
-        #[prost(message, tag = "122")]
-        VideoDecoderOpened(super::VideoDecoderOpened),
-        #[prost(message, tag = "123")]
-        VideoPacket(super::VideoPacket),
-        #[prost(message, tag = "124")]
-        VideoFrame(super::VideoFrame),
-        #[prost(message, tag = "125")]
-        VideoFlush(super::VideoFlush),
-        #[prost(message, tag = "126")]
-        VideoFlushed(super::VideoFlushed),
-        #[prost(message, tag = "127")]
-        VideoError(super::VideoError),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -1244,9 +1172,6 @@ pub enum Role {
     Unspecified = 0,
     Host = 1,
     Guest = 2,
-    /// The guest's video codec HAL, on the video port. It decodes video and nothing else, so the
-    /// host asks it for no secret, and the control port refuses it.
-    GuestVideo = 4,
 }
 impl Role {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1258,7 +1183,6 @@ impl Role {
             Self::Unspecified => "ROLE_UNSPECIFIED",
             Self::Host => "ROLE_HOST",
             Self::Guest => "ROLE_GUEST",
-            Self::GuestVideo => "ROLE_GUEST_VIDEO",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1267,7 +1191,6 @@ impl Role {
             "ROLE_UNSPECIFIED" => Some(Self::Unspecified),
             "ROLE_HOST" => Some(Self::Host),
             "ROLE_GUEST" => Some(Self::Guest),
-            "ROLE_GUEST_VIDEO" => Some(Self::GuestVideo),
             _ => None,
         }
     }
@@ -1555,46 +1478,6 @@ impl FileAction {
             "FILE_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
             "FILE_ACTION_VIEW" => Some(Self::View),
             "FILE_ACTION_SEND" => Some(Self::Send),
-            _ => None,
-        }
-    }
-}
-/// A video coding format.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum VideoCodec {
-    Unspecified = 0,
-    /// H.264 (AVC), Annex B byte stream.
-    H264 = 1,
-    /// H.265 (HEVC), Annex B byte stream.
-    Hevc = 2,
-    /// VP9, one frame (or superframe) per packet.
-    Vp9 = 3,
-    /// AV1, one temporal unit per packet, low overhead bitstream format.
-    Av1 = 4,
-}
-impl VideoCodec {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            Self::Unspecified => "VIDEO_CODEC_UNSPECIFIED",
-            Self::H264 => "VIDEO_CODEC_H264",
-            Self::Hevc => "VIDEO_CODEC_HEVC",
-            Self::Vp9 => "VIDEO_CODEC_VP9",
-            Self::Av1 => "VIDEO_CODEC_AV1",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "VIDEO_CODEC_UNSPECIFIED" => Some(Self::Unspecified),
-            "VIDEO_CODEC_H264" => Some(Self::H264),
-            "VIDEO_CODEC_HEVC" => Some(Self::Hevc),
-            "VIDEO_CODEC_VP9" => Some(Self::Vp9),
-            "VIDEO_CODEC_AV1" => Some(Self::Av1),
             _ => None,
         }
     }

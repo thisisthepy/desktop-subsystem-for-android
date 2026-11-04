@@ -227,6 +227,120 @@ jobs:
           }
           Set-AppTheme
 
+      # APKs made by the Android SDK's own tools, for the APK install window.
+      - name: Make the test APKs
+        shell: bash
+        run: .github/scripts/apk/make-test-apks.sh .scratch/test-apks
+
+      # Double-clicking an APK runs what the .apk association names; the window then shows what
+      # the file is, read on the host while Android is not running. The screens a running
+      # Android leads to (starting it, an update, a refused downgrade or signer, progress, done,
+      # a failure) come from a stand-in dsa, since this runner has no Android that boots.
+      - name: fr11_double_clicking_an_apk_opens_the_install_window
+        run: |
+          . .github/scripts/installer/setup-ui.ps1
+          $script:WindowId = 'ApkInstallWindow'
+          New-Item -ItemType Directory -Force screens | Out-Null
+          $apks = (Resolve-Path .scratch/test-apks).Path
+          Set-Content -Path "$apks\broken.apk" -Value 'not an apk' -NoNewline
+          $command =(Get-ItemProperty 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\Dsa.ApkFile\shell\open\command').'(default)'
+          Write-Host "the .apk association runs: $command"
+          if ($command -notlike "*\settings\DsaSettings.exe`" --install-apk `"%1`"") { throw "the .apk association runs $command" }
+          function Open-Apk([string]$Name) {
+            # What Explorer runs for a double-clicked APK.
+            $line = $command.Replace('%1', "$apks\$Name")
+            $exe = $line.Substring(1, $line.IndexOf('"', 1) - 1)
+            $process = Start-Process $exe -ArgumentList $line.Substring($exe.Length + 3) -PassThru
+            $null = $process.Handle
+            $process
+          }
+          function Close-Apk($Process) {
+            if (-not $Process.HasExited) { Stop-Process -Id $Process.Id -Force }
+            $Process.WaitForExit(10000) | Out-Null
+          }
+          function Expect-Text([string]$Id, [string]$Like) {
+            $text = Get-SetupText $Id
+            if ($text -notlike $Like) { Show-Desktop "apk-$Id"; throw "$Id says '$text', not '$Like'" }
+          }
+          $env:REAL_DSA = "$env:PROGRAM_DIR\dsa.exe"
+          $env:FAKE_DSA_STATE = "$PWD\.scratch\fake-android-running"
+          $fake = (Resolve-Path .github/scripts/apk/fake-dsa.cmd).Path
+          foreach ($theme in 'light', 'dark') {
+            Set-AppTheme -Dark:($theme -eq 'dark')
+            Remove-Item Env:DSA_CLI -ErrorAction SilentlyContinue
+            Remove-Item $env:FAKE_DSA_STATE -ErrorAction SilentlyContinue
+
+            # The real dsa: everything comes from the file.
+            $app = Open-Apk notes.apk
+            try {
+              Wait-SetupControl InstallButton -Enabled -Seconds 90 | Out-Null
+            } catch {
+              if ($app.HasExited) { Write-Host "DsaSettings.exe exited with code $($app.ExitCode)" }
+              Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = '.NET Runtime', 'Application Error' } -MaxEvents 4 -ErrorAction SilentlyContinue |
+                ForEach-Object { Write-Host $_.Message }
+              throw
+            }
+            Expect-Text HeroTitle 'Notes'
+            Expect-Text HeroPackage 'com.example.notes'
+            Expect-Text VersionChip '*4.2*'
+            Expect-Text PermissionsHeader '*2*'
+            Save-SetupScreen "$PWD\screens\apk-$theme-details.png"
+            Close-Apk $app
+            $app = Open-Apk adaptive.apk
+            Wait-SetupControl InstallButton -Enabled -Seconds 90 | Out-Null
+            Expect-Text HeroTitle 'Adaptive'
+            Save-SetupScreen "$PWD\screens\apk-$theme-adaptive-icon.png"
+            Close-Apk $app
+            $app = Open-Apk broken.apk
+            Wait-SetupControl ResultTitle -Seconds 90 | Out-Null
+            Save-SetupScreen "$PWD\screens\apk-$theme-not-an-apk.png"
+            Close-Apk $app
+
+            $env:DSA_CLI = $fake
+            # Installing starts Android, finds the app installed already, and shows both versions.
+            $env:FAKE_DSA_SCENARIO = 'update'
+            $app = Open-Apk notes.apk
+            Invoke-SetupButton InstallButton -Seconds 90
+            Wait-SetupControl ProgressTitle | Out-Null
+            Save-SetupScreen "$PWD\screens\apk-$theme-starting-android.png"
+            Wait-SetupControl InstallButton -Enabled -Seconds 60 | Out-Null
+            Expect-Text InstallButton 'Update'
+            Expect-Text SummaryText '*4.1*4.2*'
+            Save-SetupScreen "$PWD\screens\apk-$theme-update.png"
+            Invoke-SetupButton InstallButton
+            Wait-SetupControl ProgressPercent | Out-Null
+            Start-Sleep -Seconds 4
+            Save-SetupScreen "$PWD\screens\apk-$theme-progress.png"
+            Wait-SetupControl OpenButton -Enabled -Seconds 60 | Out-Null
+            Expect-Text ResultTitle 'Notes is updated'
+            Save-SetupScreen "$PWD\screens\apk-$theme-done.png"
+            Close-Apk $app
+
+            # Android refuses a downgrade and another signer; so does the window.
+            New-Item -ItemType File -Force $env:FAKE_DSA_STATE | Out-Null
+            foreach ($scenario in 'downgrade', 'signature') {
+              $env:FAKE_DSA_SCENARIO = $scenario
+              $app = Open-Apk notes.apk
+              Wait-SetupControl SummaryText -Seconds 90 | Out-Null
+              Start-Sleep -Seconds 2
+              if ((Wait-SetupControl InstallButton).Current.IsEnabled) { throw "the window offers to install a $scenario" }
+              Save-SetupScreen "$PWD\screens\apk-$theme-$scenario.png"
+              Close-Apk $app
+            }
+
+            # A refusal by Android shows its reason.
+            $env:FAKE_DSA_SCENARIO = 'failure'
+            $app = Open-Apk notes.apk
+            Invoke-SetupButton InstallButton -Seconds 90
+            Wait-SetupControl CloseButton -Enabled -Seconds 60 | Out-Null
+            Expect-Text ResultTitle 'Not installed'
+            Expect-Text ResultText '*processor type*INSTALL_FAILED_NO_MATCHING_ABIS*'
+            Save-SetupScreen "$PWD\screens\apk-$theme-failed.png"
+            Close-Apk $app
+          }
+          Set-AppTheme
+          Remove-Item Env:DSA_CLI, Env:FAKE_DSA_SCENARIO -ErrorAction SilentlyContinue
+
       # Task Manager and the taskbar name a program by its version information.
       - name: fr3_every_program_carries_its_name_and_version
         run: |

@@ -17,6 +17,8 @@
 //! - [`power`]: the host computer's power, which each guest's battery state follows.
 //! - [`power_hints`]: the guest's power hints, and how hard the host runs its processors.
 //! - [`links`]: web links apps in the guest open, which the host opens in its browser.
+//! - [`apk_info`]: what an APK on the host says about itself (its name, icon, version,
+//!   permissions and signer), read from the file before Android sees it.
 //! - [`files`]: host files the user opens or shares in an app in the guest.
 //! - [`clipboard`]: the text clipboard the host and the guest share.
 //! - [`notifications`]: the notifications of the guest, which the host shows.
@@ -31,6 +33,7 @@
 
 pub mod accessibility;
 pub mod apk;
+pub mod apk_info;
 pub mod bootconfig;
 pub mod clipboard;
 pub mod clock_trace;

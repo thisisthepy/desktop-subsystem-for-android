@@ -557,6 +557,29 @@ message ApkChunk {
   bytes data = 3;
 }
 
+// Host to guest: asks whether a package is installed, and at which version and with which
+// signing certificates, so the host can tell a new install from an update, a downgrade or an
+// APK signed with another key before it sends the APK. The agent answers with PackageState of
+// the same `request_id`.
+message QueryPackage {
+  uint32 request_id = 1;
+  string package_name = 2;
+}
+
+// Guest to host, from the agent: the answer to QueryPackage.
+message PackageState {
+  uint32 request_id = 1;
+  // False when the package is not installed for the guest's user; the fields below are then
+  // empty.
+  bool installed = 2;
+  // The installed version, as PackageInfo.getLongVersionCode says.
+  int64 version_code = 3;
+  string version_name = 4;
+  // The SHA-256 digest of each certificate the installed package is signed with now, in
+  // the order the package manager lists them.
+  repeated bytes signer_sha256 = 5;
+}
+
 // Guest to host, from the agent: an app in the guest opened a web link, which the host opens
 // in the user's default browser. Only http and https links are sent; the host checks the link
 // again and drops anything else, so an app in the guest can never make the host run a
@@ -1019,6 +1042,8 @@ message Envelope {
     CancelInstall cancel_install = 62;
     InstallProgress install_progress = 63;
     InstallResult install_result = 64;
+    QueryPackage query_package = 65;
+    PackageState package_state = 66;
     OpenLink open_link = 50;
     LinkHandling link_handling = 51;
     OpenFile open_file = 52;

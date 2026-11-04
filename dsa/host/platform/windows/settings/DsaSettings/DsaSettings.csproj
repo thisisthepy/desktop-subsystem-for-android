@@ -34,6 +34,13 @@
     <ProjectReference Include="..\DsaSettings.Core\DsaSettings.Core.csproj" />
   </ItemGroup>
 
+  <!-- The APK install window looks like setup: it takes setup's styles and colours from
+       installer\setup-ui rather than keeping a copy of them. -->
+  <ItemGroup>
+    <Compile Include="..\..\installer\setup-ui\Palette.cs" Link="SetupStyle\Palette.cs" />
+    <Page Include="..\..\installer\setup-ui\Styles.xaml" Link="SetupStyle\Styles.xaml" />
+  </ItemGroup>
+
   <ItemGroup>
     <Resource Include="Assets\logo.png" />
     <Resource Include="Assets\logo.ico" />

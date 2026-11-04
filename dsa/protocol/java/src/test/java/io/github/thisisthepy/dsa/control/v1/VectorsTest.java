@@ -314,6 +314,14 @@ public final class VectorsTest {
         cases.put("install_progress", Envelope.newBuilder()
                 .setInstallProgress(InstallProgress.newBuilder().setTransferId(3).setReceived(131072))
                 .build());
+        cases.put("query_package", Envelope.newBuilder()
+                .setQueryPackage(QueryPackage.newBuilder().setRequestId(7).setPackageName("com.example.notes"))
+                .build());
+        cases.put("package_state_installed", Envelope.newBuilder()
+                .setPackageState(PackageState.newBuilder().setRequestId(7).setInstalled(true)
+                        .setVersionCode(42).setVersionName("1.2")
+                        .addSignerSha256(ByteString.copyFrom(bytes(0x00, 32))))
+                .build());
         cases.put("install_result_success", Envelope.newBuilder()
                 .setInstallResult(InstallResult.newBuilder().setTransferId(3)
                         .setStatus(InstallStatus.INSTALL_STATUS_SUCCESS).setPackageName("com.example.notes"))

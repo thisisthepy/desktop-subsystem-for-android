@@ -925,6 +925,97 @@ fn fr11_dsa_install_json_reports_the_package() {
 }
 
 #[test]
+fn fr11_dsa_apk_info_and_install_progress_are_parsed() {
+    let info = parse(&args("apk-info notes.apk --json")).unwrap();
+    assert_eq!(info.command, Cmd::ApkInfo);
+    assert_eq!(
+        info.file.as_deref(),
+        Some(std::path::Path::new("notes.apk"))
+    );
+    assert!(parse(&args("apk-info"))
+        .unwrap_err()
+        .contains("needs the APK file"));
+    assert!(
+        parse(&args("install notes.apk --progress"))
+            .unwrap()
+            .progress
+    );
+    assert!(parse(&args("status --progress")).is_err());
+}
+
+#[test]
+fn fr11_dsa_apk_info_reads_the_apk_and_says_it_updates_the_installed_app() {
+    use dsa_host_core::apk_info::fixture::notes_apk;
+    use dsa_host_core::host_api_conformance::INSTALLED_VERSION;
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let path = apk_file("notes.apk", &notes_apk());
+
+    // Before Android runs, everything comes from the file, and Android is not started.
+    let json = json_of(&dsa_with_path(&endpoint, "apk-info", &path, "--json"));
+    assert_eq!(json["package"], "com.example.notes");
+    assert_eq!(json["label"], "Notes");
+    assert_eq!(json["version_code"], 42);
+    assert_eq!(json["version_name"], "4.2");
+    assert_eq!(json["min_android"], "8.0");
+    assert_eq!(json["target_android"], "14");
+    assert_eq!(json["permissions"][0]["name"], "android.permission.CAMERA");
+    assert_eq!(
+        json["permissions"][0]["description"],
+        "Take pictures and record video"
+    );
+    assert_eq!(json["icon"]["kind"], "image");
+    assert_eq!(json["signer"]["scheme"], "v2");
+    assert_eq!(json["android"], "stopped");
+    assert!(json["install"].is_null());
+
+    // With Android running, what it has of the package decides what installing does.
+    assert!(dsa(&endpoint, "start --wait --timeout 10").status.success());
+    let json = json_of(&dsa_with_path(&endpoint, "apk-info", &path, "--json"));
+    assert_eq!(json["android"], "running");
+    assert_eq!(json["installed"]["version_code"], INSTALLED_VERSION);
+    assert_eq!(json["install"], "update");
+    let text = stdout(&dsa_with_path(&endpoint, "apk-info", &path, ""));
+    assert!(text.contains("Notes (com.example.notes)"), "{text}");
+    assert!(text.contains("this APK updates it"), "{text}");
+}
+
+#[test]
+fn fr11_dsa_apk_info_refuses_a_file_that_is_not_an_apk() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let path = apk_file("broken.apk", b"PK\x03\x04 not really");
+    let output = dsa_with_path(&endpoint, "apk-info", &path, "--json");
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("not a ZIP archive"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn fr11_dsa_install_progress_says_each_step() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    let content: Vec<u8> = (0..3 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+    let path = apk_file("progress.apk", &content);
+    let output = dsa_with_path(&endpoint, "install", &path, "--progress --json");
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], "stage starting", "{text}");
+    assert_eq!(lines[1], "stage sending", "{text}");
+    assert!(lines.contains(&"progress 100"), "{text}");
+    let installing = lines
+        .iter()
+        .position(|l| *l == "stage installing")
+        .expect(&text);
+    let result: serde_json::Value = serde_json::from_str(lines[installing + 1]).expect(&text);
+    assert_eq!(result["installed"], true);
+}
+
+#[test]
 fn fr11_dsa_install_says_why_android_refused_the_apk_and_fails() {
     use dsa_host_core::host_api_conformance::BAD_APK;
     let ((listener, _, _), endpoint) = local_pair();
