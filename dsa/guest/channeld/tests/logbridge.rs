@@ -184,6 +184,7 @@ fn fr21_the_guest_reads_no_log_and_sends_nothing_until_the_host_asks() {
         tail: 10,
     }))));
     let mut connection = listener.accept(WAIT).expect("the log port is opened");
+    wait_until("logd being opened", || !logd.requests.lock().unwrap().is_empty());
     assert!(logd.requests.lock().unwrap()[0].starts_with("stream lids=0 tail=10"));
     feed.send(packet(0, 4, "Tag", "below the priority", 2))
         .unwrap();
