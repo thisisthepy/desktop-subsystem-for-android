@@ -672,7 +672,9 @@ fn fr19_trace_switches_are_settings_dsa_reads_and_parses() {
         Some(Change::InputTrace(true))
     );
     assert_eq!(
-        parse(&args("settings set resize-trace off")).unwrap().change,
+        parse(&args("settings set resize-trace off"))
+            .unwrap()
+            .change,
         Some(Change::ResizeTrace(false))
     );
     let ((listener, _, _), endpoint) = local_pair();
