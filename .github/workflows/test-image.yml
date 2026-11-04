@@ -14,6 +14,7 @@ on:
       - "dsa/kernel/**"
       - "dsa/guest/channeld/**"
       - "dsa/guest/hwcomposer/**"
+      - "dsa/guest/power/**"
       - "dsa/guest/aidl/**"
       - "dsa/guest/transport/**"
       - "dsa/guest/agent/**"
@@ -151,6 +152,42 @@ jobs:
           path: .scratch/build-hwcomposer/dsa-hwcomposer
           if-no-files-found: error
 
+  power-hal:
+    name: Build the guest power and health HALs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26b
+
+      # aidl comes from the runner's Android SDK build-tools.
+      - name: Build dsa-power and dsa-health for the guest
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: bash dsa/guest/power/build.sh .scratch .scratch/build-power
+
+      - name: Verify the binaries link only the platform's C libraries
+        run: |
+          for target in .scratch/build-power/dsa-power .scratch/build-power/dsa-health; do
+            readelf -h "$target" | grep -Fq 'Advanced Micro Devices X86-64'
+            needed=$(readelf -d "$target" | sed -nE 's/.*NEEDED.*\[(.*)\]/\1/p' | sort | xargs)
+            echo "$target needs: $needed"
+            test "$needed" = "libbinder_ndk.so libc.so libdl.so liblog.so"
+          done
+
+      - name: Keep the power and health HALs
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-power-hal
+          path: |
+            .scratch/build-power/dsa-power
+            .scratch/build-power/dsa-health
+          if-no-files-found: error
+
   agent:
     name: Build the guest agent
     runs-on: ubuntu-latest
@@ -181,7 +218,7 @@ jobs:
 
   image:
     name: Make and check the guest image (ubuntu-latest, Android ${{ matrix.android }})
-    needs: [guest-graphics, channeld, hwcomposer, agent]
+    needs: [guest-graphics, channeld, hwcomposer, power-hal, agent]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -275,6 +312,18 @@ jobs:
         run: |
           uv run dsa/graphics/check-guest-driver.py --executable .scratch/hwcomposer/dsa-hwcomposer .scratch/aosp-inputs/*/*target_files*.zip
 
+      - name: Download the guest power and health HALs
+        uses: actions/download-artifact@v4
+        with:
+          name: guest-power-hal
+          path: .scratch/power-hal
+
+      - name: Check the power and health HALs start on the image
+        run: |
+          for hal in dsa-power dsa-health; do
+            uv run dsa/graphics/check-guest-driver.py --executable ".scratch/power-hal/$hal" .scratch/aosp-inputs/*/*target_files*.zip
+          done
+
       - name: Download the guest agent
         uses: actions/download-artifact@v4
         with:
@@ -287,6 +336,7 @@ jobs:
           args+=(--graphics-dir .scratch/guest-graphics --graphics-library .scratch/guest-graphics/libOpenglSystemCommon.so)
           args+=(--channeld .scratch/channeld/dsa-channeld)
           args+=(--hwcomposer .scratch/hwcomposer/dsa-hwcomposer)
+          args+=(--power-hal .scratch/power-hal)
           args+=(--agent .scratch/agent/DsaAgent.apk)
           args+=(--aapt2 .scratch/build-tools/aapt2)
           uv run dsa/guest/image/make-image.py "${args[@]}"
@@ -313,31 +363,3 @@ jobs:
             dsa/target/image/*/image.json
             dsa/target/image/*/initrd.img
           if-no-files-found: error
-
-  hal-inventory:
-    name: List the image's power, health and codec HALs (temporary)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Make room
-        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-      - name: Fetch the pinned inputs
-        run: dsa/guest/image/fetch.sh 17
-      - name: List
-        shell: bash {0}
-        run: |
-          zip=$(echo .scratch/aosp-inputs/*/*target_files*.zip)
-          unzip -Z1 "$zip" | grep -E '^(VENDOR|ODM|VENDOR_BOOT)/' | grep -Evi 'firmware|\.ko$|/lib/modules' > names.txt
-          grep -Ei 'power|health|c2|codec|media|omx|apex|vintf|init/' names.txt
-          mkdir x; cd x
-          for pat in 'VENDOR/etc/vintf/*' 'VENDOR/etc/init/*' 'VENDOR/etc/media*' 'VENDOR/etc/selinux/*' 'SYSTEM/etc/vintf/*' 'VENDOR/apex/*'; do unzip -q -o "../$zip" "$pat" || true; done
-          find . -type f | sort
-          for f in VENDOR/etc/vintf/manifest.xml VENDOR/etc/vintf/manifest/*; do echo "== $f"; cat "$f"; done
-          for f in $(grep -il 'power\|health\|media\|codec' VENDOR/etc/init/*); do echo "== $f"; cat "$f"; done
-          for f in VENDOR/etc/media_codecs*.xml; do echo "== $f"; cat "$f"; done
-          grep -i 'power\|health\|c2\|codec\|media' VENDOR/etc/selinux/vendor_file_contexts
-          grep -ri 'power\|health\|media\|c2' VENDOR/etc/selinux/*service_contexts
-          for a in VENDOR/apex/*; do echo "== $a"; unzip -l "$a"; mkdir -p ap; unzip -o -q "$a" apex_manifest.pb apex_payload.img -d "ap/${a##*/}" || true; done
-          for f in SYSTEM/etc/vintf/compatibility_matrix.*.xml; do echo "== $f"; grep -B2 -A8 -i 'power<\|health<\|media.c2' "$f"; done
-          cat SYSTEM/etc/vintf/manifest/manifest_media_c2_software.xml
-          for a in ap/*power* ap/*health*; do [ -f "$a/apex_payload.img" ] || continue; echo "== $a"; debugfs -R 'ls -l -p /' "$a/apex_payload.img"; for d in bin bin/hw etc etc/init etc/vintf; do debugfs -R "ls -p /$d" "$a/apex_payload.img" 2>/dev/null; done; for f in $(debugfs -R 'ls -p /etc' "$a/apex_payload.img" 2>/dev/null | awk -F/ '$6 ~ /\.(rc|xml)$/ {print $6}'); do debugfs -R "cat /etc/$f" "$a/apex_payload.img"; done; done

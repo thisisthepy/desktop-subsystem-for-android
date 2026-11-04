@@ -95,6 +95,17 @@ pub fn select(
     found
 }
 
+/// The IDs of the processes of the VM `vm_id` (its `vmmem` process), from the system's
+/// process list.
+#[cfg(windows)]
+pub fn vm_processes(vm_id: &str) -> std::io::Result<Vec<u32>> {
+    Ok(system::processes()?
+        .iter()
+        .filter(|p| role_of(p, "", Some(vm_id)) == Some(HostRole::Vm))
+        .map(|p| p.pid)
+        .collect())
+}
+
 /// Measures the processes of each user's Android from the system's process list.
 #[cfg(windows)]
 pub struct WindowsHostMemory;
