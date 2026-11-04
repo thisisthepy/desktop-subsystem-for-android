@@ -17,7 +17,7 @@ use dsa_protocol::control::{
     InstallApk, InstallProgress, InstallResult, InstallStatus, KeyAction, KeyEvent, LaunchApp,
     LinkHandling, NodeAction, NodeRange, NotificationClicked, NotificationDismissed,
     NotificationRemoved, OpenFile, OpenLink, PointerAction, PointerEvent, PointerTool, PowerState,
-    ProcessMemory, Rect, RejectReason, RequestGuestMemory, ResizeTask, Role, ScreenState,
+    PackageState, ProcessMemory, QueryPackage, Rect, RejectReason, RequestGuestMemory, ResizeTask, Role, ScreenState,
     SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::control::{
@@ -412,6 +412,23 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
             wrap(Body::InstallProgress(InstallProgress {
                 transfer_id: 3,
                 received: 131_072,
+            })),
+        ),
+        (
+            "query_package",
+            wrap(Body::QueryPackage(QueryPackage {
+                request_id: 7,
+                package_name: "com.example.notes".into(),
+            })),
+        ),
+        (
+            "package_state_installed",
+            wrap(Body::PackageState(PackageState {
+                request_id: 7,
+                installed: true,
+                version_code: 42,
+                version_name: "1.2".into(),
+                signer_sha256: vec![(0u8..32).collect()],
             })),
         ),
         (

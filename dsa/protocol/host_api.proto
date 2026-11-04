@@ -430,6 +430,23 @@ message InstallResult {
   string message = 3;
 }
 
+// Asks whether a package is installed in the caller's Android, and at which version and with
+// which signing certificates. Android must be running; the answer is PackageState.
+message GetPackage {
+  // An Android package name, such as "com.example.notes".
+  string package_name = 1;
+}
+
+// The answer to GetPackage.
+message PackageState {
+  // False when the package is not installed; the fields below are then empty.
+  bool installed = 1;
+  int64 version_code = 2;
+  string version_name = 3;
+  // The SHA-256 digest of each certificate the installed package is signed with.
+  repeated bytes signer_sha256 = 4;
+}
+
 // What a pointer did.
 enum PointerAction {
   POINTER_ACTION_UNSPECIFIED = 0;
@@ -919,6 +936,7 @@ message Request {
     PlaceWidget place_widget = 34;
     WatchAccessibility watch_accessibility = 28;
     WidgetPointer widget_pointer = 35;
+    GetPackage get_package = 36;
   }
 }
 
@@ -938,6 +956,7 @@ message Response {
     WidgetProviders widget_providers = 12;
     Widget widget = 13;
     Widgets widgets = 14;
+    PackageState package_state = 15;
   }
 }
 
