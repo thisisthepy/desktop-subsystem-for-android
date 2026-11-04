@@ -6,7 +6,7 @@ them with the project's keys.
 
 | File | What it is |
 |---|---|
-| `inputs.json` | The pinned inputs: per Android version, the CI build number and the SHA-256 of its `target_files` and `otatools` |
+| `inputs.json` | The pinned inputs: per Android version, the CI build number and the SHA-256 of its `target_files`, `otatools` and `dexpreopt_tools` |
 | `fetch.sh` | Downloads one version's inputs into `.scratch/aosp-inputs/<build>/` and checks them |
 | `make-keys.sh` | Makes a set of signing keys (CI makes a throwaway set each run) |
 | `pack-keys.sh`, `unpack-keys.sh` | Split the key set into repository secrets and put it back |
@@ -76,6 +76,18 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
   Settings down when Connected devices or Accessibility opened. Each edit keeps the method's
   size, and the dex checksum and signature are written again. `check-image.py` fails an image
   that still has either.
+- The system apps users open (`COMPILED_APPS`: Settings, Files, the package installer, the
+  share sheet, WebView, the agent and a few more) are compiled to x86_64 machine code when
+  the image is made. The build compiles them only into system_other, which the guest does not
+  have, and with the verify filter only, so they ran interpreted and each Settings screen took
+  100 to 350 ms to open. `make-image.py` runs the build's own `dex2oat` (from
+  `dexpreopt_tools.zip`, pinned in `inputs.json`) against the guest's boot image, after the
+  dex edits and the signing, and puts each odex and vdex beside its APK: Settings with
+  `speed`, the others with `speed-profile` when the APK carries a profile and `speed`
+  otherwise. It prints the size each app adds. `check-image.py` fails an image whose compiled
+  app is missing, was made for other dex checksums than the APK's, uses another filter, boot
+  image or set of shared libraries. PermissionController is not compiled: it is inside the
+  permission APEX, where ART takes no odex.
 - A static overlay (`/vendor/overlay/DsaFrameworkOverlay.apk`) sets the framework's tap
   timeout to 0. A view inside anything that scrolls, which includes every list row, waits that
   long before it shows that it is pressed, in case the touch becomes a scroll, so a mouse
