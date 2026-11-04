@@ -6,7 +6,8 @@ It takes the pinned target_files and otatools (fetch.sh downloads them) and:
 
 1. removes the launcher, SystemUI and the keyboard app, because the host is the shell, and
    the apps a desktop subsystem has no use for (UNNEEDED_APPS);
-2. switches the build to user (not debuggable, adb authorised only);
+2. switches the build to user (not debuggable), with adbd stopped until the user turns
+   developer mode on (ADB_PROPS);
 3. drops the published kernel modules (they belong to Google's kernel, and DSA ships its
    own kernel with the drivers built in) and installs the Hyper-V mount table;
    with --channeld and --agent, it adds the control channel daemon and the agent, the
@@ -201,12 +202,27 @@ PARTITION_IMAGES = {
     "vendor_boot_a": "vendor_boot.img",
 }
 
+# ro.adb.secure is 0 because the guest has no SystemUI to show the prompt that authorises an
+# adb key, so a secure adbd could never be used. adbd honours it on a user build because the
+# boot is unlocked (androidboot.verifiedbootstate=orange). adbd itself stays stopped, and
+# reachable only through the host's loopback bridge, until the user turns developer mode on.
 USER_PROPS = {
     "ro.debuggable": "0",
-    "ro.adb.secure": "1",
+    "ro.adb.secure": "0",
     "ro.secure": "1",
     "ro.force.debuggable": "0",
 }
+
+# adb: adbd listens on vsock only, on the port the host bridges to its loopback address, and
+# never on TCP. The USB configuration does not start it: init starts and stops it as
+# dsa-channeld sets ADB_PROPERTY, which follows the user's developer mode setting.
+ADB_VSOCK_PORT = 5555
+ADB_PROPS = {
+    "service.adb.listen_addrs": f"vsock:{ADB_VSOCK_PORT}",
+    "persist.sys.usb.config": "none",
+}
+# Cuttlefish's product properties make adbd listen on TCP port 5555 as well; that goes.
+DROPPED_PROPS = {"persist.adb.tcp.port", "service.adb.tcp.port"}
 
 # Shared memory goes through memfd: libcutils falls back to /dev/ashmem unless this is
 # set, and DSA's kernel has no ashmem driver (its memfds answer the ashmem ioctls).
@@ -723,11 +739,12 @@ def edit_settings_apk(data, name):
 
 
 def edit_props(text):
-    props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS, **FRP_PROPS}
+    props_to_apply = {**USER_PROPS, **ADB_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS,
+                      **FRP_PROPS}
     out = []
     for line in text.splitlines():
         key = line.split("=", 1)[0]
-        if key in props_to_apply:
+        if key in props_to_apply or key in DROPPED_PROPS:
             continue
         if key.endswith("build.type"):
             line = f"{key}=user"
@@ -850,6 +867,10 @@ TRIM_PROPERTY_CONTEXT = f"{TRIM_PROPERTY} u:object_r:dsa_memory_prop:s0 exact bo
 # init sets this when Android has finished booting, and the daemon tells the host.
 BOOT_PROPERTY = "vendor.dsa.boot_completed"
 BOOT_PROPERTY_CONTEXT = f"{BOOT_PROPERTY} u:object_r:dsa_boot_prop:s0 exact bool"
+# dsa-channeld sets this to 1 while the user's developer mode is on and to 0 when it is off;
+# dsa-channeld.rc starts and stops adbd to match.
+ADB_PROPERTY = "vendor.dsa.adb"
+ADB_PROPERTY_CONTEXT = f"{ADB_PROPERTY} u:object_r:dsa_adb_prop:s0 exact bool"
 # Features the VM lacks; SystemConfig drops them wherever else they are declared.
 UNAVAILABLE_FEATURES = "VENDOR/etc/permissions/dsa-unavailable-features.xml"
 
@@ -954,6 +975,8 @@ def update_vendor_property_contexts(text):
         lines.append(TRIM_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [BOOT_PROPERTY] for line in lines):
         lines.append(BOOT_PROPERTY_CONTEXT)
+    if not any(line.split()[:1] == [ADB_PROPERTY] for line in lines):
+        lines.append(ADB_PROPERTY_CONTEXT)
     return "\n".join(lines) + "\n"
 
 
@@ -1042,6 +1065,7 @@ CHANNELD_POLICY = HERE / "sepolicy/channeld.cil"
 POWER_POLICY = HERE / "sepolicy/power.cil"
 AGENT_POLICY = HERE / "sepolicy/agent.cil"
 MEMORY_POLICY = HERE / "sepolicy/memory.cil"
+ADB_POLICY = HERE / "sepolicy/adb.cil"
 
 
 def narrow_vsock_neverallows(text):
@@ -1225,6 +1249,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             plat_patched = patch_plat_sepolicy(plat_orig, fragment_text)
             # The memory controls the vendor scripts write, and the reclaim property.
             plat_patched += "\n" + MEMORY_POLICY.read_text()
+            # adbd listening on vsock, and the property that starts it.
+            plat_patched += "\n" + ADB_POLICY.read_text()
             if channeld_payload is not None:
                 # Its rules name the domain they declare, so they go in whole.
                 plat_patched += "\n" + CHANNELD_POLICY.read_text()
@@ -1608,7 +1634,7 @@ def kernel_cmdline(partition_cmdline, hwcomposer=False):
         "androidboot.cpuvulkan.version=0",
         # The Cuttlefish lights HAL listens on this vsock port for a host client; without
         # one it binds port 0, which only privileged processes may, and aborts. No host
-        # client connects; DSA's own ports are 5000 and 5566-5567.
+        # client connects; DSA's own ports are 5000, 5555 (adb) and 5566-5567.
         "androidboot.vsock_lights_port=6900",
         *(f"androidboot.vendor.apex.{module}={apex}"
           for module, apex in apexes.items()),

@@ -751,6 +751,9 @@ impl UserAndroid for WithProgramStatus {
     fn links_in_android(&self, on: bool) {
         self.android.links_in_android(on)
     }
+    fn developer_mode(&self, on: bool, port: u16) -> Result<(), String> {
+        self.android.developer_mode(on, port)
+    }
     fn watch_links(&self) -> Option<std::sync::mpsc::Receiver<String>> {
         self.android.watch_links()
     }

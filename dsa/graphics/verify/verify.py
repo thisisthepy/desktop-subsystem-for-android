@@ -12,8 +12,9 @@
 
 check-subset needs only the network: it checks that every pattern in vk-cts-subset.txt
 still names cases of the pinned CTS and writes the expanded case list. The other commands
-need an installed DSA with adb reaching Android (a debug image), on the Windows machine
-whose GPU renders the task windows. Downloads go to .scratch/graphics-verify/.
+need an installed DSA with developer mode on (dsa settings set developer-mode on), on the
+Windows machine whose GPU renders the task windows: they connect adb to 127.0.0.1:58526
+themselves. Downloads go to .scratch/graphics-verify/.
 """
 
 import argparse
@@ -364,11 +365,33 @@ def fetch_apps(run_id=None):
 # ---------------------------------------------------------------- the device
 
 
+# Where adb reaches DSA's Android while developer mode is on: the host's loopback port (58526
+# unless the adb-port setting picks another), bridged to the guest's adbd.
+DEFAULT_SERIAL = "127.0.0.1:58526"
+
+
+def connect_command(serial):
+    """The adb command that connects to `serial` first, for a network serial (host:port); None
+    for a device adb already knows by name."""
+    if re.fullmatch(r"[^\s:]+:\d+", serial):
+        return ["adb", "connect", serial]
+    return None
+
+
 class Adb:
     def __init__(self, serial=None):
         if not shutil.which("adb"):
             raise SystemExit("adb is not on PATH (Android SDK platform-tools)")
-        self.base = ["adb"] + (["-s", serial] if serial else [])
+        serial = serial or DEFAULT_SERIAL
+        connect = connect_command(serial)
+        if connect:
+            result = subprocess.run(connect, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            said = (result.stdout + result.stderr).strip()
+            if result.returncode != 0 or "connected" not in said or "cannot" in said or "failed" in said:
+                raise SystemExit(
+                    f"adb cannot connect to {serial} ({said}). Start Android and turn developer mode "
+                    "on (dsa settings set developer-mode on); dsa settings shows the adb port.")
+        self.base = ["adb", "-s", serial]
 
     def run(self, *args, check=True):
         result = subprocess.run(self.base + list(args), capture_output=True, text=True,
@@ -574,7 +597,8 @@ def main(argv=None):
     fetch = sub.add_parser("fetch", help="download the Vulkan CTS APK and the test apps")
     for name in ("cts", "apps", "measure"):
         command = sub.add_parser(name)
-        command.add_argument("--serial", help="the adb serial of the DSA guest")
+        command.add_argument("--serial", help=f"the adb serial of the DSA guest (default {DEFAULT_SERIAL}, "
+                             "developer mode's loopback port)")
         if name == "cts":
             command.add_argument("--timeout", type=int, default=1800)
     for command in (fetch, sub.choices["apps"], sub.choices["measure"]):

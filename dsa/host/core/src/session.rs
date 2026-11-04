@@ -82,7 +82,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::io::Read;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
@@ -92,6 +92,7 @@ use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::{self, envelope::Body};
 use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 
+use crate::adb_bridge::{AdbBridge, BridgeStream, GuestAdb};
 use crate::accessibility::{
     AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, TreeUpdate,
 };
@@ -552,7 +553,13 @@ struct Shared {
     accessibility: Mutex<AccessibilityHub>,
     /// Who hears of the guest's power hints.
     power_hint_watchers: Mutex<Vec<Sender<GuestPower>>>,
+    /// Whether the user's developer mode is on, which each agent that connects is told.
+    developer_mode: AtomicBool,
 }
+
+/// Opens a stream to the guest's adbd in the VM with the given runtime ID: the platform's
+/// part of developer mode's bridge.
+pub type AdbConnect = Arc<dyn Fn(&str) -> std::io::Result<Box<dyn BridgeStream>> + Send + Sync>;
 
 /// What the guest's power HAL asks of the host's processors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -826,6 +833,10 @@ pub struct Session {
     worker: Option<JoinHandle<()>>,
     /// How long a guest the user lets be frozen stays in Doze first.
     freeze_delay: Duration,
+    /// How the platform reaches the guest's adbd, when it can.
+    adb_connect: Mutex<Option<AdbConnect>>,
+    /// Developer mode's loopback port and the bridge on it, while developer mode is on.
+    adb_bridge: Mutex<Option<(u16, AdbBridge)>>,
 }
 
 impl Session {
@@ -861,6 +872,7 @@ impl Session {
             last_package_query: AtomicU32::new(0),
             accessibility: Mutex::new(AccessibilityHub::default()),
             power_hint_watchers: Mutex::new(Vec::new()),
+            developer_mode: AtomicBool::new(false),
         });
         let freeze_delay = config.freeze_after.unwrap_or(DEFAULT_FREEZE_AFTER);
         let (commands, command_rx) = mpsc::channel();
@@ -914,7 +926,84 @@ impl Session {
             incoming,
             worker: Some(worker),
             freeze_delay,
+            adb_connect: Mutex::new(None),
+            adb_bridge: Mutex::new(None),
         }
+    }
+
+    /// Lets developer mode reach the guest's adbd through `connect`, which opens a stream to
+    /// it in the VM with the runtime ID it is given.
+    pub fn set_adb_connect(&self, connect: AdbConnect) {
+        *self.adb_connect.lock().unwrap_or_else(|e| e.into_inner()) = Some(connect);
+    }
+
+    /// Turns developer mode on or off, as the user's setting says. On, the guest starts adbd
+    /// and the host listens on `127.0.0.1:port` (port 0 takes any free port) and bridges each
+    /// connection to it; off, the port closes and the guest stops adbd. It fails, and changes
+    /// nothing, when the port cannot be opened or the platform cannot reach the guest's adbd.
+    pub fn developer_mode(&self, on: bool, port: u16) -> Result<(), String> {
+        let mut bridge = self.adb_bridge.lock().unwrap_or_else(|e| e.into_inner());
+        if on {
+            let connect = self
+                .adb_connect
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+                .ok_or_else(|| {
+                    "this host cannot reach adb in Android, so developer mode stays off".to_string()
+                })?;
+            if bridge.as_ref().map(|(open, _)| *open) != Some(port) {
+                // A new port: the old one closes first, so the same port can be chosen again.
+                *bridge = None;
+                let shared = Arc::clone(&self.shared);
+                let guest: GuestAdb = Arc::new(move || {
+                    let vm_id = shared
+                        .vm_id
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone()
+                        .ok_or_else(|| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::NotConnected,
+                                "Android is not running",
+                            )
+                        })?;
+                    connect(&vm_id)
+                });
+                let opened = AdbBridge::start(port, guest).map_err(|error| {
+                    format!(
+                        "cannot listen for adb on 127.0.0.1:{port} ({error}); another program \
+                         may use it, so choose another port (dsa settings set adb-port <port>)"
+                    )
+                })?;
+                eprintln!(
+                    "developer mode: on; adb connects to {} (adb connect {})",
+                    opened.address(),
+                    opened.address()
+                );
+                *bridge = Some((port, opened));
+            }
+        } else if bridge.take().is_some() {
+            eprintln!("developer mode: off; the adb port is closed");
+        }
+        drop(bridge);
+        if self.shared.developer_mode.swap(on, Ordering::SeqCst) != on {
+            send_quietly(
+                &self.shared,
+                &self.commands,
+                Body::DeveloperMode(control::DeveloperMode { on }),
+            );
+        }
+        Ok(())
+    }
+
+    /// The address adb connects to while developer mode is on.
+    pub fn adb_address(&self) -> Option<std::net::SocketAddr> {
+        self.adb_bridge
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|(_, bridge)| bridge.address())
     }
 
     /// Pairs the host's clock with the guest's while the guest runs and `trace` says the
@@ -2642,6 +2731,10 @@ impl Worker {
             // A new agent takes links to go to the host.
             if self.links_in_android {
                 self.send_body(Body::LinkHandling(control::LinkHandling { in_guest: true }));
+            }
+            // A guest boots with adbd stopped.
+            if self.shared.developer_mode.load(Ordering::SeqCst) {
+                self.send_body(Body::DeveloperMode(control::DeveloperMode { on: true }));
             }
             // A new agent reads no task's accessibility tree until it is asked.
             for task_id in self.shared.watched_tasks() {

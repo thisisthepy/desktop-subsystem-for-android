@@ -1,8 +1,9 @@
 //! The settings a user changes from the settings app, kept by the service.
 //!
-//! Four of them are the user's own: the GPU their window manager renders on, whether their
-//! Android may be frozen when idle, whether their clipboard is shared with it, and whether web
-//! links open in apps in their Android instead of the host's browser. The others are the
+//! Six of them are the user's own: the GPU their window manager renders on, whether their
+//! Android may be frozen when idle, whether their clipboard is shared with it, whether web
+//! links open in apps in their Android instead of the host's browser, and developer mode
+//! (whether adb reaches their Android) with the loopback port adb connects to. The others are the
 //! machine's, shared by every user: whether the service updates DSA itself, whether it
 //! downloads new Android images, and whether DSA's processes write the input trace and the
 //! per-stage resize trace to their logs.
@@ -15,7 +16,8 @@
 //! <dir>/machine.json          {"program_updates": true, "image_updates": true,
 //!                              "input_trace": false, "resize_trace": false}
 //! <dir>/users/<user>.json     {"render_gpu": "display", "freeze": false, "clipboard": true,
-//!                              "links_in_android": false}
+//!                              "links_in_android": false, "developer_mode": false,
+//!                              "adb_port": 58526}
 //! ```
 //!
 //! A missing file means the defaults. A user who has never saved settings starts from what
@@ -29,6 +31,10 @@ use serde::{Deserialize, Serialize};
 
 /// The longest render GPU value accepted, in characters.
 const MAX_RENDER_GPU: usize = 128;
+
+/// The loopback port adb connects to in developer mode unless the user picks another: the one
+/// Windows Subsystem for Android used, which adb users and tools already know.
+pub const DEFAULT_ADB_PORT: u16 = 58526;
 
 /// The settings as a client sees them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +59,12 @@ pub struct Settings {
     /// Whether every DSA process writes each stage of each resize to its log. The machine's;
     /// off by default.
     pub resize_trace: bool,
+    /// Whether adb reaches the user's Android through the host's loopback address. Off by
+    /// default.
+    pub developer_mode: bool,
+    /// The port on `127.0.0.1` adb connects to in developer mode. [`DEFAULT_ADB_PORT`] by
+    /// default.
+    pub adb_port: u16,
 }
 
 impl Default for Settings {
@@ -66,6 +78,8 @@ impl Default for Settings {
             image_updates: true,
             input_trace: false,
             resize_trace: false,
+            developer_mode: false,
+            adb_port: DEFAULT_ADB_PORT,
         }
     }
 }
@@ -102,6 +116,20 @@ fn display() -> String {
     "display".into()
 }
 
+fn default_adb_port() -> u16 {
+    DEFAULT_ADB_PORT
+}
+
+/// The adb port as kept: 0, which a client sends for "the default", becomes
+/// [`DEFAULT_ADB_PORT`].
+pub fn normalise_adb_port(port: u16) -> u16 {
+    if port == 0 {
+        DEFAULT_ADB_PORT
+    } else {
+        port
+    }
+}
+
 /// One user's share of the settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserSettings {
@@ -113,6 +141,10 @@ pub struct UserSettings {
     pub links_in_android: bool,
     #[serde(default = "yes")]
     pub clipboard: bool,
+    #[serde(default)]
+    pub developer_mode: bool,
+    #[serde(default = "default_adb_port")]
+    pub adb_port: u16,
 }
 
 impl Default for UserSettings {
@@ -122,6 +154,22 @@ impl Default for UserSettings {
             freeze: false,
             links_in_android: false,
             clipboard: true,
+            developer_mode: false,
+            adb_port: DEFAULT_ADB_PORT,
+        }
+    }
+}
+
+impl UserSettings {
+    /// The user's share of `settings`, as kept, with `render_gpu` already checked.
+    fn from_settings(settings: &Settings, render_gpu: String) -> UserSettings {
+        UserSettings {
+            render_gpu,
+            freeze: settings.freeze,
+            links_in_android: settings.links_in_android,
+            clipboard: settings.clipboard,
+            developer_mode: settings.developer_mode,
+            adb_port: normalise_adb_port(settings.adb_port),
         }
     }
 }
@@ -231,9 +279,7 @@ impl FileSettings {
                     .and_then(|previous| previous(user))
                     .and_then(|value| normalise_render_gpu(&value).ok())
                     .unwrap_or_else(display),
-                freeze: false,
-                links_in_android: false,
-                clipboard: true,
+                ..UserSettings::default()
             }),
         }
     }
@@ -271,6 +317,8 @@ fn combine(mine: UserSettings, machine: MachineSettings) -> Settings {
         image_updates: machine.image_updates,
         input_trace: machine.input_trace,
         resize_trace: machine.resize_trace,
+        developer_mode: mine.developer_mode,
+        adb_port: normalise_adb_port(mine.adb_port),
     }
 }
 
@@ -298,16 +346,12 @@ impl SettingsStore for FileSettings {
         let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         write_json(
             &user_file,
-            &UserSettings {
-                render_gpu: render_gpu.clone(),
-                freeze: settings.freeze,
-                links_in_android: settings.links_in_android,
-                clipboard: settings.clipboard,
-            },
+            &UserSettings::from_settings(settings, render_gpu.clone()),
         )?;
         write_json(&self.machine_file(), &machine_part(settings))?;
         Ok(Settings {
             render_gpu,
+            adb_port: normalise_adb_port(settings.adb_port),
             ..settings.clone()
         })
     }
@@ -349,16 +393,12 @@ impl SettingsStore for MemorySettings {
         let render_gpu = normalise_render_gpu(&settings.render_gpu)?;
         self.users.lock().unwrap_or_else(|e| e.into_inner()).insert(
             user.to_string(),
-            UserSettings {
-                render_gpu: render_gpu.clone(),
-                freeze: settings.freeze,
-                links_in_android: settings.links_in_android,
-                clipboard: settings.clipboard,
-            },
+            UserSettings::from_settings(settings, render_gpu.clone()),
         );
         *self.machine.lock().unwrap_or_else(|e| e.into_inner()) = machine_part(settings);
         Ok(Settings {
             render_gpu,
+            adb_port: normalise_adb_port(settings.adb_port),
             ..settings.clone()
         })
     }
@@ -414,6 +454,8 @@ mod tests {
                     image_updates: true,
                     input_trace: true,
                     resize_trace: false,
+                    developer_mode: true,
+                    adb_port: 5037,
                 },
             )
             .unwrap();
@@ -568,6 +610,42 @@ mod tests {
             store.get("S-1-5-21-1-2-3-1001").unwrap().render_gpu,
             "display"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr20_developer_mode_is_off_by_default_on_port_58526_and_kept_per_user() {
+        let dir = scratch("developer-mode");
+        let store = FileSettings::new(&dir);
+        let fresh = store.get("uid:1000").unwrap();
+        assert!(!fresh.developer_mode);
+        assert_eq!(fresh.adb_port, 58526);
+        let saved = store
+            .set(
+                "uid:1000",
+                &Settings {
+                    developer_mode: true,
+                    adb_port: 0,
+                    ..Settings::default()
+                },
+            )
+            .unwrap();
+        assert!(saved.developer_mode);
+        assert_eq!(saved.adb_port, 58526, "0 means the default port");
+        store
+            .set(
+                "uid:1000",
+                &Settings {
+                    developer_mode: true,
+                    adb_port: 5037,
+                    ..Settings::default()
+                },
+            )
+            .unwrap();
+        let again = FileSettings::new(&dir);
+        assert!(again.get("uid:1000").unwrap().developer_mode);
+        assert_eq!(again.get("uid:1000").unwrap().adb_port, 5037);
+        assert!(!again.get("uid:1001").unwrap().developer_mode, "the user's own");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

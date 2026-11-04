@@ -1,0 +1,14 @@
+; Desktop Subsystem for Android (DSA)
+; adb for developer mode. adbd listens on vsock port 5555 (service.adb.listen_addrs), which
+; the host bridges to a port on its loopback address while the user's developer mode is on.
+; The platform's user build policy gives adbd TCP and USB, not vsock.
+(allow adbd self (vsock_socket (create bind listen accept read write getattr setattr getopt setopt shutdown)))
+
+; vendor.dsa.adb (vendor_property_contexts): set by dsa-channeld to follow the developer mode
+; setting; dsa-channeld.rc starts adbd when it is 1 and stops it when it is 0. channeld.cil lets
+; the daemon set it; nothing else may.
+(type dsa_adb_prop)
+(roletype object_r dsa_adb_prop)
+(typeattributeset property_type (dsa_adb_prop))
+(typeattributeset vendor_property_type (dsa_adb_prop))
+(allow vendor_init dsa_adb_prop (file (read open getattr map)))

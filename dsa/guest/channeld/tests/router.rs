@@ -495,3 +495,22 @@ fn fr2_the_host_hears_when_the_agent_dies() {
     router.from_host(&frame(Body::CloseTask(CloseTask { task_id: 1 })));
     assert_eq!(reports(&host), vec![(false, false)]);
 }
+
+#[test]
+fn fr20_developer_mode_reaches_the_switch_and_no_client() {
+    let (router, _host) = router();
+    let switched = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&switched);
+    let router = router.on_developer_mode(move |on| seen.lock().unwrap().push(on));
+    let agent = Arc::new(Recorder::default());
+    router.subscribe(AGENT, agent.clone());
+
+    router.host_connected();
+    let mode = |on| frame(Body::DeveloperMode(dsa_protocol::control::DeveloperMode { on }));
+    router.from_host(&mode(true));
+    router.from_host(&mode(false));
+    router.from_host(&mode(true));
+
+    assert_eq!(*switched.lock().unwrap(), vec![true, false, true]);
+    assert!(agent.frames().is_empty(), "the agent is not told");
+}

@@ -124,5 +124,12 @@ class MeasurementTests(unittest.TestCase):
         self.assertTrue(layers[0].startswith("SurfaceView"))
 
 
+class AdbTests(unittest.TestCase):
+    def test_fr20_the_guest_is_reached_through_developer_modes_loopback_port(self):
+        self.assertEqual(verify.DEFAULT_SERIAL, "127.0.0.1:58526")
+        self.assertEqual(verify.connect_command("127.0.0.1:58526"), ["adb", "connect", "127.0.0.1:58526"])
+        self.assertIsNone(verify.connect_command("emulator-5554"))
+
+
 if __name__ == "__main__":
     unittest.main()

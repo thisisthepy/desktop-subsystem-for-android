@@ -268,6 +268,9 @@ impl UserAndroid for UpdatingAndroid {
     fn links_in_android(&self, on: bool) {
         UserAndroid::links_in_android(&*self.session, on)
     }
+    fn developer_mode(&self, on: bool, port: u16) -> Result<(), String> {
+        UserAndroid::developer_mode(&*self.session, on, port)
+    }
     fn watch_links(&self) -> Option<std::sync::mpsc::Receiver<String>> {
         UserAndroid::watch_links(&*self.session)
     }

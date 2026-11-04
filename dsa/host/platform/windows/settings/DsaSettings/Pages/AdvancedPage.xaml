@@ -44,6 +44,35 @@
                                  IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnLinksToggled" />
             </ui:CardControl>
 
+            <TextBlock Text="{l:Text DeveloperHeader.Text}" Style="{StaticResource SectionHeader}" />
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon DeveloperBoard24}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="{l:Text DeveloperModeCard.Header}" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{l:Text DeveloperModeCard.Description}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <ui:ToggleSwitch x:Name="DeveloperModeSwitch" IsChecked="{Binding DeveloperMode, Mode=OneWay}"
+                                 IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnDeveloperModeToggled" />
+            </ui:CardControl>
+            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon PlugConnected24}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="{l:Text AdbCard.Header}" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{l:Text AdbCard.Description}" Style="{StaticResource CardDescription}" />
+                        <TextBox Text="{Binding AdbConnect, Mode=OneWay}" FontFamily="Consolas" IsReadOnly="True"
+                                 BorderThickness="0" Background="Transparent" Padding="0,4,0,0"
+                                 Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{l:Text AdbPortLabel.Text}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <TextBox x:Name="AdbPortBox" Width="90" Text="{Binding AdbPort, Mode=OneWay}"
+                             IsEnabled="{Binding CanChange, Mode=OneWay}" LostFocus="OnAdbPortChanged"
+                             KeyDown="OnAdbPortKeyDown" />
+                </StackPanel>
+            </ui:CardControl>
+
             <TextBlock Text="{l:Text LogsHeader.Text}" Style="{StaticResource SectionHeader}" />
             <ui:CardAction Icon="{ui:SymbolIcon Folder24}" Click="OnOpenUserLogs" Margin="0,0,0,4">
                 <StackPanel>

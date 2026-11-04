@@ -405,8 +405,8 @@ message ClipboardSharing {
 
 // Host to guest: whether the user turned developer mode on. While it is on, the guest's adbd
 // listens on vsock port 5555, which the host bridges to a port on its loopback address;
-// while it is off, adbd is stopped. The guest takes it to be off when the host connects; the
-// host says so when it is on, and on every change after that. The control daemon handles it,
+// while it is off, adbd is stopped. A guest boots with it off; the host says so when it is on,
+// each time the agent connects, and on every change after that. The control daemon handles it,
 // not the agent.
 message DeveloperMode {
   bool on = 1;

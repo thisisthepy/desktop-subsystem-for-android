@@ -210,6 +210,31 @@ public class ViewModelTests
     }
 
     [Fact]
+    public async Task Fr20_developer_mode_is_off_by_default_and_shows_the_adb_address_when_on()
+    {
+        var off = Settings.Replace("\"freeze\":false", "\"freeze\":false,\"developer_mode\":false,\"adb_port\":58526");
+        var on = off.Replace("\"developer_mode\":false", "\"developer_mode\":true");
+        var cli = new FakeCli()
+            .Answer("settings --json", off)
+            .Fail("gpus --json", "dsa: no GPU list")
+            .Answer("settings set developer-mode on --json", on)
+            .Answer("settings set adb-port 5037 --json", on.Replace("58526", "5037"));
+        var vm = new SettingsViewModel(new DsaService(cli), new KeyText());
+        await vm.LoadAsync();
+        Assert.False(vm.DeveloperMode);
+        Assert.Equal(58526, vm.AdbPort);
+
+        await vm.SetDeveloperModeAsync(true);
+        Assert.True(vm.DeveloperMode);
+        Assert.Equal("adb connect 127.0.0.1:58526", vm.AdbConnect);
+        await vm.SetAdbPortAsync("70000");
+        Assert.DoesNotContain(cli.Calls, call => call.Contains("adb-port 70000"));
+        await vm.SetAdbPortAsync("5037");
+        Assert.Equal("adb connect 127.0.0.1:5037", vm.AdbConnect);
+        Assert.Contains("settings set developer-mode on --json", cli.Calls);
+    }
+
+    [Fact]
     public async Task Fr13_a_service_that_does_not_report_the_clipboard_switch_shares_it()
     {
         var cli = new FakeCli()

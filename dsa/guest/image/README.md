@@ -93,7 +93,13 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
 - `wifi.rc` no longer sets up its kernel trace instance when boot completes. The VM has no
   Wi-Fi device to trace, and on Hyper-V those tracefs writes hold up lmkd's own tracepoint
   setup past its two second watchdog, which then kills the app the user just opened.
-- The build becomes a user build: not debuggable, adb only when authorised.
+- The build becomes a user build (`ro.debuggable=0`). adbd is in it but stopped, and starts
+  only while the user's developer mode is on (`dsa settings set developer-mode on`, or the
+  settings app). dsa-channeld then sets `vendor.dsa.adb`, and `dsa-channeld.rc` starts or stops
+  adbd to match. adbd listens on vsock port 5555 alone, never on TCP, and asks for no
+  authorisation (`ro.adb.secure=0`), because the guest has no SystemUI to show the prompt.
+  The host bridges that port to `127.0.0.1:58526` (the `adb-port` setting), so
+  `adb connect 127.0.0.1:58526` reaches it. `sepolicy/adb.cil` lets adbd listen on vsock.
 - The control channel daemon (`/vendor/bin/dsa-channeld`) is added and runs in its own
   SELinux domain, the only one that may read `/proc/bootconfig`, where the host puts the
   boot's secret. It connects to the host, and tells the host when Android has finished booting
@@ -119,7 +125,7 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
   for Hyper-V's SCSI disks only on that disk.
 - Android's log (`logcat`) goes to the serial console, which the host keeps as the VM's
   console log (`C:\ProgramData\DSA\logs\android-*.log` on Windows). Cuttlefish writes it to a
-  virtio console, which Hyper-V does not have, and a user build has no adb to read it with.
+  virtio console, which Hyper-V does not have, and adb is there only in developer mode.
   Only informational messages and above go there, because each byte written to the emulated
   port traps out of the VM and takes time from vsync and input.
 - Every APK, APEX and verified boot image is re-signed. The published build is signed with

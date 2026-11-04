@@ -3406,3 +3406,74 @@ fn nfr5_malformed_widget_messages_are_dropped_and_the_session_stays_active() {
     assert_eq!(session.state(), SessionState::Active);
     assert_eq!(session.widgets().len(), 1);
 }
+
+fn developer_mode(on: bool) -> Body {
+    Body::DeveloperMode(dsa_protocol::control::DeveloperMode { on })
+}
+
+/// A guest adbd that echoes what it is sent, and the VM IDs it was reached through.
+fn fake_adbd() -> (dsa_host_core::session::AdbConnect, Arc<Mutex<Vec<String>>>) {
+    use std::io::{Read, Write};
+    let adbd = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let address = adbd.local_addr().unwrap();
+    thread::spawn(move || {
+        for mut stream in adbd.incoming().flatten() {
+            thread::spawn(move || {
+                let mut buf = [0u8; 64];
+                while let Ok(n) = stream.read(&mut buf) {
+                    if n == 0 || stream.write_all(&buf[..n]).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+    });
+    let reached = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&reached);
+    let connect: dsa_host_core::session::AdbConnect = Arc::new(move |vm_id: &str| {
+        seen.lock().unwrap().push(vm_id.to_string());
+        Ok(Box::new(std::net::TcpStream::connect(address)?)
+            as Box<dyn dsa_host_core::adb_bridge::BridgeStream>)
+    });
+    (connect, reached)
+}
+
+#[test]
+fn fr20_developer_mode_starts_adbd_and_opens_a_loopback_port_that_reaches_it() {
+    use std::io::{Read, Write};
+    let (session, mut agent, _launcher) = active_session();
+    assert_eq!(session.adb_address(), None, "off by default: nothing listens");
+    let (connect, reached) = fake_adbd();
+    session.set_adb_connect(connect);
+    session.developer_mode(true, 0).unwrap();
+    assert_eq!(next_body(&mut agent), developer_mode(true));
+    let address = session.adb_address().expect("a port while developer mode is on");
+    assert!(address.ip().is_loopback());
+
+    let mut adb = std::net::TcpStream::connect(address).unwrap();
+    adb.set_read_timeout(Some(WAIT)).unwrap();
+    adb.write_all(b"CNXN").unwrap();
+    let mut answer = [0u8; 4];
+    adb.read_exact(&mut answer).unwrap();
+    assert_eq!(&answer, b"CNXN");
+    assert_eq!(*reached.lock().unwrap(), vec!["fake-vm".to_string()]);
+
+    // An agent that connects again is told, since a guest boots with adbd stopped.
+    report_boot(&mut agent, true, false);
+    thread::sleep(Duration::from_millis(50));
+    report_boot(&mut agent, true, true);
+    assert_eq!(next_body(&mut agent), developer_mode(true));
+
+    session.developer_mode(false, 0).unwrap();
+    assert_eq!(next_body(&mut agent), developer_mode(false));
+    assert_eq!(session.adb_address(), None);
+    assert!(std::net::TcpStream::connect(address).is_err(), "the port is closed");
+}
+
+#[test]
+fn fr20_developer_mode_stays_off_without_a_way_to_reach_adbd() {
+    let (session, mut agent, _launcher) = active_session();
+    assert!(session.developer_mode(true, 0).is_err());
+    assert_eq!(session.adb_address(), None);
+    nothing_for_the_guest(&mut agent);
+}

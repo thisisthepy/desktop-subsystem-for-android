@@ -20,6 +20,10 @@
 //!   Only the agent may say so: the platform gives the router a check for the caller, and
 //!   [`agent_caller`] is the rule it applies to what binder and the kernel say of the caller.
 //!
+//! - The host's `DeveloperMode` stops here too: it goes to the platform's developer mode
+//!   switch ([`Router::on_developer_mode`]), which has init start or stop adbd. A guest boots
+//!   with it off; the host says when it is on.
+//!
 //! None of this knows about binder: a listener is anything that can take a frame, so the
 //! rules run and are tested on any platform. The binder service in `binder` is a thin layer
 //! that turns calls into these.
@@ -185,7 +189,11 @@ pub struct Router {
     to_host: Sender<Vec<u8>>,
     state: Mutex<State>,
     agent_check: AgentCheck,
+    developer_mode: Option<DeveloperModeSwitch>,
 }
+
+/// Turns the guest's developer mode (adbd) on or off, as the host says.
+type DeveloperModeSwitch = Box<dyn Fn(bool) + Send + Sync>;
 
 /// Says whether the caller of the current call is the agent. It runs on the caller's thread.
 type AgentCheck = Box<dyn Fn(Peer) -> Result<(), String> + Send + Sync>;
@@ -201,6 +209,20 @@ impl Router {
             to_host,
             state: Mutex::new(State::default()),
             agent_check: Box::new(agent_check),
+            developer_mode: None,
+        }
+    }
+
+    /// Hands the host's developer mode to `switch`: `true` when the user turns it on, `false`
+    /// when they turn it off.
+    pub fn on_developer_mode(mut self, switch: impl Fn(bool) + Send + Sync + 'static) -> Router {
+        self.developer_mode = Some(Box::new(switch));
+        self
+    }
+
+    fn set_developer_mode(&self, on: bool) {
+        if let Some(switch) = &self.developer_mode {
+            switch(on);
         }
     }
 
@@ -283,6 +305,11 @@ impl Router {
     /// Passes a frame from the host to every listener.
     pub fn from_host(&self, frame: &[u8]) {
         let body = dsa_protocol::decode(frame).ok().and_then(|e| e.body);
+        if let Some(Body::DeveloperMode(mode)) = body {
+            // For the daemon alone: no client of the channel acts on it.
+            self.set_developer_mode(mode.on);
+            return;
+        }
         let mut state = self.lock();
         match body {
             Some(Body::ScreenState(screen)) => state.screen_off = !screen.on,
