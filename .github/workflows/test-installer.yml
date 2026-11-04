@@ -300,15 +300,28 @@ jobs:
             if (-not (Test-InView $window $about)) { throw "the mouse wheel over the navigation pane does not bring About into view" }
             Stop-Short $run
 
-            # The keyboard: the focus on the last item brings it into view.
+            # The keyboard: Tab from the first item moves the focus down the pane, and the
+            # focused item comes into view, About included.
             $run = Start-Short 'general'
             $window = $run.Window
-            $about = Find-Named $window 'About'
-            $about.SetFocus()
+            $general = $window.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($name, 'General'))) |
+              Where-Object { $_.Current.BoundingRectangle.X -lt ($window.Current.BoundingRectangle.X + 280) } | Select-Object -First 1
+            $r = $general.Current.BoundingRectangle
+            [Dsa.Input]::SetCursorPos([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2)) | Out-Null
+            [Dsa.Input]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)   # left down
+            [Dsa.Input]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)   # left up
             Start-Sleep -Seconds 1
-            $about = Find-Named $window 'About'
+            $reached = $false
+            for ($i = 0; $i -lt 12 -and -not $reached; $i++) {
+              [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
+              Start-Sleep -Milliseconds 400
+              $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+              Write-Host "Tab $($i + 1): focus on '$($focused.Current.Name)'"
+              $about = Find-Named $window 'About'
+              $reached = Test-InView $window $about
+            }
             Save-WindowScreen $window "$PWD\screens\settings-$theme-short-pane-keyboard.png"
-            if (-not (Test-InView $window $about)) { throw "moving the keyboard focus to About does not bring it into view" }
+            if (-not $reached) { throw "Tab through the navigation pane does not bring About into view" }
             Stop-Short $run
 
             # The wheel over the page reaches its last card.

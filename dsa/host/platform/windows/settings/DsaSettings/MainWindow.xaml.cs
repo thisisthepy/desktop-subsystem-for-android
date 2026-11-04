@@ -110,11 +110,27 @@ public partial class MainWindow : FluentWindow
         };
         pane.AddHandler(UIElement.GotKeyboardFocusEvent, new KeyboardFocusChangedEventHandler((_, e) =>
         {
-            if (e.NewFocus is FrameworkElement focused)
+            if (e.NewFocus is FrameworkElement focused && focused.IsDescendantOf(scroller))
             {
-                focused.BringIntoView();
+                ScrollIntoView(scroller, focused);
             }
         }), true);
+    }
+
+    /// <summary>Scrolls <paramref name="scroller"/> just enough to show all of
+    /// <paramref name="element"/>.</summary>
+    private static void ScrollIntoView(ScrollViewer scroller, FrameworkElement element)
+    {
+        var top = element.TransformToAncestor(scroller).Transform(new Point(0, 0)).Y;
+        var bottom = top + element.ActualHeight;
+        if (top < 0)
+        {
+            scroller.ScrollToVerticalOffset(scroller.VerticalOffset + top);
+        }
+        else if (bottom > scroller.ViewportHeight)
+        {
+            scroller.ScrollToVerticalOffset(scroller.VerticalOffset + bottom - scroller.ViewportHeight);
+        }
     }
 
     /// <summary>The first element of type <typeparamref name="T"/> under <paramref name="root"/>.</summary>
