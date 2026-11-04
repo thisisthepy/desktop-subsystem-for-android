@@ -206,6 +206,26 @@ pub struct HostFile {
     /// Such as `host/dsa-hostd.log`.
     pub name: String,
     pub path: PathBuf,
+    /// For a log shared by every user, whose lines about a user start with that user's ID
+    /// (`S-1-5-21-...: `): the user whose lines are kept. Lines about any other user are left
+    /// out, so one user's diagnostics never carry another's.
+    pub only_user: Option<String>,
+}
+
+/// Leaves out the lines of `data` that start with another user's ID than `user`.
+pub fn lines_of_user(data: &[u8], user: &str) -> Vec<u8> {
+    let mut kept = Vec::with_capacity(data.len());
+    for line in data.split_inclusive(|b| *b == b'\n') {
+        let about_user = line
+            .split(|b| *b == b':')
+            .next()
+            .filter(|id| id.starts_with(b"S-1-") && !id.contains(&b' '));
+        match about_user {
+            Some(id) if id != user.as_bytes() => {}
+            _ => kept.extend_from_slice(line),
+        }
+    }
+    kept
 }
 
 /// Keeps the end of `data` when it is longer than [`MAX_FILE_BYTES`], after a line that says
@@ -357,7 +377,13 @@ pub fn write_archive<W: Write>(
     }
     for file in host_files {
         match read_end(&file.path) {
-            Ok(data) => add(&mut zip, &mut report, &mut names, &file.name, data)?,
+            Ok(data) => {
+                let data = match &file.only_user {
+                    Some(user) => lines_of_user(&data, user),
+                    None => data,
+                };
+                add(&mut zip, &mut report, &mut names, &file.name, data)?
+            }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => report.problems.push(format!(
                 "{} could not be read: {error}",

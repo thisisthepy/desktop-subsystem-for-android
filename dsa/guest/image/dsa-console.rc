@@ -1,0 +1,12 @@
+# The serial console carries the kernel's early boot, for a boot that never gets as far as the
+# host's log port, and a panic; once Android has finished booting, nothing else. Every byte
+# written to the emulated serial port traps out of the VM with the port's lock held, taking
+# processor time from whatever else runs there, vsync and input among them.
+#
+# Console level 1 prints only emergencies; a panic raises the level itself, so its report
+# still reaches the console. The kernel's other messages stay in its ring buffer, which logd
+# reads (ro.logd.kernel) and `dsa logcat -b kernel` shows on demand.
+#
+# A system script, because only init itself may write the kernel's printk levels.
+on property:sys.boot_completed=1
+    write /proc/sys/kernel/printk 1

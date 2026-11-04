@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use dsa_host_core::diagnostics::{crc32, write_archive, HostFile, ZipWriter};
+use dsa_host_core::diagnostics::{crc32, lines_of_user, write_archive, HostFile, ZipWriter};
 use dsa_host_core::guest_log::{
     read_log_frame, DiagnosticsEvent, LogBuffer, LogDumpEvent, LogEntry, LogFilter, LogHub,
     LogPortMessage, LogRing, DEFAULT_BUFFERS, ERROR, INFO, SILENT, VERBOSE, WARN,
@@ -242,10 +242,12 @@ fn fr21_the_archive_is_a_zip_of_the_guest_and_host_files() {
             HostFile {
                 name: "host/dsa-hostd.log".into(),
                 path: host_log,
+                only_user: None,
             },
             HostFile {
                 name: "host/missing.log".into(),
                 path: folder.join("missing.log"),
+                only_user: None,
             },
         ],
         SystemTime::now(),
@@ -558,4 +560,21 @@ fn fr21_the_guest_diagnostics_arrive_on_the_log_port() {
         }
     );
     assert_eq!(events.recv_timeout(WAIT).unwrap(), DiagnosticsEvent::Done(None));
+}
+
+#[test]
+fn fr21_a_users_diagnostics_leave_out_the_service_lines_about_other_users() {
+    let log = b"service started
+S-1-5-21-1-1001: lifecycle: Android finished booting
+S-1-5-21-1-1002: lifecycle: the agent is connected
+local API: refused a client
+";
+    let kept = lines_of_user(log, "S-1-5-21-1-1001");
+    assert_eq!(
+        String::from_utf8(kept).unwrap(),
+        "service started
+S-1-5-21-1-1001: lifecycle: Android finished booting
+local API: refused a client
+"
+    );
 }

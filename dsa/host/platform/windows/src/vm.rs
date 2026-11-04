@@ -37,6 +37,13 @@ const MEMORY_GRANULARITY_MB: u32 = 2;
 /// console pipe.
 pub const CONSOLE_CMDLINE: &str = "earlycon=uart8250,io,0x3f8,115200 console=ttyS0,115200";
 
+/// The ramoops region the guest kernel keeps its last log in: 1 MiB of RAM at 256 MiB, reserved
+/// before the kernel uses any memory. The guest kernel's README says why there and how it is
+/// split.
+pub const RAMOOPS_CMDLINE: &str = "memmap=1M$0x10000000 ramoops.mem_address=0x10000000 \
+     ramoops.mem_size=0x100000 ramoops.record_size=0x20000 ramoops.console_size=0x40000 \
+     ramoops.pmsg_size=0x40000 ramoops.ecc=1";
+
 const PIPE_PREFIX: &str = r"\\.\pipe\";
 
 /// The pipe the console of VM `vm_name` is served on: `\\.\pipe\dsa-console-<vm_name>`.
@@ -220,7 +227,7 @@ impl AndroidVmConfig {
     /// The kernel command line: the settings the VM needs, then [`kernel_cmdline`](Self::kernel_cmdline).
     pub fn full_kernel_cmdline(&self) -> String {
         let mut cmdline = format!(
-            "{CONSOLE_CMDLINE} panic=-1 page_reporting.page_reporting_order={}",
+            "{CONSOLE_CMDLINE} panic=-1 page_reporting.page_reporting_order={} {RAMOOPS_CMDLINE}",
             self.page_reporting_order
         );
         if !self.kernel_cmdline.trim().is_empty() {

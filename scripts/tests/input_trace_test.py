@@ -117,6 +117,28 @@ class InputTraceTest(unittest.TestCase):
         self.assertTrue(paths[0].startswith(r"C:\Users\me\AppData\Local"))
         self.assertTrue(paths[1].startswith(r"C:\ProgramData"))
 
+    def test_fr21_the_guest_stages_come_from_dsa_logcat_not_a_log_file(self):
+        self.assertEqual(trace.guest_command(), ["dsa", "logcat", "-d", "-b", "all"])
+        asked = []
+
+        class Done:
+            returncode = 0
+            stdout = (
+                "2026-11-04 10:00:00.000  1234  1240 I DsaAgent: "
+                "input-trace stage=agent.inject task=7 mono=1000.0\n"
+                "2026-11-04 10:00:00.001  1234  1240 I Other: not a trace line\n"
+            )
+            stderr = ""
+
+        def run(command, **_):
+            asked.append(command)
+            return Done()
+
+        lines = trace.guest_lines(run)
+        self.assertEqual(asked, [trace.guest_command()])
+        self.assertEqual([line.stage for line in lines], ["agent.inject"])
+        self.assertEqual(lines[0].source, "dsa logcat")
+
 
 if __name__ == "__main__":
     unittest.main()
