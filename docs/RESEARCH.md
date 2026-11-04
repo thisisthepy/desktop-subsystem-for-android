@@ -794,3 +794,52 @@ Digitalis의 배포 묶음(`docker/build-digitalis.sh`)은 번역기(`libberberi
 - Digitalis 묶음이 Android 17 DSA 게스트에서 실제로 돌고, 어떤 앱이 도는지.
 - 번역된 앱의 성능(시작 시간, 프레임 시간). 공개된 수치가 없다.
 - 오버레이 위의 라이브러리를 앱 프로세스가 SELinux 거부 없이 읽는지. PC에서 `dmesg`로 확인한다.
+
+## R10. ARM64 Windows 호스트: WSL의 arm64 부팅과 Hyper-V ARM64의 차이 (FR-25)
+
+**기준.** 2026-11-05. WSL 소스 `microsoft/WSL` `master`(커밋 `8a5e541`)의 `src/windows/service/exe/WslCoreVm.cpp`, `src/windows/common/hcs_schema.h`, `src/windows/common/helpers.cpp`와 커널 저장소 `microsoft/WSL2-Linux-Kernel` 태그 `linux-msft-wsl-6.18.54.1`의 `Microsoft/config-wsl-arm64`, DSA 커널 패치 다섯 개를 읽었다. ARM64 PC에서 부팅해 보지는 않았다.
+
+### WSL은 arm64 커널을 어떻게 부팅하는가
+
+- **직접 부팅이 없다.** WSL은 x86_64에서 `Chipset.LinuxKernelDirect`(`KernelFilePath`, `InitRdPath`, `KernelCmdLine`)를 쓰고, ARM64에서는 주석대로 "Linux kernel direct boot is not yet supported on ARM64"라서 `Chipset.Uefi.BootThis`를 쓴다. 항목은 `DeviceType: "VmbFs"`, `VmbFsRootPath`(폴더), `DevicePath`(`\` + 커널 파일 이름), `OptionalData`(커널 명령줄) 넷이다. UEFI 펌웨어가 VMBus 파일 시스템으로 폴더를 읽어 커널의 EFI 스텁을 시작하고, 스텁은 `OptionalData`를 명령줄로 받는다.
+- **initrd는 명령줄로 넘긴다.** WSL의 명령줄은 `initrd=\initrd.img`로 시작한다. EFI 스텁이 자기가 시작된 폴더에서 그 파일을 읽는다. 그래서 커널과 initrd가 한 폴더에 있어야 하고, WSL은 ARM64에서 둘을 임시 폴더에 복사한 뒤 그 폴더를 `VmbFsRootPath`로 준다.
+- **콘솔.** x86_64는 `earlycon=uart8250,io,0x3f8,115200`과 `console=ttyS0,115200`, ARM64는 `earlycon=pl011,0xeffec000,115200`과 `console=ttyAMA0`이다. 두 아키텍처 모두 `Devices.ComPorts["0"]`에 named pipe를 연결한다. 디버거 포트는 x86_64가 `ttyS1`, ARM64가 `ttyAMA1`이다.
+- **공통 매개변수.** `nr_cpus`, `hv_utils.timesync_implicit=1`, `printk.devkmsg=on`, `page_reporting.page_reporting_order`는 아키텍처와 상관없이 붙는다. 메모리 설정(`AllowOvercommit`, `EnableDeferredCommit`, cold hint, `HostingProcessNameSuffix`)도 같다. 성능 카운터(`EnablePerfmonPmu`)만 x86_64 전용이다. 중첩 가상화는 ARM64에서 지원되지 않을 수 있다고 WSL이 적어 둔다.
+
+### Hyper-V ARM64가 커널에 요구하는 것
+
+- `config-wsl-arm64`에는 `CONFIG_EFI=y`, `CONFIG_EFI_STUB=y`, `CONFIG_ACPI=y`(기계 설명은 장치 트리가 아니라 ACPI), `CONFIG_SERIAL_AMBA_PL011=y`와 그 콘솔, `CONFIG_HYPERV=y`, `CONFIG_HYPERV_VMBUS=y`, `CONFIG_HYPERV_TIMER=y`, `CONFIG_HYPERV_UTILS=y`, `CONFIG_HYPERV_STORAGE=y`, `CONFIG_HYPERV_NET=y`, `CONFIG_HYPERV_BALLOON=y`, `CONFIG_PAGE_REPORTING=y`, `CONFIG_HYPERV_VSOCKETS=y`, `CONFIG_ARM64_4K_PAGES=y`가 모두 있다. `CONFIG_ANDROID_BINDER_IPC`는 꺼져 있고 `CONFIG_PREEMPT`도 꺼져 있어, `android.config`가 x86_64와 같이 켠다.
+- ARM64의 balloon 드라이버는 빈 페이지 보고만 하고 메모리 hot-add는 하지 않는다. DSA가 메모리를 돌려받는 길은 빈 페이지 보고이므로 잃는 것이 없다.
+- 커널 이미지는 `bzImage`가 아니라 `arch/arm64/boot/Image`다. EFI 스텁이 들어 있으면 PE 이미지(`MZ`)이고 오프셋 56에 arm64 Image 표식 `ARM\x64`가 있다. CI가 이 둘을 확인한다.
+
+### DSA 패치는 arm64에서 맞는가
+
+| 패치 | 건드리는 곳 | arm64 |
+|---|---|---|
+| `vmbus-platform-device` | `drivers/hv/vmbus_drv.c`의 `vmbus_acpi_add` | 맞다. Hyper-V는 ARM64에서도 VMBus를 ACPI로 알리므로 같은 함수를 지난다. 바로 아래 ARM64 `_CCA` 처리 코드는 그대로 둔다 |
+| `cmdline-partition-uuid` | `block/partitions/cmdline.c` | 맞다. 아키텍처와 무관하다 |
+| `memfd-ashmem-shim` | `mm/` | 맞다. `CONFIG_COMPAT` 분기는 32비트 앱용이고 arm64에서도 그대로 컴파일된다 |
+| `cgroup-v1-sys-nice` | `kernel/cgroup/cgroup-v1.c` | 맞다 |
+| `wakeup-sources-virtual` | `drivers/base/power/wakeup_stats.c` | 맞다. ARM64의 VMBus 장치 경로도 호스트마다 바뀐다 |
+
+`arch/x86` 아래를 건드리는 패치는 없고, 테스트가 이를 지킨다.
+
+**x86 전용 가정 하나는 호스트 명령줄에 있었다.** ramoops 영역을 `memmap=1M$0x10000000`으로 잡는데, `memmap=`은 x86 매개변수이고 ARM64 VM의 메모리 배치는 펌웨어가 정하므로 256 MiB가 RAM이라는 보장이 없다. ARM64에서는 `reserve_mem=1M:4096:dsa_ramoops ramoops.mem_name=dsa_ramoops`로 이름으로 잡는다(커널 6.12부터). 나누는 크기는 x86_64와 같다.
+
+### 결정
+
+1. 커널은 같은 태그에서 `config-wsl-arm64` + `android.config` + `android-arm64.config`로 만든다. `android-arm64.config`는 위 부팅, VMBus, 빈 페이지 보고에 필요한 옵션을 이름으로 적어, 새 WSL 태그가 하나라도 빼면 빌드가 실패한다. CI는 `ubuntu-24.04-arm` 러너에서 직접 빌드하고, 다른 기계에서는 `aarch64-linux-gnu-`로 교차 컴파일한다. 산출물 이름은 `kernel-arm64`다.
+2. 호스트는 빌드된 아키텍처(`target_arch`)로 게스트 아키텍처를 정한다. Hyper-V는 같은 아키텍처의 게스트만 돌린다. ARM64에서는 WSL처럼 `Uefi.BootThis`(`VmbFs`)로 부팅하고, 콘솔은 PL011, ramoops는 `reserve_mem=`이다. 나머지 문서(메모리, SCSI, hvsocket, `ComPorts`)는 같다.
+3. **부팅마다 폴더 하나.** VM은 `VmbFsRootPath` 폴더 전체를 읽을 수 있다. 기계의 `tmp` 폴더에는 다른 사용자의 부팅 initrd(비밀이 든)가 있을 수 있으므로, 그 폴더를 그대로 주지 않는다. 부팅마다 `tmp\<고유 이름>\`을 만들어 커널 사본과 `initrd.img`만 넣고, VM 시작이 끝나면 지운다.
+
+### 대가
+
+- ARM64에서는 부팅마다 커널(수십 MB)을 복사한다. WSL도 같은 복사를 한다.
+- ARM64 게스트는 arm64 전용 이미지가 따로 있어야 한다(이미지 작업은 별도).
+
+### 확인하지 못한 것
+
+- 실제 ARM64 PC(Snapdragon)에서 이 문서로 VM이 만들어지고 부팅하는지, 그리고 `HcsGrantVmAccess`가 폴더에 대해 VmbFs 읽기를 허락하는지.
+- PL011 주소 `0xeffec000`이 모든 ARM64 Windows 빌드에서 같은지. WSL이 고정값으로 쓰므로 같다고 본다.
+- `reserve_mem=`으로 잡은 ramoops가 Hyper-V ARM64에서 패닉 기록을 남기는지.
+- ARM64에서 `EnableColdHint`와 fine-grained memory 설정이 받아들여지는지. WSL은 아키텍처를 가리지 않고 설정한다.
