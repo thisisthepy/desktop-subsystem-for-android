@@ -117,6 +117,9 @@ extern GuestMemoryDefaultTypeInternal _GuestMemory_default_instance_;
 class GuestNotification;
 struct GuestNotificationDefaultTypeInternal;
 extern GuestNotificationDefaultTypeInternal _GuestNotification_default_instance_;
+class GuestSleepReady;
+struct GuestSleepReadyDefaultTypeInternal;
+extern GuestSleepReadyDefaultTypeInternal _GuestSleepReady_default_instance_;
 class Hello;
 struct HelloDefaultTypeInternal;
 extern HelloDefaultTypeInternal _Hello_default_instance_;
@@ -129,6 +132,9 @@ extern HelloRejectedDefaultTypeInternal _HelloRejected_default_instance_;
 class HostMemory;
 struct HostMemoryDefaultTypeInternal;
 extern HostMemoryDefaultTypeInternal _HostMemory_default_instance_;
+class HostSleep;
+struct HostSleepDefaultTypeInternal;
+extern HostSleepDefaultTypeInternal _HostSleep_default_instance_;
 class ImeCommit;
 struct ImeCommitDefaultTypeInternal;
 extern ImeCommitDefaultTypeInternal _ImeCommit_default_instance_;
@@ -307,10 +313,12 @@ template<> ::dsa::control::v1::FileProgress* Arena::CreateMaybeMessage<::dsa::co
 template<> ::dsa::control::v1::GuestBoot* Arena::CreateMaybeMessage<::dsa::control::v1::GuestBoot>(Arena*);
 template<> ::dsa::control::v1::GuestMemory* Arena::CreateMaybeMessage<::dsa::control::v1::GuestMemory>(Arena*);
 template<> ::dsa::control::v1::GuestNotification* Arena::CreateMaybeMessage<::dsa::control::v1::GuestNotification>(Arena*);
+template<> ::dsa::control::v1::GuestSleepReady* Arena::CreateMaybeMessage<::dsa::control::v1::GuestSleepReady>(Arena*);
 template<> ::dsa::control::v1::Hello* Arena::CreateMaybeMessage<::dsa::control::v1::Hello>(Arena*);
 template<> ::dsa::control::v1::HelloAccepted* Arena::CreateMaybeMessage<::dsa::control::v1::HelloAccepted>(Arena*);
 template<> ::dsa::control::v1::HelloRejected* Arena::CreateMaybeMessage<::dsa::control::v1::HelloRejected>(Arena*);
 template<> ::dsa::control::v1::HostMemory* Arena::CreateMaybeMessage<::dsa::control::v1::HostMemory>(Arena*);
+template<> ::dsa::control::v1::HostSleep* Arena::CreateMaybeMessage<::dsa::control::v1::HostSleep>(Arena*);
 template<> ::dsa::control::v1::ImeCommit* Arena::CreateMaybeMessage<::dsa::control::v1::ImeCommit>(Arena*);
 template<> ::dsa::control::v1::ImeComposition* Arena::CreateMaybeMessage<::dsa::control::v1::ImeComposition>(Arena*);
 template<> ::dsa::control::v1::ImeCursor* Arena::CreateMaybeMessage<::dsa::control::v1::ImeCursor>(Arena*);
@@ -4424,6 +4432,264 @@ class HostMemory final :
 };
 // -------------------------------------------------------------------
 
+class HostSleep final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.HostSleep) */ {
+ public:
+  inline HostSleep() : HostSleep(nullptr) {}
+  ~HostSleep() override;
+  explicit PROTOBUF_CONSTEXPR HostSleep(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  HostSleep(const HostSleep& from);
+  HostSleep(HostSleep&& from) noexcept
+    : HostSleep() {
+    *this = ::std::move(from);
+  }
+
+  inline HostSleep& operator=(const HostSleep& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline HostSleep& operator=(HostSleep&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const HostSleep& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const HostSleep* internal_default_instance() {
+    return reinterpret_cast<const HostSleep*>(
+               &_HostSleep_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    24;
+
+  friend void swap(HostSleep& a, HostSleep& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(HostSleep* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(HostSleep* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  HostSleep* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<HostSleep>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const HostSleep& from);
+  void MergeFrom(const HostSleep& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(HostSleep* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.HostSleep";
+  }
+  protected:
+  explicit HostSleep(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kHostUnixTimeMsFieldNumber = 2,
+    kAsleepFieldNumber = 1,
+  };
+  // uint64 host_unix_time_ms = 2;
+  void clear_host_unix_time_ms();
+  uint64_t host_unix_time_ms() const;
+  void set_host_unix_time_ms(uint64_t value);
+  private:
+  uint64_t _internal_host_unix_time_ms() const;
+  void _internal_set_host_unix_time_ms(uint64_t value);
+  public:
+
+  // bool asleep = 1;
+  void clear_asleep();
+  bool asleep() const;
+  void set_asleep(bool value);
+  private:
+  bool _internal_asleep() const;
+  void _internal_set_asleep(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.HostSleep)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    uint64_t host_unix_time_ms_;
+    bool asleep_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class GuestSleepReady final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.GuestSleepReady) */ {
+ public:
+  inline GuestSleepReady() : GuestSleepReady(nullptr) {}
+  ~GuestSleepReady() override;
+  explicit PROTOBUF_CONSTEXPR GuestSleepReady(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  GuestSleepReady(const GuestSleepReady& from);
+  GuestSleepReady(GuestSleepReady&& from) noexcept
+    : GuestSleepReady() {
+    *this = ::std::move(from);
+  }
+
+  inline GuestSleepReady& operator=(const GuestSleepReady& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline GuestSleepReady& operator=(GuestSleepReady&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const GuestSleepReady& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const GuestSleepReady* internal_default_instance() {
+    return reinterpret_cast<const GuestSleepReady*>(
+               &_GuestSleepReady_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    25;
+
+  friend void swap(GuestSleepReady& a, GuestSleepReady& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(GuestSleepReady* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(GuestSleepReady* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  GuestSleepReady* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<GuestSleepReady>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const GuestSleepReady& from);
+  void MergeFrom(const GuestSleepReady& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(GuestSleepReady* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.GuestSleepReady";
+  }
+  protected:
+  explicit GuestSleepReady(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.GuestSleepReady)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class PowerHint final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.PowerHint) */ {
  public:
@@ -4463,7 +4729,7 @@ class PowerHint final :
                &_PowerHint_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    24;
+    26;
 
   friend void swap(PowerHint& a, PowerHint& b) {
     a.Swap(&b);
@@ -4626,7 +4892,7 @@ class DeviceIdle final :
                &_DeviceIdle_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    25;
+    27;
 
   friend void swap(DeviceIdle& a, DeviceIdle& b) {
     a.Swap(&b);
@@ -4756,7 +5022,7 @@ class ClipboardText final :
                &_ClipboardText_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    26;
+    28;
 
   friend void swap(ClipboardText& a, ClipboardText& b) {
     a.Swap(&b);
@@ -4891,7 +5157,7 @@ class ClipboardSharing final :
                &_ClipboardSharing_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    27;
+    29;
 
   friend void swap(ClipboardSharing& a, ClipboardSharing& b) {
     a.Swap(&b);
@@ -5021,7 +5287,7 @@ class GuestNotification final :
                &_GuestNotification_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    28;
+    30;
 
   friend void swap(GuestNotification& a, GuestNotification& b) {
     a.Swap(&b);
@@ -5280,7 +5546,7 @@ class NotificationRemoved final :
                &_NotificationRemoved_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    29;
+    31;
 
   friend void swap(NotificationRemoved& a, NotificationRemoved& b) {
     a.Swap(&b);
@@ -5415,7 +5681,7 @@ class NotificationClicked final :
                &_NotificationClicked_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    30;
+    32;
 
   friend void swap(NotificationClicked& a, NotificationClicked& b) {
     a.Swap(&b);
@@ -5550,7 +5816,7 @@ class NotificationDismissed final :
                &_NotificationDismissed_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    31;
+    33;
 
   friend void swap(NotificationDismissed& a, NotificationDismissed& b) {
     a.Swap(&b);
@@ -5685,7 +5951,7 @@ class RequestGuestMemory final :
                &_RequestGuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    32;
+    34;
 
   friend void swap(RequestGuestMemory& a, RequestGuestMemory& b) {
     a.Swap(&b);
@@ -5802,7 +6068,7 @@ class ProcessMemory final :
                &_ProcessMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    33;
+    35;
 
   friend void swap(ProcessMemory& a, ProcessMemory& b) {
     a.Swap(&b);
@@ -5970,7 +6236,7 @@ class GuestMemory final :
                &_GuestMemory_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    34;
+    36;
 
   friend void swap(GuestMemory& a, GuestMemory& b) {
     a.Swap(&b);
@@ -6252,7 +6518,7 @@ class AgentConnected final :
                &_AgentConnected_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    35;
+    37;
 
   friend void swap(AgentConnected& a, AgentConnected& b) {
     a.Swap(&b);
@@ -6369,7 +6635,7 @@ class GuestBoot final :
                &_GuestBoot_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    36;
+    38;
 
   friend void swap(GuestBoot& a, GuestBoot& b) {
     a.Swap(&b);
@@ -6510,7 +6776,7 @@ class InstallApk final :
                &_InstallApk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    37;
+    39;
 
   friend void swap(InstallApk& a, InstallApk& b) {
     a.Swap(&b);
@@ -6667,7 +6933,7 @@ class ApkChunk final :
                &_ApkChunk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    38;
+    40;
 
   friend void swap(ApkChunk& a, ApkChunk& b) {
     a.Swap(&b);
@@ -6824,7 +7090,7 @@ class QueryPackage final :
                &_QueryPackage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    39;
+    41;
 
   friend void swap(QueryPackage& a, QueryPackage& b) {
     a.Swap(&b);
@@ -6970,7 +7236,7 @@ class PackageState final :
                &_PackageState_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    40;
+    42;
 
   friend void swap(PackageState& a, PackageState& b) {
     a.Swap(&b);
@@ -7164,7 +7430,7 @@ class OpenLink final :
                &_OpenLink_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    41;
+    43;
 
   friend void swap(OpenLink& a, OpenLink& b) {
     a.Swap(&b);
@@ -7299,7 +7565,7 @@ class LinkHandling final :
                &_LinkHandling_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    42;
+    44;
 
   friend void swap(LinkHandling& a, LinkHandling& b) {
     a.Swap(&b);
@@ -7429,7 +7695,7 @@ class OpenFile final :
                &_OpenFile_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    43;
+    45;
 
   friend void swap(OpenFile& a, OpenFile& b) {
     a.Swap(&b);
@@ -7597,7 +7863,7 @@ class FileChunk final :
                &_FileChunk_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    44;
+    46;
 
   friend void swap(FileChunk& a, FileChunk& b) {
     a.Swap(&b);
@@ -7754,7 +8020,7 @@ class CancelInstall final :
                &_CancelInstall_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    45;
+    47;
 
   friend void swap(CancelInstall& a, CancelInstall& b) {
     a.Swap(&b);
@@ -7884,7 +8150,7 @@ class InstallProgress final :
                &_InstallProgress_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    46;
+    48;
 
   friend void swap(InstallProgress& a, InstallProgress& b) {
     a.Swap(&b);
@@ -8025,7 +8291,7 @@ class InstallResult final :
                &_InstallResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    47;
+    49;
 
   friend void swap(InstallResult& a, InstallResult& b) {
     a.Swap(&b);
@@ -8198,7 +8464,7 @@ class FileProgress final :
                &_FileProgress_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    48;
+    50;
 
   friend void swap(FileProgress& a, FileProgress& b) {
     a.Swap(&b);
@@ -8355,7 +8621,7 @@ class ClockProbe final :
                &_ClockProbe_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    49;
+    51;
 
   friend void swap(ClockProbe& a, ClockProbe& b) {
     a.Swap(&b);
@@ -8485,7 +8751,7 @@ class VideoCodecSupport final :
                &_VideoCodecSupport_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    50;
+    52;
 
   friend void swap(VideoCodecSupport& a, VideoCodecSupport& b) {
     a.Swap(&b);
@@ -8637,7 +8903,7 @@ class VideoCapabilities final :
                &_VideoCapabilities_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    51;
+    53;
 
   friend void swap(VideoCapabilities& a, VideoCapabilities& b) {
     a.Swap(&b);
@@ -8776,7 +9042,7 @@ class VideoDecoderOpen final :
                &_VideoDecoderOpen_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    52;
+    54;
 
   friend void swap(VideoDecoderOpen& a, VideoDecoderOpen& b) {
     a.Swap(&b);
@@ -8928,7 +9194,7 @@ class VideoDecoderOpened final :
                &_VideoDecoderOpened_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    53;
+    55;
 
   friend void swap(VideoDecoderOpened& a, VideoDecoderOpened& b) {
     a.Swap(&b);
@@ -9074,7 +9340,7 @@ class VideoPacket final :
                &_VideoPacket_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    54;
+    56;
 
   friend void swap(VideoPacket& a, VideoPacket& b) {
     a.Swap(&b);
@@ -9253,7 +9519,7 @@ class VideoFrame final :
                &_VideoFrame_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    55;
+    57;
 
   friend void swap(VideoFrame& a, VideoFrame& b) {
     a.Swap(&b);
@@ -9454,7 +9720,7 @@ class VideoFlush final :
                &_VideoFlush_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    56;
+    58;
 
   friend void swap(VideoFlush& a, VideoFlush& b) {
     a.Swap(&b);
@@ -9571,7 +9837,7 @@ class VideoFlushed final :
                &_VideoFlushed_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    57;
+    59;
 
   friend void swap(VideoFlushed& a, VideoFlushed& b) {
     a.Swap(&b);
@@ -9688,7 +9954,7 @@ class VideoError final :
                &_VideoError_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    58;
+    60;
 
   friend void swap(VideoError& a, VideoError& b) {
     a.Swap(&b);
@@ -9823,7 +10089,7 @@ class ClockAnswer final :
                &_ClockAnswer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    59;
+    61;
 
   friend void swap(ClockAnswer& a, ClockAnswer& b) {
     a.Swap(&b);
@@ -9964,7 +10230,7 @@ class ListWidgetProviders final :
                &_ListWidgetProviders_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    60;
+    62;
 
   friend void swap(ListWidgetProviders& a, ListWidgetProviders& b) {
     a.Swap(&b);
@@ -10094,7 +10360,7 @@ class WidgetProvider final :
                &_WidgetProvider_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    61;
+    63;
 
   friend void swap(WidgetProvider& a, WidgetProvider& b) {
     a.Swap(&b);
@@ -10365,7 +10631,7 @@ class WidgetProviders final :
                &_WidgetProviders_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    62;
+    64;
 
   friend void swap(WidgetProviders& a, WidgetProviders& b) {
     a.Swap(&b);
@@ -10526,7 +10792,7 @@ class AddWidget final :
                &_AddWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    63;
+    65;
 
   friend void swap(AddWidget& a, AddWidget& b) {
     a.Swap(&b);
@@ -10672,7 +10938,7 @@ class WidgetAdded final :
                &_WidgetAdded_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    64;
+    66;
 
   friend void swap(WidgetAdded& a, WidgetAdded& b) {
     a.Swap(&b);
@@ -10829,7 +11095,7 @@ class WidgetUpdated final :
                &_WidgetUpdated_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    65;
+    67;
 
   friend void swap(WidgetUpdated& a, WidgetUpdated& b) {
     a.Swap(&b);
@@ -10979,7 +11245,7 @@ class WidgetList final :
                &_WidgetList_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    66;
+    68;
 
   friend void swap(WidgetList& a, WidgetList& b) {
     a.Swap(&b);
@@ -11123,7 +11389,7 @@ class RemoveWidget final :
                &_RemoveWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    67;
+    69;
 
   friend void swap(RemoveWidget& a, RemoveWidget& b) {
     a.Swap(&b);
@@ -11253,7 +11519,7 @@ class ResizeWidget final :
                &_ResizeWidget_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    68;
+    70;
 
   friend void swap(ResizeWidget& a, ResizeWidget& b) {
     a.Swap(&b);
@@ -11438,7 +11704,7 @@ class WidgetFrame final :
                &_WidgetFrame_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    69;
+    71;
 
   friend void swap(WidgetFrame& a, WidgetFrame& b) {
     a.Swap(&b);
@@ -11606,7 +11872,7 @@ class WidgetPointer final :
                &_WidgetPointer_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    70;
+    72;
 
   friend void swap(WidgetPointer& a, WidgetPointer& b) {
     a.Swap(&b);
@@ -11780,7 +12046,7 @@ class AccessibilityWatch final :
                &_AccessibilityWatch_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    71;
+    73;
 
   friend void swap(AccessibilityWatch& a, AccessibilityWatch& b) {
     a.Swap(&b);
@@ -11921,7 +12187,7 @@ class NodeRange final :
                &_NodeRange_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    72;
+    74;
 
   friend void swap(NodeRange& a, NodeRange& b) {
     a.Swap(&b);
@@ -12073,7 +12339,7 @@ class AccessibilityNode final :
                &_AccessibilityNode_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    73;
+    75;
 
   friend void swap(AccessibilityNode& a, AccessibilityNode& b) {
     a.Swap(&b);
@@ -12516,7 +12782,7 @@ class AccessibilityTree final :
                &_AccessibilityTree_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    74;
+    76;
 
   friend void swap(AccessibilityTree& a, AccessibilityTree& b) {
     a.Swap(&b);
@@ -12749,7 +13015,7 @@ class AccessibilityAction final :
                &_AccessibilityAction_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    75;
+    77;
 
   friend void swap(AccessibilityAction& a, AccessibilityAction& b) {
     a.Swap(&b);
@@ -12939,7 +13205,7 @@ class AccessibilityActionResult final :
                &_AccessibilityActionResult_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    76;
+    78;
 
   friend void swap(AccessibilityActionResult& a, AccessibilityActionResult& b) {
     a.Swap(&b);
@@ -13136,6 +13402,8 @@ class Envelope final :
     kPowerHint = 110,
     kDeviceIdle = 42,
     kHostMemory = 43,
+    kHostSleep = 44,
+    kGuestSleepReady = 45,
     kInstallApk = 60,
     kApkChunk = 61,
     kCancelInstall = 62,
@@ -13182,7 +13450,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    77;
+    79;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -13279,6 +13547,8 @@ class Envelope final :
     kPowerHintFieldNumber = 110,
     kDeviceIdleFieldNumber = 42,
     kHostMemoryFieldNumber = 43,
+    kHostSleepFieldNumber = 44,
+    kGuestSleepReadyFieldNumber = 45,
     kInstallApkFieldNumber = 60,
     kApkChunkFieldNumber = 61,
     kCancelInstallFieldNumber = 62,
@@ -13911,6 +14181,42 @@ class Envelope final :
   void unsafe_arena_set_allocated_host_memory(
       ::dsa::control::v1::HostMemory* host_memory);
   ::dsa::control::v1::HostMemory* unsafe_arena_release_host_memory();
+
+  // .dsa.control.v1.HostSleep host_sleep = 44;
+  bool has_host_sleep() const;
+  private:
+  bool _internal_has_host_sleep() const;
+  public:
+  void clear_host_sleep();
+  const ::dsa::control::v1::HostSleep& host_sleep() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::HostSleep* release_host_sleep();
+  ::dsa::control::v1::HostSleep* mutable_host_sleep();
+  void set_allocated_host_sleep(::dsa::control::v1::HostSleep* host_sleep);
+  private:
+  const ::dsa::control::v1::HostSleep& _internal_host_sleep() const;
+  ::dsa::control::v1::HostSleep* _internal_mutable_host_sleep();
+  public:
+  void unsafe_arena_set_allocated_host_sleep(
+      ::dsa::control::v1::HostSleep* host_sleep);
+  ::dsa::control::v1::HostSleep* unsafe_arena_release_host_sleep();
+
+  // .dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;
+  bool has_guest_sleep_ready() const;
+  private:
+  bool _internal_has_guest_sleep_ready() const;
+  public:
+  void clear_guest_sleep_ready();
+  const ::dsa::control::v1::GuestSleepReady& guest_sleep_ready() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::GuestSleepReady* release_guest_sleep_ready();
+  ::dsa::control::v1::GuestSleepReady* mutable_guest_sleep_ready();
+  void set_allocated_guest_sleep_ready(::dsa::control::v1::GuestSleepReady* guest_sleep_ready);
+  private:
+  const ::dsa::control::v1::GuestSleepReady& _internal_guest_sleep_ready() const;
+  ::dsa::control::v1::GuestSleepReady* _internal_mutable_guest_sleep_ready();
+  public:
+  void unsafe_arena_set_allocated_guest_sleep_ready(
+      ::dsa::control::v1::GuestSleepReady* guest_sleep_ready);
+  ::dsa::control::v1::GuestSleepReady* unsafe_arena_release_guest_sleep_ready();
 
   // .dsa.control.v1.InstallApk install_apk = 60;
   bool has_install_apk() const;
@@ -14634,6 +14940,8 @@ class Envelope final :
   void set_has_power_hint();
   void set_has_device_idle();
   void set_has_host_memory();
+  void set_has_host_sleep();
+  void set_has_guest_sleep_ready();
   void set_has_install_apk();
   void set_has_apk_chunk();
   void set_has_cancel_install();
@@ -14716,6 +15024,8 @@ class Envelope final :
       ::dsa::control::v1::PowerHint* power_hint_;
       ::dsa::control::v1::DeviceIdle* device_idle_;
       ::dsa::control::v1::HostMemory* host_memory_;
+      ::dsa::control::v1::HostSleep* host_sleep_;
+      ::dsa::control::v1::GuestSleepReady* guest_sleep_ready_;
       ::dsa::control::v1::InstallApk* install_apk_;
       ::dsa::control::v1::ApkChunk* apk_chunk_;
       ::dsa::control::v1::CancelInstall* cancel_install_;
@@ -17139,6 +17449,54 @@ inline void HostMemory::set_low(bool value) {
   _internal_set_low(value);
   // @@protoc_insertion_point(field_set:dsa.control.v1.HostMemory.low)
 }
+
+// -------------------------------------------------------------------
+
+// HostSleep
+
+// bool asleep = 1;
+inline void HostSleep::clear_asleep() {
+  _impl_.asleep_ = false;
+}
+inline bool HostSleep::_internal_asleep() const {
+  return _impl_.asleep_;
+}
+inline bool HostSleep::asleep() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.HostSleep.asleep)
+  return _internal_asleep();
+}
+inline void HostSleep::_internal_set_asleep(bool value) {
+  
+  _impl_.asleep_ = value;
+}
+inline void HostSleep::set_asleep(bool value) {
+  _internal_set_asleep(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.HostSleep.asleep)
+}
+
+// uint64 host_unix_time_ms = 2;
+inline void HostSleep::clear_host_unix_time_ms() {
+  _impl_.host_unix_time_ms_ = uint64_t{0u};
+}
+inline uint64_t HostSleep::_internal_host_unix_time_ms() const {
+  return _impl_.host_unix_time_ms_;
+}
+inline uint64_t HostSleep::host_unix_time_ms() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.HostSleep.host_unix_time_ms)
+  return _internal_host_unix_time_ms();
+}
+inline void HostSleep::_internal_set_host_unix_time_ms(uint64_t value) {
+  
+  _impl_.host_unix_time_ms_ = value;
+}
+inline void HostSleep::set_host_unix_time_ms(uint64_t value) {
+  _internal_set_host_unix_time_ms(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.HostSleep.host_unix_time_ms)
+}
+
+// -------------------------------------------------------------------
+
+// GuestSleepReady
 
 // -------------------------------------------------------------------
 
@@ -25114,6 +25472,154 @@ inline ::dsa::control::v1::HostMemory* Envelope::mutable_host_memory() {
   return _msg;
 }
 
+// .dsa.control.v1.HostSleep host_sleep = 44;
+inline bool Envelope::_internal_has_host_sleep() const {
+  return body_case() == kHostSleep;
+}
+inline bool Envelope::has_host_sleep() const {
+  return _internal_has_host_sleep();
+}
+inline void Envelope::set_has_host_sleep() {
+  _impl_._oneof_case_[0] = kHostSleep;
+}
+inline void Envelope::clear_host_sleep() {
+  if (_internal_has_host_sleep()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.host_sleep_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::HostSleep* Envelope::release_host_sleep() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.host_sleep)
+  if (_internal_has_host_sleep()) {
+    clear_has_body();
+    ::dsa::control::v1::HostSleep* temp = _impl_.body_.host_sleep_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.host_sleep_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::HostSleep& Envelope::_internal_host_sleep() const {
+  return _internal_has_host_sleep()
+      ? *_impl_.body_.host_sleep_
+      : reinterpret_cast< ::dsa::control::v1::HostSleep&>(::dsa::control::v1::_HostSleep_default_instance_);
+}
+inline const ::dsa::control::v1::HostSleep& Envelope::host_sleep() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.host_sleep)
+  return _internal_host_sleep();
+}
+inline ::dsa::control::v1::HostSleep* Envelope::unsafe_arena_release_host_sleep() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.host_sleep)
+  if (_internal_has_host_sleep()) {
+    clear_has_body();
+    ::dsa::control::v1::HostSleep* temp = _impl_.body_.host_sleep_;
+    _impl_.body_.host_sleep_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_host_sleep(::dsa::control::v1::HostSleep* host_sleep) {
+  clear_body();
+  if (host_sleep) {
+    set_has_host_sleep();
+    _impl_.body_.host_sleep_ = host_sleep;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.host_sleep)
+}
+inline ::dsa::control::v1::HostSleep* Envelope::_internal_mutable_host_sleep() {
+  if (!_internal_has_host_sleep()) {
+    clear_body();
+    set_has_host_sleep();
+    _impl_.body_.host_sleep_ = CreateMaybeMessage< ::dsa::control::v1::HostSleep >(GetArenaForAllocation());
+  }
+  return _impl_.body_.host_sleep_;
+}
+inline ::dsa::control::v1::HostSleep* Envelope::mutable_host_sleep() {
+  ::dsa::control::v1::HostSleep* _msg = _internal_mutable_host_sleep();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.host_sleep)
+  return _msg;
+}
+
+// .dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;
+inline bool Envelope::_internal_has_guest_sleep_ready() const {
+  return body_case() == kGuestSleepReady;
+}
+inline bool Envelope::has_guest_sleep_ready() const {
+  return _internal_has_guest_sleep_ready();
+}
+inline void Envelope::set_has_guest_sleep_ready() {
+  _impl_._oneof_case_[0] = kGuestSleepReady;
+}
+inline void Envelope::clear_guest_sleep_ready() {
+  if (_internal_has_guest_sleep_ready()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.guest_sleep_ready_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::GuestSleepReady* Envelope::release_guest_sleep_ready() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.guest_sleep_ready)
+  if (_internal_has_guest_sleep_ready()) {
+    clear_has_body();
+    ::dsa::control::v1::GuestSleepReady* temp = _impl_.body_.guest_sleep_ready_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.guest_sleep_ready_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::GuestSleepReady& Envelope::_internal_guest_sleep_ready() const {
+  return _internal_has_guest_sleep_ready()
+      ? *_impl_.body_.guest_sleep_ready_
+      : reinterpret_cast< ::dsa::control::v1::GuestSleepReady&>(::dsa::control::v1::_GuestSleepReady_default_instance_);
+}
+inline const ::dsa::control::v1::GuestSleepReady& Envelope::guest_sleep_ready() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.guest_sleep_ready)
+  return _internal_guest_sleep_ready();
+}
+inline ::dsa::control::v1::GuestSleepReady* Envelope::unsafe_arena_release_guest_sleep_ready() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.guest_sleep_ready)
+  if (_internal_has_guest_sleep_ready()) {
+    clear_has_body();
+    ::dsa::control::v1::GuestSleepReady* temp = _impl_.body_.guest_sleep_ready_;
+    _impl_.body_.guest_sleep_ready_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_guest_sleep_ready(::dsa::control::v1::GuestSleepReady* guest_sleep_ready) {
+  clear_body();
+  if (guest_sleep_ready) {
+    set_has_guest_sleep_ready();
+    _impl_.body_.guest_sleep_ready_ = guest_sleep_ready;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.guest_sleep_ready)
+}
+inline ::dsa::control::v1::GuestSleepReady* Envelope::_internal_mutable_guest_sleep_ready() {
+  if (!_internal_has_guest_sleep_ready()) {
+    clear_body();
+    set_has_guest_sleep_ready();
+    _impl_.body_.guest_sleep_ready_ = CreateMaybeMessage< ::dsa::control::v1::GuestSleepReady >(GetArenaForAllocation());
+  }
+  return _impl_.body_.guest_sleep_ready_;
+}
+inline ::dsa::control::v1::GuestSleepReady* Envelope::mutable_guest_sleep_ready() {
+  ::dsa::control::v1::GuestSleepReady* _msg = _internal_mutable_guest_sleep_ready();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.guest_sleep_ready)
+  return _msg;
+}
+
 // .dsa.control.v1.InstallApk install_apk = 60;
 inline bool Envelope::_internal_has_install_apk() const {
   return body_case() == kInstallApk;
@@ -27938,6 +28444,10 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
