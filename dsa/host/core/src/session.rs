@@ -83,11 +83,18 @@
 //! the agent and wait for its answer. A widget's frames come while the guest is in Doze too:
 //! the agent draws them at a low rate without waking the guest. A press in a widget's window
 //! wakes a guest in Doze, as a click on a notification does, since it may open an app.
+//!
+//! The guest's log flows only while someone reads it ([`Session::watch_log`]): the first
+//! reader asks the guest's channel daemon to read logd, and the last one leaving tells it to
+//! stop. The records arrive on a port of their own ([`Session::serve_log_port`]), so they
+//! never queue behind or ahead of the control channel's messages, and they are kept only in
+//! a small ring in memory ([`crate::guest_log`]). A one-off dump ([`Session::dump_log`]) and
+//! the guest's diagnostics ([`Session::collect_diagnostics`]) come the same way.
 
 use std::collections::HashMap;
 use std::fmt;
 use std::io::Read;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
@@ -104,8 +111,12 @@ use crate::apk::{self, InstallOutcome, InstalledPackage};
 use crate::clipboard;
 use crate::clock_trace::ClockTrace;
 use crate::files::{self, FileAction, FileTransfer};
+use crate::guest_log::{
+    serve_log_connection, DiagnosticsEvent, LogDumpEvent, LogEntry, LogFilter, LogHub,
+    LogPortMessage, LogWatch, STREAM_TAIL,
+};
 use crate::ime::{ImeCursor, ImeEvent};
-use crate::input::PointerEvent;
+use crate::input::{PointerAction, PointerEvent};
 use crate::keys::KeyEvent;
 use crate::links::{self, LinkGate};
 use crate::memory::{GuestMemory, GuestMemoryReport};
@@ -561,6 +572,12 @@ struct Shared {
     accessibility: Mutex<AccessibilityHub>,
     /// Who hears of the guest's power hints.
     power_hint_watchers: Mutex<Vec<Sender<GuestPower>>>,
+    /// Who reads the guest's log, its recent records, and the dumps and diagnostics under way.
+    logs: Mutex<LogHub>,
+    /// The running boot's secret, which a connection on the log port must prove it knows.
+    boot_secret: Mutex<Option<BootSecret>>,
+    /// Set when the session ends, so the log port's threads end with it.
+    log_port_stop: Arc<AtomicBool>,
 }
 
 /// What the guest's power HAL asks of the host's processors.
@@ -570,6 +587,11 @@ pub enum GuestPower {
     Hint(PowerHint),
     /// The guest stopped: none of its modes or boosts is on any longer.
     Stopped,
+    /// Whether any task window is shown on the host, as the host said it.
+    WindowsShown(bool),
+    /// The host passed the user's input (a press, a release, a scroll or a key) to the guest.
+    /// The host hears of it before Android does, so its boost starts here.
+    HostInput,
 }
 
 /// What the agent answers about widgets.
@@ -870,6 +892,9 @@ impl Session {
             last_package_query: AtomicU32::new(0),
             accessibility: Mutex::new(AccessibilityHub::default()),
             power_hint_watchers: Mutex::new(Vec::new()),
+            logs: Mutex::new(LogHub::default()),
+            boot_secret: Mutex::new(None),
+            log_port_stop: Arc::new(AtomicBool::new(false)),
         });
         let freeze_delay = config.freeze_after.unwrap_or(DEFAULT_FREEZE_AFTER);
         let (commands, command_rx) = mpsc::channel();
@@ -1242,6 +1267,7 @@ impl Session {
     /// Says whether any task window is shown. The session keeps the latest word in every
     /// state, so a guest that starts with no window shown goes into Doze after the delay.
     pub fn windows_shown(&self, shown: bool) -> Result<(), SessionError> {
+        self.shared.publish_power(GuestPower::WindowsShown(shown));
         self.commands
             .send(Command::WindowsShown(shown))
             .map_err(|_| SessionError::Gone)
@@ -1803,6 +1829,12 @@ impl Session {
 
     /// Passes pointer input in a task's window to the guest. Needs an active session.
     pub fn pointer(&self, event: &PointerEvent) -> Result<(), SessionError> {
+        if matches!(
+            event.action,
+            PointerAction::Down | PointerAction::Up | PointerAction::Scroll
+        ) {
+            self.shared.publish_power(GuestPower::HostInput);
+        }
         self.send(dsa_protocol::encode(&control::Envelope {
             body: Some(Body::PointerEvent(event.to_control())),
         }))
@@ -1811,6 +1843,7 @@ impl Session {
     /// Passes a key pressed or released in a task's window to the guest. Needs an active
     /// session.
     pub fn key(&self, event: &KeyEvent) -> Result<(), SessionError> {
+        self.shared.publish_power(GuestPower::HostInput);
         self.send(dsa_protocol::encode(&control::Envelope {
             body: Some(Body::KeyEvent(event.to_control())),
         }))
@@ -1825,8 +1858,231 @@ impl Session {
     }
 }
 
+impl Session {
+    /// Reads the guest's log: the records the host holds that pass `filter`, then each new one
+    /// that does. The first reader asks the guest to read its log, and dropping the last tells
+    /// it to stop, so a guest whose log nobody reads pays nothing for it. The watch lasts
+    /// across restarts of the guest: each boot is asked again.
+    pub fn watch_log(&self, filter: LogFilter) -> LogWatch {
+        let (id, history, entries, stream) = {
+            let mut hub = self.shared.logs.lock().unwrap_or_else(|e| e.into_inner());
+            let first = hub.reader_count() == 0;
+            let (id, history, entries) = hub.subscribe(filter);
+            (id, history, entries, (hub.stream(), first))
+        };
+        let (stream, first) = stream;
+        if first {
+            eprintln!("guest log: a reader is attached; asking Android for its log");
+        }
+        send_quietly(&self.shared, &self.commands, Body::LogStream(stream));
+        let shared = Arc::clone(&self.shared);
+        let commands = self.commands.clone();
+        LogWatch::new(history, entries, move || {
+            let stream = {
+                let mut hub = shared.logs.lock().unwrap_or_else(|e| e.into_inner());
+                hub.unsubscribe(id);
+                hub.stream()
+            };
+            if !stream.on {
+                eprintln!("guest log: no reader is attached; Android stops sending its log");
+            }
+            send_quietly(&shared, &commands, Body::LogStream(stream));
+        })
+    }
+
+    /// The guest's records the host holds now, oldest first.
+    pub fn recent_log(&self) -> Vec<LogEntry> {
+        let hub = self.shared.logs.lock().unwrap_or_else(|e| e.into_inner());
+        hub.ring().iter().cloned().collect()
+    }
+
+    /// Asks the guest for everything its log holds now that passes `filter`. The records
+    /// arrive on the receiver, then its end. Needs a running guest.
+    pub fn dump_log(&self, filter: LogFilter) -> Result<Receiver<LogDumpEvent>, SessionError> {
+        let least = filter.least_priority();
+        let buffers = filter.buffers;
+        let (request_id, events) = self
+            .shared
+            .logs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .begin_dump(filter);
+        let sent = self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::LogDump(control::LogDump {
+                request_id,
+                buffers,
+                min_priority: u32::from(least.min(crate::guest_log::FATAL)),
+            })),
+        }));
+        if let Err(error) = sent {
+            self.shared
+                .logs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .end_dump(request_id);
+            return Err(error);
+        }
+        Ok(events)
+    }
+
+    /// Asks the guest for its diagnostics. Its files arrive on the receiver, then the end.
+    /// Needs a running guest.
+    pub fn collect_diagnostics(&self) -> Result<Receiver<DiagnosticsEvent>, SessionError> {
+        let (request_id, events) = self
+            .shared
+            .logs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .begin_diagnostics();
+        let sent = self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::CollectDiagnostics(control::CollectDiagnostics {
+                request_id,
+            })),
+        }));
+        if let Err(error) = sent {
+            self.shared
+                .logs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .end_diagnostics(request_id);
+            return Err(error);
+        }
+        Ok(events)
+    }
+
+    /// Serves the guest's log port on `listener` for the life of the session: each connection
+    /// that proves it knows the running boot's secret may send log records and diagnostics. A
+    /// connection that sends anything else, or a record that breaks the rules, is closed; the
+    /// control channel and the session go on.
+    pub fn serve_log_port(&self, listener: Box<dyn Listener>, build: &str) {
+        let shared = Arc::clone(&self.shared);
+        let commands = self.commands.clone();
+        let hello = dsa_protocol::handshake::local_hello(control::Role::Host, build);
+        let spawned = thread::Builder::new()
+            .name("dsa-guest-log".into())
+            .spawn(move || accept_log_connections(listener, shared, commands, hello));
+        if let Err(error) = spawned {
+            eprintln!("guest log: the log port cannot be served: {error}");
+        }
+    }
+}
+
+/// How long a connection on the log port may take to pass the handshake.
+const LOG_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn accept_log_connections(
+    mut listener: Box<dyn Listener>,
+    shared: Arc<Shared>,
+    commands: Sender<Command>,
+    hello: control::Hello,
+) {
+    let mut reported = false;
+    while !shared.log_port_stop.load(Ordering::Relaxed) {
+        let mut connection = match listener.accept(Duration::from_millis(200)) {
+            Ok(connection) => connection,
+            Err(TransportError::Timeout) => continue,
+            Err(error) => {
+                if !reported {
+                    eprintln!("guest log: accepting on the log port failed: {error}");
+                    reported = true;
+                }
+                thread::sleep(Duration::from_secs(1));
+                continue;
+            }
+        };
+        reported = false;
+        let secret = shared
+            .boot_secret
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let Some(secret) = secret else {
+            connection.close();
+            continue;
+        };
+        let (shared, commands, hello) = (Arc::clone(&shared), commands.clone(), hello.clone());
+        let spawned = thread::Builder::new()
+            .name("dsa-guest-log-connection".into())
+            .spawn(move || {
+                let served = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    if let Err(error) = dsa_protocol::handshake::host_accept(
+                        connection.as_mut(),
+                        &hello,
+                        &secret,
+                        LOG_HANDSHAKE_TIMEOUT,
+                    ) {
+                        connection.close();
+                        eprintln!("guest log: refused a connection on the log port: {error}");
+                        return;
+                    }
+                    let stop = || shared.log_port_stop.load(Ordering::Relaxed);
+                    let ended = serve_log_connection(connection.as_mut(), &stop, &mut |message| {
+                        deliver_log(&shared, &commands, message)
+                    });
+                    if let Err(why) = ended {
+                        eprintln!(
+                            "guest log: closed the log connection, which sent {why}; the control \
+                             channel goes on"
+                        );
+                    }
+                }));
+                if served.is_err() {
+                    eprintln!("guest log: a log connection failed; the control channel goes on");
+                }
+            });
+        if let Err(error) = spawned {
+            eprintln!("guest log: a log connection cannot be served: {error}");
+        }
+    }
+}
+
+/// Hands one message from the log port to whoever waits for it.
+fn deliver_log(shared: &Shared, commands: &Sender<Command>, message: LogPortMessage) {
+    match message {
+        LogPortMessage::Records {
+            request_id: 0,
+            entries,
+            error,
+            ..
+        } => {
+            if !error.is_empty() {
+                eprintln!("guest log: Android cannot send its log: {error}");
+            }
+            let stream = {
+                let mut hub = shared.logs.lock().unwrap_or_else(|e| e.into_inner());
+                hub.publish(entries).then(|| hub.stream())
+            };
+            if let Some(stream) = stream {
+                send_quietly(shared, commands, Body::LogStream(stream));
+            }
+        }
+        LogPortMessage::Records {
+            request_id,
+            entries,
+            end,
+            error,
+        } => {
+            let mut hub = shared.logs.lock().unwrap_or_else(|e| e.into_inner());
+            if !hub.dump_records(request_id, entries, end, &error) {
+                eprintln!(
+                    "guest log: dropped records of dump {request_id}, which nobody waits for"
+                );
+            }
+        }
+        LogPortMessage::Diagnostics { request_id, event } => {
+            let mut hub = shared.logs.lock().unwrap_or_else(|e| e.into_inner());
+            if !hub.diagnostics_event(request_id, event) {
+                eprintln!(
+                    "guest log: dropped diagnostics of request {request_id}, which nobody waits for"
+                );
+            }
+        }
+    }
+}
+
 impl Drop for Session {
     fn drop(&mut self) {
+        self.shared.log_port_stop.store(true, Ordering::Relaxed);
         let _ = self.commands.send(Command::Shutdown);
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
@@ -3021,6 +3277,11 @@ impl Worker {
             }
         };
         let started = self.launcher.start(&secret);
+        *self
+            .shared
+            .boot_secret
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(secret.clone());
         self.secret = Some(secret);
         if let Err(why) = started {
             // The launcher may have got part of the way; make sure nothing is left behind.
@@ -3077,6 +3338,18 @@ impl Worker {
                             self.shared.set_sender(connection.try_clone_sender());
                             self.connection = Some(connection);
                             self.shared.set_vm_id(self.launcher.vm_id());
+                            // A new boot's daemon reads no log until it is asked; with readers
+                            // waiting, it starts with the newest records the boot has logged.
+                            let mut stream = self
+                                .shared
+                                .logs
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .stream();
+                            if stream.on {
+                                stream.tail = STREAM_TAIL;
+                                self.send_body(Body::LogStream(stream));
+                            }
                             // The agent takes the screen to be on when it connects. The session
                             // stays Starting until the guest says it is ready.
                             self.screen_on = true;
@@ -3437,6 +3710,9 @@ impl Worker {
             | Some(Body::WidgetPointer(_))
             | Some(Body::AccessibilityWatch(_))
             | Some(Body::AccessibilityAction(_))
+            | Some(Body::LogStream(_))
+            | Some(Body::LogDump(_))
+            | Some(Body::CollectDiagnostics(_))
             | Some(Body::ClockProbe(_))
             | Some(Body::VideoCapabilities(_))
             | Some(Body::VideoDecoderOpen(_))
@@ -3447,6 +3723,11 @@ impl Worker {
             | Some(Body::VideoFlushed(_))
             | Some(Body::VideoError(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
+            }
+            Some(Body::LogRecords(_))
+            | Some(Body::DiagnosticsFile(_))
+            | Some(Body::DiagnosticsDone(_)) => {
+                eprintln!("control channel: dropping a log message, which belongs on the log port");
             }
             None => {
                 eprintln!("control channel: dropping message with unknown body");
@@ -3486,6 +3767,17 @@ impl Worker {
         // And the modes and boosts its power HAL asked for.
         self.shared.publish_power(GuestPower::Stopped);
         self.shared.set_guest_memory(None);
+        // A dump or diagnostics under way gets no more from this guest.
+        self.shared
+            .logs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .guest_gone("Android stopped");
+        *self
+            .shared
+            .boot_secret
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
         match self.launcher.stop(self.config.stop_timeout) {
             Ok(()) => {
                 let reason = reason(self.launcher.as_mut());

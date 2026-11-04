@@ -209,8 +209,19 @@ class WidgetManager(
     /** Whether the host has heard which widgets are placed since the agent started. */
     private var listed = false
 
-    /** Starts drawing the placed widgets; [post] runs work on the agent's thread. */
-    fun start(post: (() -> Unit) -> Unit) {
+    /** Whether the widget host is running, so the placed widgets can be read. */
+    private var started = false
+
+    /** Whether a start was refused and is being tried again. */
+    private var waiting = false
+
+    /**
+     * Starts drawing the placed widgets; [post] runs work on the agent's thread. The agent
+     * starts before the user's storage is unlocked, and Android keeps widgets until then, so
+     * a refused start runs again through [later] until it succeeds. Until it has, the host
+     * hears nothing about widgets: an empty list would make it remove the ones placed.
+     */
+    fun start(later: (() -> Unit) -> Unit = {}, post: (() -> Unit) -> Unit) {
         this.post = post
         try {
             platform.start(
@@ -218,15 +229,21 @@ class WidgetManager(
                 changed = { post { if (isConnected()) announce() else prune() } },
             )
         } catch (e: Exception) {
-            log.warn("the widget host did not start; widgets are not drawn", e)
+            if (!waiting) log.warn("the widget host did not start yet; trying again until it does", e)
+            waiting = true
+            later { start(later, post) }
             return
         }
+        started = true
+        if (waiting) log.info("the widget host started")
         prune()
         val sizes = store.sizes()
         for (id in placed()) {
             val size = sizes[id] ?: platform.info(id)?.let(WidgetSize::defaultOf) ?: continue
             show(id, size)
         }
+        if (waiting && isConnected()) announce()
+        waiting = false
     }
 
     private fun placed(): List<Int> = try {
@@ -266,7 +283,7 @@ class WidgetManager(
     /** The host connected: it hears of every placed widget and what each shows now. */
     fun connected() {
         lastFrame.clear()
-        announce()
+        if (started) announce()
     }
 
     private fun announce() {

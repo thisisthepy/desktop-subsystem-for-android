@@ -9,6 +9,7 @@
   "processors": 4,
   "page_reporting_order": 9,
   "control_port": 5000,
+  "log_port": 5001,
   "connect_timeout_secs": 120,
   "stop_timeout_secs": 30,
   "doze_delay_secs": 30

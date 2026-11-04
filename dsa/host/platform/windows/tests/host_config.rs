@@ -18,6 +18,7 @@ fn fr2_a_minimal_configuration_gets_working_defaults() {
     let config = HostConfig::parse(MINIMAL).unwrap();
     assert_eq!(config.vm_name, "dsa-android");
     assert_eq!(config.control_port, 5000);
+    assert_eq!(config.log_port, 5001);
     let session = config.session_config();
     assert_eq!(session.connect_timeout, Duration::from_secs(120));
     assert_eq!(session.stop_timeout, Duration::from_secs(30));

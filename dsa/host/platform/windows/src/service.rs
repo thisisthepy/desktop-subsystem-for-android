@@ -24,11 +24,13 @@
 //! service runs; the render GPU is for each user's window manager, which asks for it.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_host_core::diagnostics::HostFile;
 use dsa_host_core::guest_display::{display_or_smallest, with_display_size};
+use dsa_host_core::guest_log::{LogFilter, LogWatch, DEFAULT_BUFFERS, WARN};
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{HostApiService, PerUser, ServiceFacts, UserAndroid, UserAndroids};
 use dsa_host_core::memory::{summary_lines, HostMemory, LOG_INTERVAL};
@@ -47,6 +49,7 @@ use dsa_transport::Listener;
 
 use crate::android_vm::AndroidVmLauncher;
 use crate::compositor::log::PerformanceCounterClock;
+use crate::console_log::{old_copy_path, ConsoleSigns};
 use crate::guest_communication_services::register_graphics_service_guids;
 use crate::guid::Guid;
 use crate::host_config::{local_app_data, HostConfig};
@@ -91,6 +94,89 @@ pub fn guest_traces_input(cmdline: &str) -> bool {
     cmdline
         .split_whitespace()
         .any(|word| word == GUEST_INPUT_TRACE)
+}
+
+/// Reads Android's log while it boots (`Starting` or `Stalled`), and only then, for what
+/// explains a boot that stalls: SELinux refusing the agent the channel, or the hwcomposer
+/// not reaching the renderer. Once Android is up, or stopped, the log is no longer read.
+fn watch_boot_signs(session: Weak<Session>, signs: Arc<Mutex<ConsoleSigns>>) {
+    use dsa_host_core::session::SessionState;
+    let Some(events) = session.upgrade().map(|s| s.events()) else {
+        return;
+    };
+    let mut watch: Option<LogWatch> = None;
+    loop {
+        let Some(running) = session.upgrade() else {
+            return;
+        };
+        let booting = matches!(
+            running.state(),
+            SessionState::Starting | SessionState::Stalled
+        );
+        if booting && watch.is_none() {
+            watch = Some(running.watch_log(LogFilter {
+                buffers: DEFAULT_BUFFERS,
+                tags: vec![("*".into(), WARN)],
+            }));
+        } else if !booting {
+            watch = None;
+        }
+        drop(running);
+        match &watch {
+            Some(log) => {
+                if let Ok(entry) = log.entries.recv_timeout(Duration::from_millis(500)) {
+                    let mut signs = signs.lock().unwrap_or_else(|e| e.into_inner());
+                    for entry in std::iter::once(entry).chain(log.entries.try_iter()) {
+                        signs.read_line(&format!("{}: {}", entry.tag, entry.message));
+                    }
+                }
+            }
+            None => match events.recv_timeout(Duration::from_secs(1)) {
+                Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            },
+        }
+    }
+}
+
+/// The host's logs that go in `sid`'s diagnostics: the service's own (without the lines about
+/// other users), the console of that user's Android, and the logs of the processes in their
+/// session. Never another user's.
+pub fn host_logs_of(config: &HostConfig, sid: &str) -> Vec<HostFile> {
+    let mut files = Vec::new();
+    if let Some(log) = &config.log_file {
+        files.push(HostFile {
+            name: "host/dsa-hostd.log".into(),
+            path: log.clone(),
+            only_user: Some(sid.to_string()),
+        });
+    }
+    if let Ok(user) = config.user_vm(sid) {
+        files.push(HostFile {
+            name: "host/android-console.log".into(),
+            path: user.console_log.clone(),
+            only_user: None,
+        });
+        files.push(HostFile {
+            name: "host/android-console.1.log".into(),
+            path: old_copy_path(&user.console_log),
+            only_user: None,
+        });
+    }
+    if let Ok(dir) = local_app_data(sid) {
+        let root = crate::paths::UserRoot::in_local_app_data(&dir);
+        files.push(HostFile {
+            name: "host/dsa-wm.log".into(),
+            path: root.window_manager_log(),
+            only_user: None,
+        });
+        files.push(HostFile {
+            name: "host/dsa-app-window.log".into(),
+            path: root.app_window_log(),
+            only_user: None,
+        });
+    }
+    files
 }
 
 /// The user's Android: their data disk, VM and session, created on their first request.
@@ -185,6 +271,10 @@ pub fn create_user_android(
     } else {
         launcher
     };
+    // What Android logs while it boots explains a boot that stalls; the console no longer
+    // carries it.
+    let boot_signs = Arc::new(Mutex::new(ConsoleSigns::default()));
+    let launcher = launcher.with_log_signs(Arc::clone(&boot_signs));
     let service = Guid::vsock_service(config.control_port);
     let listener = VmBoundListener::new(
         launcher.vm_id_slot(),
@@ -192,9 +282,17 @@ pub fn create_user_android(
             HvSocketListener::bind(vm_id, service).map(|l| Box::new(l) as Box<dyn Listener>)
         }),
     );
+    let log_service = Guid::vsock_service(config.log_port);
+    let log_listener = VmBoundListener::new(
+        launcher.vm_id_slot(),
+        Box::new(move |vm_id| {
+            HvSocketListener::bind(vm_id, log_service).map(|l| Box::new(l) as Box<dyn Listener>)
+        }),
+    );
     let session_config = config.session_config();
     let handshake = ControlHandshake::new(build, session_config.connect_timeout);
     let session = Session::new(launcher, Box::new(listener), handshake, session_config);
+    session.serve_log_port(Box::new(log_listener), build);
     // The clock lines go to the service's log, beside the guest's console log.
     let user_name = sid.to_string();
     session.set_clock_trace(Some(ClockTrace::new(
@@ -203,6 +301,17 @@ pub fn create_user_android(
         Arc::new(move |line: &str| eprintln!("{user_name}: {line}")),
     )));
     let session = Arc::new(session);
+    {
+        let (watched, user_name) = (Arc::downgrade(&session), sid.to_string());
+        if let Err(error) = std::thread::Builder::new()
+            .name("dsa-boot-signs".into())
+            .spawn(move || watch_boot_signs(watched, boot_signs))
+        {
+            eprintln!(
+                "{user_name}: guest log: cannot read Android's boot for its problems: {error}"
+            );
+        }
+    }
     if let Some(power) = power {
         power.attach(&session);
     }
@@ -599,7 +708,11 @@ where
         .with_host_memory(Arc::clone(&host_memory))
         .with_widget_placements(Arc::new(dsa_host_core::widgets::FileWidgetPlacements::new(
             config.settings_dir(),
-        )));
+        )))
+        .with_host_logs({
+            let config = config.clone();
+            Arc::new(move |sid: &str| host_logs_of(&config, sid))
+        });
     {
         let androids = androids.clone();
         let (worker_build, stop) = (build.to_string(), Arc::clone(&stop));

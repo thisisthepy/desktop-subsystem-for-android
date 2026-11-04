@@ -47,6 +47,30 @@ Service Control Manager; the installer registers it, and it writes its messages 
   only SYSTEM, Administrators and Hyper-V's virtual machines, so other users cannot read
   someone's Android data.
 
+### Android's log
+
+Android's log stays in memory in the guest and is never written to a file. The guest's
+channel daemon reads it only while someone does (`dsa logcat`, the Android log page of DSA
+Settings) and sends it on vsock port `log_port` (5001), apart from the control channel, so a
+busy log never delays input or windows. The service keeps the last 1 MiB of what came in
+memory, for a reader that joins later, and reads Android's log while it boots, to explain a
+boot that stalls. A connection on the log port passes the same handshake as the control
+channel, so only the guest's daemon gets in.
+
+```
+dsa logcat                        # follow the log; Ctrl+C ends it
+dsa logcat -d -b all *:W          # what Android's log holds now, warnings and above
+dsa logs collect -o diag.zip      # everything a problem report needs, as one zip
+```
+
+The diagnostics archive holds Android's whole log, its tombstones, ANR traces and dropbox,
+pstore, a summary of the system services' state, the console of the user's Android, the
+logs of the processes in their session, and the service's log without the lines about other
+users. `summary.txt` in the archive says what could not be gathered.
+
+The serial console carries only the kernel's early boot and a panic, and the service writes
+at most 2 MiB of it a boot to `android-<SID>.log`.
+
 ### Where files go
 
 Everything DSA makes at run time is in two folders, and `src/paths.rs` is the one place
@@ -58,7 +82,7 @@ that builds their paths. The settings app and the installer follow the same layo
 | `images\` | the Android image store |
 | `updates\` | downloaded setup files and the update state |
 | `settings\` | the settings users change in DSA Settings, and widget placements |
-| `logs\` | `dsa-hostd.log` and each user's Android console, `android-<SID>.log` |
+| `logs\` | `dsa-hostd.log` and each user's Android console, `android-<SID>.log` (the kernel's early boot and a panic, at most 2 MiB a boot) |
 | `tmp\` | each boot's initrd while the VM starts; SYSTEM and Administrators only |
 
 | Each user (`%LOCALAPPDATA%\DSA`) | |

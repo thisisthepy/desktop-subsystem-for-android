@@ -3,7 +3,8 @@
 # naming the handler and the callback, and the first message it starts 16 ms or more late
 # ("Slow delivery"). A frame, an activity launch and a click are each one such message, so the
 # log shows where the main thread's time went between a press and the frame that answers it.
-# Off by default: the lines go to the serial console, and each byte written there costs time.
+# Off by default: every app logs more. The lines stay in logd's memory, and `dsa logcat` reads
+# them.
 #
 # It is a system script, not a vendor one, because init runs vendor scripts in a context that
 # may not set log properties. Each app reads the property when its main thread starts.

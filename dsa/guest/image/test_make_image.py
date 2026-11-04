@@ -583,26 +583,36 @@ class ImageLayoutTests(unittest.TestCase):
                 self.assertIn("libOpenglSystemCommon\\.so", fc)
 
 
-    def test_fr2_android_log_reaches_the_vm_console_log(self):
+    def test_fr21_android_log_stays_in_memory_and_the_console_quiets_after_boot(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "target-files.zip"
+            ueventd_text = "# seriallogging\n/dev/hvc2 0660 system logd\n"
             with zipfile.ZipFile(source, "w") as archive:
-                archive.writestr("VENDOR/etc/ueventd.rc", "# seriallogging\n/dev/hvc2 0660 system logd\n")
+                archive.writestr("VENDOR/etc/ueventd.rc", ueventd_text)
                 archive.writestr("META/vendor_filesystem_config.txt", "vendor/etc/ueventd.rc 0 0 644 capabilities=0x0\n")
+                archive.writestr("META/filesystem_config.txt", "system/etc 0 0 755 capabilities=0x0\n")
 
             modified = root / "modified.zip"
             make_image.modify(source, modified)
 
             with zipfile.ZipFile(modified) as archive:
-                rc = archive.read("VENDOR/etc/init/dsa-console-logcat.rc").decode()
-                self.assertIn("/system/bin/logcat -b main,system,crash -v threadtime -f /dev/ttyS0 *:I", rc)
-                self.assertIn("seclabel u:r:logpersist:s0", rc)
-                self.assertIn("user logd", rc)
-                ueventd = archive.read("VENDOR/etc/ueventd.rc").decode()
-                self.assertTrue(ueventd.splitlines()[-1].split() == ["/dev/ttyS0", "0660", "system", "logd"])
-                fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
-                self.assertIn("vendor/etc/init/dsa-console-logcat.rc 0 0 644 capabilities=0x0", fs_config)
+                names = archive.namelist()
+                # Nothing writes Android's log to the serial console or to a file.
+                self.assertFalse(any("console-logcat" in name for name in names), names)
+                for name in names:
+                    if name.endswith(".rc"):
+                        self.assertNotIn("/system/bin/logcat", archive.read(name).decode(), name)
+                self.assertEqual(archive.read("VENDOR/etc/ueventd.rc").decode(), ueventd_text)
+                console = archive.read("SYSTEM/etc/init/dsa-console.rc").decode()
+                self.assertIn("on property:sys.boot_completed=1", console)
+                self.assertIn("write /proc/sys/kernel/printk 1", console)
+                fs_config = archive.read("META/filesystem_config.txt").decode()
+                self.assertIn("system/etc/init/dsa-console.rc 0 0 644 capabilities=0x0", fs_config)
+                vendor_fs = archive.read("META/vendor_filesystem_config.txt").decode()
+                self.assertNotIn("console-logcat", vendor_fs)
+        # logd keeps the kernel's log, which `dsa logcat -b kernel` reads.
+        self.assertIn("ro.logd.kernel=true", make_image.edit_props("").splitlines())
 
     def test_pr6_the_control_daemon_is_installed_in_its_own_domain(self):
         # The daemon reads the boot's secret from /proc/bootconfig, so it needs a domain
@@ -2080,6 +2090,72 @@ class TouchLatencyTests(unittest.TestCase):
             missing = f"does not label sysfs {path} sysfs_wakeup"
             self.assertIn(missing, outputs[0])
             self.assertNotIn(missing, outputs[1])
+
+
+class BootLogTests(unittest.TestCase):
+    """What a normal boot logs: no refused property, audit flood or stale package state."""
+
+    SYSTEM_PROPS = (
+        "ro.build.version.incremental=15581820\n"
+        "ro.system.build.version.incremental=15581820\n"
+        "ro.system.build.fingerprint=generic/aosp_cf/vsoc:16/BP4A/15581820:userdebug/test-keys\n"
+        "ro.build.id=BP4A\n"
+    )
+
+    def test_fr14_a_new_image_changes_every_fingerprint(self):
+        # PackageManager reparses the apps, compiles them again and grants new permissions
+        # only when a partition's fingerprint changes.
+        props = make_image.edit_props(self.SYSTEM_PROPS, build_tag="dsa0123456789ab").splitlines()
+        self.assertIn("ro.build.version.incremental=15581820.dsa0123456789ab", props)
+        self.assertIn("ro.system.build.version.incremental=15581820.dsa0123456789ab", props)
+        self.assertIn("ro.system.build.fingerprint="
+                      "generic/aosp_cf/vsoc:16/BP4A/15581820.dsa0123456789ab:userdebug/test-keys", props)
+        self.assertIn("ro.build.id=BP4A", props)
+
+    def test_fr14_vendor_fingerprint_carries_the_same_tag(self):
+        vendor = ("ro.vendor.build.fingerprint=generic/aosp_cf/vsoc:16/BP4A/15581820:userdebug/test-keys\n"
+                  "ro.vendor.build.version.incremental=15581820\n")
+        props = make_image.edit_props(vendor, vendor=True, build_tag="dsaab").splitlines()
+        self.assertIn("ro.vendor.build.fingerprint=generic/aosp_cf/vsoc:16/BP4A/15581820.dsaab:userdebug/test-keys", props)
+        self.assertIn("ro.vendor.build.version.incremental=15581820.dsaab", props)
+
+    def test_fr14_the_build_tag_follows_the_image_content(self):
+        one = make_image.image_build_tag([b"agent 1", None])
+        self.assertEqual(one, make_image.image_build_tag([b"agent 1", None]))
+        self.assertNotEqual(one, make_image.image_build_tag([b"agent 2", None]))
+        self.assertRegex(one, r"^dsa[0-9a-f]{12}$")
+
+    def test_fr14_props_are_unchanged_without_a_build_tag(self):
+        props = make_image.edit_props(self.SYSTEM_PROPS)
+        self.assertIn("ro.build.version.incremental=15581820\n", props)
+
+    def test_fr1_vendor_build_props_set_only_what_vendor_init_may(self):
+        # init reads the vendor and odm build.prop as vendor_init, which may not set these;
+        # each line was a denial on every boot.
+        props = make_image.edit_props("ro.debuggable=1\nro.adb.secure=0\n", vendor=True)
+        for key in ("ro.debuggable", "ro.secure", "ro.adb.secure", "ro.force.debuggable", "sys.use_memfd"):
+            self.assertNotIn(f"{key}=", props)
+        self.assertIn("ro.hardware.egl=angle\n", props)
+        self.assertIn("ro.vulkan.apex=\n", props)
+        self.assertIn("ro.lmk.use_psi=true\n", props)
+        self.assertEqual(make_image.VENDOR_PROP_FILES, {"VENDOR/build.prop", "ODM/etc/build.prop"})
+
+    def test_fr1_system_build_prop_keeps_the_user_build_settings(self):
+        props = make_image.edit_props("ro.debuggable=1\n")
+        self.assertIn("ro.debuggable=0\n", props)
+        self.assertIn("sys.use_memfd=true\n", props)
+
+    def test_fr1_kernel_does_not_audit_every_syscall(self):
+        # audit=1 made the kernel audit each iptables change and BPF program load, with
+        # syscall records, and overflow its queue for auditd before logd started.
+        self.assertNotIn("audit=1", make_image.kernel_cmdline("blkdevparts=sda:1@0(misc)").split())
+
+    def test_fr1_unused_devtmpfs_nodes_are_not_logged_as_denials(self):
+        policy = make_image.KERNEL_POLICY.read_text()
+        self.assertIn("(dontaudit kernel device (dir (write add_name create search)))", policy)
+        self.assertNotIn("(allow ", policy)
+        source = Path(make_image.__file__).read_text()
+        self.assertIn('plat_patched += "\\n" + KERNEL_POLICY.read_text()', source)
 
 
 if __name__ == "__main__":

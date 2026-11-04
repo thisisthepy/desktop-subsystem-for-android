@@ -157,7 +157,8 @@ SETTINGS_CODE_WITHOUT_BLUETOOTH = {
 
 # Cuttlefish's logger writes to a virtio console Hyper-V does not have, so it exits as soon as
 # it starts. init starts it again every five seconds, and each exit runs flags_health_check.
-# console-logcat.rc is what logs here.
+# Nothing takes its place: Android's log stays in logd's memory, and the control daemon sends
+# it to the host only while someone reads it (`dsa logcat`).
 REMOVED_INIT_SCRIPTS = ["VENDOR/etc/init/seriallogging.rc"]
 
 # The user's disk. The super partition's UUID is how first-stage init finds the disk, so it
@@ -258,6 +259,13 @@ LOADER_PROPS = {
 # PersistentDataBlockService nor, without an oemlock HAL, OemLockService.
 FRP_PROPS = {
     "ro.frp.pst": "",
+}
+
+# logd keeps the kernel's log in its own buffer too, so `dsa logcat -b kernel` and the
+# diagnostics have it. A user build leaves it out by default. The serial console carries the
+# kernel's messages only until boot completes (dsa-console.rc).
+LOG_PROPS = {
+    "ro.logd.kernel": "true",
 }
 
 # Cuttlefish ships selectable vendor APEX implementations. Its launcher passes
@@ -722,16 +730,64 @@ def edit_settings_apk(data, name):
     return out.getvalue()
 
 
-def edit_props(text, codec2=False):
+# Properties the vendor and odm build.prop files may not set. init reads those two files as
+# vendor_init, and the platform's policy gives vendor_init no right to set these: each line
+# was refused, and logged as a denial, on every boot. The system build.prop sets them.
+VENDOR_FORBIDDEN_PROPS = {*USER_PROPS, "sys.use_memfd"}
+VENDOR_PROP_FILES = {"VENDOR/build.prop", "ODM/etc/build.prop"}
+
+# The build's own fingerprint is AOSP's, and it stays the same however often DSA's image
+# changes. PackageManager keys its parsed package cache, its compiled code and its upgrade
+# handling on the fingerprints of the partitions, so with the same fingerprint it went on
+# using what it had parsed from the agent the image had before: the input method's metadata
+# pointed at a resource the new agent had moved, the input method failed to load, and
+# permissions the new agent asks for were never granted. Each image adds a tag of its own
+# content to the incremental version, which every fingerprint carries, so a new image is an
+# upgrade, as an over-the-air update is.
+FINGERPRINT_KEY = re.compile(r"^ro\.(?:[a-z_]+\.)?build\.fingerprint$")
+INCREMENTAL_KEY = re.compile(r"^ro\.(?:[a-z_]+\.)?build\.version\.incremental$")
+
+
+def image_build_tag(payloads):
+    """Returns the tag that names one image's content: a digest of the files DSA adds to the
+    image and of the files in this folder that say how the image is made."""
+    h = hashlib.sha256()
+    for payload in payloads:
+        h.update(hashlib.sha256(payload or b"").digest())
+    for path in sorted(p for p in HERE.rglob("*") if p.is_file() and "__pycache__" not in p.parts):
+        h.update(path.relative_to(HERE).as_posix().encode() + b"\0")
+        h.update(hashlib.sha256(path.read_bytes()).digest())
+    return "dsa" + h.hexdigest()[:12]
+
+
+def tag_build_version(key, value, build_tag):
+    """Returns a build property's value with `build_tag` added to its incremental version."""
+    if INCREMENTAL_KEY.match(key):
+        return f"{value}.{build_tag}"
+    if FINGERPRINT_KEY.match(key) and ":" in value:
+        # brand/product/device:release/id/incremental:type/tags
+        head, tail = value.rsplit(":", 1)
+        return f"{head}.{build_tag}:{tail}"
+    return value
+
+
+def edit_props(text, codec2=False, vendor=False, build_tag=None):
+    """Returns a build.prop with DSA's properties. With `vendor`, it is one init reads as
+    vendor_init, which gets only the properties vendor_init may set. With `build_tag`, the
+    incremental version and the fingerprints carry it."""
     props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS, **FRP_PROPS,
-                      **(CODEC2_PROPS if codec2 else {})}
+                      **LOG_PROPS, **(CODEC2_PROPS if codec2 else {})}
+    if vendor:
+        props_to_apply = {k: v for k, v in props_to_apply.items() if k not in VENDOR_FORBIDDEN_PROPS}
     out = []
     for line in text.splitlines():
         key = line.split("=", 1)[0]
-        if key in props_to_apply:
+        if key in props_to_apply or (vendor and key in VENDOR_FORBIDDEN_PROPS):
             continue
         if key.endswith("build.type"):
             line = f"{key}=user"
+        if build_tag and "=" in line and not line.startswith("#"):
+            line = f"{key}={tag_build_version(key, line.split('=', 1)[1], build_tag)}"
         out.append(line)
     out += [f"{k}={v}" for k, v in props_to_apply.items()]
     return "\n".join(out) + "\n"
@@ -851,13 +907,18 @@ DISPLAY_BOOTCONFIG = {
     "display_dpi": 160,
 }
 
-CONSOLE_LOGCAT_RC = "VENDOR/etc/init/dsa-console-logcat.rc"
 # Turns on the zram swap fstab.dsa declares, and tunes the kernel for it.
 MEMORY_RC = "VENDOR/etc/init/dsa-memory.rc"
 # Main thread timing for the input trace (dsa-trace.rc). A system script, so init itself runs it.
 TRACE_RC = "SYSTEM/etc/init/dsa-trace.rc"
+# Quiets the serial console once boot completes, so it carries only the kernel's early boot and
+# a panic. A system script, because only init itself may write the kernel's printk levels.
+CONSOLE_RC = "SYSTEM/etc/init/dsa-console.rc"
 SYSTEM_FS_CONFIG = "META/filesystem_config.txt"
-TRACE_FS_CONFIG = ["system/etc/init/dsa-trace.rc 0 0 644 capabilities=0x0"]
+TRACE_FS_CONFIG = [
+    "system/etc/init/dsa-trace.rc 0 0 644 capabilities=0x0",
+    "system/etc/init/dsa-console.rc 0 0 644 capabilities=0x0",
+]
 # The property dsa-channeld sets to have init drop the caches and compact memory, so free
 # page reporting hands idle memory back to the host. vendor_property_contexts gives it the
 # type the daemon's policy lets it set.
@@ -920,8 +981,6 @@ AGENT_FS_CONFIG = [
     "system_ext/priv-app/DsaAgent/DsaAgent.apk 0 0 644 capabilities=0x0",
     "system_ext/etc/permissions/privapp-permissions-dsa-agent.xml 0 0 644 capabilities=0x0",
 ]
-# The console logcat runs as logd, and ueventd makes the serial port root's alone.
-CONSOLE_UEVENTD_LINE = "/dev/ttyS0 0660 system logd"
 
 
 def update_vendor_file_contexts(fc_text, channeld=False, hwcomposer=False, power=False, codec2=False):
@@ -1025,7 +1084,6 @@ def update_vendor_filesystem_config(fs_config_text, channeld=False, hwcomposer=F
     entries = [
         ("vendor/lib64/hw/vulkan.ranchu.so", "vendor/lib64/hw/vulkan.ranchu.so 0 0 644 capabilities=0x0"),
         ("vendor/lib64/libOpenglSystemCommon.so", "vendor/lib64/libOpenglSystemCommon.so 0 0 644 capabilities=0x0"),
-        ("vendor/etc/init/dsa-console-logcat.rc", "vendor/etc/init/dsa-console-logcat.rc 0 0 644 capabilities=0x0"),
         ("vendor/etc/init/dsa-memory.rc", "vendor/etc/init/dsa-memory.rc 0 0 644 capabilities=0x0"),
         ("vendor/etc/selinux/vendor_property_contexts",
          "vendor/etc/selinux/vendor_property_contexts 0 0 644 capabilities=0x0"),
@@ -1068,6 +1126,7 @@ POWER_POLICY = HERE / "sepolicy/power.cil"
 CODEC2_POLICY = HERE / "sepolicy/codec2.cil"
 AGENT_POLICY = HERE / "sepolicy/agent.cil"
 MEMORY_POLICY = HERE / "sepolicy/memory.cil"
+KERNEL_POLICY = HERE / "sepolicy/kernel.cil"
 
 
 def narrow_vsock_neverallows(text):
@@ -1208,7 +1267,6 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
     Cuttlefish's when `power_hal` names the folder that holds dsa-power and dsa-health, and
     DSA's codec HAL, whose video decoders decode on the host's GPU, when `codec2` names it."""
     fstab = (HERE / "fstab.dsa").read_bytes()
-    console_logcat = (HERE / "console-logcat.rc").read_bytes()
     graphics_payload = Path(graphics_library).read_bytes() if graphics_library else None
     vulkan_payload = Path(vulkan_driver).read_bytes() if vulkan_driver else None
     channeld_payload = Path(channeld).read_bytes() if channeld else None
@@ -1233,6 +1291,10 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             for name, source in CODEC2_FILES.items()
         }
     has_codec2 = codec2_payloads is not None
+    build_tag = image_build_tag([
+        graphics_payload, vulkan_payload, channeld_payload, agent_payload, hwcomposer_payload,
+        overlay_payload, *(power_payloads or {}).values(), *(codec2_payloads or {}).values(),
+    ])
     replaced_graphics_payload = False
     replaced_vulkan_payload = False
     kept_modules = re.compile(r"^(VENDOR_BOOT/RAMDISK|VENDOR_DLKM|SYSTEM_DLKM)/lib/modules/.*\.ko$")
@@ -1260,6 +1322,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             plat_patched = patch_plat_sepolicy(plat_orig, fragment_text)
             # The memory controls the vendor scripts write, and the reclaim property.
             plat_patched += "\n" + MEMORY_POLICY.read_text()
+            # The kernel thread whose devtmpfs nodes nothing uses.
+            plat_patched += "\n" + KERNEL_POLICY.read_text()
             if channeld_payload is not None:
                 # Its rules name the domain they declare, so they go in whole.
                 plat_patched += "\n" + CHANNELD_POLICY.read_text()
@@ -1342,7 +1406,9 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             else:
                 data = zin.read(name)
                 if name in PROP_FILES:
-                    data = edit_props(data.decode(), codec2=has_codec2).encode()
+                    data = edit_props(data.decode(), codec2=has_codec2,
+                                      vendor=name in VENDOR_PROP_FILES,
+                                      build_tag=build_tag).encode()
                 elif name == WIFI_RC:
                     data = edit_wifi_rc(data.decode()).encode()
                 elif name.endswith(SETTINGS_APK):
@@ -1384,8 +1450,6 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                         if overlay_payload is not None:
                             text = add_filesystem_config(text, FRAMEWORK_OVERLAY_FS_CONFIG)
                     data = text.encode()
-                elif name == "VENDOR/etc/ueventd.rc":
-                    data = data.rstrip(b"\n") + b"\n" + CONSOLE_UEVENTD_LINE.encode() + b"\n"
                 elif name in ("VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"):
                     data = update_vendor_file_contexts(data.decode(), channeld_payload is not None,
                                                        has_hwcomposer, has_power, codec2=has_codec2).encode()
@@ -1398,9 +1462,9 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             zout.writestr(info, data)
         for directory in FSTAB_DIRS:
             zout.writestr(directory + "fstab.dsa", fstab)
-        zout.writestr(CONSOLE_LOGCAT_RC, console_logcat)
         zout.writestr(MEMORY_RC, (HERE / "dsa-memory.rc").read_bytes())
         zout.writestr(TRACE_RC, (HERE / "dsa-trace.rc").read_bytes())
+        zout.writestr(CONSOLE_RC, (HERE / "dsa-console.rc").read_bytes())
         if VENDOR_PROPERTY_CONTEXTS not in names:
             zout.writestr(VENDOR_PROPERTY_CONTEXTS, update_vendor_property_contexts(""))
         zout.writestr(UNAVAILABLE_FEATURES, (HERE / "unavailable-features.xml").read_bytes())
@@ -1638,7 +1702,10 @@ def kernel_cmdline(partition_cmdline, hwcomposer=False):
         ]
         apexes = VENDOR_APEX_BOOTCONFIG
     return " ".join([
-        "console=ttyS0", "printk.devkmsg=on", "audit=1", "panic=-1", "8250.nr_uarts=1",
+        # No audit=1, as on Android devices: SELinux denials reach logd's auditd without it.
+        # With it, the kernel also audited every iptables change and BPF program load with
+        # their syscall records, and overflowed its queue for auditd before logd started.
+        "console=ttyS0", "printk.devkmsg=on", "panic=-1", "8250.nr_uarts=1",
         "firmware_class.path=/vendor/etc/", "loop.max_part=7", "init=/init", partition_cmdline,
         "androidboot.boot_devices=vmbus", "androidboot.fstab_suffix=dsa",
         "androidboot.slot_suffix=_a", "androidboot.force_normal_boot=1",
@@ -1652,7 +1719,7 @@ def kernel_cmdline(partition_cmdline, hwcomposer=False):
         "androidboot.cpuvulkan.version=0",
         # The Cuttlefish lights HAL listens on this vsock port for a host client; without
         # one it binds port 0, which only privileged processes may, and aborts. No host
-        # client connects; DSA's own ports are 5000 and 5566-5567.
+        # client connects; DSA's own ports are 5000-5001 and 5566-5567.
         "androidboot.vsock_lights_port=6900",
         *(f"androidboot.vendor.apex.{module}={apex}"
           for module, apex in apexes.items()),

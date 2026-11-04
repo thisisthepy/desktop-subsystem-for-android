@@ -310,7 +310,7 @@ starting a second VM, for any project that wants it.
 
 1. 호스트 설정의 `kernel_cmdline`에 `androidboot.hardware.dsa_input_trace=1`을 더하고, `%LOCALAPPDATA%\DSA\input-trace` 파일을 만든 뒤 DSA를 다시 시작한다.
 2. 앱 창을 20번 누른다.
-3. `Select-String input-trace "$env:LOCALAPPDATA\DSA\logs\*.log", "C:\ProgramData\DSA\logs\android-*.log"`로 모아 `utc` 순으로 합친다.
+3. `uv run scripts/input-trace.py`로 모아 호스트 시계 순으로 합친다. 호스트 줄은 `%LOCALAPPDATA%\DSA\logs\*.log`와 `C:\ProgramData\DSA\logs\*.log`에서, 게스트 줄은 `dsa logcat -d -b all`에서 읽는다. 안드로이드 로그는 이제 파일로 남지 않고 메모리에만 있으므로(FR-21), 누른 직후에 모은다.
 
 구간은 `app.pointer`, `agent.inject`, `driver.flush`, `hwc.frame`, `wm.frame`, `app.present` 순이다. 호스트와 게스트의 시계 차이는 합친 간격에 포함된다.
 
@@ -484,3 +484,78 @@ Davey는 이 로그에 2건뿐이고 둘 다 액티비티 전환이다. 리플�
 - **`ServiceCapacityLow`**: `dsa-hwcomposer.rc`의 이 프로필은 cpuset `system-background`에 들어가는 것이다. `init.rc`가 이 그룹에 모든 CPU를 복사하므로 컴포저가 쓸 CPU는 줄지 않는다. AOSP의 컴포저 서비스(ranchu 등)도 같은 줄을 쓴다. init이 root로 쓰므로 이번 오류와도 관계가 없다. 그대로 둔다.
 
 **실제 PC에서 확인할 것**: 위 두 로그 줄이 사라지는지, `cat /proc/cgroups`에 cpu, cpuset, blkio, memory, freezer가 켜져 있는지, `ls -Z /sys/class/wakeup/`의 대상이 `/sys/devices/virtual/wakeup/`이고 `sysfs_wakeup`인지.
+
+## 부팅 로그의 시스템 서비스 오류, 감사 로그 홍수, 낡은 패키지 상태 (FR-1, FR-6, FR-14)
+
+**확인 대상**: 안드로이드 16 이미지(`aosp_cf_x86_64_only_phone` 15581820, `16.0.0-15581820-7`), develop `dcbb771`. 실제 PC의 콘솔 로그(`android-<SID>.log`, 14,937줄, 2026-11-04, 부팅 두 번)와 같은 커밋의 `DsaAgent.apk`(`resources.arsc`, 바이너리 매니페스트)를 읽었다. 고친 이미지는 이 기기에서 부팅해 보지 않았다.
+
+**결과와 결정**:
+
+| 로그 | 건수 | 누가, 왜 | 결정 |
+| --- | --- | --- | --- |
+| `E SystemServiceRegistry` `dropbox` | 12건(줄 약 240) | system_server가 부팅 초기의 WTF를 DropBox에 넣으려 했지만 `DropBoxManagerService`가 4 ms 뒤에 시작했다. | 무해. AOSP의 시작 순서이고 DSA가 뺀 서비스가 아니다. 서비스는 곧 떠서 이후 기록은 들어간다. |
+| `carrier_config` | 10건 | Wi-Fi(`WifiServiceImpl`), 시간대 감지 등이 `CarrierConfigManager`를 찾는다. 이미지에 전화 기능(rild)이 없다. | 무해. 호출하는 쪽이 null을 처리한다. WSA에도 전화 기능은 없었다. |
+| `jobscheduler` | 2건 | `SettingsProvider.scheduleWriteFallbackFilesJob`이 JobScheduler보다 먼저 불렸다. | 무해. 시작 순서. |
+| `uwb`, `thread_network` | 각 1건 | 연결 서비스의 초기화. UWB와 Thread HAL APEX는 DSA가 뺐다(`REMOVED_APEXES`). | 무해. 한 번만 묻고 기능이 없다고 판단한다. WSA에도 없었다. |
+| `trust`, `virtualdevice`, `supervision`, `keyguard` | 각 1건 | `SystemServer.startOtherServices`, `ProtectedPackages.isSupervisionPackage`가 서비스 시작 전에 매니저를 만들었다. | 무해. 시작 순서. |
+| `E InputMethodManagerService: Meta-data does not start with input-method tag` | 1건 | 아래 "낡은 패키지 상태". 호스트 입력기가 등록되지 않아 텍스트 입력이 안 된다. | 고침: 이미지마다 지문을 바꾼다. |
+| `W DsaAgent` `MANAGE_ROLE_HOLDERS`, `MANAGE_NOTIFICATION_LISTENERS` 거절 | 각 1건 | 같은 원인. 새 에이전트가 요청한 권한이 부여되지 않았다. | 고침: 같은 변경. |
+| `W DsaAgent` `User 0 must be unlocked for widgets` | 3건 | 에이전트는 사용자 저장소 잠금 해제 전에 시작하는데, 위젯 호스트는 그 전에 시작할 수 없다. 에이전트는 다시 시도하지 않아 그 부팅 내내 위젯이 그려지지 않았고, 연결 때 읽지 못한 목록을 빈 목록으로 보내 호스트가 배치한 위젯을 지울 수 있었다. | 고침: 시작이 거절되면 1초마다 다시 시도하고(경고는 한 번), 시작하기 전에는 위젯 목록을 보내지 않는다. |
+| `W auditd`, `kauditd hold queue overflow` | 705줄, 손실 1,058건 | 커널 명령줄의 `audit=1`. 커널이 iptables 변경(`NETFILTER_CFG`), BPF 프로그램 적재(`BPF`), 각 거절의 `SYSCALL`, `PROCTITLE`, `EOE` 기록까지 남겼고, logd가 뜨기 전에 대기열(64)이 넘쳤다. | 고침: `audit=1`을 뺀다. 안드로이드 기기도 주지 않는다. SELinux 거절은 그대로 logd의 auditd로 간다. |
+| `avc: denied { write } kdevtmpfs` | 부팅당 70여 건 | 커널의 devtmpfs 스레드가 정책 적재 뒤 찾은 장치마다 노드를 만들려 했다. 안드로이드는 이 devtmpfs를 올리지 않는다(`/dev`는 init의 tmpfs, 노드는 ueventd). | 고침: 거절은 두고 기록만 하지 않는다(`sepolicy/kernel.cil`의 `dontaudit`). |
+| `avc: denied { set }` `ro.debuggable`, `ro.secure`, `ro.adb.secure`, `ro.force.debuggable`, `sys.use_memfd` | 부팅당 10건 | `edit_props`가 이 값을 vendor와 odm의 build.prop에도 썼다. init은 두 파일을 vendor_init으로 읽고, vendor_init은 이 속성을 쓸 수 없다. 값은 system build.prop에서 이미 들어갔다. | 고침: vendor와 odm build.prop에는 쓰지 않고, 있던 줄도 지운다. `check-image.py`가 확인한다. |
+| `W iptables-restor` | 123줄 | netd의 iptables 적재를 `audit=1`이 감사 기록으로 남긴 것. | 고침: `audit=1` 제거로 사라진다. |
+| `W PackageManager` | 253줄 | 대부분 APEX 패키지(`com.android.vndk.v*`, `com.google.cf.*`)의 "Skipping preparing app data"와 첫 부팅의 "Missing permission state". | 무해. AOSP 기본 동작이다. |
+| `W Zygote: Class not found for preloading` | 150줄 | 프레임워크의 preloaded-classes 목록이 R8 합성 클래스 이름과 맞지 않는다. | 무해. AOSP 빌드 그대로이고 기능에 영향이 없다. |
+| 나머지 거절(`discard_max_bytes`, `storaged` sysfs, `init_dev_config`, 센서 HAL memfd, `crash_dump` keystore) | 각 1~4건 | Cuttlefish 장치 스크립트와 AOSP의 알려진 거절(`bug=` 표시). | 그대로 둔다. 반복되지 않고 기능에 영향이 없다. |
+
+### 낡은 패키지 상태
+
+- **무엇이었나**: 매니페스트의 `android.view.im` 메타데이터는 `0x7f030001`(`res/rz.xml`, `<input-method>`)을 가리키고 APK 자체는 맞다. 그런데 system_server는 그 자원을 `<input-method>`가 아니라고 읽었다. 같은 부팅에 `Checksum mismatch for dex DsaAgent.apk`도 있다.
+- **원인**: 이미지의 지문이 AOSP 빌드의 것(`.../15581820:user/release-keys`) 그대로라, DSA가 이미지를 새로 만들어도 바뀌지 않는다. PackageManager는 파티션 지문의 요약(`PackagePartitions.FINGERPRINT`)이 바뀔 때만 업그레이드로 보고 파싱 캐시를 버리고, 다시 컴파일하고, 새 권한을 준다. 그래서 사용자 데이터에 남은 이전 에이전트의 파싱 결과를 썼다. 이전 에이전트에서는 `0x7f030000`이 입력기 XML이었고, 접근성 서비스가 들어온 지금은 그 번호가 접근성 XML이다.
+- **고친 것**: `make-image.py`가 이미지 내용(DSA가 넣는 파일과 `dsa/guest/image/`의 파일)의 요약으로 `dsa<12자리>` 태그를 만들어, 모든 build.prop의 `ro.*build.version.incremental`과 `ro.*build.fingerprint`의 incremental 부분에 붙인다. 모든 파티션에 같은 태그가 붙어 서로 같다. 새 이미지의 첫 부팅은 OTA 뒤처럼 앱을 다시 컴파일하므로 조금 길어진다.
+
+**실제 PC에서 확인할 것**: 새 이미지로 부팅한 뒤 `getprop ro.build.fingerprint`에 `.dsa`가 붙는지, 로그에 `Unable to load input method`가 없고 `ime list -s`에 `io.github.thisisthepy.dsa.agent/.platform.HostInputMethod`가 있는지, 호스트에서 한글을 입력할 수 있는지, `DsaAgent`의 권한 거절이 없는지. `kauditd hold queue overflow`, `type=1325`, `type=1334`, `kdevtmpfs` 거절, `vendor_init`의 `{ set }` 거절이 사라졌는지.
+
+## 클릭 지연과 게스트 처리기 성능 (FR-5)
+
+**확인 대상**: develop dcbb771이 설치된 소유자 PC(Intel Arc, Settings 앱, 20 ms 클릭 15회, 1픽셀 임계값의 연속 화면 캡처, `scripts/input-trace.py`로 합친 추적). 이미지 16.0.0-15581820-7의 `signed-target_files.zip`. AOSP ART Service의 `ArtManagerLocal.getDefaultPackages`.
+
+**실측**
+
+- 호스트: `app.pointer`에서 `app.present`까지 13~25 ms, present에서 표시까지 한 번의 새로 고침 안(`app.shown exact=true`가 대부분).
+- 클릭에서 첫 화면 변화까지 p50 252 ms, p90 302 ms, 최대 488 ms(11회). 첫 변화는 언제나 새 화면 전체(300x80 캡처에서 약 23,000픽셀)였고, 누름 표시나 리플은 한 번도 잡히지 않았다.
+- 누름과 뗌 직후 앱 프레임 2~3개(순번이 오른다)에는 보이는 변화가 없고, 그 뒤 131~351 ms 동안 앱 프레임이 없다. 그동안 메인 스레드는 `SubSettings`를 시작한다(`Displayed SubSettings +106..+326ms`).
+- 서비스 로그: 부팅 직후 `power: running Android's processors frugally`가 한 번 나오고, 12:14~12:16 UTC의 클릭 동안 `full speed` 줄이 없다.
+
+**찾은 것**
+
+1. **로그만으로는 클릭 중 성능을 알 수 없었다.** `guest_performance::follow`는 성능마다 VM당 처음 한 번만 로그를 남겼다. 그래서 `full speed` 줄이 없다는 것은 부스트가 오지 않았다는 증거가 못 된다. 다만 부스트가 왔더라도, 부스트가 끝나면 frugal로 돌아갔다.
+2. **창이 보이는 동안에도 frugal이 될 수 있었다.** 정책은 `LOW_POWER`, `DEVICE_IDLE`, `DISPLAY_INACTIVE` 중 하나가 켜져 있고 성능 모드나 부스트가 없으면 frugal(EcoQoS, 낮은 우선순위)이었다. 호스트가 셸이라 게스트의 기본 디스플레이는 사용자가 보는 화면이 아니며, 이 모드들은 작업 창이 보이는 것과 무관하게 켜져 있을 수 있다. 실측의 "부팅 직후 frugal, 그 뒤 변화 없음"과 맞는다.
+3. **호스트는 클릭을 Android보다 먼저 안다.** 게스트의 `INTERACTION` 부스트는 입력이 게스트에 닿고, 입력 디스패처와 전원 관리자를 거친 뒤 제어 채널로 돌아온다. 그동안 vCPU는 frugal 상태로 입력을 처리한다.
+4. **Settings는 컴파일되지 않은 채로 돈다.** 이미지의 Settings odex/vdex는 `SYSTEM_OTHER/system_ext/priv-app/Settings/oat/x86_64/`에만 있고, DSA 디스크는 system_other를 싣지 않는다. 게다가 `make-image.py`가 블루투스 때문에 `Settings.apk`의 dex를 고치므로, 그 odex를 실어도 dex 체크섬이 맞지 않는다. APK 안에는 기준 프로파일(`assets/dexopt/baseline.prof`)이 없다. 첫 부팅 dexopt는 모든 패키지를 `pm.dexopt.first-boot=verify`로 처리하므로 Settings는 검사만 되고 인터프리터와 JIT로 돈다. 이것은 앞 절의 `CompilerFilter=verify` 관찰의 원인이다.
+5. **vCPU와 cgroup**: 기본 vCPU는 4개(`host_config.rs`)다. top-app cpuset과 uclamp는 앞 절의 커널 패치(cgroup v1 쓰기 예외) 뒤로 다시 적용된다. 이번 빌드의 게스트에서 `/dev/cpuset/top-app/cpus`는 확인하지 않았다.
+6. **누름 프레임이 비어 보이는 이유**: 앞 절의 2대로 패턴 리플은 `setPressed` 뒤 33 ms에 알파 5%, 반지름 0.7%, 67 ms에 25%, 3.2%다. 누름과 뗌 직후의 2~3프레임은 이 구간에 들어가므로, 리플은 클릭 지점의 몇 픽셀에 거의 투명하게 그려진다. 그다음 프레임들은 메인 스레드가 액티비티를 시작하는 동안 나오지 않는다. 리플 진행이 메인 스레드의 애니메이터에 묶여 있다는 뜻이다(추론, 게스트에서 확인하지 않음). DSA의 hwcomposer와 호스트가 레이어를 버리거나 합친 흔적은 없다: 프레임 순번이 오르고 호스트가 present를 했다.
+
+**고친 것**
+
+- 작업 창이 하나라도 보이면 frugal로 가지 않는다(`PowerHints::windows_shown`). frugal은 창이 없고 게스트가 frugal 모드를 말할 때만이다.
+- 호스트가 누름, 뗌, 스크롤, 키를 게스트로 보낼 때 그 자리에서 1.5초 부스트를 건다(`Session::pointer`, `Session::key`가 `GuestPower::HostInput`을 낸다). 감시 스레드는 채널에서 깨어나 바로 적용하므로 폴링이 없다. 게스트의 `LAUNCH` 모드와 `INTERACTION` 부스트도 같은 경로로 바로 적용된다.
+- 성능이 바뀔 때마다 UTC 시각, 원인, 받은 뒤 적용까지 걸린 시간을 로그에 남긴다.
+
+**하지 못한 것과 이유**
+
+- **이미지 빌드에서 Settings 컴파일**: 고친 dex로 odex를 만들려면 호스트용 `dex2oat`가 필요하다. 이 프로젝트가 받는 `otatools.zip`과 target_files에는 없고, ART 호스트 도구를 새로 받거나 빌드하는 것은 소유자에게 먼저 물어야 하는 새 도구다. 첫 부팅의 `pm.dexopt.first-boot`를 `speed`로 올리면 101개 APK(312 MiB)를 모두 첫 부팅에 컴파일하고, `speed-profile`은 프로파일이 없는 Settings에는 `verify`와 같다.
+- **누름 리플을 앞당기는 것**: 리플의 진입 곡선은 프레임워크의 컴파일 시점 상수라 이미지 오버레이로 바꿀 수 없다.
+
+**제안 (SPEC은 바꾸지 않았다)**
+
+1. ART 호스트 도구(`dex2oat64`, 부트 이미지 포함)를 `.scratch/`로 받는 단계를 `fetch.sh`에 더하고, 이미지 빌드에서 고친 Settings를 `speed`로 컴파일해 `oat/`를 같이 싣는다. 비용: 이미지 빌드 도구 하나와 수 MB. 얻는 것: 첫 실행부터 컴파일된 Settings. 소유자의 도구 승인이 필요하다.
+2. 대안으로, 에이전트가 부팅 완료 뒤 한 번 시스템 서버에 Settings의 `speed` dexopt를 요청하는 vendor 서비스를 둔다. `cmd package compile`은 root나 shell만 부를 수 있으므로 별도 SELinux 도메인과 init 서비스가 필요하다.
+3. 누름 표시는 FR-5의 수용 기준을 "클릭 뒤 첫 시각 변화"로 볼지 "새 화면"으로 볼지를 소유자가 정해야 한다. 리플은 Android가 의도적으로 처음 수십 ms 동안 거의 투명하게 그린다.
+
+**실제 PC에서 확인할 것**
+
+- 창을 연 뒤 서비스 로그에 `power: <UTC> running Android's processors as any program (..., a window shown; took N us)`가 나오고, frugal은 창을 모두 닫은 뒤에만 나오는지.
+- 클릭마다 `power: <UTC> running Android's processors at full speed (the user's input, ...; took N us)`가 누름 시각(`app.pointer`)과 1 ms 안에 나오고, 약 1.5초 뒤 `as any program`으로 돌아오는지.
+- 같은 15회 클릭에서 첫 화면 변화의 p50과 p90, `Displayed SubSettings`의 시간이 줄었는지.

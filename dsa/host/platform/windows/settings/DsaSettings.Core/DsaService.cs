@@ -275,6 +275,22 @@ public sealed class DsaService
         await RunJsonAsync("widgets", "remove", id.ToString(System.Globalization.CultureInfo.InvariantCulture))
             .ConfigureAwait(true);
 
+    /// <summary>Saves the diagnostics of Android and of DSA on this computer to
+    /// <paramref name="path"/>, as one zip archive. Returns what dsa said.</summary>
+    public async Task<string> CollectDiagnosticsAsync(string path)
+    {
+        var result = await _cli.RunAsync(new[] { "logs", "collect", "-o", path }).ConfigureAwait(true);
+        if (result.ExitCode != 0)
+        {
+            var detail = result.Error.StartsWith("dsa: ", StringComparison.Ordinal) ? result.Error[5..] : result.Error;
+            var problem = detail.Contains("cannot reach the DSA service", StringComparison.Ordinal)
+                ? Problem.ServiceUnreachable
+                : Problem.Refused;
+            throw new DsaException(problem, detail.Length > 0 ? detail : $"dsa ended with code {result.ExitCode}");
+        }
+        return result.Output;
+    }
+
     /// <summary>Installs the newest version of DSA now. Returns what the service said.</summary>
     public async Task<string> UpdateNowAsync()
     {
