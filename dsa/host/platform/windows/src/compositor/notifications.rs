@@ -48,8 +48,14 @@ const RETRY: Duration = Duration::from_secs(1);
 /// How long the watch waits for the service before it looks for dismissals again.
 const POLL: Duration = Duration::from_millis(100);
 
-/// The protocol a toast launches when it is clicked.
-pub const PROTOCOL: &str = "dsa-notification";
+/// The protocol a toast launches when it is clicked. A scheme only this program registers
+/// starts with a reversed domain its maker owns (`thisisthepy.github.io`), so no other
+/// program's scheme takes the same name; it is lowercase and at most 39 characters, the
+/// limits a packaged app's protocol has too.
+pub const PROTOCOL: &str = "io.github.thisisthepy.dsa-notification";
+
+/// The protocol earlier versions registered. Its key is removed on upgrade and uninstall.
+pub const OLD_PROTOCOL: &str = "dsa-notification";
 
 /// The argument that hands `dsa-wm` the URI of a clicked toast.
 pub const ARGUMENT: &str = "--notification";
@@ -636,7 +642,7 @@ mod tests {
     #[test]
     fn fr8_a_click_uri_names_the_notification_it_opens() {
         let uri = activation_uri(KEY);
-        assert!(uri.starts_with("dsa-notification:open?key="));
+        assert!(uri.starts_with("io.github.thisisthepy.dsa-notification:open?key="));
         assert!(!uri.contains('|'));
         assert_eq!(
             parse_activation(&uri),
@@ -659,12 +665,12 @@ mod tests {
         for uri in [
             "",
             "https://example.com/?key=a",
-            "dsa-notification:open",
-            "dsa-notification:open?key=",
-            "dsa-notification:open?key=%zz",
-            "dsa-notification:open?key=%e",
-            "dsa-notification:delete?key=a",
-            "dsa-notification:open?key=%FF%FE",
+            "io.github.thisisthepy.dsa-notification:open",
+            "io.github.thisisthepy.dsa-notification:open?key=",
+            "io.github.thisisthepy.dsa-notification:open?key=%zz",
+            "io.github.thisisthepy.dsa-notification:open?key=%e",
+            "io.github.thisisthepy.dsa-notification:delete?key=a",
+            "io.github.thisisthepy.dsa-notification:open?key=%FF%FE",
         ] {
             assert_eq!(parse_activation(uri), None, "{uri}");
         }
