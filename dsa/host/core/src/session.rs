@@ -3789,6 +3789,7 @@ impl Worker {
             | Some(Body::OpenFile(_))
             | Some(Body::FileChunk(_))
             | Some(Body::ClipboardSharing(_))
+            | Some(Body::DeveloperMode(_))
             | Some(Body::NotificationClicked(_))
             | Some(Body::NotificationDismissed(_))
             | Some(Body::InstallApk(_))
