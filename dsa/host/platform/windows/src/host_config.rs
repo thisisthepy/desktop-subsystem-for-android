@@ -161,6 +161,9 @@ fn windows_build() -> Option<(u32, u32)> {
 fn default_control_port() -> u32 {
     5000
 }
+fn default_log_port() -> u32 {
+    5001
+}
 fn default_connect_timeout_secs() -> u64 {
     120
 }
@@ -245,6 +248,11 @@ pub struct HostConfig {
     /// The vsock port the guest's channel daemon connects to.
     #[serde(default = "default_control_port")]
     pub control_port: u32,
+    /// The vsock port the guest's channel daemon sends Android's log and diagnostics on, while
+    /// the host asks for them. A port of its own, so a busy log never delays the control
+    /// channel's messages.
+    #[serde(default = "default_log_port")]
+    pub log_port: u32,
     #[serde(default = "default_connect_timeout_secs")]
     pub connect_timeout_secs: u64,
     #[serde(default = "default_stop_timeout_secs")]

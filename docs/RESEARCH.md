@@ -310,7 +310,7 @@ starting a second VM, for any project that wants it.
 
 1. 호스트 설정의 `kernel_cmdline`에 `androidboot.hardware.dsa_input_trace=1`을 더하고, `%LOCALAPPDATA%\DSA\input-trace` 파일을 만든 뒤 DSA를 다시 시작한다.
 2. 앱 창을 20번 누른다.
-3. `Select-String input-trace "$env:LOCALAPPDATA\DSA\logs\*.log", "C:\ProgramData\DSA\logs\android-*.log"`로 모아 `utc` 순으로 합친다.
+3. `uv run scripts/input-trace.py`로 모아 호스트 시계 순으로 합친다. 호스트 줄은 `%LOCALAPPDATA%\DSA\logs\*.log`와 `C:\ProgramData\DSA\logs\*.log`에서, 게스트 줄은 `dsa logcat -d -b all`에서 읽는다. 안드로이드 로그는 이제 파일로 남지 않고 메모리에만 있으므로(FR-21), 누른 직후에 모은다.
 
 구간은 `app.pointer`, `agent.inject`, `driver.flush`, `hwc.frame`, `wm.frame`, `app.present` 순이다. 호스트와 게스트의 시계 차이는 합친 간격에 포함된다.
 

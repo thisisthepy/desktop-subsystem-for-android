@@ -1,11 +1,13 @@
 """Lays out each click's input trace on the host clock.
 
-    uv run scripts/input-trace.py [log files or folders ...]
+    uv run scripts/input-trace.py [--no-guest] [log files or folders ...]
 
-With no arguments it reads the host logs (%LOCALAPPDATA%\\DSA\\logs\\*.log) and the service's
-logs, which hold the guest console (the logs folder of the machine's DSA folder,
-%ProgramData%\\DSA\\logs\\*.log unless another data folder was chosen at install, among them
-android-<user>.log).
+With no arguments it reads the host logs (%LOCALAPPDATA%\\DSA\\logs\\*.log), the service's logs
+(the logs folder of the machine's DSA folder, %ProgramData%\\DSA\\logs\\*.log unless another data
+folder was chosen at install), and Android's log, which holds the guest's stages: it runs
+`dsa logcat -d -b all`, which prints what Android's log holds now. Android keeps its log in
+memory only, so take the trace soon after the clicks. `--no-guest` skips Android's log; a file
+saved from `dsa logcat -d` can be named like any log file.
 
 The trace is a setting: `dsa settings set input-trace on`, run as an administrator, turns it on
 for every DSA process that starts afterwards (`DSA_INPUT_TRACE=1` does it for one process).
@@ -34,6 +36,8 @@ from __future__ import annotations
 import argparse
 import glob
 import os
+import shutil
+import subprocess
 import sys
 from dataclasses import dataclass, field
 
@@ -266,6 +270,33 @@ def default_paths() -> list[str]:
     return paths
 
 
+def guest_command() -> list[str]:
+    """What prints Android's log as it is now: the DSA command line tool's dump of every buffer."""
+    return ["dsa", "logcat", "-d", "-b", "all"]
+
+
+def guest_lines(run=subprocess.run) -> list[Line]:
+    """The trace lines of Android's log, read with `dsa logcat -d`. Android keeps its log in
+    memory, so nothing is on disk to read instead."""
+    command = guest_command()
+    if run is subprocess.run and shutil.which(command[0]) is None:
+        print("dsa is not on the PATH, so Android's log is not read", file=sys.stderr)
+        return []
+    try:
+        done = run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except OSError as error:
+        print(f"cannot run {' '.join(command)}: {error}", file=sys.stderr)
+        return []
+    if done.returncode != 0:
+        print(f"{' '.join(command)} failed: {done.stderr.strip()}", file=sys.stderr)
+    lines = []
+    for text in done.stdout.splitlines():
+        line = parse_line(text, "dsa logcat")
+        if line is not None:
+            lines.append(line)
+    return lines
+
+
 def log_files(paths: list[str]) -> list[str]:
     files = []
     for path in paths:
@@ -294,6 +325,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("paths", nargs="*", help="log files, folders or patterns")
     parser.add_argument(
+        "--no-guest",
+        action="store_true",
+        help="do not read Android's log with `dsa logcat -d`",
+    )
+    parser.add_argument(
         "--window",
         type=float,
         default=1500.0,
@@ -302,6 +338,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     files = log_files(args.paths or default_paths())
     lines = read(files)
+    if not args.paths and not args.no_guest:
+        lines += guest_lines()
     clock = Clock(lines)
     if not clock.pairings:
         print(

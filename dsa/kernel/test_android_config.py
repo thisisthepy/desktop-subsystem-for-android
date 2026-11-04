@@ -105,6 +105,16 @@ class AndroidKernelConfigTests(unittest.TestCase):
         ]:
             self.assertIn(option, config)
 
+    def test_fr21_the_kernel_keeps_its_last_log_in_pstore_ramoops(self):
+        config = CONFIG.read_text()
+        for option in [
+            "CONFIG_PSTORE=y",
+            "CONFIG_PSTORE_CONSOLE=y",
+            "CONFIG_PSTORE_PMSG=y",
+            "CONFIG_PSTORE_RAM=y",
+        ]:
+            self.assertIn(option, config)
+
     def test_fr1_vmbus_root_device_is_platform_device_patch(self):
         patch = (PATCHES / "vmbus-platform-device.patch").read_text()
         self.assertIn("drivers/hv/vmbus_drv.c", patch)

@@ -583,26 +583,36 @@ class ImageLayoutTests(unittest.TestCase):
                 self.assertIn("libOpenglSystemCommon\\.so", fc)
 
 
-    def test_fr2_android_log_reaches_the_vm_console_log(self):
+    def test_fr21_android_log_stays_in_memory_and_the_console_quiets_after_boot(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "target-files.zip"
+            ueventd_text = "# seriallogging\n/dev/hvc2 0660 system logd\n"
             with zipfile.ZipFile(source, "w") as archive:
-                archive.writestr("VENDOR/etc/ueventd.rc", "# seriallogging\n/dev/hvc2 0660 system logd\n")
+                archive.writestr("VENDOR/etc/ueventd.rc", ueventd_text)
                 archive.writestr("META/vendor_filesystem_config.txt", "vendor/etc/ueventd.rc 0 0 644 capabilities=0x0\n")
+                archive.writestr("META/filesystem_config.txt", "system/etc 0 0 755 capabilities=0x0\n")
 
             modified = root / "modified.zip"
             make_image.modify(source, modified)
 
             with zipfile.ZipFile(modified) as archive:
-                rc = archive.read("VENDOR/etc/init/dsa-console-logcat.rc").decode()
-                self.assertIn("/system/bin/logcat -b main,system,crash -v threadtime -f /dev/ttyS0 *:I", rc)
-                self.assertIn("seclabel u:r:logpersist:s0", rc)
-                self.assertIn("user logd", rc)
-                ueventd = archive.read("VENDOR/etc/ueventd.rc").decode()
-                self.assertTrue(ueventd.splitlines()[-1].split() == ["/dev/ttyS0", "0660", "system", "logd"])
-                fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
-                self.assertIn("vendor/etc/init/dsa-console-logcat.rc 0 0 644 capabilities=0x0", fs_config)
+                names = archive.namelist()
+                # Nothing writes Android's log to the serial console or to a file.
+                self.assertFalse(any("console-logcat" in name for name in names), names)
+                for name in names:
+                    if name.endswith(".rc"):
+                        self.assertNotIn("/system/bin/logcat", archive.read(name).decode(), name)
+                self.assertEqual(archive.read("VENDOR/etc/ueventd.rc").decode(), ueventd_text)
+                console = archive.read("SYSTEM/etc/init/dsa-console.rc").decode()
+                self.assertIn("on property:sys.boot_completed=1", console)
+                self.assertIn("write /proc/sys/kernel/printk 1", console)
+                fs_config = archive.read("META/filesystem_config.txt").decode()
+                self.assertIn("system/etc/init/dsa-console.rc 0 0 644 capabilities=0x0", fs_config)
+                vendor_fs = archive.read("META/vendor_filesystem_config.txt").decode()
+                self.assertNotIn("console-logcat", vendor_fs)
+        # logd keeps the kernel's log, which `dsa logcat -b kernel` reads.
+        self.assertIn("ro.logd.kernel=true", make_image.edit_props("").splitlines())
 
     def test_pr6_the_control_daemon_is_installed_in_its_own_domain(self):
         # The daemon reads the boot's secret from /proc/bootconfig, so it needs a domain

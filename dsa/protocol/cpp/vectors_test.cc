@@ -479,6 +479,51 @@ std::map<std::string, v1::Envelope> Cases() {
     result->set_error("the node is gone");
   }
   {
+    v1::LogStream* stream = cases["log_stream_on"].mutable_log_stream();
+    stream->set_on(true);
+    stream->set_buffers(50);
+    stream->set_min_priority(4);
+    stream->set_tail(500);
+  }
+  cases["log_stream_off"].mutable_log_stream();
+  {
+    v1::LogDump* dump = cases["log_dump"].mutable_log_dump();
+    dump->set_request_id(7);
+    dump->set_buffers(50);
+    dump->set_min_priority(2);
+  }
+  {
+    v1::LogRecords* records = cases["log_records"].mutable_log_records();
+    v1::LogRecord* record = records->add_records();
+    record->set_buffer(v1::LOG_BUFFER_MAIN);
+    record->set_priority(4);
+    record->set_time_ns(1700000000123456789ULL);
+    record->set_pid(1234);
+    record->set_tid(1240);
+    record->set_uid(1000);
+    record->set_tag("ActivityManager");
+    record->set_message("Start proc 1234");
+    records->add_records()->set_dropped(12);
+  }
+  {
+    v1::LogRecords* end = cases["log_records_dump_end"].mutable_log_records();
+    end->set_request_id(7);
+    end->set_end(true);
+  }
+  cases["collect_diagnostics"].mutable_collect_diagnostics()->set_request_id(3);
+  {
+    v1::DiagnosticsFile* file = cases["diagnostics_file"].mutable_diagnostics_file();
+    file->set_request_id(3);
+    file->set_name("android/pstore/console-ramoops-0");
+    file->set_data("boot");
+    file->set_last(true);
+  }
+  {
+    v1::DiagnosticsDone* done = cases["diagnostics_done"].mutable_diagnostics_done();
+    done->set_request_id(3);
+    done->set_error("the agent did not answer");
+  }
+  {
     const std::string provider = "com.example.clock/.ClockWidget";
     auto clock = [&](v1::WidgetProvider* p) {
       p->set_provider(provider);

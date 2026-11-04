@@ -50,6 +50,21 @@ background.
  HAL clients ─── RPC Binder ──────────────────→ host codecs, audio, power
 ```
 
+## Android's log and reporting a problem
+
+Android's log stays in memory and is never written to a file. It flows to Windows only while
+something reads it, so it costs nothing the rest of the time:
+
+```
+dsa logcat                      # follow the log, as logcat does; Ctrl+C ends it
+dsa logcat -d -b all *:W        # what the log holds now, warnings and above
+dsa logs collect -o diag.zip    # everything a problem report needs, as one zip file
+```
+
+DSA Settings shows the same log live on its Android log page, with a filter and a pause
+button, and its Save diagnostics button makes the same zip file. Attach that file to a
+problem report.
+
 ## What DSA will not ship
 
 - **Google Play services or an app store.** Licensing makes them a user's choice, not

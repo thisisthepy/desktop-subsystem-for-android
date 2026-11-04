@@ -9,6 +9,7 @@
 //! and it is deleted then.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use dsa_host_core::bootconfig;
@@ -16,7 +17,7 @@ use dsa_host_core::session::{GuestLauncher, GuestStall};
 use dsa_protocol::auth::{bootconfig_entry, BootSecret};
 
 use crate::console_log::{
-    boot_header, explain_unfinished_boot, explain_unreachable_agent, ConsoleLog,
+    boot_header, explain_unfinished_boot, explain_unreachable_agent, ConsoleLog, ConsoleSigns,
 };
 use crate::console_pipe::ConsoleCapture;
 use crate::guid::Guid;
@@ -59,6 +60,8 @@ pub struct AndroidVmLauncher {
     prerequisite: Option<Prerequisite>,
     /// The disk the running VM boots from, for what a stalled boot tells the user to do.
     data_disk: Option<PathBuf>,
+    /// What Android's log has shown during this boot, which the console no longer carries.
+    log_signs: Arc<Mutex<ConsoleSigns>>,
 }
 
 /// See [`AndroidVmLauncher::with_prerequisite`].
@@ -112,7 +115,26 @@ impl AndroidVmLauncher {
             boot_dir: crate::paths::MachineRoot::default_location().tmp(),
             prerequisite: None,
             data_disk: None,
+            log_signs: Arc::new(Mutex::new(ConsoleSigns::default())),
         }
+    }
+
+    /// Reads the signs of a late boot from `signs` as well as from the console: whoever reads
+    /// Android's log while it boots fills it in. Each boot starts it afresh.
+    pub fn with_log_signs(mut self, signs: Arc<Mutex<ConsoleSigns>>) -> AndroidVmLauncher {
+        self.log_signs = signs;
+        self
+    }
+
+    /// What this boot's console and Android's log have shown about why it is late.
+    fn signs(&self) -> ConsoleSigns {
+        let mut signs = self
+            .console
+            .as_ref()
+            .map(ConsoleCapture::signs)
+            .unwrap_or_default();
+        signs.merge(&self.log_signs.lock().unwrap_or_else(|e| e.into_inner()));
+        signs
     }
 
     /// Has the session ask `prerequisite` for what the VM cannot run without: it tries to
@@ -202,6 +224,7 @@ impl GuestLauncher for AndroidVmLauncher {
         // the pipe's name is free again.
         self.end_console(Duration::ZERO);
         self.console_report = None;
+        *self.log_signs.lock().unwrap_or_else(|e| e.into_inner()) = ConsoleSigns::default();
         let mut config = (self.config)()?;
         self.data_disk = Some(config.data_disk.clone());
         let Some(initrd) = config.initrd.clone() else {
@@ -309,14 +332,12 @@ impl GuestLauncher for AndroidVmLauncher {
     }
 
     fn agent_refused_for_keys(&mut self) -> bool {
-        self.console
-            .as_ref()
-            .is_some_and(|console| console.signs().agent_refused_for_keys())
+        self.signs().agent_refused_for_keys()
     }
 
     fn explain_stall(&mut self, stall: GuestStall) -> Option<String> {
-        let console = self.console.as_ref()?;
-        let (signs, log) = (console.signs(), console.log_path());
+        let log = self.console.as_ref()?.log_path();
+        let signs = self.signs();
         Some(match stall {
             GuestStall::BootUnfinished => explain_unfinished_boot(&signs, &log),
             GuestStall::AgentUnreachable => {

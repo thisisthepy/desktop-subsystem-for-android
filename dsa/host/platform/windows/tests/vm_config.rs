@@ -52,6 +52,11 @@ fn fr2_the_vm_boots_its_kernel_directly_with_the_android_command_line() {
         "{cmdline}"
     );
     assert!(!cmdline.contains("hvc0"), "{cmdline}");
+    // The guest kernel's ramoops region, reserved before the kernel uses any memory.
+    assert!(
+        cmdline.contains("memmap=1M$0x10000000 ramoops.mem_address=0x10000000"),
+        "{cmdline}"
+    );
     assert!(cmdline.ends_with("androidboot.hardware=dsa"), "{cmdline}");
     assert_eq!(doc["SchemaVersion"]["Major"], 2);
     assert_eq!(doc["ShouldTerminateOnLastHandleClosed"], true);

@@ -157,7 +157,8 @@ SETTINGS_CODE_WITHOUT_BLUETOOTH = {
 
 # Cuttlefish's logger writes to a virtio console Hyper-V does not have, so it exits as soon as
 # it starts. init starts it again every five seconds, and each exit runs flags_health_check.
-# console-logcat.rc is what logs here.
+# Nothing takes its place: Android's log stays in logd's memory, and the control daemon sends
+# it to the host only while someone reads it (`dsa logcat`).
 REMOVED_INIT_SCRIPTS = ["VENDOR/etc/init/seriallogging.rc"]
 
 # The user's disk. The super partition's UUID is how first-stage init finds the disk, so it
@@ -258,6 +259,13 @@ LOADER_PROPS = {
 # PersistentDataBlockService nor, without an oemlock HAL, OemLockService.
 FRP_PROPS = {
     "ro.frp.pst": "",
+}
+
+# logd keeps the kernel's log in its own buffer too, so `dsa logcat -b kernel` and the
+# diagnostics have it. A user build leaves it out by default. The serial console carries the
+# kernel's messages only until boot completes (dsa-console.rc).
+LOG_PROPS = {
+    "ro.logd.kernel": "true",
 }
 
 # Cuttlefish ships selectable vendor APEX implementations. Its launcher passes
@@ -768,7 +776,7 @@ def edit_props(text, codec2=False, vendor=False, build_tag=None):
     vendor_init, which gets only the properties vendor_init may set. With `build_tag`, the
     incremental version and the fingerprints carry it."""
     props_to_apply = {**USER_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS, **FRP_PROPS,
-                      **(CODEC2_PROPS if codec2 else {})}
+                      **LOG_PROPS, **(CODEC2_PROPS if codec2 else {})}
     if vendor:
         props_to_apply = {k: v for k, v in props_to_apply.items() if k not in VENDOR_FORBIDDEN_PROPS}
     out = []
@@ -899,13 +907,18 @@ DISPLAY_BOOTCONFIG = {
     "display_dpi": 160,
 }
 
-CONSOLE_LOGCAT_RC = "VENDOR/etc/init/dsa-console-logcat.rc"
 # Turns on the zram swap fstab.dsa declares, and tunes the kernel for it.
 MEMORY_RC = "VENDOR/etc/init/dsa-memory.rc"
 # Main thread timing for the input trace (dsa-trace.rc). A system script, so init itself runs it.
 TRACE_RC = "SYSTEM/etc/init/dsa-trace.rc"
+# Quiets the serial console once boot completes, so it carries only the kernel's early boot and
+# a panic. A system script, because only init itself may write the kernel's printk levels.
+CONSOLE_RC = "SYSTEM/etc/init/dsa-console.rc"
 SYSTEM_FS_CONFIG = "META/filesystem_config.txt"
-TRACE_FS_CONFIG = ["system/etc/init/dsa-trace.rc 0 0 644 capabilities=0x0"]
+TRACE_FS_CONFIG = [
+    "system/etc/init/dsa-trace.rc 0 0 644 capabilities=0x0",
+    "system/etc/init/dsa-console.rc 0 0 644 capabilities=0x0",
+]
 # The property dsa-channeld sets to have init drop the caches and compact memory, so free
 # page reporting hands idle memory back to the host. vendor_property_contexts gives it the
 # type the daemon's policy lets it set.
@@ -968,8 +981,6 @@ AGENT_FS_CONFIG = [
     "system_ext/priv-app/DsaAgent/DsaAgent.apk 0 0 644 capabilities=0x0",
     "system_ext/etc/permissions/privapp-permissions-dsa-agent.xml 0 0 644 capabilities=0x0",
 ]
-# The console logcat runs as logd, and ueventd makes the serial port root's alone.
-CONSOLE_UEVENTD_LINE = "/dev/ttyS0 0660 system logd"
 
 
 def update_vendor_file_contexts(fc_text, channeld=False, hwcomposer=False, power=False, codec2=False):
@@ -1073,7 +1084,6 @@ def update_vendor_filesystem_config(fs_config_text, channeld=False, hwcomposer=F
     entries = [
         ("vendor/lib64/hw/vulkan.ranchu.so", "vendor/lib64/hw/vulkan.ranchu.so 0 0 644 capabilities=0x0"),
         ("vendor/lib64/libOpenglSystemCommon.so", "vendor/lib64/libOpenglSystemCommon.so 0 0 644 capabilities=0x0"),
-        ("vendor/etc/init/dsa-console-logcat.rc", "vendor/etc/init/dsa-console-logcat.rc 0 0 644 capabilities=0x0"),
         ("vendor/etc/init/dsa-memory.rc", "vendor/etc/init/dsa-memory.rc 0 0 644 capabilities=0x0"),
         ("vendor/etc/selinux/vendor_property_contexts",
          "vendor/etc/selinux/vendor_property_contexts 0 0 644 capabilities=0x0"),
@@ -1257,7 +1267,6 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
     Cuttlefish's when `power_hal` names the folder that holds dsa-power and dsa-health, and
     DSA's codec HAL, whose video decoders decode on the host's GPU, when `codec2` names it."""
     fstab = (HERE / "fstab.dsa").read_bytes()
-    console_logcat = (HERE / "console-logcat.rc").read_bytes()
     graphics_payload = Path(graphics_library).read_bytes() if graphics_library else None
     vulkan_payload = Path(vulkan_driver).read_bytes() if vulkan_driver else None
     channeld_payload = Path(channeld).read_bytes() if channeld else None
@@ -1441,8 +1450,6 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                         if overlay_payload is not None:
                             text = add_filesystem_config(text, FRAMEWORK_OVERLAY_FS_CONFIG)
                     data = text.encode()
-                elif name == "VENDOR/etc/ueventd.rc":
-                    data = data.rstrip(b"\n") + b"\n" + CONSOLE_UEVENTD_LINE.encode() + b"\n"
                 elif name in ("VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"):
                     data = update_vendor_file_contexts(data.decode(), channeld_payload is not None,
                                                        has_hwcomposer, has_power, codec2=has_codec2).encode()
@@ -1455,9 +1462,9 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             zout.writestr(info, data)
         for directory in FSTAB_DIRS:
             zout.writestr(directory + "fstab.dsa", fstab)
-        zout.writestr(CONSOLE_LOGCAT_RC, console_logcat)
         zout.writestr(MEMORY_RC, (HERE / "dsa-memory.rc").read_bytes())
         zout.writestr(TRACE_RC, (HERE / "dsa-trace.rc").read_bytes())
+        zout.writestr(CONSOLE_RC, (HERE / "dsa-console.rc").read_bytes())
         if VENDOR_PROPERTY_CONTEXTS not in names:
             zout.writestr(VENDOR_PROPERTY_CONTEXTS, update_vendor_property_contexts(""))
         zout.writestr(UNAVAILABLE_FEATURES, (HERE / "unavailable-features.xml").read_bytes())
@@ -1712,7 +1719,7 @@ def kernel_cmdline(partition_cmdline, hwcomposer=False):
         "androidboot.cpuvulkan.version=0",
         # The Cuttlefish lights HAL listens on this vsock port for a host client; without
         # one it binds port 0, which only privileged processes may, and aborts. No host
-        # client connects; DSA's own ports are 5000 and 5566-5567.
+        # client connects; DSA's own ports are 5000-5001 and 5566-5567.
         "androidboot.vsock_lights_port=6900",
         *(f"androidboot.vendor.apex.{module}={apex}"
           for module, apex in apexes.items()),

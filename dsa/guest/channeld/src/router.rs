@@ -20,6 +20,10 @@
 //!   Only the agent may say so: the platform gives the router a check for the caller, and
 //!   [`agent_caller`] is the rule it applies to what binder and the kernel say of the caller.
 //!
+//! - The diagnostics the agent gathers go to the log port ([`Router::divert_diagnostics`]),
+//!   never on the control channel, and only the agent may send them. The guest's log is the
+//!   daemon's own to send; no client may.
+//!
 //! None of this knows about binder: a listener is anything that can take a frame, so the
 //! rules run and are tested on any platform. The binder service in `binder` is a thin layer
 //! that turns calls into these.
@@ -185,6 +189,8 @@ pub struct Router {
     to_host: Sender<Vec<u8>>,
     state: Mutex<State>,
     agent_check: AgentCheck,
+    /// Where the agent's diagnostics go instead of the host's control channel.
+    diagnostics: Mutex<Option<Sender<Vec<u8>>>>,
 }
 
 /// Says whether the caller of the current call is the agent. It runs on the caller's thread.
@@ -201,7 +207,19 @@ impl Router {
             to_host,
             state: Mutex::new(State::default()),
             agent_check: Box::new(agent_check),
+            diagnostics: Mutex::new(None),
         }
+    }
+
+    /// Whether the agent is connected.
+    pub fn agent_connected(&self) -> bool {
+        self.lock().agent.is_some()
+    }
+
+    /// Sends the diagnostics the agent gathers (`DiagnosticsFile`, `DiagnosticsDone`) to `to`
+    /// instead of the host's control channel. Without it the agent's diagnostics are refused.
+    pub fn divert_diagnostics(&self, to: Sender<Vec<u8>>) {
+        *self.diagnostics.lock().unwrap_or_else(|e| e.into_inner()) = Some(to);
     }
 
     /// Adds a listener for `peer` and tells it the live tasks other processes reported. It
@@ -388,6 +406,36 @@ impl Router {
             }
             Some(Body::TaskFrames(frames)) => {
                 state.tasks.entry(frames.task_id).or_default().frames = Some(frame.clone());
+            }
+            Some(Body::DiagnosticsFile(_) | Body::DiagnosticsDone(_)) => {
+                // The agent's part of the diagnostics goes on the log port, never on the
+                // control channel, so a large dump cannot hold up input.
+                (self.agent_check)(sender).map_err(|why| {
+                    SendError::NotAllowed(format!("only the agent sends diagnostics: {why}"))
+                })?;
+                let diverted = self
+                    .diagnostics
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .as_ref()
+                    .map(|to| to.send(frame).is_ok())
+                    .unwrap_or(false);
+                if !diverted {
+                    return Err(SendError::NotAllowed(
+                        "no diagnostics are being gathered".to_string(),
+                    ));
+                }
+                return Ok(());
+            }
+            Some(
+                Body::LogStream(_)
+                | Body::LogDump(_)
+                | Body::LogRecords(_)
+                | Body::CollectDiagnostics(_),
+            ) => {
+                return Err(SendError::NotAllowed(
+                    "the guest's log is the daemon's to send".to_string(),
+                ))
             }
             Some(Body::PowerHint(hint)) if hint.kind == PowerHintKind::Mode as i32 => {
                 if !hint.enabled {
