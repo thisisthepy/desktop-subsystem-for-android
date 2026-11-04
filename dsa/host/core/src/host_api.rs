@@ -2341,7 +2341,9 @@ impl HostApiService {
             return Self::no_settings();
         };
         match store.get(&peer.user) {
-            Ok(settings) => response::Body::Settings(settings_to_wire(&settings, &self.facts_now(facts))),
+            Ok(settings) => {
+                response::Body::Settings(settings_to_wire(&settings, &self.facts_now(facts)))
+            }
             Err(why) => error(ErrorCode::Unavailable, why),
         }
     }

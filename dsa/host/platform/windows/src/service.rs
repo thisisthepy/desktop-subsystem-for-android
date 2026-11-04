@@ -494,7 +494,10 @@ where
             .map(|dir| dir.to_string_lossy().into_owned()),
         program_updates_available: program.is_some() && config.program_updates_available(),
         image_updates_available,
-        android_version: config.first_image.as_ref().map(|image| image.version.clone()),
+        android_version: config
+            .first_image
+            .as_ref()
+            .map(|image| image.version.clone()),
     };
     // With an update store the image the next start boots is the store's current one, which
     // an update changes while the service runs.
