@@ -145,16 +145,18 @@ pub fn is_korean(lang_id: u16) -> bool {
 }
 
 /// Shows the menu of a widget window at `x`, `y` on the screen and returns what the user
-/// chose. Called on the window's own thread; no state is borrowed while the menu is open.
+/// chose. `window` is the widget window's handle as a number. Called on the window's own
+/// thread; no state is borrowed while the menu is open.
 #[cfg(windows)]
 pub fn show(
-    hwnd: windows_sys::Win32::Foundation::HWND,
+    window: isize,
     x: i32,
     y: i32,
     provider: &WidgetProvider,
     placement: &Placement,
 ) -> Option<MenuChoice> {
     use std::ptr::null;
+    use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         AppendMenuW, CreatePopupMenu, DestroyMenu, PostMessageW, SetForegroundWindow,
@@ -169,6 +171,7 @@ pub fn show(
     // SAFETY: reads the user's display language.
     let text = menu_text(is_korean(unsafe { GetUserDefaultUILanguage() }));
     let sizes = size_choices(provider);
+    let hwnd = window as HWND;
     // SAFETY: the menus are made, shown and destroyed here, on the window's thread; every
     // string outlives the call that reads it.
     unsafe {

@@ -1258,7 +1258,7 @@ mod win {
             height_dp: shown.height_dp,
             ..placement
         };
-        match widget_menu::show(hwnd, x, y, &provider, &placement) {
+        match widget_menu::show(hwnd as isize, x, y, &provider, &placement) {
             Some(MenuChoice::Resize {
                 width_dp,
                 height_dp,
