@@ -37,6 +37,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use dsa_host_core::host_paths::HostPaths;
+
 /// The folder below each root that is DSA's.
 pub const DSA: &str = "DSA";
 
@@ -388,4 +390,74 @@ pub fn old_trace_markers(markers: &[PathBuf]) -> OldTraceMarkers {
 /// temporary folder of the account the service runs as.
 pub fn old_boot_initrd(vm_name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{vm_name}.initrd"))
+}
+
+/// Finds the user root of a user from their SID.
+pub type FindUserRoot = Box<dyn Fn(&str) -> Result<UserRoot, String> + Send + Sync>;
+
+/// The Windows [`HostPaths`]: the machine root and each user's root as above.
+pub struct WindowsHostPaths {
+    machine: MachineRoot,
+    find_user: FindUserRoot,
+}
+
+impl WindowsHostPaths {
+    /// The paths below `machine`, finding each user's root with `find_user`.
+    pub fn new(machine: MachineRoot, find_user: FindUserRoot) -> WindowsHostPaths {
+        WindowsHostPaths { machine, find_user }
+    }
+
+    /// The paths below `machine`, finding each user's root from their profile in the
+    /// registry.
+    pub fn with_profiles(machine: MachineRoot) -> WindowsHostPaths {
+        WindowsHostPaths::new(
+            machine,
+            Box::new(|sid| {
+                crate::host_config::local_app_data(sid)
+                    .map(|local| UserRoot::in_local_app_data(&local))
+            }),
+        )
+    }
+
+    pub fn machine(&self) -> &MachineRoot {
+        &self.machine
+    }
+
+    /// The root of the user with SID `sid`.
+    pub fn user_root(&self, sid: &str) -> Result<UserRoot, String> {
+        (self.find_user)(sid)
+    }
+}
+
+impl HostPaths for WindowsHostPaths {
+    fn machine_data(&self) -> PathBuf {
+        self.machine.dir().to_path_buf()
+    }
+    fn images(&self) -> PathBuf {
+        self.machine.images()
+    }
+    fn updates(&self) -> PathBuf {
+        self.machine.updates()
+    }
+    fn settings(&self) -> PathBuf {
+        self.machine.settings()
+    }
+    fn machine_logs(&self) -> PathBuf {
+        self.machine.logs()
+    }
+    fn machine_tmp(&self) -> PathBuf {
+        self.machine.tmp()
+    }
+    fn user_data(&self, user: &str) -> Result<PathBuf, String> {
+        Ok(self.user_root(user)?.dir().to_path_buf())
+    }
+    fn apps(&self, user: &str) -> Result<PathBuf, String> {
+        Ok(self.user_root(user)?.apps())
+    }
+    fn user_logs(&self, user: &str) -> Result<PathBuf, String> {
+        Ok(self.user_root(user)?.logs())
+    }
+    fn user_tmp(&self, user: &str) -> Result<PathBuf, String> {
+        Ok(self.user_root(user)?.tmp())
+    }
 }

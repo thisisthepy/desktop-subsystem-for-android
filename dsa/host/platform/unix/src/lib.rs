@@ -3,6 +3,9 @@
 //! The server binds a socket file whose permissions decide who may connect at all, and
 //! reads each client's user ID from the kernel (`SO_PEERCRED` on Linux, `getpeereid` on
 //! macOS), so it never trusts a user named in a message.
+//!
+//! [`paths`] says where a Unix host keeps its files.
 
+pub mod paths;
 #[cfg(unix)]
 pub mod socket;
