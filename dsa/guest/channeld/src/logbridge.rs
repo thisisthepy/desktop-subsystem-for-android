@@ -483,7 +483,7 @@ fn run_dump(
     let mut batch = Vec::new();
     let problem = {
         let connection = &mut connection;
-        let mut each = |record: LogRecord| {
+        let mut each = |record: LogRecord| -> Result<(), String> {
             batch.push(record);
             if batch.len() >= BATCH {
                 send_records(&mut **connection, request_id, &mut batch, false, String::new())?;
@@ -561,7 +561,7 @@ fn run_collect(
     let name = "android/logcat.txt";
     let problem = {
         let connection = &mut connection;
-        let mut each = |record: LogRecord| {
+        let mut each = |record: LogRecord| -> Result<(), String> {
             text.extend_from_slice(logd::threadtime(&record).as_bytes());
             if text.len() >= PIECE {
                 let piece = std::mem::take(&mut text);
