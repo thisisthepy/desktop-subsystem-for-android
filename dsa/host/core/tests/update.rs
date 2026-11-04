@@ -427,6 +427,37 @@ fn fr14_an_image_whose_disk_is_not_a_disk_is_not_usable() {
 }
 
 #[test]
+fn fr25_an_image_of_another_architecture_is_not_usable() {
+    use dsa_host_core::update::store::{guest_arch, image_is_usable};
+    let first = installed("16.0.1", 16, 1);
+    let (_store, root) = fresh_store(&first);
+    put_image(&root, "17.0.0-1", 17, 1, true);
+    put_image(&root, "17.0.0-2", 17, 2, true);
+    let set_arch = |version: &str, arch: &str| {
+        let path = root.join("images").join(version).join("image.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        manifest["arch"] = serde_json::json!(arch);
+        std::fs::write(&path, manifest.to_string()).unwrap();
+    };
+    let other = if guest_arch() == "arm64" { "x86_64" } else { "arm64" };
+    set_arch("17.0.0-1", guest_arch());
+    set_arch("17.0.0-2", other);
+    assert!(image_is_usable(&root.join("images").join("17.0.0-1")));
+    assert!(
+        !image_is_usable(&root.join("images").join("17.0.0-2")),
+        "an {other} image on an {} host",
+        guest_arch()
+    );
+    let expected = if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        "x86_64"
+    };
+    assert_eq!(guest_arch(), expected);
+}
+
+#[test]
 fn fr14_a_current_image_that_cannot_boot_falls_back_to_a_usable_one() {
     use dsa_host_core::update::store::Recovery;
     let first = installed("none", 0, 0);

@@ -84,9 +84,23 @@ fn is_vhdx(path: &Path) -> bool {
         .is_ok_and(|()| head == VHDX_SIGNATURE)
 }
 
+/// The guest architecture this host runs, as an image's `image.json` names it in `arch`:
+/// `x86_64` on an x86_64 host, `arm64` on an ARM64 host. A VM runs only a guest of the
+/// host's own architecture.
+pub fn guest_arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        other => other,
+    }
+}
+
 /// Whether the image folder `dir` holds files an Android VM can boot from. An image with an
-/// `image.json` has every file it names, at the size it names, and its disks are VHDX files.
-/// An older image without one has at least one disk, and every disk in it is a VHDX file.
+/// `image.json` has every file it names, at the size it names, and its disks are VHDX files;
+/// when it names its `arch`, that is the host's ([`guest_arch`]). An image from before
+/// images named their architecture is taken as it is: each architecture reads its own
+/// image list, so it only ever downloaded images of its own architecture.
+/// An older image without an `image.json` has at least one disk, and every disk in it is a
+/// VHDX file.
 pub fn image_is_usable(dir: &Path) -> bool {
     let is_disk = |name: &str| name.to_ascii_lowercase().ends_with(".vhdx");
     match fs::read(dir.join("image.json")) {
@@ -97,6 +111,12 @@ pub fn image_is_usable(dir: &Path) -> bool {
             let Some(files) = manifest["files"].as_object() else {
                 return false;
             };
+            if manifest
+                .get("arch")
+                .is_some_and(|arch| arch.as_str() != Some(guest_arch()))
+            {
+                return false;
+            }
             !files.is_empty()
                 && files.iter().all(|(name, entry)| {
                     let path = dir.join(name);
