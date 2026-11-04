@@ -79,12 +79,12 @@ pub fn document(elements: &[El<'_>]) -> Vec<u8> {
     let mut body = Vec::new();
     let mut open = 0;
     for El(name, attributes, closes) in elements {
-        let name_index = index(*name, &mut strings);
+        let name_index = index(name, &mut strings);
         let mut attrs = Vec::new();
         for attribute in attributes {
             let (attr_name, raw, kind, data) = match attribute {
                 Attr::Str(n, _, v) => {
-                    let v = index(*v, &mut strings);
+                    let v = index(v, &mut strings);
                     (*n, v, TYPE_STRING, v)
                 }
                 Attr::Typed(n, _, kind, data) => (*n, u32::MAX, *kind, *data),

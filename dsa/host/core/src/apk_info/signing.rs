@@ -202,7 +202,10 @@ fn jar_signer<R: std::io::Read + std::io::Seek>(archive: &mut Archive<R>) -> Opt
 }
 
 /// One DER element: its tag, its content, and the whole element with its header.
-fn der(data: &[u8]) -> Option<(u8, &[u8], &[u8], &[u8])> {
+/// A DER element: its tag, its content, the whole element, and what follows it.
+type Der<'a> = (u8, &'a [u8], &'a [u8], &'a [u8]);
+
+fn der(data: &[u8]) -> Option<Der<'_>> {
     let tag = *data.first()?;
     let first = *data.get(1)?;
     let (length, header) = if first & 0x80 == 0 {
