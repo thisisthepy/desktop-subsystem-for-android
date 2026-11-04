@@ -707,7 +707,7 @@ def component_problems(component: dict, policy: dict) -> list:
 
     A licence from the allow list is always fine. A weak copyleft licence is fine for a
     component shipped unmodified. A GPL licence is fine only for a separate program with a
-    written source offer.
+    source shipped beside it in the same release.
     """
     name = component.get("name", "<unnamed>")
     problems = [f"{name}: has no {key}" for key in ("name", "license", "part", "distribution", "source")
@@ -729,7 +729,7 @@ def component_problems(component: dict, policy: dict) -> list:
         if token in weak:
             return component.get("modified") is False
         if token in separate:
-            return component["distribution"] == "separate-program" and bool(component.get("source_offer"))
+            return component["distribution"] == "separate-program" and bool(component.get("shipped_source"))
         return False
 
     expr = component["license"]
@@ -743,8 +743,8 @@ def component_problems(component: dict, policy: dict) -> list:
         ids = [t for t in tokens if t not in ("AND", "OR", "(", ")")]
         if any(t in separate for t in ids):
             problems.append(
-                f"{name}: '{expr}' is allowed only for a separate program with a written source offer "
-                "(distribution = \"separate-program\" and source_offer)")
+                f"{name}: '{expr}' is allowed only for a separate program whose source is shipped beside it "
+                "(distribution = \"separate-program\" and shipped_source)")
         elif any(t in weak for t in ids):
             problems.append(f"{name}: '{expr}' is allowed only for a component shipped unmodified (modified = false)")
         else:
@@ -811,31 +811,40 @@ def components_notice(workspace_dir: Path) -> str:
             lines.append(f"  Source: {c['source']}")
             if c.get("notice"):
                 lines.append(f"  {c['notice']}")
-            if c.get("source_offer"):
-                lines.append(f"  Source offer: see {c['source_offer']}")
+            if c.get("shipped_source"):
+                lines.append(f"  Its source is shipped beside it: see {c['shipped_source']}")
         lines.append("")
     return "\n".join(lines) + "\n"
 
 
-def kernel_source_offer(workspace_dir: Path) -> str:
+# The release asset that holds the kernel's corresponding source. The release workflow
+# publishes it beside every kernel it publishes (dsa/kernel/source-bundle.sh makes it).
+KERNEL_SOURCE_ASSET = "kernel-source.tar.gz"
+
+
+def kernel_source_notice(workspace_dir: Path, release_tag: str | None = None) -> str:
+    """Where the shipped kernel's source is: an asset of the release that ships it."""
     tag_file = workspace_dir / "kernel" / "wsl-kernel.tag"
     tag = tag_file.read_text(encoding="utf-8").strip() if tag_file.exists() else "named in dsa/kernel/wsl-kernel.tag"
-    return f"""Guest kernel: source code offer
+    if release_tag:
+        where = (f"the asset {KERNEL_SOURCE_ASSET} of release {release_tag}:\n"
+                 f"  {REPO_URL}/releases/download/{release_tag}/{KERNEL_SOURCE_ASSET}\n"
+                 f"  (release page: {REPO_URL}/releases/tag/{release_tag})")
+    else:
+        where = (f"the asset {KERNEL_SOURCE_ASSET} of the release this build was published as,\n"
+                 f"  on {REPO_URL}/releases")
+    return f"""Guest kernel: where its source is
 
 The guest kernel (vm\\bzImage) is a separate program licensed under the GNU General Public
 License, version 2 (see kernel-GPL-2.0.txt). It runs in its own virtual machine; no DSA
 program links with it.
 
-Its complete corresponding source code is:
-- the WSL2 Linux kernel at tag {tag}:
-  https://github.com/microsoft/WSL2-Linux-Kernel/tree/{tag}
-- with the configuration and patches in dsa/kernel/ of the DSA source code of the same
-  release: {REPO_URL}
+Its complete corresponding source is published beside it, as
+{where}
 
-For at least three years from the date you received this program, any third party may
-ask for a complete machine-readable copy of that source code, for a charge no more than
-the cost of physically performing the distribution, by opening an issue at
-{REPO_URL}/issues.
+The bundle holds the WSL2 Linux kernel at tag {tag}, DSA's patches, configuration fragment
+and build script, the merged configuration the kernel was built with, and how to rebuild
+it. Every Android image release that carries this kernel has the same asset.
 """
 
 
@@ -851,7 +860,8 @@ def parse_cargo_lock(lock_path: Path):
     return entries
 
 
-def generate_bundle(workspace_dir: Path, out_dir: Path, master_notice: Path | None = None):
+def generate_bundle(workspace_dir: Path, out_dir: Path, master_notice: Path | None = None,
+                    release_tag: str | None = None):
     allow_list = load_deny_allow_list(workspace_dir)
     lock_path = workspace_dir / "Cargo.lock"
     if not lock_path.exists():
@@ -915,7 +925,7 @@ def generate_bundle(workspace_dir: Path, out_dir: Path, master_notice: Path | No
     (out_dir / "apache-2.0.txt").write_text(APACHE_2_0_TEXT, encoding="utf-8")
     (out_dir / "mit.txt").write_text(MIT_TEXT, encoding="utf-8")
     (out_dir / "third-party-components.txt").write_text(components_notice(workspace_dir), encoding="utf-8")
-    (out_dir / "kernel-source-offer.txt").write_text(kernel_source_offer(workspace_dir), encoding="utf-8")
+    (out_dir / "kernel-source-offer.txt").write_text(kernel_source_notice(workspace_dir, release_tag), encoding="utf-8")
 
     # 3. Master NOTICE.txt
     master_lines = [
@@ -950,7 +960,7 @@ def generate_bundle(workspace_dir: Path, out_dir: Path, master_notice: Path | No
         "   - Source: Microsoft WSL2 Linux Kernel with DSA binder and partition patches",
         "   - License: GNU General Public License v2.0 (GPL-2.0-only)",
         "   - Full license text: see licenses/kernel-GPL-2.0.txt",
-        "   - Source code offer: see licenses/kernel-source-offer.txt",
+        "   - Where its source is: see licenses/kernel-source-offer.txt",
         "   - Kernel configurations and build scripts: dsa/kernel/ in the source repository",
         "",
         "2. Windows Setup Program and WiX Runtime (setup.exe, DsaSetup.exe)",
@@ -1007,6 +1017,8 @@ def main():
     parser.add_argument("--out-dir", type=Path, default=Path(__file__).resolve().parents[4] / "dsa/target/installer/stage/licenses")
     parser.add_argument("--master-notice", type=Path, default=None)
     parser.add_argument("--check-only", action="store_true")
+    parser.add_argument("--release-tag", default=None,
+                        help="the GitHub release this build is published as; the kernel source notice names its asset")
     args = parser.parse_args()
 
     allow_list = load_deny_allow_list(args.workspace)
@@ -1038,7 +1050,7 @@ def main():
         print(f"All {len(lock_packages)} Rust dependencies comply with the licence policy.")
         return
 
-    generate_bundle(args.workspace, args.out_dir, args.master_notice)
+    generate_bundle(args.workspace, args.out_dir, args.master_notice, args.release_tag)
 
 
 if __name__ == "__main__":

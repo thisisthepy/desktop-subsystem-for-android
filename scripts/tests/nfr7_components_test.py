@@ -62,13 +62,13 @@ class ComponentRule(unittest.TestCase):
         problems = gl.component_problems(component(license="GPL-2.0-only"), POLICY)
         self.assertIn("separate program", problems[0])
 
-    def test_nfr7_gpl_separate_program_without_source_offer_is_rejected(self):
+    def test_nfr7_gpl_separate_program_without_shipped_source_is_rejected(self):
         problems = gl.component_problems(
             component(license="GPL-2.0-only", distribution="separate-program"), POLICY)
-        self.assertIn("source offer", problems[0])
+        self.assertIn("source is shipped beside it", problems[0])
 
-    def test_nfr7_gpl_separate_program_with_source_offer_is_allowed(self):
-        c = component(license="GPL-2.0-only", distribution="separate-program", source_offer="offer.txt")
+    def test_nfr7_gpl_separate_program_with_shipped_source_is_allowed(self):
+        c = component(license="GPL-2.0-only", distribution="separate-program", shipped_source="notice.txt")
         self.assertEqual(gl.component_problems(c, POLICY), [])
 
     def test_nfr7_weak_copyleft_needs_an_unmodified_component(self):
@@ -124,11 +124,17 @@ class RealManifest(unittest.TestCase):
     def test_nfr7_every_shipped_component_follows_the_licence_rule(self):
         self.assertEqual(gl.check_components(REPO / "dsa"), [])
 
-    def test_nfr7_kernel_source_offer_names_the_pinned_tag(self):
+    def test_nfr7_kernel_source_notice_names_the_release_asset(self):
         tag = (REPO / "dsa/kernel/wsl-kernel.tag").read_text(encoding="utf-8").strip()
-        offer = gl.kernel_source_offer(REPO / "dsa")
-        self.assertIn(tag, offer)
-        self.assertIn("three years", offer)
+        notice = gl.kernel_source_notice(REPO / "dsa", "v1.2.3")
+        self.assertIn(tag, notice)
+        self.assertIn("/releases/download/v1.2.3/kernel-source.tar.gz", notice)
+        # The source goes with the binary; no time-limited promise stands in for it.
+        self.assertNotIn("three years", notice)
+        self.assertNotIn("written offer", notice)
+
+    def test_nfr7_kernel_source_notice_without_a_release_still_names_the_asset(self):
+        self.assertIn("kernel-source.tar.gz", gl.kernel_source_notice(REPO / "dsa"))
 
     def test_nfr7_components_notice_lists_every_component(self):
         notice = gl.components_notice(REPO / "dsa")

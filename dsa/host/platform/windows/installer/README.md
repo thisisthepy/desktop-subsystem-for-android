@@ -138,9 +138,11 @@ component breaks this rule:
   list fails the check.
 - A component linked into a DSA program must carry a permissive licence from the allow list
   there. A file-level reciprocal licence (MS-RL) is allowed only for a component shipped
-  unmodified. A GPL licence is allowed only for a separate program with a written source
-  offer: the guest kernel, which runs in its own virtual machine and is never linked with
-  DSA code. Its offer is `licenses\kernel-source-offer.txt`.
+  unmodified. A GPL licence is allowed only for a separate program whose corresponding
+  source ships beside it: the guest kernel, which runs in its own virtual machine and is
+  never linked with DSA code. Every release that ships it (the installer and each Android
+  image) carries `kernel-source.tar.gz`, made by `dsa/kernel/source-bundle.sh`, and
+  `licenses\kernel-source-offer.txt` says where that asset is.
 
 The bundle also has `third-party-components.txt`, which lists those components with their
 licences and sources. The settings app's About page opens the bundle's folder.

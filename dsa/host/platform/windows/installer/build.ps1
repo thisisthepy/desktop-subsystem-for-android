@@ -26,6 +26,9 @@
 # -ProgramListUrl names the signed program list the service updates DSA itself from (it
 # needs -ListUrl, and the same -TrustedKey signs both lists). Without it the installed DSA
 # is updated by hand.
+#
+# -ReleaseTag names the GitHub release this build is published as (v<version>); the licence
+# bundle points at the kernel source asset of that release.
 param(
     [string]$Version = "0.1.0",
     [string]$Kernel,
@@ -39,7 +42,8 @@ param(
     [string]$ProgramListUrl,
     [string]$PipeSddl,
     [int]$AndroidMajor,
-    [string]$GfxstreamBackend
+    [string]$GfxstreamBackend,
+    [string]$ReleaseTag
 )
 $ErrorActionPreference = "Stop"
 
@@ -83,7 +87,8 @@ $python = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } e
 $licensesDir = Join-Path $stage "licenses"
 $masterNotice = Join-Path $stage "NOTICE.txt"
 $generateScript = Join-Path $installer "generate-licenses.py"
-& $python $generateScript --workspace $dsa --out-dir $licensesDir --master-notice $masterNotice
+$releaseTagArgs = if ($ReleaseTag) { @("--release-tag", $ReleaseTag) } else { @() }
+& $python $generateScript --workspace $dsa --out-dir $licensesDir --master-notice $masterNotice @releaseTagArgs
 if ($LASTEXITCODE -ne 0) { throw "generating the licence bundle failed" }
 
 # Reject Microsoft WSA binaries or components in the payload.

@@ -14,7 +14,8 @@
 #   component DSA ships unmodified, with `modified = false` and a `source` to get it from.
 # - A licence from `policy.separate_program` (GPL) is allowed only for a program that runs
 #   on its own and is not linked with DSA code (`distribution = "separate-program"`), with
-#   a written source offer (`source_offer`). The guest kernel is the one such component:
+#   its corresponding source shipped beside it in every release that ships it
+#   (`shipped_source`, the notice that says where). The guest kernel is the one such component:
 #   it runs in its own virtual machine, and DSA talks to it only through system calls and
 #   devices, never by linking.
 
@@ -147,7 +148,7 @@ license = "GPL-2.0-only WITH Linux-syscall-note"
 part = "guest"
 distribution = "separate-program"
 source = "https://github.com/microsoft/WSL2-Linux-Kernel"
-source_offer = "kernel-source-offer.txt"
+shipped_source = "kernel-source-offer.txt (release asset kernel-source.tar.gz)"
 
 [[component]]
 name = "Protocol Buffers C++ runtime (dsa-hwcomposer, dsa-codec2, dsa power HAL)"
