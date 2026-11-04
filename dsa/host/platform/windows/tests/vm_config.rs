@@ -55,7 +55,7 @@ fn arm64_document(config: &AndroidVmConfig) -> Value {
 }
 
 #[test]
-fn fr25_the_host_architecture_picks_the_guest_architecture() {
+fn fr27_the_host_architecture_picks_the_guest_architecture() {
     let expected = if cfg!(target_arch = "aarch64") {
         GuestArch::Arm64
     } else {
@@ -78,7 +78,7 @@ fn fr25_the_host_architecture_picks_the_guest_architecture() {
 }
 
 #[test]
-fn fr25_an_arm64_vm_boots_the_kernels_efi_stub_from_its_boot_folder() {
+fn fr27_an_arm64_vm_boots_the_kernels_efi_stub_from_its_boot_folder() {
     let doc = arm64_document(&arm64_config());
     let chipset = &doc["VirtualMachine"]["Chipset"];
     assert!(
@@ -107,7 +107,7 @@ fn fr25_an_arm64_vm_boots_the_kernels_efi_stub_from_its_boot_folder() {
 }
 
 #[test]
-fn fr25_an_arm64_kernel_gets_no_x86_parameters() {
+fn fr27_an_arm64_kernel_gets_no_x86_parameters() {
     let options = arm64_config().full_kernel_cmdline_for(GuestArch::Arm64);
     for x86 in ["uart8250", "ttyS0", "memmap=", "ramoops.mem_address"] {
         assert!(!options.contains(x86), "{x86} in {options}");
@@ -128,7 +128,7 @@ fn fr25_an_arm64_kernel_gets_no_x86_parameters() {
 }
 
 #[test]
-fn fr25_an_arm64_vm_keeps_the_same_devices_memory_and_console_pipe() {
+fn fr27_an_arm64_vm_keeps_the_same_devices_memory_and_console_pipe() {
     let arm = arm64_document(&arm64_config());
     let x86 = document(&arm64_config());
     for key in ["ComputeTopology", "Devices"] {
@@ -144,7 +144,7 @@ fn fr25_an_arm64_vm_keeps_the_same_devices_memory_and_console_pipe() {
 }
 
 #[test]
-fn fr25_an_arm64_vm_without_an_initrd_names_none() {
+fn fr27_an_arm64_vm_without_an_initrd_names_none() {
     let mut config = arm64_config();
     config.initrd = None;
     let doc = arm64_document(&config);
@@ -155,7 +155,7 @@ fn fr25_an_arm64_vm_without_an_initrd_names_none() {
 }
 
 #[test]
-fn fr25_an_arm64_initrd_outside_the_kernels_folder_is_refused() {
+fn fr27_an_arm64_initrd_outside_the_kernels_folder_is_refused() {
     // The firmware reads only the boot folder, so it could not load the initrd.
     let error = config()
         .to_hcs_document_for(GuestArch::Arm64)

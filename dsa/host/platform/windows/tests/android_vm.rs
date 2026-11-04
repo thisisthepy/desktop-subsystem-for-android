@@ -103,7 +103,7 @@ fn fr2_a_failed_start_keeps_a_console_log_and_frees_the_pipe_for_the_next_start(
 }
 
 #[test]
-fn fr25_an_arm64_boot_gets_a_folder_of_its_own_with_the_kernel_and_the_initrd() {
+fn fr27_an_arm64_boot_gets_a_folder_of_its_own_with_the_kernel_and_the_initrd() {
     let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("android-vm-arm64-boot");
     let _ = std::fs::remove_dir_all(&root);
     let image = root.join("image");
@@ -149,7 +149,7 @@ fn fr25_an_arm64_boot_gets_a_folder_of_its_own_with_the_kernel_and_the_initrd() 
 }
 
 #[test]
-fn fr25_an_x86_64_boot_keeps_its_initrd_beside_the_others() {
+fn fr27_an_x86_64_boot_keeps_its_initrd_beside_the_others() {
     let boot_dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("android-vm-x86-boot");
     let _ = std::fs::remove_dir_all(&boot_dir);
     std::fs::create_dir_all(&boot_dir).unwrap();

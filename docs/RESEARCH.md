@@ -795,7 +795,7 @@ Digitalis의 배포 묶음(`docker/build-digitalis.sh`)은 번역기(`libberberi
 - 번역된 앱의 성능(시작 시간, 프레임 시간). 공개된 수치가 없다.
 - 오버레이 위의 라이브러리를 앱 프로세스가 SELinux 거부 없이 읽는지. PC에서 `dmesg`로 확인한다.
 
-## R10. ARM64 Windows 호스트: WSL의 arm64 부팅과 Hyper-V ARM64의 차이 (FR-25)
+## R10. ARM64 Windows 호스트: WSL의 arm64 부팅과 Hyper-V ARM64의 차이 (FR-27)
 
 **기준.** 2026-11-05. WSL 소스 `microsoft/WSL` `master`(커밋 `8a5e541`)의 `src/windows/service/exe/WslCoreVm.cpp`, `src/windows/common/hcs_schema.h`, `src/windows/common/helpers.cpp`와 커널 저장소 `microsoft/WSL2-Linux-Kernel` 태그 `linux-msft-wsl-6.18.54.1`의 `Microsoft/config-wsl-arm64`, DSA 커널 패치 다섯 개를 읽었다. ARM64 PC에서 부팅해 보지는 않았다.
 
