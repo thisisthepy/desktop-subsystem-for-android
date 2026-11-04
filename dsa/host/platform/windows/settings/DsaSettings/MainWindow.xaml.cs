@@ -89,6 +89,22 @@ public partial class MainWindow : FluentWindow
     /// items out of reach.</summary>
     private void MakePaneScroll()
     {
+        // The library's items take no keyboard focus, so Tab and the arrow keys skipped the
+        // pane. Each item takes the focus, and Enter or Space opens its page.
+        foreach (var item in Navigation.MenuItems.OfType<NavigationViewItem>()
+                     .Concat(Navigation.FooterMenuItems.OfType<NavigationViewItem>()))
+        {
+            item.Focusable = true;
+            item.IsTabStop = true;
+            item.KeyDown += (_, e) =>
+            {
+                if ((e.Key == Key.Enter || e.Key == Key.Space) && item.TargetPageType is { } page)
+                {
+                    Navigation.Navigate(page);
+                    e.Handled = true;
+                }
+            };
+        }
         Navigation.ApplyTemplate();
         if (Navigation.Template?.FindName("PaneGrid", Navigation) is not FrameworkElement pane
             || Descendant<ScrollViewer>(pane) is not { } scroller)
