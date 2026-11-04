@@ -1777,7 +1777,10 @@ fn fr10_an_active_guest_writes_its_data_before_the_host_sleeps_and_is_active_aga
     assert_eq!(next_body(&mut agent), screen(false));
     assert_eq!(next_body(&mut agent), host_sleep(true, 0));
     send_body(&mut agent, sleep_ready());
-    assert!(sleeping.join().unwrap(), "the wait ends with the guest's answer");
+    assert!(
+        sleeping.join().unwrap(),
+        "the wait ends with the guest's answer"
+    );
 
     // A clock an hour off shows the guest is told the host's clock, not its own.
     let host_clock = std::time::SystemTime::now() + Duration::from_secs(3600);
@@ -1820,7 +1823,10 @@ fn fr10_a_dozing_guest_stays_dozing_when_the_host_wakes_and_has_its_clock_set() 
     assert_clock_near(next_body(&mut agent), host_clock);
     thread::sleep(DOZE_DELAY * 2);
     assert_eq!(session.state(), SessionState::Dozing);
-    assert!(agent.recv(Some(Duration::from_millis(100))).is_err(), "nothing else is sent");
+    assert!(
+        agent.recv(Some(Duration::from_millis(100))).is_err(),
+        "nothing else is sent"
+    );
 }
 
 #[test]

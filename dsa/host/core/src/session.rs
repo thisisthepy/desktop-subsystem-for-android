@@ -3142,8 +3142,15 @@ impl Worker {
                 self.share_clipboard(on);
                 true
             }
-            Command::WidgetPressed(reply) => {
+            // No daemon is connected yet, so nothing in the guest waits to be written.
+            Command::WidgetPressed(reply) | Command::HostSleep(reply) => {
                 let _ = reply.send(());
+                true
+            }
+            // A guest still connecting is told the clock once its agent is there.
+            Command::HostWoke(wall_clock) => {
+                self.host_asleep = None;
+                self.clock_pending = Some((wall_clock, Instant::now()));
                 true
             }
             Command::Stop => {

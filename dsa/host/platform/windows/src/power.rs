@@ -219,9 +219,8 @@ unsafe extern "system" fn sleep_callback(
         // SAFETY: the context is the hub the watch keeps alive until it ends the registration.
         let hub = unsafe { &*(context as *const std::sync::Arc<dsa_host_core::power::PowerHub>) };
         // A panic must not cross into Windows.
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            on_sleep_event(hub, event)
-        }));
+        let _ =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| on_sleep_event(hub, event)));
     }
     0
 }

@@ -355,5 +355,8 @@ fn fr10_the_daemon_writes_the_guests_data_and_answers_before_the_host_sleeps() {
         None
     );
     assert!(!woke.load(Ordering::Relaxed));
-    assert_eq!(dsa_guest_channeld::sleep_answer(b"not a message", || {}), None);
+    assert_eq!(
+        dsa_guest_channeld::sleep_answer(b"not a message", || {}),
+        None
+    );
 }
