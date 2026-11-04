@@ -47,6 +47,23 @@ pub struct GuestMemory {
     pub total_pss_kb: u64,
     /// Largest first.
     pub top_processes: Vec<ProcessMemory>,
+    /// What the kernel itself holds.
+    pub kernel: KernelMemory,
+}
+
+/// What the guest's kernel itself holds, in KiB, from /proc/meminfo, and the memory it was
+/// given. 0 for what the guest could not read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct KernelMemory {
+    pub slab_unreclaimable_kb: u64,
+    pub kernel_stack_kb: u64,
+    pub page_tables_kb: u64,
+    pub vmalloc_used_kb: u64,
+    pub percpu_kb: u64,
+    pub cma_total_kb: u64,
+    pub hugetlb_kb: u64,
+    /// The memory the kernel was given (its online memory blocks).
+    pub mem_online_kb: u64,
 }
 
 /// The guest's last report and how old it is.
@@ -150,7 +167,39 @@ impl GuestMemory {
                     swap_pss_kb: p.swap_pss_kb,
                 })
                 .collect(),
+            kernel: KernelMemory {
+                slab_unreclaimable_kb: memory.slab_unreclaimable_kb,
+                kernel_stack_kb: memory.kernel_stack_kb,
+                page_tables_kb: memory.page_tables_kb,
+                vmalloc_used_kb: memory.vmalloc_used_kb,
+                percpu_kb: memory.percpu_kb,
+                cma_total_kb: memory.cma_total_kb,
+                hugetlb_kb: memory.hugetlb_kb,
+                mem_online_kb: memory.mem_online_kb,
+            },
         }
+    }
+
+    /// What of [`other_kb`](Self::other_kb) no counter names: memory drivers took for
+    /// themselves, such as GPU and DMA buffers.
+    pub fn unaccounted_kb(&self) -> u64 {
+        let k = &self.kernel;
+        self.other_kb().saturating_sub(
+            k.slab_unreclaimable_kb
+                + k.kernel_stack_kb
+                + k.page_tables_kb
+                + k.vmalloc_used_kb
+                + k.percpu_kb
+                + k.hugetlb_kb
+                + self.zram_used_kb,
+        )
+    }
+
+    /// What the kernel reserved at boot, before MemTotal: its code and data, the page
+    /// structures, swiotlb, pstore. `None` when the guest could not count its memory.
+    pub fn reserved_at_boot_kb(&self) -> Option<u64> {
+        (self.kernel.mem_online_kb > 0)
+            .then(|| self.kernel.mem_online_kb.saturating_sub(self.mem_total_kb))
     }
 }
 
@@ -258,6 +307,30 @@ impl fmt::Display for MemorySnapshot {
         )?;
         writeln!(f, "  app memory (anonymous) {} MiB", mib(g.anon_pages_kb))?;
         writeln!(f, "  kernel and everything else {} MiB", mib(g.other_kb()))?;
+        let k = &g.kernel;
+        writeln!(
+            f,
+            "    unreclaimable slab {}, kernel stacks {}, page tables {}, vmalloc {}, per-CPU {}, \
+             huge pages {}, zram store {}, unaccounted (drivers, GPU and DMA buffers) {} MiB",
+            mib(k.slab_unreclaimable_kb),
+            mib(k.kernel_stack_kb),
+            mib(k.page_tables_kb),
+            mib(k.vmalloc_used_kb),
+            mib(k.percpu_kb),
+            mib(k.hugetlb_kb),
+            mib(g.zram_used_kb),
+            mib(g.unaccounted_kb())
+        )?;
+        if let Some(reserved) = g.reserved_at_boot_kb() {
+            writeln!(
+                f,
+                "  reserved by the kernel at boot {} MiB of {} MiB given (code, page structures, \
+                 swiotlb, pstore); contiguous area (CMA) {} MiB",
+                mib(reserved),
+                mib(k.mem_online_kb),
+                mib(k.cma_total_kb)
+            )?;
+        }
         if let Some(beyond) = self.vm_beyond_guest_kb() {
             writeln!(
                 f,
@@ -311,6 +384,14 @@ pub fn snapshot_to_wire(snapshot: &MemorySnapshot) -> types::Memory {
                     })
                     .collect(),
                 age_seconds: report.age.as_secs(),
+                slab_unreclaimable_kb: g.kernel.slab_unreclaimable_kb,
+                kernel_stack_kb: g.kernel.kernel_stack_kb,
+                page_tables_kb: g.kernel.page_tables_kb,
+                vmalloc_used_kb: g.kernel.vmalloc_used_kb,
+                percpu_kb: g.kernel.percpu_kb,
+                cma_total_kb: g.kernel.cma_total_kb,
+                hugetlb_kb: g.kernel.hugetlb_kb,
+                mem_online_kb: g.kernel.mem_online_kb,
             }
         }),
         host: snapshot
@@ -356,6 +437,16 @@ pub fn snapshot_from_wire(memory: types::Memory) -> MemorySnapshot {
                         swap_pss_kb: p.swap_pss_kb,
                     })
                     .collect(),
+                kernel: KernelMemory {
+                    slab_unreclaimable_kb: g.slab_unreclaimable_kb,
+                    kernel_stack_kb: g.kernel_stack_kb,
+                    page_tables_kb: g.page_tables_kb,
+                    vmalloc_used_kb: g.vmalloc_used_kb,
+                    percpu_kb: g.percpu_kb,
+                    cma_total_kb: g.cma_total_kb,
+                    hugetlb_kb: g.hugetlb_kb,
+                    mem_online_kb: g.mem_online_kb,
+                },
             },
         }),
         host: memory
@@ -391,6 +482,61 @@ pub fn summary_lines(androids: &dyn UserAndroids, host: &dyn HostMemory) -> Vec<
             Some(format!("{user}: {}", snapshot.summary_line()))
         })
         .collect()
+}
+
+/// The least memory the host's own system keeps when the VM is sized to the host, in MiB.
+pub const HOST_RESERVE_MIN_MB: u64 = 2048;
+
+/// The least memory a VM is given, in MiB: Android does not boot in much less.
+pub const VM_MEMORY_MIN_MB: u64 = 2048;
+
+/// The memory the VM may grow to on a host with `host_total_mb` of RAM, in MiB, when the user
+/// set no limit: all of it but what the host's own system keeps, a tenth of it and at least
+/// [`HOST_RESERVE_MIN_MB`]. The VM holds only what the guest uses (deferred commit, free page
+/// reporting), so a large maximum costs nothing while the guest does not use it.
+pub fn automatic_vm_memory_mb(host_total_mb: u64) -> u64 {
+    let reserve = HOST_RESERVE_MIN_MB.max(host_total_mb / 10);
+    host_total_mb.saturating_sub(reserve).max(VM_MEMORY_MIN_MB)
+}
+
+/// The VM's memory, in MiB: the user's limit when they set one (`limit_mb` above 0), never
+/// more than the host has, else [`automatic_vm_memory_mb`].
+pub fn vm_memory_mb(host_total_mb: u64, limit_mb: u32) -> u64 {
+    if limit_mb > 0 {
+        u64::from(limit_mb)
+            .min(host_total_mb.max(VM_MEMORY_MIN_MB))
+            .max(VM_MEMORY_MIN_MB)
+    } else {
+        automatic_vm_memory_mb(host_total_mb)
+    }
+}
+
+/// What a host process holds, in KiB, as far as the platform can tell; `None` where it
+/// cannot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct HeldMemory {
+    /// Resident in RAM.
+    pub working_set_kb: Option<u64>,
+    /// Committed to the process alone, resident or not.
+    pub private_kb: Option<u64>,
+    /// The GPU's own memory the process uses.
+    pub gpu_local_kb: Option<u64>,
+    /// System memory the GPU maps for the process.
+    pub gpu_non_local_kb: Option<u64>,
+}
+
+/// The log line a give-back writes: what the process held before it and holds after, in
+/// MiB, with `?` for what could not be read.
+pub fn held_line(before: &HeldMemory, after: &HeldMemory) -> String {
+    let show = |kb: Option<u64>| kb.map_or("?".to_string(), |kb| mib(kb).to_string());
+    let part = |b: Option<u64>, a: Option<u64>| format!("{} -> {} MiB", show(b), show(a));
+    format!(
+        "working set {}, private {}, GPU memory {}, GPU-mapped system memory {}",
+        part(before.working_set_kb, after.working_set_kb),
+        part(before.private_kb, after.private_kb),
+        part(before.gpu_local_kb, after.gpu_local_kb),
+        part(before.gpu_non_local_kb, after.gpu_non_local_kb),
+    )
 }
 
 /// How long the window manager waits after the last task window closed before it gives back

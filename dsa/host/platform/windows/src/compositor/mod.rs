@@ -557,7 +557,10 @@ impl Compositor {
                         logger.log(line);
                     }
                 });
-                let decoders = crate::video_decoder::MediaFoundationDecoders::probe(&*log);
+                let probe_log = Arc::clone(&log);
+                let decoders = crate::video_decoder::MediaFoundationDecoders::lazy(Box::new(
+                    move |line: &str| probe_log(line),
+                ));
                 let build = format!("dsa-wm {}", crate::VERSION);
                 dsa_host_core::video::serve(
                     Box::new(listener),
@@ -764,6 +767,7 @@ impl Compositor {
         let (requests_tx, requests_rx) = mpsc::channel();
         let manager_stop = Arc::new(AtomicBool::new(false));
         let idle = Arc::new(Mutex::new(IdleTrim::new(IDLE_TRIM_DELAY, Instant::now())));
+        let trim_gpu = gpu.clone();
         let setup = ManagerSetup {
             events: events_rx,
             requests: requests_tx,
@@ -811,7 +815,7 @@ impl Compositor {
         let trim_logger = self.logger.clone();
         let trimmer = thread::Builder::new()
             .name("dsa-wm-trim".into())
-            .spawn(move || trim::run(trim_idle, trim_stop, trim_logger))
+            .spawn(move || trim::run(trim_idle, trim_gpu, trim_stop, trim_logger))
             .map_err(|e| log(&format!("could not start the idle memory trim: {e}")))
             .ok();
 

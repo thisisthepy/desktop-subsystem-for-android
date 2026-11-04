@@ -11,6 +11,10 @@
 //! }
 //! ```
 //!
+//! Without `memory_mb`, which an installation leaves out, the VM may grow to 3 GiB, or to the
+//! limit the user set (`dsa settings set memory-limit <MiB>`), never past the computer's
+//! memory. It holds only what Android uses.
+//!
 //! The service runs one VM per user. Each user's VM is named after the user's SID and lets
 //! only that user (and SYSTEM) use its Hyper-V sockets. Its disk is in the user's own
 //! profile, `%LOCALAPPDATA%\DSA\android.vhdx`, as WSL keeps each user's distributions in
@@ -126,8 +130,37 @@ pub fn profile_disk(local_app_data: &std::path::Path) -> PathBuf {
 fn default_vm_name() -> String {
     "dsa-android".into()
 }
-fn default_memory_mb() -> u32 {
-    3072
+/// The VM's memory when the configuration names none and the user set no limit, in MiB.
+pub const DEFAULT_MEMORY_MB: u32 = 3072;
+
+/// Whether "automatic" sizes the VM to the computer (its memory less what Windows keeps, see
+/// [`automatic_vm_memory_mb`]) rather than [`DEFAULT_MEMORY_MB`]. Off for now: the guest
+/// kernel keeps its page records for the VM's whole maximum resident, about 1.6% of it (some
+/// 460 MiB for a 29.5 GiB VM), so a large maximum raises idle memory until that cost is
+/// measured and accepted.
+///
+/// [`automatic_vm_memory_mb`]: dsa_host_core::memory::automatic_vm_memory_mb
+pub const SIZE_TO_COMPUTER: bool = false;
+
+/// The VM's memory in MiB for a user whose limit is `limit_mb` (0 for automatic): their limit,
+/// never more than the computer has, else [`DEFAULT_MEMORY_MB`] (or the computer's size, with
+/// [`SIZE_TO_COMPUTER`]).
+pub fn host_sized_memory_mb(limit_mb: u32) -> u32 {
+    if limit_mb == 0 && !SIZE_TO_COMPUTER {
+        return DEFAULT_MEMORY_MB;
+    }
+    #[cfg(windows)]
+    let total_mb = crate::power::read_memory().map(|(total_kb, _)| total_kb / 1024);
+    #[cfg(not(windows))]
+    let total_mb: Option<u64> = None;
+    match total_mb {
+        Some(total_mb) => {
+            let sized = dsa_host_core::memory::vm_memory_mb(total_mb, limit_mb);
+            u32::try_from(sized).unwrap_or(u32::MAX)
+        }
+        None if limit_mb > 0 => limit_mb,
+        None => DEFAULT_MEMORY_MB,
+    }
 }
 fn default_processors() -> u32 {
     4
@@ -195,8 +228,11 @@ pub struct HostConfig {
     /// Extra kernel command line for the Android image.
     #[serde(default)]
     pub kernel_cmdline: String,
-    #[serde(default = "default_memory_mb")]
-    pub memory_mb: u32,
+    /// The VM's memory in MiB. Unset, it is sized to the computer and the user's limit
+    /// ([`host_sized_memory_mb`]); set, it is that, whatever the user's limit, for tests and
+    /// development.
+    #[serde(default)]
+    pub memory_mb: Option<u32>,
     #[serde(default = "default_processors")]
     pub processors: u32,
     /// The Android system image, when updates are not used.
@@ -603,7 +639,7 @@ impl HostConfig {
             kernel: files.kernel,
             initrd: files.initrd,
             kernel_cmdline: files.kernel_cmdline,
-            memory_mb: self.memory_mb,
+            memory_mb: self.memory_mb.unwrap_or_else(|| host_sized_memory_mb(0)),
             processors: self.processors,
             system_image: files.system_image,
             data_disk,

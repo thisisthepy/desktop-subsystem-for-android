@@ -887,5 +887,16 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.DiagnosticsDone getDiagnosticsDone();
 
+  /**
+   * <code>.dsa.control.v1.StopApp stop_app = 136;</code>
+   * @return Whether the stopApp field is set.
+   */
+  boolean hasStopApp();
+  /**
+   * <code>.dsa.control.v1.StopApp stop_app = 136;</code>
+   * @return The stopApp.
+   */
+  io.github.thisisthepy.dsa.control.v1.StopApp getStopApp();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

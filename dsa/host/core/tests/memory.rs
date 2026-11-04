@@ -10,9 +10,44 @@ use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{HostApiClient, HostApiService, PerUser, UserAndroid, UserAndroids};
 use dsa_host_core::host_api_conformance::RunningService;
 use dsa_host_core::memory::{
-    snapshot_from_wire, snapshot_to_wire, summary_lines, GuestMemory, GuestMemoryReport,
-    HostMemory, HostProcessMemory, HostRole, IdleTrim, MemorySnapshot,
+    held_line, snapshot_from_wire, snapshot_to_wire, summary_lines, GuestMemory, GuestMemoryReport,
+    HeldMemory, HostMemory, HostProcessMemory, HostRole, IdleTrim, MemorySnapshot,
 };
+
+#[test]
+fn nfr2_the_vm_is_sized_to_the_host_less_what_the_host_keeps() {
+    use dsa_host_core::memory::{automatic_vm_memory_mb, vm_memory_mb};
+    // A tenth of a large host, at least 2 GiB of a small one.
+    assert_eq!(automatic_vm_memory_mb(32768), 32768 - 3276);
+    assert_eq!(automatic_vm_memory_mb(8192), 6144);
+    // Never less than Android needs to boot.
+    assert_eq!(automatic_vm_memory_mb(3072), 2048);
+    // The user's limit wins, within what the host has.
+    assert_eq!(vm_memory_mb(32768, 4096), 4096);
+    assert_eq!(vm_memory_mb(8192, 65536), 8192);
+    assert_eq!(vm_memory_mb(32768, 0), 32768 - 3276);
+}
+
+#[test]
+fn nfr1_a_give_back_logs_what_the_window_manager_still_holds() {
+    let before = HeldMemory {
+        working_set_kb: Some(119 * MIB),
+        private_kb: Some(501 * MIB),
+        gpu_local_kb: Some(300 * MIB),
+        gpu_non_local_kb: None,
+    };
+    let after = HeldMemory {
+        working_set_kb: Some(2 * MIB),
+        private_kb: Some(420 * MIB),
+        gpu_local_kb: Some(250 * MIB),
+        gpu_non_local_kb: None,
+    };
+    assert_eq!(
+        held_line(&before, &after),
+        "working set 119 -> 2 MiB, private 501 -> 420 MiB, GPU memory 300 -> 250 MiB, \
+         GPU-mapped system memory ? -> ? MiB"
+    );
+}
 use dsa_host_core::session::{GuestLauncher, Session, SessionConfig, SessionState};
 use dsa_host_core::tasks::{Task, TaskEvent};
 use dsa_protocol::auth::BootSecret;
@@ -93,6 +128,14 @@ fn report() -> control::GuestMemory {
             pss_kb: 180 * MIB,
             swap_pss_kb: MIB,
         }],
+        slab_unreclaimable_kb: 60 * MIB,
+        kernel_stack_kb: 10 * MIB,
+        page_tables_kb: 20 * MIB,
+        vmalloc_used_kb: 30 * MIB,
+        percpu_kb: 2 * MIB,
+        cma_total_kb: 0,
+        hugetlb_kb: 0,
+        mem_online_kb: 4200 * MIB,
     }
 }
 
@@ -280,7 +323,10 @@ fn nfr1_the_report_dsa_memory_prints_names_every_part() {
         "page cache 900 MiB",
         "swap 100 of 2048 MiB used; zram holds 100 MiB in 30 MiB",
         "650 MiB PSS in all",
-        "kernel and everything else",
+        "kernel and everything else 358 MiB",
+        "unreclaimable slab 60, kernel stacks 10, page tables 20, vmalloc 30, per-CPU 2",
+        "zram store 30, unaccounted (drivers, GPU and DMA buffers) 206 MiB",
+        "reserved by the kernel at boot 104 MiB of 4200 MiB given",
         "system",
     ] {
         assert!(text.contains(part), "{part:?} missing from:\n{text}");

@@ -7,9 +7,10 @@
 # their generated files start to conflict or go stale. Forks are never touched: their
 # token cannot push, and their code is not run with a token that can.
 #
-# What it does to one branch is .github/scripts/protocol/regenerate.sh. A push made with the
-# workflow token starts no workflow, so after pushing it starts the test workflows on the
-# branch itself. Those runs are not pull request events, so they never start this workflow
+# What it does to one branch is .github/scripts/protocol/regenerate.sh. The pull request
+# runs a push made with the workflow token gets are held for approval ("action required")
+# and run no job, so after pushing it starts the test workflows on the branch itself. Those
+# runs test the same commit, so their checks are the ones that show on the pull request. Those runs are not pull request events, so they never start this workflow
 # again; and a pull request whose last commit is already a regeneration is skipped.
 
 name: Protocol sync
@@ -86,19 +87,31 @@ jobs:
           cp .github/scripts/protocol/regenerate.sh "$RUNNER_TEMP/regenerate.sh"
           git config user.name "dsa-ci"
           git config user.email "dsa-ci@users.noreply.github.com"
+          # Every branch is tried even when one fails; the job fails at the end if any did,
+          # with each branch's outcome in the summary. The script's output goes to a file,
+          # not a pipe, so its exit status is its own, and it reads nothing from the list.
           failed=0
+          : > "$RUNNER_TEMP/summary"
           while read -r branch base; do
             echo "::group::$branch"
-            if result="$(bash "$RUNNER_TEMP/regenerate.sh" "$branch" "$base" | tail -1)"; then
+            if bash "$RUNNER_TEMP/regenerate.sh" "$branch" "$base" < /dev/null > "$RUNNER_TEMP/out" 2>&1; then
+              cat "$RUNNER_TEMP/out"
+              result="$(tail -1 "$RUNNER_TEMP/out")"
               if [[ "$result" == pushed ]]; then
                 for workflow in test.yml test-image.yml test-installer.yml; do
-                  gh workflow run "$workflow" --repo "$REPO" --ref "$branch"
+                  gh workflow run "$workflow" --repo "$REPO" --ref "$branch" < /dev/null || failed=1
                 done
               fi
             else
-              echo "::warning::regenerating $branch failed"
+              cat "$RUNNER_TEMP/out"
+              result="failed"
+              echo "::error::regenerating $branch failed"
               failed=1
             fi
             echo "::endgroup::"
+            echo "$branch: $result" >> "$RUNNER_TEMP/summary"
           done < "$RUNNER_TEMP/branches"
+          echo "== outcome per branch"
+          cat "$RUNNER_TEMP/summary"
+          cat "$RUNNER_TEMP/summary" >> "$GITHUB_STEP_SUMMARY"
           exit "$failed"

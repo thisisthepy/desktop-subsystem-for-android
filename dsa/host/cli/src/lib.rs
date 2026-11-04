@@ -7,6 +7,7 @@
 //! dsa freeze
 //! dsa update [--wait]
 //! dsa launch <package>
+//! dsa stop-app <package>
 //! dsa install <file.apk> [--progress]
 //! dsa apk-info <file.apk>
 //! dsa open <file>
@@ -139,7 +140,7 @@ use dsa_host_core::widgets::{Widget, WidgetEvent, WidgetProvider};
 use dsa_transport::Connector;
 use serde_json::{json, Value};
 
-pub const USAGE: &str = "usage: dsa <status | start | stop | freeze | update | launch <package> | \
+pub const USAGE: &str = "usage: dsa <status | start | stop | freeze | update | launch <package> | stop-app <package> | \
      install <file.apk> [--progress] | apk-info <file.apk> | open <file> | share <file> | \
      tasks | settings [set <name> <value>] | memory | gpus | \
      widgets [list | add <provider> | remove <id> | watch] | \
@@ -159,6 +160,7 @@ pub enum Command {
     Update,
     /// Start an app in a window of its own; the package is in [`Invocation::package`].
     Launch,
+    StopApp,
     /// Install an APK; the file is in [`Invocation::file`].
     Install,
     /// Say what an APK is, and what installing it would do; the file is in
@@ -208,6 +210,8 @@ pub enum Change {
     ImageUpdates(bool),
     InputTrace(bool),
     ResizeTrace(bool),
+    /// The most memory Android may have, in MiB; 0 for automatic.
+    MemoryLimit(u32),
     DeveloperMode(bool),
     AdbPort(u16),
 }
@@ -228,6 +232,7 @@ impl Change {
             "image-updates" => switch().map(Change::ImageUpdates),
             "input-trace" => switch().map(Change::InputTrace),
             "resize-trace" => switch().map(Change::ResizeTrace),
+            "memory-limit" => parse_memory_limit(value).map(Change::MemoryLimit),
             "developer-mode" => switch().map(Change::DeveloperMode),
             "adb-port" => match value.parse::<u16>() {
                 Ok(port) if port > 0 => Ok(Change::AdbPort(port)),
@@ -238,10 +243,35 @@ impl Change {
             _ => Err(format!(
                 "there is no setting {name:?}; the settings are render-gpu, freeze, \
                  clipboard, links-in-android, program-updates, image-updates, input-trace, \
-                 resize-trace, developer-mode and adb-port"
+                 resize-trace, memory-limit, developer-mode and adb-port"
             )),
         }
     }
+}
+
+/// A memory limit as `dsa settings set memory-limit` takes it: `auto` (the service's
+/// default size), or a size in MiB, with `G` or `GB` for GiB.
+fn parse_memory_limit(value: &str) -> Result<u32, String> {
+    let lower = value.trim().to_ascii_lowercase();
+    if lower == "auto" || lower == "0" {
+        return Ok(0);
+    }
+    let (number, scale) = match lower.strip_suffix("gb").or_else(|| lower.strip_suffix('g')) {
+        Some(gib) => (gib, 1024),
+        None => (lower.strip_suffix("mb").unwrap_or(&lower), 1),
+    };
+    number
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .and_then(|n| n.checked_mul(scale))
+        .filter(|mb| *mb >= 2048)
+        .ok_or_else(|| {
+            format!(
+                "memory-limit is auto or a size of at least 2048 MiB (such as 8192 or 8G), \
+                 not {value:?}"
+            )
+        })
 }
 
 /// What can start a host service or ensure it is running.
@@ -365,9 +395,9 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             spec if command == Some(Command::Logcat) && !spec.starts_with('-') => {
                 tags.push(dsa_host_core::guest_log::LogFilter::parse_spec(spec)?);
             }
-            "status" | "start" | "stop" | "freeze" | "update" | "launch" | "install"
-            | "apk-info" | "open" | "share" | "tasks" | "settings" | "memory" | "gpus"
-            | "widgets"
+            "status" | "start" | "stop" | "freeze" | "update" | "launch" | "stop-app"
+            | "install" | "apk-info" | "open" | "share" | "tasks" | "settings" | "memory"
+            | "gpus" | "widgets"
                 if command.is_none() =>
             {
                 command = Some(match arg.as_str() {
@@ -376,6 +406,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                     "freeze" => Command::Freeze,
                     "update" => Command::Update,
                     "launch" => Command::Launch,
+                    "stop-app" => Command::StopApp,
                     "install" => Command::Install,
                     "apk-info" => Command::ApkInfo,
                     "open" => Command::Open,
@@ -428,7 +459,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             }
             "--json" => json = true,
             "--progress" if command == Some(Command::Install) => progress = true,
-            name if command == Some(Command::Launch)
+            name if matches!(command, Some(Command::Launch | Command::StopApp))
                 && package.is_none()
                 && !name.starts_with('-') =>
             {
@@ -501,6 +532,12 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         tags,
     };
     let log_filter = (command == Command::Logcat).then_some(filter);
+    if command == Command::StopApp && package.is_none() {
+        return Err(format!(
+            "dsa stop-app needs the package of the app to stop, such as com.example.music\n\
+             {USAGE}"
+        ));
+    }
     if command == Command::Launch && package.is_none() {
         return Err(format!(
             "dsa launch needs the package of the app to start, such as com.android.settings\n\
@@ -786,6 +823,7 @@ pub fn settings_json(report: &SettingsReport) -> Value {
         "image_updates": report.settings.image_updates,
         "input_trace": report.settings.input_trace,
         "resize_trace": report.settings.resize_trace,
+        "memory_limit_mb": report.settings.memory_limit_mb,
         "developer_mode": report.settings.developer_mode,
         "adb_port": report.settings.adb_port,
         "adb_address": adb_address(&report.settings),
@@ -843,6 +881,13 @@ pub fn describe_settings(report: &SettingsReport) -> String {
         ),
         format!("Input trace: {}", on_off(settings.input_trace)),
         format!("Resize trace: {}", on_off(settings.resize_trace)),
+        format!(
+            "Memory limit: {}",
+            match settings.memory_limit_mb {
+                0 => "automatic".to_string(),
+                mb => format!("{mb} MiB"),
+            }
+        ),
         if settings.developer_mode {
             format!("Developer mode: on (adb connect {})", adb_address(settings))
         } else {
@@ -878,6 +923,18 @@ pub fn memory_json(memory: &MemorySnapshot) -> Value {
             "zram_original_kb": guest.zram_original_kb,
             "zram_used_kb": guest.zram_used_kb,
             "total_pss_kb": guest.total_pss_kb,
+            "kernel": {
+                "slab_unreclaimable_kb": guest.kernel.slab_unreclaimable_kb,
+                "kernel_stack_kb": guest.kernel.kernel_stack_kb,
+                "page_tables_kb": guest.kernel.page_tables_kb,
+                "vmalloc_used_kb": guest.kernel.vmalloc_used_kb,
+                "percpu_kb": guest.kernel.percpu_kb,
+                "cma_total_kb": guest.kernel.cma_total_kb,
+                "hugetlb_kb": guest.kernel.hugetlb_kb,
+                "mem_online_kb": guest.kernel.mem_online_kb,
+                "unaccounted_kb": guest.unaccounted_kb(),
+                "reserved_at_boot_kb": guest.reserved_at_boot_kb(),
+            },
             "age_seconds": report.age.as_secs(),
             "top_processes": guest.top_processes.iter().map(|p| json!({
                 "pid": p.pid,
@@ -957,6 +1014,7 @@ fn settings(invocation: &Invocation, client: &mut HostApiClient) -> Result<Strin
             Change::ImageUpdates(on) => wanted.image_updates = *on,
             Change::InputTrace(on) => wanted.input_trace = *on,
             Change::ResizeTrace(on) => wanted.resize_trace = *on,
+            Change::MemoryLimit(mb) => wanted.memory_limit_mb = *mb,
             Change::DeveloperMode(on) => wanted.developer_mode = *on,
             Change::AdbPort(port) => wanted.adb_port = *port,
         }
@@ -1511,6 +1569,11 @@ pub fn run_with_starter(
             let package = invocation.package.as_deref().unwrap_or_default();
             client.launch_app(package).map_err(|e| e.to_string())?;
             return Ok(format!("Launching {package}"));
+        }
+        Command::StopApp => {
+            let package = invocation.package.as_deref().unwrap_or_default();
+            client.stop_app(package).map_err(|e| e.to_string())?;
+            return Ok(format!("Stopping {package} and giving its memory back"));
         }
         Command::Install => return install(invocation, client, connector),
         Command::Widgets => return widgets(invocation, client, connector),

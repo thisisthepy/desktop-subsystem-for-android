@@ -108,6 +108,47 @@ before="$(head_of "$d" feat/x)"
 check "a definition conflict is left (result)" "$(run "$d" feat/x)" "left"
 check "a definition conflict is left (head)" "$(head_of "$d" feat/x)" "$before"
 
+# --- several branches in one checkout, as the workflow runs them ----------------
+# One branch's run fails half way, with the generator's files written and a merge in
+# progress; another is left for a person. Neither keeps the next from being regenerated.
+d="$tmp/many"; make_origin "$d"
+for b in feat/a feat/b feat/c feat/d; do
+    change "$d" "$b" 'message A { int32 a = 1; }\n\n\n\n\n\n\n\nmessage Z {}\n' yes
+done
+change "$d" feat/b 'message A { int32 a = 1; }\n\n\n\n\n\n\n\nmessage Z { int64 y = 9; }\n' yes
+change "$d" develop 'message A {}\n\n\n\n\n\n\n\nmessage Z { int32 z = 1; }\n' yes
+rm -rf "$d/work"
+git clone -q "$d/origin.git" "$d/work" 2> /dev/null
+git -C "$d/work" config user.email ci@example.invalid
+git -C "$d/work" config user.name "CI"
+in_work() {
+    (cd "$d/work" && bash "$regenerate" "$1" develop > "$d/out" 2>&1)
+    echo "$? $(tail -1 "$d/out")"
+}
+before="$(head_of "$d" feat/a)"
+check "a branch whose generator fails fails (status)" \
+    "$(DSA_PROTOCOL_CODEGEN="echo broken > protocol/control.sha256; touch protocol/stray; exit 1" in_work feat/a | cut -d' ' -f1)" "1"
+check "a branch whose generator fails is not pushed" "$(head_of "$d" feat/a)" "$before"
+check "the branch after a failed one is checked out and judged" "$(in_work feat/b)" "0 left"
+check "the branch after one left for a person is regenerated" "$(in_work feat/c)" "0 pushed"
+check "the last branch is regenerated too" "$(in_work feat/d)" "0 pushed"
+check "the last branch has the merged hash" "$(file_on "$d" feat/d control.sha256)" \
+    "$(file_on "$d" feat/d control.proto | sha256sum | cut -c1-64)"
+
+# --- the runs the workflow starts after a push can start and test everything -----
+# A push made with the workflow token gets pull request runs that wait for approval, so
+# the workflow starts these by hand. Each must take a run by hand, and Test must run every
+# job then, since a run by hand has no pull request to compare with.
+workflows="$script_dir/../../.github/workflows"
+started="$(grep -oE 'for workflow in [a-z. -]+;' "$workflows/protocol-sync.yml" | sed 's/for workflow in //; s/;//')"
+check "protocol sync starts the test workflows" "$started" "test.yml test-image.yml test-installer.yml"
+for workflow in $started; do
+    check "$workflow can be started by hand" \
+        "$(grep -c '^  workflow_dispatch:' "$workflows/$workflow")" "1"
+done
+check "a Test run by hand runs every job" \
+    "$(grep -c 'echo ".github/workflows/test.yml" > "$RUNNER_TEMP/changed"' "$workflows/test.yml")" "1"
+
 if ((failures)); then
     echo "$failures failed"
     exit 1

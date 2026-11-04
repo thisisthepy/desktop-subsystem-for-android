@@ -72,6 +72,28 @@ class MemoryReporterTest {
     }
 
     @Test
+    fun nfr1_the_report_breaks_down_what_the_kernel_holds() {
+        val kernel = """SUnreclaim:        61440 kB
+KernelStack:       10240 kB
+PageTables:        20480 kB
+VmallocUsed:       30720 kB
+Percpu:             2048 kB
+CmaTotal:          16384 kB
+HugePages_Total:       2
+Hugepagesize:       2048 kB
+"""
+        val report = guestMemory(MemInfo.parse(MEMINFO + kernel), null, emptyList(), memOnlineKb = 3_145_728)
+        assertEquals(61440L, report.slabUnreclaimableKb)
+        assertEquals(10240L, report.kernelStackKb)
+        assertEquals(20480L, report.pageTablesKb)
+        assertEquals(30720L, report.vmallocUsedKb)
+        assertEquals(2048L, report.percpuKb)
+        assertEquals(16384L, report.cmaTotalKb)
+        assertEquals(4096L, report.hugetlbKb)
+        assertEquals(3_145_728L, report.memOnlineKb)
+    }
+
+    @Test
     fun nfr1_meminfo_lines_it_cannot_read_are_skipped() {
         val info = MemInfo.parse("garbage\nMemTotal: lots kB\nMemFree: 12 kB\n:\n")
         assertEquals(0L, info.memTotalKb)

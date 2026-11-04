@@ -51,9 +51,13 @@ for name, expected in manifest["files"].items():
 
 with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     names = z.namelist()
-    for app in ["Launcher3QuickStep", "SystemUI", "LatinIME"]:
+    for app in ["Launcher3QuickStep", "SystemUI", "LatinIME", "CuttlefishService"]:
         if any(f"/{app}/" in n and n.endswith(".apk") for n in names):
             problems.append(f"{app} is still in the image")
+    features_xml = "VENDOR/etc/permissions/dsa-unavailable-features.xml"
+    features = z.read(features_xml).decode() if features_xml in names else ""
+    if 'name="android.software.device_lock"' not in features:
+        problems.append("the device lock feature is still declared, so its service and controller start")
     props = z.read("SYSTEM/build.prop").decode()
     if "ro.debuggable=1" in props or "ro.build.type=userdebug" in props:
         problems.append("the system is still a debuggable build")

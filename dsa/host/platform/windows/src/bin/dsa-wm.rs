@@ -28,6 +28,15 @@ fn main() {
         choose, describe_outcome, describe_request, render_gpu_setting, CompositorSettings,
     };
 
+    // The window manager runs itself with this argument to find which video formats the GPU
+    // decodes, so the decoders never load into the long-running process until they are used.
+    if std::env::args().any(|arg| arg == dsa_host_windows::video_decoder::PROBE_ARGUMENT) {
+        use std::io::Write;
+        let report = dsa_host_windows::video_decoder::probe_here();
+        let _ = std::io::stdout().write_all(report.as_bytes());
+        return;
+    }
+
     let log_file = default_log_file();
     let logger = CompositorLogger::open(&log_file).ok().map(Arc::new);
 

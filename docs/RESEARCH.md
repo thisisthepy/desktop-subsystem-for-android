@@ -226,6 +226,32 @@
 
 **실기에서 확인할 것.** 이 표본은 #146 이전 빌드의 값이다. 한 번에 크기 하나만 요청하는 지금의 드래그에서 답이 얼마나 빨라지는지, `budget=`이 어디에 자리 잡는지는 측정이 필요하다.
 
+## R8. 앱 하나를 연 DSA의 메모리 내역과 줄일 곳 (NFR-1, NFR-2)
+
+**기준.** 소유자 PC, develop dcbb771, Android `Active`, Settings 창 하나, `dsa memory`. 아래 절감량은 코드와 설정을 읽어 낸 추정치이고, 이 조사에서 빌드하거나 실행하지 않았다.
+
+| 항목 | 측정값 |
+|---|---|
+| vm | 상주 670 MiB, private 1189 MiB |
+| 창 관리자(dsa-wm) | 상주 119 MiB, private 501 MiB |
+| 앱 창 | 38 MiB |
+| 게스트 | 2908 MiB 중 809 MiB 사용. 페이지 캐시 276, 앱 익명 168, 커널과 나머지 336, zram 220 MiB를 62 MiB에 보관 |
+| PSS 상위 | system_server 131, Settings 101, 에이전트 46, ext.services 28, media provider 23, permissioncontroller 18, networkstack 12, gceservice 12, devicelockcontroller 9, phone 9 |
+
+**찾은 것과 바꾼 것.**
+
+1. dsa-wm: 시작할 때 H.264, HEVC, VP9, AV1 디코더를 하나씩 열어 보았다(#181). 디코더마다 비디오 지원 D3D11 장치를 만들고 GPU의 미디어 드라이버를 프로세스에 올리며, 닫은 뒤에도 드라이버 DLL과 그 힙은 남는다. 이제 게스트가 처음 물을 때 자식 프로세스(`dsa-wm --probe-video`)가 확인하고 끝나며, 디코더는 게스트가 코덱을 열 때만 만든다. 추정 20-60 MiB(드라이버에 따라 다르다). 창이 하나도 보이지 않을 때는 작업 집합을 비우는 것에 더해 D3D11 장치를 `Trim`하고, 그 전후의 작업 집합, private, GPU 메모리(로컬, 비로컬)를 로그에 남긴다. 렌더러(gfxstream)는 게스트의 표면을 갖고 있어 내리지 않는다. 내리면 창을 다시 열 때 게스트 전체를 다시 그려야 한다.
+2. 커널과 나머지 336 MiB: 이제 `dsa memory`가 `/proc/meminfo`의 SUnreclaim, KernelStack, PageTables, VmallocUsed, Percpu, CmaTotal, 휴즈 페이지, zram 저장분과 그 밖(드라이버, GPU와 DMA 버퍼)으로 나누고, 온라인 메모리 블록과 MemTotal의 차로 부팅 때 커널이 잡은 몫(코드, struct page, swiotlb, pstore)을 보인다. 2908 MiB는 3072 MiB VM에서 약 164 MiB가 빠진 값이다. struct page가 약 48 MiB(1.56%), ramoops는 1 MiB다. swiotlb는 Hyper-V의 VMBus 장치가 쓰지 않지만 끄는 것은 이 숫자를 본 뒤에 정한다.
+3. 게스트 프로세스: Cuttlefish의 gceservice(`CuttlefishService`)는 이미지에서 뺀다. Cuttlefish 런처에 상태를 알리는 앱이고 DSA에는 그 런처가 없다. 기기 잠금(devicelock)은 기능을 내려 system_server가 서비스를 띄우지 않게 하고, 에이전트가 시작할 때 두 패키지가 남아 있으면 끈다. phone(TeleService)은 system_server가 부팅 때 바인딩하므로 남긴다. 캐시 프로세스 상한은 32에서 8로 낮춘다(`activity_manager_constants`). 추정 25-40 MiB.
+4. 닫은 앱: 한 패키지의 마지막 창이 닫히면 에이전트가 그 앱을 끝내고(위젯이 놓여 있거나 포그라운드 서비스가 있으면 남긴다), 제어 데몬이 2초 뒤 캐시를 버리고 압축해 빈 페이지 보고로 호스트에 돌려준다. 앱마다 30-100 MiB가 몇 초 안에 돌아온다고 본다. 에이전트는 `closed <package>: returned N MiB in T ms`를 남긴다.
+5. VM 크기: 호스트 메모리에서 Windows 몫(10%, 최소 2 GiB)을 뺀 값으로 키우는 경로와 `dsa settings set memory-limit`는 들어갔지만, 기본값(`auto`)은 소유자가 아래 대가를 결정할 때까지 지금의 3 GiB로 둔다(`SIZE_TO_COMPUTER`). 대가가 있다. 커널은 모든 메모리의 struct page를 부팅 때 만들고 채우므로, 최대 크기의 약 1.56%가 늘 상주한다. 32 GiB PC(VM 29.5 GiB)에서는 약 460 MiB로, 3 GiB일 때의 48 MiB보다 400 MiB 이상 많다. 이것은 NFR-2의 "대기 메모리가 눈에 띄게 늘지 않는다"와 충돌할 수 있으므로 실측해야 한다. 피하는 방법은 메모리를 작게 시작해 필요할 때 늘리는 것(Hyper-V의 메모리 핫애드, `hv_balloon`)인데, HCS로 만든 VM에서 쓸 수 있는지는 확인하지 못했다. 실측에서 늘어나면 사용자가 `dsa settings set memory-limit 8G`처럼 상한을 둘 수 있다.
+
+**WSL과의 비교 (공개 자료, 측정 아님).** WSL2는 기본으로 호스트 메모리의 50%를 VM 최대 크기로 두고, 같은 struct page 비용을 낸다. 배포판 하나가 쉬고 있을 때 `vmmemWSL`은 공개된 사용자 보고에서 수백 MiB 수준이다. WSL은 `autoMemoryReclaim`(gradual은 cgroup 회수, dropcache는 캐시 버리기)과 빈 페이지 보고로 쓰지 않는 메모리를 돌려준다. DSA도 같은 장치(지연 커밋, 빈 페이지 보고, 차가운 페이지 힌트, 작은 백킹 페이지)를 쓴다. 차이는 안드로이드가 쉬는 동안에도 system_server와 앱 프로세스를 띄워 두는 데 있다. 그래서 목표는 프로세스 수를 줄이고 닫은 앱을 바로 끝내는 쪽이다.
+
+**목표 (실측 전).** Settings 하나를 연 상태의 DSA 호스트 private 합 단기 400 MiB, 최종 250 MiB. 이번 변경 뒤 기대치는 dsa-wm private -20~-60 MiB, 게스트 프로세스 -25~-40 MiB, 닫은 앱마다 -30~-100 MiB(몇 초 안에)다.
+
+**PC에서 잴 것.** `measure.ps1 -Part open`으로 Settings 하나를 연 상태의 각 프로세스 private와 `dsa memory`의 커널 내역을 기록한다. `-Part close`로 앱을 닫은 뒤 vm 상주 메모리가 몇 초 안에 얼마나 줄었는지 잰다. 32 GiB PC에서 `dsa settings set memory-limit 3G`와 `auto`를 바꿔 가며 `Dozing` 상주 메모리와 부팅 시간을 비교한다. `dsa-wm.log`에서 "no task window is shown" 줄의 GPU 메모리를 확인한다.
+
 ## 부록 A. Microsoft에 낼 이슈 초안
 
 R1의 선택지 D다. [microsoft/WSL](https://github.com/microsoft/WSL/issues)에 내는 이슈로, 아직 내지 않았다. 소유자가 낸다. 이슈는 영어로 내므로 본문은 영어로 둔다.

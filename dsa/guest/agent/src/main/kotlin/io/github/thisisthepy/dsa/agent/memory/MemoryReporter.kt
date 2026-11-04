@@ -19,6 +19,9 @@ interface MemorySource {
 
     /** The processes the activity manager runs, with their proportional set sizes. */
     fun processes(): List<ProcessPss>
+
+    /** The memory the kernel was given, in KiB, counted from its online memory blocks; null when unreadable. */
+    fun memOnlineKb(): Long? = null
 }
 
 /** The fields of /proc/meminfo the report carries, in KiB. */
@@ -33,6 +36,13 @@ data class MemInfo(
     val slabReclaimableKb: Long = 0,
     val swapTotalKb: Long = 0,
     val swapFreeKb: Long = 0,
+    val slabUnreclaimableKb: Long = 0,
+    val kernelStackKb: Long = 0,
+    val pageTablesKb: Long = 0,
+    val vmallocUsedKb: Long = 0,
+    val percpuKb: Long = 0,
+    val cmaTotalKb: Long = 0,
+    val hugetlbKb: Long = 0,
 ) {
     companion object {
         /**
@@ -59,6 +69,13 @@ data class MemInfo(
                 slabReclaimableKb = v("SReclaimable"),
                 swapTotalKb = v("SwapTotal"),
                 swapFreeKb = v("SwapFree"),
+                slabUnreclaimableKb = v("SUnreclaim"),
+                kernelStackKb = v("KernelStack"),
+                pageTablesKb = v("PageTables"),
+                vmallocUsedKb = v("VmallocUsed"),
+                percpuKb = v("Percpu"),
+                cmaTotalKb = v("CmaTotal"),
+                hugetlbKb = v("Hugetlb").takeIf { it > 0 } ?: (v("HugePages_Total") * v("Hugepagesize")),
             )
         }
     }
@@ -84,7 +101,7 @@ data class ZramStat(val originalKb: Long, val usedKb: Long) {
  * Builds the GuestMemory report: the kernel's totals, zram, and the processes with the
  * largest proportional set size, largest first.
  */
-fun guestMemory(meminfo: MemInfo, zram: ZramStat?, processes: List<ProcessPss>): GuestMemory {
+fun guestMemory(meminfo: MemInfo, zram: ZramStat?, processes: List<ProcessPss>, memOnlineKb: Long? = null): GuestMemory {
     val builder = GuestMemory.newBuilder()
         .setMemTotalKb(meminfo.memTotalKb)
         .setMemFreeKb(meminfo.memFreeKb)
@@ -99,6 +116,14 @@ fun guestMemory(meminfo: MemInfo, zram: ZramStat?, processes: List<ProcessPss>):
         .setZramOriginalKb(zram?.originalKb ?: 0)
         .setZramUsedKb(zram?.usedKb ?: 0)
         .setTotalPssKb(processes.sumOf { it.pssKb })
+        .setSlabUnreclaimableKb(meminfo.slabUnreclaimableKb)
+        .setKernelStackKb(meminfo.kernelStackKb)
+        .setPageTablesKb(meminfo.pageTablesKb)
+        .setVmallocUsedKb(meminfo.vmallocUsedKb)
+        .setPercpuKb(meminfo.percpuKb)
+        .setCmaTotalKb(meminfo.cmaTotalKb)
+        .setHugetlbKb(meminfo.hugetlbKb)
+        .setMemOnlineKb(memOnlineKb ?: 0)
     processes
         .sortedWith(compareByDescending<ProcessPss> { it.pssKb }.thenBy { it.pid })
         .take(MemoryReporter.TOP_PROCESSES)
@@ -158,13 +183,18 @@ class MemoryReporter(
         } catch (e: Exception) {
             null
         }
+        val memOnline = try {
+            source.memOnlineKb()
+        } catch (e: Exception) {
+            null
+        }
         val processes = try {
             source.processes()
         } catch (e: Exception) {
             log.warn("could not read the processes' memory", e)
             emptyList()
         }
-        val frame = Envelope.newBuilder().setGuestMemory(guestMemory(meminfo, zram, processes)).build()
+        val frame = Envelope.newBuilder().setGuestMemory(guestMemory(meminfo, zram, processes, memOnline)).build()
         send(frame.toByteArray())
     }
 

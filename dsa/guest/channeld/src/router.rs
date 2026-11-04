@@ -33,7 +33,8 @@
 
 use std::collections::BTreeMap;
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::Duration;
 
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{Envelope, GuestBoot, PowerHintKind};
@@ -195,6 +196,8 @@ pub struct Router {
     developer_mode: Option<DeveloperModeSwitch>,
     /// Where the agent's diagnostics go instead of the host's control channel.
     diagnostics: Mutex<Option<Sender<Vec<u8>>>>,
+    /// How many times an app's last task has ended, and the wake-up for whoever waits on it.
+    apps_closed: (Mutex<u64>, Condvar),
 }
 
 /// Turns the guest's developer mode (adbd) on or off, as the host says.
@@ -216,7 +219,31 @@ impl Router {
             agent_check: Box::new(agent_check),
             developer_mode: None,
             diagnostics: Mutex::new(None),
+            apps_closed: (Mutex::new(0), Condvar::new()),
         }
+    }
+
+    /// How many times an app's last task has ended so far.
+    pub fn apps_closed(&self) -> u64 {
+        *self.apps_closed.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Waits until an app's last task has ended since the count was `seen`, or `timeout`
+    /// passes, and returns the count then. The idle reclaim waits on it so a closed app's
+    /// memory goes back to the host at once rather than at the next periodic look.
+    pub fn wait_for_closed_app(&self, seen: u64, timeout: Duration) -> u64 {
+        let (count, wake) = &self.apps_closed;
+        let guard = count.lock().unwrap_or_else(|e| e.into_inner());
+        let (guard, _) = wake
+            .wait_timeout_while(guard, timeout, |count| *count == seen)
+            .unwrap_or_else(|e| e.into_inner());
+        *guard
+    }
+
+    fn app_closed(&self) {
+        let (count, wake) = &self.apps_closed;
+        *count.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+        wake.notify_all();
     }
 
     /// Hands the host's developer mode to `switch`: `true` when the user turns it on, `false`
@@ -421,6 +448,7 @@ impl Router {
                 if let Some(task) = state.tasks.remove(&removed.task_id) {
                     if !state.tasks.values().any(|t| t.package == task.package) {
                         state.apps.remove(&task.package);
+                        self.app_closed();
                     }
                 }
                 state.deliver(&frame, Some(sender));

@@ -46,6 +46,9 @@ pub struct Settings {
     /// Whether the web links apps in the user's Android open go to apps in it rather than to
     /// the host's default browser. Off by default.
     pub links_in_android: bool,
+    /// The most memory the user's Android may have, in MiB. 0 (the default) is automatic:
+    /// the service's default size.
+    pub memory_limit_mb: u32,
     /// Whether text copied on the host can be pasted in the user's Android, and the reverse.
     /// On by default.
     pub clipboard: bool,
@@ -73,6 +76,7 @@ impl Default for Settings {
             render_gpu: "display".into(),
             freeze: false,
             links_in_android: false,
+            memory_limit_mb: 0,
             clipboard: true,
             program_updates: true,
             image_updates: true,
@@ -139,6 +143,8 @@ pub struct UserSettings {
     pub freeze: bool,
     #[serde(default)]
     pub links_in_android: bool,
+    #[serde(default)]
+    pub memory_limit_mb: u32,
     #[serde(default = "yes")]
     pub clipboard: bool,
     #[serde(default)]
@@ -153,6 +159,7 @@ impl Default for UserSettings {
             render_gpu: display(),
             freeze: false,
             links_in_android: false,
+            memory_limit_mb: 0,
             clipboard: true,
             developer_mode: false,
             adb_port: DEFAULT_ADB_PORT,
@@ -167,6 +174,7 @@ impl UserSettings {
             render_gpu,
             freeze: settings.freeze,
             links_in_android: settings.links_in_android,
+            memory_limit_mb: settings.memory_limit_mb,
             clipboard: settings.clipboard,
             developer_mode: settings.developer_mode,
             adb_port: normalise_adb_port(settings.adb_port),
@@ -312,6 +320,7 @@ fn combine(mine: UserSettings, machine: MachineSettings) -> Settings {
         render_gpu: mine.render_gpu,
         freeze: mine.freeze,
         links_in_android: mine.links_in_android,
+        memory_limit_mb: mine.memory_limit_mb,
         clipboard: mine.clipboard,
         program_updates: machine.program_updates,
         image_updates: machine.image_updates,
@@ -449,6 +458,7 @@ mod tests {
                     render_gpu: " Discrete ".into(),
                     freeze: true,
                     links_in_android: true,
+                    memory_limit_mb: 0,
                     clipboard: false,
                     program_updates: false,
                     image_updates: true,
@@ -516,6 +526,7 @@ mod tests {
                 "uid:1000",
                 &Settings {
                     links_in_android: true,
+                    memory_limit_mb: 0,
                     ..Settings::default()
                 },
             )

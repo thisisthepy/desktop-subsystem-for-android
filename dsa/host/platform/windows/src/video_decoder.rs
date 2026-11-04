@@ -58,8 +58,38 @@ pub fn picture_from_planes(
     })
 }
 
+use dsa_host_core::video::Codec;
+
+/// The argument that makes the window manager find the formats this computer decodes on its
+/// GPU and print them, one line each (see [`probe_line`]), then end. The window manager runs
+/// itself with it, so the decoders, their Direct3D devices and the GPU's video driver are
+/// loaded in a process that ends, not in the window manager, until the guest opens a codec.
+pub const PROBE_ARGUMENT: &str = "--probe-video";
+
+const ALL_CODECS: [Codec; 4] = [Codec::H264, Codec::Hevc, Codec::Vp9, Codec::Av1];
+
+/// The probe's line for `codec`: `gpu <name>` when it decodes on the GPU, else
+/// `no <name>: <why>`.
+pub fn probe_line(codec: Codec, result: &Result<(), String>) -> String {
+    match result {
+        Ok(()) => format!("gpu {}", codec.name()),
+        Err(why) => format!("no {}: {}", codec.name(), why.replace(['\r', '\n'], " ")),
+    }
+}
+
+/// The formats a probe's output says decode on the GPU, in the order printed. Lines it does
+/// not know are skipped.
+pub fn parse_probe(text: &str) -> Vec<Codec> {
+    text.lines()
+        .filter_map(|line| {
+            let name = line.trim().strip_prefix("gpu ")?;
+            ALL_CODECS.into_iter().find(|codec| codec.name() == name)
+        })
+        .collect()
+}
+
 #[cfg(windows)]
-pub use system::MediaFoundationDecoders;
+pub use system::{probe_here, MediaFoundationDecoders};
 
 #[cfg(windows)]
 mod system {
@@ -502,35 +532,108 @@ mod system {
     }
 
     /// The host's decoders: the formats whose Media Foundation decoder takes the GPU.
+    ///
+    /// Nothing is loaded until the guest first asks what it can decode; then a child process
+    /// finds out (see [`PROBE_ARGUMENT`](super::PROBE_ARGUMENT)) and the answer is kept. A
+    /// decoder is made only when the guest opens one, and freed when it closes.
     pub struct MediaFoundationDecoders {
-        supported: Vec<CodecSupport>,
+        supported: OnceLock<Vec<CodecSupport>>,
+        log: Box<dyn Fn(&str) + Send + Sync>,
+    }
+
+    /// How long the probe may take before it is given up, and no format is offered.
+    const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+    /// Opens a decoder of each format in this process and prints a line for each. What
+    /// `dsa-wm --probe-video` runs.
+    pub fn probe_here() -> String {
+        let mut out = String::new();
+        for codec in super::ALL_CODECS {
+            let result = MediaFoundationDecoder::open(codec, 1280, 720).map(drop);
+            out.push_str(&super::probe_line(codec, &result));
+            out.push('\n');
+        }
+        out
+    }
+
+    /// Runs this program with the probe argument and returns what it printed.
+    fn probe_in_child() -> Result<String, String> {
+        use std::io::Read;
+        use std::os::windows::process::CommandExt;
+        use std::process::{Command, Stdio};
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let exe = std::env::current_exe().map_err(|e| format!("cannot find this program: {e}"))?;
+        let mut child = Command::new(exe)
+            .arg(super::PROBE_ARGUMENT)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| format!("the probe did not start: {e}"))?;
+        let mut stdout = child.stdout.take().ok_or("the probe has no output")?;
+        let reader = std::thread::spawn(move || {
+            let mut text = String::new();
+            let _ = stdout.read_to_string(&mut text);
+            text
+        });
+        let started = std::time::Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if started.elapsed() < PROBE_TIMEOUT => {
+                    std::thread::sleep(std::time::Duration::from_millis(50))
+                }
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "the probe did not finish in {} s",
+                        PROBE_TIMEOUT.as_secs()
+                    ));
+                }
+            }
+        }
+        reader
+            .join()
+            .map_err(|_| "the probe's output was lost".to_string())
     }
 
     impl MediaFoundationDecoders {
-        /// Finds the formats this computer decodes on its GPU, by opening a decoder of each.
-        /// `log` takes a line for each format.
-        pub fn probe(log: &dyn Fn(&str)) -> MediaFoundationDecoders {
-            let mut supported = Vec::new();
-            for codec in [Codec::H264, Codec::Hevc, Codec::Vp9, Codec::Av1] {
-                match MediaFoundationDecoder::open(codec, 1280, 720) {
-                    Ok(_) => {
-                        log(&format!("video: {} decodes on the GPU", codec.name()));
-                        supported.push(CodecSupport {
-                            codec,
-                            max_width: MAX_WIDTH,
-                            max_height: MAX_HEIGHT,
-                        });
-                    }
-                    Err(why) => log(&format!("video: {} is not offered: {why}", codec.name())),
-                }
+        /// Decoders that find their formats when first asked. `log` takes a line for each
+        /// format then.
+        pub fn lazy(log: Box<dyn Fn(&str) + Send + Sync>) -> MediaFoundationDecoders {
+            MediaFoundationDecoders {
+                supported: OnceLock::new(),
+                log,
             }
-            MediaFoundationDecoders { supported }
+        }
+
+        fn find(&self) -> Vec<CodecSupport> {
+            let text = match probe_in_child() {
+                Ok(text) => text,
+                Err(why) => {
+                    (self.log)(&format!("video: no format is offered: {why}"));
+                    return Vec::new();
+                }
+            };
+            for line in text.lines().filter(|l| !l.trim().is_empty()) {
+                (self.log)(&format!("video: {line}"));
+            }
+            super::parse_probe(&text)
+                .into_iter()
+                .map(|codec| CodecSupport {
+                    codec,
+                    max_width: MAX_WIDTH,
+                    max_height: MAX_HEIGHT,
+                })
+                .collect()
         }
     }
 
     impl VideoDecoders for MediaFoundationDecoders {
         fn capabilities(&self) -> Vec<CodecSupport> {
-            self.supported.clone()
+            self.supported.get_or_init(|| self.find()).clone()
         }
 
         fn open(

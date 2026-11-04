@@ -130,6 +130,12 @@ message LaunchApp {
   string package_name = 1;
 }
 
+// The user's Stop: asks the caller's Android to end every process of an app and give its
+// memory back, even one a placed widget or a foreground service keeps running.
+message StopApp {
+  string package_name = 1;
+}
+
 // The user resized a task's window: asks the caller's Android to give the task the
 // window's client size, in Android display pixels. `live` is true while the user is still
 // dragging the window's edge: the task takes the size without being reconfigured, and the
@@ -679,6 +685,16 @@ message GuestMemory {
   repeated GuestProcessMemory top_processes = 14;
   // How long ago Android sent this report, in seconds.
   uint64 age_seconds = 15;
+  // What the guest's kernel itself holds, and the memory it was given, as the control
+  // channel's GuestMemory says.
+  uint64 slab_unreclaimable_kb = 16;
+  uint64 kernel_stack_kb = 17;
+  uint64 page_tables_kb = 18;
+  uint64 vmalloc_used_kb = 19;
+  uint64 percpu_kb = 20;
+  uint64 cma_total_kb = 21;
+  uint64 hugetlb_kb = 22;
+  uint64 mem_online_kb = 23;
 }
 
 // One host process that runs the caller's Android: its VM's memory process, the window
@@ -847,6 +863,10 @@ message Settings {
   // Whether every DSA process writes a line for each stage of each resize, rather than a
   // summary at the end of a drag. Off by default; the same rules as input_trace.
   bool resize_trace = 12;
+  // The most memory the caller's Android may have, in MiB. 0, the default, is automatic: the
+  // service's default size. It takes effect
+  // the next time Android starts.
+  uint32 memory_limit_mb = 16;
   // Whether the caller's Android takes adb connections: the service then listens on
   // 127.0.0.1:adb_port and bridges each connection to the guest's adbd. Off by default, and
   // the caller's own. It applies at once, without restarting Android.
@@ -1023,6 +1043,7 @@ message Request {
     GetPackage get_package = 36;
     WatchLog watch_log = 70;
     CollectDiagnostics collect_diagnostics = 71;
+    StopApp stop_app = 37;
   }
 }
 

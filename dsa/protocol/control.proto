@@ -146,6 +146,12 @@ message LaunchApp {
   string package_name = 1;
 }
 
+// Host to guest: the user's Stop. The agent ends every process of the app, even one a
+// placed widget or a foreground service keeps running, and the guest gives the memory back.
+message StopApp {
+  string package_name = 1;
+}
+
 // Host to guest: the user resized the task's window; the task takes the window's client
 // size, in guest display pixels. Only the latest size counts: during a live resize the host
 // sends the size it has now, not every size it passed through. The agent keeps the task
@@ -523,6 +529,21 @@ message GuestMemory {
   uint64 total_pss_kb = 13;
   // The processes with the largest proportional set size, largest first, at most 10.
   repeated ProcessMemory top_processes = 14;
+  // What the kernel itself holds, from /proc/meminfo: slab it cannot free (SUnreclaim),
+  // kernel stacks, page tables, vmalloc, per-CPU areas, and the contiguous memory area (CMA)
+  // set aside for drivers.
+  uint64 slab_unreclaimable_kb = 15;
+  uint64 kernel_stack_kb = 16;
+  uint64 page_tables_kb = 17;
+  uint64 vmalloc_used_kb = 18;
+  uint64 percpu_kb = 19;
+  uint64 cma_total_kb = 20;
+  // Huge pages reserved (HugePages_Total times Hugepagesize).
+  uint64 hugetlb_kb = 21;
+  // The memory the kernel was given, counted from its online memory blocks; what it gave to
+  // MemTotal is this less what it reserved at boot (its own code, page structures, swiotlb,
+  // pstore). 0 when the guest cannot read it.
+  uint64 mem_online_kb = 22;
 }
 
 // From the agent to the guest's control daemon, on each connection to it: the agent has
@@ -1202,5 +1223,6 @@ message Envelope {
     CollectDiagnostics collect_diagnostics = 133;
     DiagnosticsFile diagnostics_file = 134;
     DiagnosticsDone diagnostics_done = 135;
+    StopApp stop_app = 136;
   }
 }
