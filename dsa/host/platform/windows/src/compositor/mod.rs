@@ -603,6 +603,12 @@ impl Compositor {
     /// this program first; a problem with either is logged, and the rest of the window manager
     /// goes on.
     fn start_notifications(&self, stop: &Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
+        for why in crate::user_registry::remove_old_names_for_current_user() {
+            note(
+                self.logger.as_deref(),
+                &format!("a registry key an earlier version wrote stays: {why}"),
+            );
+        }
         if !self.show_notifications {
             return None;
         }

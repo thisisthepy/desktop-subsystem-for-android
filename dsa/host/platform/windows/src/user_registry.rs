@@ -15,14 +15,12 @@ use windows_sys::Win32::Security::{
 };
 use windows_sys::Win32::System::Registry::{
     RegCloseKey, RegDeleteTreeW, RegEnumKeyExW, RegLoadKeyW, RegOpenKeyExW, RegUnLoadKeyW, HKEY,
-    HKEY_USERS, KEY_ALL_ACCESS,
+    HKEY_CURRENT_USER, HKEY_USERS, KEY_ALL_ACCESS,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
-use crate::compositor::notifications::PROTOCOL;
-
-/// The prefix of every AppUserModelID DSA gives an app.
-const APP_ID_PREFIX: &str = "DSA.";
+use crate::compositor::notifications::{OLD_PROTOCOL, PROTOCOL};
+use crate::start_menu::{APP_ID_PREFIX, OLD_APP_ID_PREFIX};
 
 /// Where a hive is loaded while its keys are removed.
 const MOUNT: &str = "DSA-Uninstall-Classes";
@@ -78,16 +76,29 @@ fn delete_tree(key: HKEY, name: &str) -> Result<(), String> {
     }
 }
 
-/// Removes DSA's keys from one user's classes, opened as `classes`.
+/// Removes DSA's keys from one user's classes, opened as `classes`: those of this version and
+/// those of the names earlier versions used.
 fn remove_from(classes: HKEY) -> Vec<String> {
+    remove_named(
+        classes,
+        &[PROTOCOL, OLD_PROTOCOL],
+        &[APP_ID_PREFIX, OLD_APP_ID_PREFIX],
+    )
+}
+
+/// Removes the protocol keys `protocols`, and the AppUserModelId keys whose names start with
+/// one of `prefixes`, from the classes opened as `classes`.
+fn remove_named(classes: HKEY, protocols: &[&str], prefixes: &[&str]) -> Vec<String> {
     let mut problems = Vec::new();
-    if let Err(why) = delete_tree(classes, PROTOCOL) {
-        problems.push(why);
+    for protocol in protocols {
+        if let Err(why) = delete_tree(classes, protocol) {
+            problems.push(why);
+        }
     }
     if let Some(ids) = open(classes, "AppUserModelId") {
         for name in subkeys(ids)
             .into_iter()
-            .filter(|name| name.starts_with(APP_ID_PREFIX))
+            .filter(|name| prefixes.iter().any(|prefix| name.starts_with(prefix)))
         {
             if let Err(why) = delete_tree(ids, &name) {
                 problems.push(why);
@@ -154,6 +165,20 @@ fn enable_privilege(name: &str) -> Result<(), String> {
     // SAFETY: opened above, closed once.
     unsafe { CloseHandle(token) };
     result
+}
+
+/// Removes, from the current user's classes, the keys earlier versions wrote under names this
+/// version no longer uses: the `dsa-notification` protocol and the `DSA.<package>`
+/// AppUserModelIDs. The window manager does this each time it starts, so an upgrade leaves
+/// nothing behind. Returns what could not be removed, to report.
+pub fn remove_old_names_for_current_user() -> Vec<String> {
+    let Some(classes) = open(HKEY_CURRENT_USER, "Software\\Classes") else {
+        return Vec::new();
+    };
+    let problems = remove_named(classes, &[OLD_PROTOCOL], &[OLD_APP_ID_PREFIX]);
+    // SAFETY: opened above, closed once.
+    unsafe { RegCloseKey(classes) };
+    problems
 }
 
 /// Removes DSA's keys from the classes of the user `sid`, whose local application data folder
