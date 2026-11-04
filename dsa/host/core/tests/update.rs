@@ -418,7 +418,11 @@ fn fr14_an_image_whose_disk_is_not_a_disk_is_not_usable() {
     assert!(!image_is_usable(&root.join("images").join("17.0.0-1")));
     assert!(!image_is_usable(&root.join("images").join("missing")));
     // A file shorter than image.json says is a broken copy.
-    std::fs::write(root.join("images").join("16.0.2").join("initrd.img"), b"short").unwrap();
+    std::fs::write(
+        root.join("images").join("16.0.2").join("initrd.img"),
+        b"short",
+    )
+    .unwrap();
     assert!(!image_is_usable(&root.join("images").join("16.0.2")));
 }
 

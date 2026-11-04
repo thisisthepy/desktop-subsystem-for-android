@@ -20,7 +20,10 @@ fn fr1_programs_running_from_the_program_folder_are_ended_before_an_upgrade() {
         r"\\?\C:\Program Files\DSA\settings\DsaSettings.exe",
         "C:/Program Files/DSA/dsa.exe",
     ] {
-        assert!(is_dsa_program(Path::new(image), program, &apps()), "{image}");
+        assert!(
+            is_dsa_program(Path::new(image), program, &apps()),
+            "{image}"
+        );
     }
 }
 
@@ -31,7 +34,10 @@ fn fr1_each_apps_window_program_is_ended_in_every_users_profile() {
         r"C:\Users\ada\AppData\Local\DSA\apps\com.example.notes\Notes.exe",
         r"D:\Profiles\bob\Local\DSA\apps\org.example\Example.exe",
     ] {
-        assert!(is_dsa_program(Path::new(image), program, &apps()), "{image}");
+        assert!(
+            is_dsa_program(Path::new(image), program, &apps()),
+            "{image}"
+        );
     }
 }
 
@@ -45,7 +51,10 @@ fn fr1_other_programs_are_left_running() {
         r"C:\Users\ada\AppData\Local\DSA\android.vhdx",
         r"C:\Program Files\DSA",
     ] {
-        assert!(!is_dsa_program(Path::new(image), program, &apps()), "{image}");
+        assert!(
+            !is_dsa_program(Path::new(image), program, &apps()),
+            "{image}"
+        );
     }
     // An empty folder from a missing argument matches nothing.
     let explorer = Path::new(r"C:\Windows\explorer.exe");

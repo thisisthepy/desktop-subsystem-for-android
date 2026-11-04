@@ -24,7 +24,7 @@
   version installed over it (as the service does when it updates DSA) keeps them.
 
   Build variables (-d): Version, ProductName (with " (test package)" after it for a
-  package that only tests the installer), SourceDir (the built binaries, version.txt and
+  package that only tests the installer), SourceDir (the built binaries and
   dsa-hostd.json),
   SettingsDir (the published settings app), and,
   when an image is bundled, ImageDir and ImageVersion, plus ImageManifest when the image
@@ -42,8 +42,7 @@
         <!-- The new version installs over the old one before the old one is removed, so the
              files both have stay. Removing the old one first would also remove the
              configuration after costing had decided to keep it, and leave none. An edited
-             configuration is kept and an unedited one replaced, by Windows Installer's rule
-             for files without a version. A package of the same version installs over the one
+             configuration is kept: the package never overwrites it. A package of the same version installs over the one
              already there too, as a repair would, rather than beside it. -->
         <MajorUpgrade Schedule="afterInstallExecute"
                       AllowSameVersionUpgrades="yes"
@@ -121,7 +120,7 @@
                 <Exclude Files="$(SettingsDir)\DsaSettings.exe" />
             </Files>
             <Component Id="SettingsExe" Guid="*">
-                <File Id="SettingsExe" Source="$(SettingsDir)\DsaSettings.exe" KeyPath="yes" CompanionFile="ProgramVersion">
+                <File Id="SettingsExe" Source="$(SettingsDir)\DsaSettings.exe" KeyPath="yes">
                     <Shortcut Id="SettingsShortcut"
                               Directory="ProgramMenuFolder"
                               Name="DSA Settings"
@@ -131,19 +130,16 @@
             </Component>
         </ComponentGroup>
 
-        <!-- Every program file is a companion of version.txt, which has no version of its own
-             on disk but a version in the package, so Windows Installer always finds the
-             package's copy newer and replaces it, and with it every companion. Its own rules
-             would keep a program file whose version is higher than the package's, or one
-             without a version that was changed after it was installed, and an old program
-             beside a new service cannot talk to it. -->
+        <!-- Every installation, upgrade and repair replaces every file of the package (the
+             "a" of REINSTALLMODE), even one whose version is higher than the package's or
+             one without a version that was changed after it was installed: Windows
+             Installer's own rules would keep those, and an old program beside a new service
+             cannot talk to it. The configuration alone is never overwritten, so an edited one
+             stays. -->
+        <Property Id="REINSTALLMODE" Value="amus" />
         <ComponentGroup Id="Service" Directory="INSTALLFOLDER">
-            <Component Id="ProgramVersion" Guid="*">
-                <File Id="ProgramVersion" Source="$(SourceDir)\version.txt" KeyPath="yes"
-                      DefaultVersion="$(Version).0" DefaultLanguage="0" />
-            </Component>
             <Component Id="HostdExe" Guid="*">
-                <File Id="HostdExe" Source="$(SourceDir)\dsa-hostd.exe" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="HostdExe" Source="$(SourceDir)\dsa-hostd.exe" KeyPath="yes" />
                 <ServiceInstall Id="DsaHost"
                                 Name="DsaHost"
                                 DisplayName="Desktop Subsystem for Android Service"
@@ -164,16 +160,16 @@
                 <ServiceControl Id="DsaHost" Name="DsaHost" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
             </Component>
             <Component Id="DsaExe" Guid="*">
-                <File Id="DsaExe" Source="$(SourceDir)\dsa.exe" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="DsaExe" Source="$(SourceDir)\dsa.exe" KeyPath="yes" />
                 <Environment Id="Path" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="yes" Permanent="no" />
             </Component>
             <Component Id="WindowManagerExe" Guid="*">
-                <File Id="WindowManagerExe" Source="$(SourceDir)\dsa-wm.exe" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="WindowManagerExe" Source="$(SourceDir)\dsa-wm.exe" KeyPath="yes" />
             </Component>
             <!-- The app window host. The window manager copies it for each Android app into
                  the user's profile (%LOCALAPPDATA%\DSA\apps\<package>\<Label>.exe), named and drawn as the app. -->
             <Component Id="AppWindowExe" Guid="*">
-                <File Id="AppWindowExe" Source="$(SourceDir)\dsa-app-window.exe" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="AppWindowExe" Source="$(SourceDir)\dsa-app-window.exe" KeyPath="yes" />
             </Component>
             <!-- Opening an .apk file in Explorer opens the APK install window of the settings
                  app, which shows what the file is (its name, icon, version, permissions and
@@ -221,7 +217,7 @@
                                Type="string" Value="&quot;[INSTALLFOLDER]dsa-app-window.exe&quot; --share-file &quot;%1&quot;" />
             </Component>
             <Component Id="GfxstreamBackendDll" Guid="*">
-                <File Id="GfxstreamBackendDll" Source="$(SourceDir)\gfxstream_backend.dll" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="GfxstreamBackendDll" Source="$(SourceDir)\gfxstream_backend.dll" KeyPath="yes" />
             </Component>
             <Component Id="WindowManagerRun" Guid="c1904da8-fec3-46a3-9d9f-676d1873a52e">
                 <RegistryValue Root="HKLM"
@@ -256,14 +252,14 @@
                 </RegistryKey>
             </Component>
             <Component Id="NoticeFile" Guid="*">
-                <File Id="NoticeFile" Source="$(SourceDir)\NOTICE.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="NoticeFile" Source="$(SourceDir)\NOTICE.txt" KeyPath="yes" />
             </Component>
         </ComponentGroup>
 
         <!-- The service's own folder: SYSTEM and Administrators only, and read access for
              Hyper-V's virtual machines (S-1-5-83-0), which open the images from it. -->
         <ComponentGroup Id="Data" Directory="DATAFOLDER">
-            <Component Id="Config" Guid="*">
+            <Component Id="Config" Guid="*" NeverOverwrite="yes">
                 <File Id="Config" Source="$(SourceDir)\dsa-hostd.json" KeyPath="yes" />
                 <CreateFolder>
                     <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;S-1-5-83-0)" />
@@ -286,41 +282,41 @@
         <!-- The licence bundle for all shipped components and dependencies. -->
         <ComponentGroup Id="Licenses" Directory="LICENSESFOLDER">
             <Component Id="LicNotice" Guid="*">
-                <File Id="LicNotice" Source="$(SourceDir)\licenses\NOTICE.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="LicNotice" Source="$(SourceDir)\licenses\NOTICE.txt" KeyPath="yes" />
             </Component>
             <Component Id="LicRust" Guid="*">
-                <File Id="LicRust" Source="$(SourceDir)\licenses\rust-crates.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="LicRust" Source="$(SourceDir)\licenses\rust-crates.txt" KeyPath="yes" />
             </Component>
             <Component Id="LicKernel" Guid="*">
-                <File Id="LicKernel" Source="$(SourceDir)\licenses\kernel-GPL-2.0.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="LicKernel" Source="$(SourceDir)\licenses\kernel-GPL-2.0.txt" KeyPath="yes" />
             </Component>
             <Component Id="LicWix" Guid="*">
-                <File Id="LicWix" Source="$(SourceDir)\licenses\wix-MS-RL.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="LicWix" Source="$(SourceDir)\licenses\wix-MS-RL.txt" KeyPath="yes" />
             </Component>
             <Component Id="LicSetupUi" Guid="*">
-                <File Id="LicSetupUi" Source="$(SourceDir)\licenses\setup-ui.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="LicSetupUi" Source="$(SourceDir)\licenses\setup-ui.txt" KeyPath="yes" />
             </Component>
             <Component Id="LicSettingsApp" Guid="*">
-                <File Id="LicSettingsApp" Source="$(SourceDir)\licenses\settings-app.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="LicSettingsApp" Source="$(SourceDir)\licenses\settings-app.txt" KeyPath="yes" />
             </Component>
             <Component Id="LicGfxstream" Guid="*">
-                <File Id="LicGfxstream" Source="$(SourceDir)\licenses\gfxstream.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="LicGfxstream" Source="$(SourceDir)\licenses\gfxstream.txt" KeyPath="yes" />
             </Component>
             <Component Id="LicAosp" Guid="*">
-                <File Id="LicAosp" Source="$(SourceDir)\licenses\aosp-notice.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="LicAosp" Source="$(SourceDir)\licenses\aosp-notice.txt" KeyPath="yes" />
             </Component>
             <Component Id="LicApache" Guid="*">
-                <File Id="LicApache" Source="$(SourceDir)\licenses\apache-2.0.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="LicApache" Source="$(SourceDir)\licenses\apache-2.0.txt" KeyPath="yes" />
             </Component>
             <Component Id="LicMit" Guid="*">
-                <File Id="LicMit" Source="$(SourceDir)\licenses\mit.txt" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="LicMit" Source="$(SourceDir)\licenses\mit.txt" KeyPath="yes" />
             </Component>
         </ComponentGroup>
 
         <!-- The kernel: readable by everyone and by the VMs. -->
         <ComponentGroup Id="Kernel" Directory="VMFOLDER">
             <Component Id="Kernel" Guid="*">
-                <File Id="Kernel" Source="$(SourceDir)\bzImage" KeyPath="yes" CompanionFile="ProgramVersion" />
+                <File Id="Kernel" Source="$(SourceDir)\bzImage" KeyPath="yes" />
                 <CreateFolder>
                     <PermissionEx Sddl="D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;BU)(A;OICI;GRGX;;;S-1-5-83-0)" />
                 </CreateFolder>

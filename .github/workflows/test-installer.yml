@@ -704,7 +704,7 @@ jobs:
             Copy-Item "dsa\target\release\$name" "$program\$name"
           }
           Copy-Item dsa\target\installer\settings-app\DsaSettings.exe "$program\settings\DsaSettings.exe"
-          foreach ($name in 'gfxstream_backend.dll', 'NOTICE.txt', 'version.txt', 'licenses\NOTICE.txt', 'licenses\gfxstream.txt', 'vm\bzImage') {
+          foreach ($name in 'gfxstream_backend.dll', 'NOTICE.txt', 'licenses\NOTICE.txt', 'licenses\gfxstream.txt', 'vm\bzImage') {
             Set-Content "$program\$name" 'a stale copy' -NoNewline
           }
           Get-ChildItem -Recurse -File $program | ForEach-Object { $_.LastWriteTime = (Get-Date).AddDays(1) }

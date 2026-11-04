@@ -111,7 +111,10 @@ pub fn start_for_signed_in_users(program: &Path) -> Vec<String> {
         }
         let token = OwnedHandle(token);
         if let Err(error) = run_in_session(&token, program) {
-            problems.push(format!("starting {} in session {id}: {error}", program.display()));
+            problems.push(format!(
+                "starting {} in session {id}: {error}",
+                program.display()
+            ));
         }
     }
     problems

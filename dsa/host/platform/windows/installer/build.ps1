@@ -65,9 +65,6 @@ Copy-Item (Join-Path $dsa "target\release\dsa-hostd.exe") $stage
 Copy-Item (Join-Path $dsa "target\release\dsa-wm.exe") $stage
 Copy-Item (Join-Path $dsa "target\release\dsa-app-window.exe") $stage
 Copy-Item (Join-Path $dsa "target\release\dsa.exe") $stage
-# Every program file is installed as a companion of this one, which makes Windows Installer
-# replace them all on every installation (see dsa.wxs).
-Set-Content -Path (Join-Path $stage "version.txt") -Value $Version -NoNewline -Encoding ascii
 
 if ($GfxstreamBackend) {
     Copy-Item $GfxstreamBackend (Join-Path $stage "gfxstream_backend.dll")
