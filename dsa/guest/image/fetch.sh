@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Downloads the pinned AOSP build inputs of one Android major version (see inputs.json)
+# Downloads the pinned AOSP build inputs of one Android major version (see inputs.json:
+# target_files, otatools, and dexpreopt_tools with the build's own dex2oat)
 # into .scratch/aosp-inputs/<build>/ and checks their sizes and SHA-256.
 #
 #   dsa/guest/image/fetch.sh 17
@@ -12,7 +13,8 @@ read -r build branch target <<<"$(jq -r --argjson m "$major" \
 [[ -n "$build" ]] || { echo "inputs.json has no image for Android $major" >&2; exit 1; }
 dest="${DSA_AOSP_INPUTS:-$repo/.scratch/aosp-inputs}/$build"
 mkdir -p "$dest"
-for kind in target_files otatools; do
+kinds="$(jq -r --argjson m "$major" '.images[] | select(.android_major == $m) | .files | keys[]' "$here/inputs.json")"
+for kind in $kinds; do
   name="$(jq -r --argjson m "$major" --arg k "$kind" '.images[] | select(.android_major == $m) | .files[$k].name' "$here/inputs.json")"
   sha="$(jq -r --argjson m "$major" --arg k "$kind" '.images[] | select(.android_major == $m) | .files[$k].sha256' "$here/inputs.json")"
   file="$dest/$name"
