@@ -139,6 +139,26 @@ class HostGraphicsBuildTests(unittest.TestCase):
             source,
         )
 
+    def test_fr25_host_renderer_builds_for_arm64_windows(self):
+        script = BUILD_SCRIPT.read_text(encoding="utf-8")
+        # The platform picks the Visual Studio environment and the compiler's target, and
+        # an ARM64 build on an x64 machine is a cross build.
+        self.assertIn('[ValidateSet("x64", "ARM64")]', script)
+        self.assertIn("vcvarsarm64.bat", script)
+        self.assertIn("vcvarsamd64_arm64.bat", script)
+        self.assertIn("aarch64-pc-windows-msvc", script)
+        fetch = FETCH_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn('"0011-*.patch"', fetch)
+        self.assertIn('Join-Path $PatchDir "aemu"', fetch)
+        aemu = (HERE.parent / "patches" / "aemu" /
+                "0001-yield-without-the-x86-pause-instruction.patch").read_text(encoding="utf-8")
+        self.assertIn("-    _mm_pause();", aemu)
+        self.assertIn("+    YieldProcessor();", aemu)
+        gfx = (HERE.parent / "patches" /
+               "0011-build-and-spin-on-arm64-windows.patch").read_text(encoding="utf-8")
+        self.assertIn("+                        __builtin_arm_yield();", gfx)
+        self.assertIn('+        setIcdPaths("lvp_icd.aarch64.json");', gfx)
+
 
 if __name__ == "__main__":
     unittest.main()

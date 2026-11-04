@@ -59,9 +59,18 @@ jobs:
             .scratch/graphics-verify/vk-cts-subset.cases.txt
           if-no-files-found: error
 
+  # x86_64 for x64 hosts, arm64-v8a for the arm64-only guest of ARM64 Windows hosts.
   guest-transport:
-    name: Build the guest Hyper-V graphics transport
+    name: Build the guest Hyper-V graphics transport (${{ matrix.abi }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { abi: x86_64, elf: "Advanced Micro Devices X86-64", artifact: guest-gfxstream-hvsocket }
+          - { abi: arm64-v8a, elf: "AArch64", artifact: guest-gfxstream-hvsocket-arm64 }
     runs-on: ubuntu-latest
+    env:
+      DSA_GUEST_ABI: ${{ matrix.abi }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -81,16 +90,16 @@ jobs:
         run: bash dsa/graphics/tests/test.sh .scratch
 
       - name: Build the guest transport
-        run: bash dsa/graphics/build.sh .scratch .scratch/build
+        run: bash dsa/graphics/build.sh .scratch .scratch/build-${{ matrix.abi }}
 
       - name: Verify ELF architecture and exported Hyper-V symbols
         run: |
-          target=".scratch/build/libOpenglSystemCommon.so"
-          readelf -h "$target" | grep -Fq 'Advanced Micro Devices X86-64'
+          target=".scratch/build-${{ matrix.abi }}/libOpenglSystemCommon.so"
+          readelf -h "$target" | grep -Fq '${{ matrix.elf }}'
           nm -D "$target" | grep -Fq 'HvSocketStream'
           nm -D "$target" | grep -Fq 'goldfish_get_egl_tls'
-          target_vk=".scratch/build/vulkan.ranchu.so"
-          readelf -h "$target_vk" | grep -Fq 'Advanced Micro Devices X86-64'
+          target_vk=".scratch/build-${{ matrix.abi }}/vulkan.ranchu.so"
+          readelf -h "$target_vk" | grep -Fq '${{ matrix.elf }}'
           # The Android loader looks up HMI and nothing else; everything else stays hidden.
           exports=$(nm -D --defined-only "$target_vk" | awk '{print $3}')
           test "$exports" = "HMI"
@@ -99,21 +108,45 @@ jobs:
       - name: Keep the patched guest library
         uses: actions/upload-artifact@v4
         with:
-          name: guest-gfxstream-hvsocket
+          name: ${{ matrix.artifact }}
           path: |
-            .scratch/build/libOpenglSystemCommon.so
-            .scratch/build/vulkan.ranchu.so
+            .scratch/build-${{ matrix.abi }}/libOpenglSystemCommon.so
+            .scratch/build-${{ matrix.abi }}/vulkan.ranchu.so
           if-no-files-found: error
 
+  # x64 on windows-latest, and ARM64 natively on windows-11-arm with MSVC's ARM64 tools.
+  # Each runs the renderer on software Vulkan (Mesa Lavapipe) for its own processor.
   host-renderer:
-    name: Build the host graphics renderer (windows)
-    runs-on: windows-latest
-    timeout-minutes: 40
+    name: Build the host graphics renderer (windows, ${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: windows-latest, platform: x64, lavapipe: x64, artifact: host-gfxstream-windows }
+          - { runner: windows-11-arm, platform: ARM64, lavapipe: arm64, artifact: host-gfxstream-windows-arm64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      LVP_ICD: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.json
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
+
+      # The ARM64 runner image does not always carry these.
+      - name: Set up Rust for ARM64 Windows
+        if: matrix.platform == 'ARM64'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+
+      - name: Set up Ninja for ARM64 Windows
+        if: matrix.platform == 'ARM64'
+        shell: pwsh
+        run: |
+          uv tool install ninja
+          uv tool dir --bin >> $env:GITHUB_PATH
 
       - name: Fetch gfxstream and host build dependencies
         shell: pwsh
@@ -123,14 +156,31 @@ jobs:
       - name: Build the host graphics renderer
         shell: pwsh
         run: |
-          & dsa/graphics/host/build.ps1 -ScratchDir .scratch -OutDir .scratch/build-host
+          & dsa/graphics/host/build.ps1 -ScratchDir .scratch -OutDir .scratch/build-host -Platform ${{ matrix.platform }}
+
+      - name: Check the renderer is built for ${{ matrix.platform }}
+        shell: pwsh
+        run: |
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path .scratch/build-host/dist/bin/gfxstream_backend.dll).Path)
+          $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+          $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
+          $expected = if ('${{ matrix.platform }}' -eq 'ARM64') { 0xAA64 } else { 0x8664 }
+          if ($machine -ne $expected) { throw "gfxstream_backend.dll is for machine 0x$('{0:X4}' -f $machine), not ${{ matrix.platform }}" }
 
       - name: Download software Vulkan (Mesa Lavapipe)
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://github.com/mmozeiko/build-mesa/releases/download/26.2.5/mesa-lavapipe-x64-26.2.5.7z" -OutFile ".scratch/mesa-lavapipe.7z"
-          & "C:\Program Files\7-Zip\7z.exe" x .scratch/mesa-lavapipe.7z "-o.scratch/lavapipe" -y
-          $jsonPath = (Resolve-Path .scratch/lavapipe/lvp_icd.x86_64.json).Path
+          Invoke-WebRequest -Uri "https://github.com/mmozeiko/build-mesa/releases/download/26.2.5/mesa-lavapipe-${{ matrix.lavapipe }}-26.2.5.7z" -OutFile ".scratch/mesa-lavapipe.7z"
+          New-Item -ItemType Directory -Force .scratch/lavapipe | Out-Null
+          if (Test-Path "C:\Program Files\7-Zip\7z.exe") {
+            & "C:\Program Files\7-Zip\7z.exe" x .scratch/mesa-lavapipe.7z "-o.scratch/lavapipe" -y
+          } else {
+            tar -xf .scratch/mesa-lavapipe.7z -C .scratch/lavapipe
+          }
+          if ($LASTEXITCODE -ne 0) { throw "unpacking Lavapipe failed" }
+          # The manifest is named for the processor (lvp_icd.x86_64.json, lvp_icd.aarch64.json);
+          # it is rewritten under one name below.
+          $jsonPath = $env:LVP_ICD
           $dllPath = (Resolve-Path .scratch/lavapipe/vulkan_lvp.dll).Path
 
           Copy-Item $dllPath -Destination "C:\Windows\System32\vulkan_lvp.dll" -Force
@@ -151,8 +201,8 @@ jobs:
       - name: Run host renderer smoke test on software Vulkan
         shell: pwsh
         env:
-          VK_ICD_FILENAMES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
-          VK_DRIVER_FILES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
+          VK_ICD_FILENAMES: ${{ env.LVP_ICD }}
+          VK_DRIVER_FILES: ${{ env.LVP_ICD }}
           VK_LOADER_DEBUG: all
           GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
         run: |
@@ -162,8 +212,8 @@ jobs:
         shell: pwsh
         working-directory: dsa
         env:
-          VK_ICD_FILENAMES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
-          VK_DRIVER_FILES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
+          VK_ICD_FILENAMES: ${{ env.LVP_ICD }}
+          VK_DRIVER_FILES: ${{ env.LVP_ICD }}
           VK_LOADER_DEBUG: all
           GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
         run: |
@@ -173,8 +223,8 @@ jobs:
         shell: pwsh
         working-directory: dsa
         env:
-          VK_ICD_FILENAMES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
-          VK_DRIVER_FILES: ${{ github.workspace }}\.scratch\lavapipe\lvp_icd.x86_64.json
+          VK_ICD_FILENAMES: ${{ env.LVP_ICD }}
+          VK_DRIVER_FILES: ${{ env.LVP_ICD }}
           GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
         run: |
           cargo test -p dsa-host-windows --test window_manager -- nfr5_unknown_vulkan_image_is_rejected_without_reaching_the_driver --nocapture
@@ -182,7 +232,7 @@ jobs:
       - name: Keep the host renderer library and headers
         uses: actions/upload-artifact@v4
         with:
-          name: host-gfxstream-windows
+          name: ${{ matrix.artifact }}
           path: |
             .scratch/build-host/dist/bin/gfxstream_backend.dll
             .scratch/build-host/dist/include/
@@ -191,7 +241,7 @@ jobs:
       - name: Keep the host renderer's symbols
         uses: actions/upload-artifact@v4
         with:
-          name: host-gfxstream-windows-symbols
+          name: ${{ matrix.artifact }}-symbols
           path: .scratch/build-host/dist/symbols/gfxstream_backend.pdb
           if-no-files-found: warn
 

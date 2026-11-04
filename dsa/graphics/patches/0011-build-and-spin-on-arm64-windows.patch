@@ -1,0 +1,28 @@
+diff --git a/host/vulkan/VkDecoder.cpp b/host/vulkan/VkDecoder.cpp
+--- a/host/vulkan/VkDecoder.cpp
++++ b/host/vulkan/VkDecoder.cpp
+@@ -198,10 +198,12 @@
+                             })
+                             .build();
+                     while ((seqno - seqnoPtr->load(std::memory_order_seq_cst) != 1)) {
+ #if (defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_X64)))
+                         _mm_pause();
++#elif (defined(__clang__) && defined(__aarch64__))
++                        __builtin_arm_yield();
++#elif (defined(_MSC_VER) && defined(_M_ARM64))
++                        __yield();
+ #elif (defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__)))
+                         __asm__ __volatile__("pause;");
+diff --git a/host/vulkan/VulkanDispatch.cpp b/host/vulkan/VulkanDispatch.cpp
+--- a/host/vulkan/VulkanDispatch.cpp
++++ b/host/vulkan/VulkanDispatch.cpp
+@@ -66,5 +66,9 @@
+     if (androidIcd == "lavapipe") {
+         INFO("%s: ICD set to 'lavapipe', using Lavapipe ICD", __func__);
++#if defined(_M_ARM64) || defined(__aarch64__)
++        setIcdPaths("lvp_icd.aarch64.json");
++#else
+         setIcdPaths("lvp_icd.x86_64.json");
++#endif
+     } else if (androidIcd == "swiftshader") {
+         INFO("%s: ICD set to 'swiftshader', using Swiftshader ICD", __func__);

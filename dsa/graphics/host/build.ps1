@@ -1,14 +1,35 @@
 # Builds gfxstream's host renderer (gfxstream_backend.dll) on Windows.
+#
+# -Platform is the machine the DLL is for: x64 or ARM64. Without it the DLL is for the
+# machine that builds it. An ARM64 build on an ARM64 machine is native; on an x64 machine
+# it is a cross build with Visual Studio's x64-to-ARM64 tools. On ARM64 the renderer uses
+# the device's own Vulkan driver through the Vulkan loader, as on x64.
 param(
     [string]$ScratchDir = "$PSScriptRoot/../../../../.scratch",
     [string]$OutDir = "",
     [string]$Config = "Release",
     [string]$Generator = "Ninja",
-    [string]$Platform = "x64",
+    [ValidateSet("x64", "ARM64")]
+    [string]$Platform = "",
     [string]$Toolset = "ClangCL"
 )
 
 $ErrorActionPreference = "Stop"
+
+# The machine's own processor: PROCESSOR_ARCHITEW6432 is set when this PowerShell is
+# itself emulated.
+$NativeArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+$HostIsArm64 = $NativeArch -eq "ARM64"
+if (-not $Platform) {
+    $Platform = if ($HostIsArm64) { "ARM64" } else { "x64" }
+}
+# The Visual Studio environment that compiles for $Platform on this machine.
+$VcvarsName = if ($Platform -eq "ARM64") {
+    if ($HostIsArm64) { "vcvarsarm64.bat" } else { "vcvarsamd64_arm64.bat" }
+} else {
+    if ($HostIsArm64) { "vcvarsarm64_amd64.bat" } else { "vcvars64.bat" }
+}
+Write-Host "Building the host graphics renderer for $Platform on a $NativeArch machine"
 
 $ScratchPath = (Resolve-Path -Path $ScratchDir -ErrorAction SilentlyContinue)
 if (-not $ScratchPath) {
@@ -39,7 +60,7 @@ $Vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.e
 if (Test-Path $Vswhere) {
     $VsPath = & $Vswhere -latest -property installationPath
     if ($VsPath) {
-        $Vcvars = Join-Path $VsPath "VC\Auxiliary\Build\vcvars64.bat"
+        $Vcvars = Join-Path $VsPath "VC\Auxiliary\Build\$VcvarsName"
         if (Test-Path $Vcvars) {
             Write-Host "Initializing Visual Studio environment from $Vcvars..."
             cmd.exe /c "call `"$Vcvars`" && set" | ForEach-Object {
@@ -85,6 +106,13 @@ if ($Generator -eq "Ninja" -and $HasNinja) {
     $ConfigureArgs += @("-G", "Ninja", "-DCMAKE_BUILD_TYPE=$Config")
     if ($HasClangCl) {
         $ConfigureArgs += @("-DCMAKE_C_COMPILER=clang-cl", "-DCMAKE_CXX_COMPILER=clang-cl")
+        # clang-cl compiles for the machine it runs on unless told otherwise, and Visual
+        # Studio's clang-cl on an x64 machine is an x64 program.
+        $ClangTarget = if ($Platform -eq "ARM64") { "aarch64-pc-windows-msvc" } else { "x86_64-pc-windows-msvc" }
+        $ConfigureArgs += @("-DCMAKE_C_COMPILER_TARGET=$ClangTarget", "-DCMAKE_CXX_COMPILER_TARGET=$ClangTarget")
+    }
+    if ($Platform -eq "ARM64" -and -not $HostIsArm64) {
+        $ConfigureArgs += @("-DCMAKE_SYSTEM_NAME=Windows", "-DCMAKE_SYSTEM_PROCESSOR=ARM64")
     }
 } elseif ($Generator -match "Visual Studio") {
     $ConfigureArgs += @("-G", $Generator, "-A", $Platform)

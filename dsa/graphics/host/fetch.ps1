@@ -40,8 +40,9 @@ git -C $GfxstreamDir clean -fdx
 # every app on it. Without 0007 the renderer cannot be asked for the GPU that drives the
 # display. Without 0009 every ColorBuffer the guest destroys waits, under the renderer's
 # locks, for all GPU work on the queue to finish, and the guest's buffer allocations queue
-# up behind it for seconds while a window is resized. A patch that does not apply stops the
-# fetch.
+# up behind it for seconds while a window is resized. Without 0011 the renderer's
+# spin-wait has no processor hint on ARM64, and the lavapipe test driver is looked for under
+# its x86_64 name. A patch that does not apply stops the fetch.
 $PatchDir = Join-Path $RepoRoot "dsa/graphics/patches"
 $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0004-*.patch") +
@@ -49,7 +50,8 @@ $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0006-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0007-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0009-*.patch") +
-    @(Get-ChildItem -Path $PatchDir -Filter "0010-*.patch")
+    @(Get-ChildItem -Path $PatchDir -Filter "0010-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0011-*.patch")
 foreach ($Patch in $Patches) {
     Write-Host "Applying patch: $($Patch.Name)"
     git -C $GfxstreamDir apply --recount $Patch.FullName
@@ -66,6 +68,17 @@ if (-not (Test-Path "$AemuDir/.git")) {
 git -C $AemuDir fetch --no-tags origin $AemuRevision
 git -C $AemuDir checkout --detach $AemuRevision
 git -C $AemuDir reset --hard $AemuRevision
+git -C $AemuDir clean -fdx
+
+# Apply the checked-in aemu patches (patches/aemu). Without 0001 aemu does not compile for
+# ARM64 Windows: it calls the x86-only _mm_pause there.
+foreach ($Patch in @(Get-ChildItem -Path (Join-Path $PatchDir "aemu") -Filter "*.patch" | Sort-Object Name)) {
+    Write-Host "Applying aemu patch: $($Patch.Name)"
+    git -C $AemuDir apply --recount $Patch.FullName
+    if ($LASTEXITCODE -ne 0) {
+        throw "patch aemu/$($Patch.Name) does not apply to aemu $AemuRevision"
+    }
+}
 
 # 3. Fetch angle (sparse include only)
 if (-not (Test-Path "$AngleDir/.git")) {

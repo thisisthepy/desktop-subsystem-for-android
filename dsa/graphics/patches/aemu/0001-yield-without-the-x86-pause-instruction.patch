@@ -1,0 +1,14 @@
+diff --git a/base/ring_buffer.cpp b/base/ring_buffer.cpp
+--- a/base/ring_buffer.cpp
++++ b/base/ring_buffer.cpp
+@@ -397,7 +397,9 @@
+
+ void ring_buffer_yield() {
+ #ifdef _WIN32
+-    _mm_pause();
++    // The processor's spin-wait hint: pause on x86, yield on ARM64. _mm_pause exists
++    // only on x86.
++    YieldProcessor();
+ #else
+     sched_yield();
+ #endif
