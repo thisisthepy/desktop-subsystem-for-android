@@ -700,5 +700,71 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult getAccessibilityActionResult();
 
+  /**
+   * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
+   * @return Whether the logStream field is set.
+   */
+  boolean hasLogStream();
+  /**
+   * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
+   * @return The logStream.
+   */
+  io.github.thisisthepy.dsa.control.v1.LogStream getLogStream();
+
+  /**
+   * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
+   * @return Whether the logDump field is set.
+   */
+  boolean hasLogDump();
+  /**
+   * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
+   * @return The logDump.
+   */
+  io.github.thisisthepy.dsa.control.v1.LogDump getLogDump();
+
+  /**
+   * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
+   * @return Whether the logRecords field is set.
+   */
+  boolean hasLogRecords();
+  /**
+   * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
+   * @return The logRecords.
+   */
+  io.github.thisisthepy.dsa.control.v1.LogRecords getLogRecords();
+
+  /**
+   * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
+   * @return Whether the collectDiagnostics field is set.
+   */
+  boolean hasCollectDiagnostics();
+  /**
+   * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
+   * @return The collectDiagnostics.
+   */
+  io.github.thisisthepy.dsa.control.v1.CollectDiagnostics getCollectDiagnostics();
+
+  /**
+   * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
+   * @return Whether the diagnosticsFile field is set.
+   */
+  boolean hasDiagnosticsFile();
+  /**
+   * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
+   * @return The diagnosticsFile.
+   */
+  io.github.thisisthepy.dsa.control.v1.DiagnosticsFile getDiagnosticsFile();
+
+  /**
+   * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
+   * @return Whether the diagnosticsDone field is set.
+   */
+  boolean hasDiagnosticsDone();
+  /**
+   * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
+   * @return The diagnosticsDone.
+   */
+  io.github.thisisthepy.dsa.control.v1.DiagnosticsDone getDiagnosticsDone();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

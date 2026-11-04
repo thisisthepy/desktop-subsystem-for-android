@@ -96,9 +96,18 @@ extern ClockProbeDefaultTypeInternal _ClockProbe_default_instance_;
 class CloseTask;
 struct CloseTaskDefaultTypeInternal;
 extern CloseTaskDefaultTypeInternal _CloseTask_default_instance_;
+class CollectDiagnostics;
+struct CollectDiagnosticsDefaultTypeInternal;
+extern CollectDiagnosticsDefaultTypeInternal _CollectDiagnostics_default_instance_;
 class DeviceIdle;
 struct DeviceIdleDefaultTypeInternal;
 extern DeviceIdleDefaultTypeInternal _DeviceIdle_default_instance_;
+class DiagnosticsDone;
+struct DiagnosticsDoneDefaultTypeInternal;
+extern DiagnosticsDoneDefaultTypeInternal _DiagnosticsDone_default_instance_;
+class DiagnosticsFile;
+struct DiagnosticsFileDefaultTypeInternal;
+extern DiagnosticsFileDefaultTypeInternal _DiagnosticsFile_default_instance_;
 class Envelope;
 struct EnvelopeDefaultTypeInternal;
 extern EnvelopeDefaultTypeInternal _Envelope_default_instance_;
@@ -165,6 +174,18 @@ extern LinkHandlingDefaultTypeInternal _LinkHandling_default_instance_;
 class ListWidgetProviders;
 struct ListWidgetProvidersDefaultTypeInternal;
 extern ListWidgetProvidersDefaultTypeInternal _ListWidgetProviders_default_instance_;
+class LogDump;
+struct LogDumpDefaultTypeInternal;
+extern LogDumpDefaultTypeInternal _LogDump_default_instance_;
+class LogRecord;
+struct LogRecordDefaultTypeInternal;
+extern LogRecordDefaultTypeInternal _LogRecord_default_instance_;
+class LogRecords;
+struct LogRecordsDefaultTypeInternal;
+extern LogRecordsDefaultTypeInternal _LogRecords_default_instance_;
+class LogStream;
+struct LogStreamDefaultTypeInternal;
+extern LogStreamDefaultTypeInternal _LogStream_default_instance_;
 class NodeRange;
 struct NodeRangeDefaultTypeInternal;
 extern NodeRangeDefaultTypeInternal _NodeRange_default_instance_;
@@ -273,7 +294,10 @@ template<> ::dsa::control::v1::ClipboardText* Arena::CreateMaybeMessage<::dsa::c
 template<> ::dsa::control::v1::ClockAnswer* Arena::CreateMaybeMessage<::dsa::control::v1::ClockAnswer>(Arena*);
 template<> ::dsa::control::v1::ClockProbe* Arena::CreateMaybeMessage<::dsa::control::v1::ClockProbe>(Arena*);
 template<> ::dsa::control::v1::CloseTask* Arena::CreateMaybeMessage<::dsa::control::v1::CloseTask>(Arena*);
+template<> ::dsa::control::v1::CollectDiagnostics* Arena::CreateMaybeMessage<::dsa::control::v1::CollectDiagnostics>(Arena*);
 template<> ::dsa::control::v1::DeviceIdle* Arena::CreateMaybeMessage<::dsa::control::v1::DeviceIdle>(Arena*);
+template<> ::dsa::control::v1::DiagnosticsDone* Arena::CreateMaybeMessage<::dsa::control::v1::DiagnosticsDone>(Arena*);
+template<> ::dsa::control::v1::DiagnosticsFile* Arena::CreateMaybeMessage<::dsa::control::v1::DiagnosticsFile>(Arena*);
 template<> ::dsa::control::v1::Envelope* Arena::CreateMaybeMessage<::dsa::control::v1::Envelope>(Arena*);
 template<> ::dsa::control::v1::FileChunk* Arena::CreateMaybeMessage<::dsa::control::v1::FileChunk>(Arena*);
 template<> ::dsa::control::v1::FileProgress* Arena::CreateMaybeMessage<::dsa::control::v1::FileProgress>(Arena*);
@@ -296,6 +320,10 @@ template<> ::dsa::control::v1::KeyEvent* Arena::CreateMaybeMessage<::dsa::contro
 template<> ::dsa::control::v1::LaunchApp* Arena::CreateMaybeMessage<::dsa::control::v1::LaunchApp>(Arena*);
 template<> ::dsa::control::v1::LinkHandling* Arena::CreateMaybeMessage<::dsa::control::v1::LinkHandling>(Arena*);
 template<> ::dsa::control::v1::ListWidgetProviders* Arena::CreateMaybeMessage<::dsa::control::v1::ListWidgetProviders>(Arena*);
+template<> ::dsa::control::v1::LogDump* Arena::CreateMaybeMessage<::dsa::control::v1::LogDump>(Arena*);
+template<> ::dsa::control::v1::LogRecord* Arena::CreateMaybeMessage<::dsa::control::v1::LogRecord>(Arena*);
+template<> ::dsa::control::v1::LogRecords* Arena::CreateMaybeMessage<::dsa::control::v1::LogRecords>(Arena*);
+template<> ::dsa::control::v1::LogStream* Arena::CreateMaybeMessage<::dsa::control::v1::LogStream>(Arena*);
 template<> ::dsa::control::v1::NodeRange* Arena::CreateMaybeMessage<::dsa::control::v1::NodeRange>(Arena*);
 template<> ::dsa::control::v1::NotificationClicked* Arena::CreateMaybeMessage<::dsa::control::v1::NotificationClicked>(Arena*);
 template<> ::dsa::control::v1::NotificationDismissed* Arena::CreateMaybeMessage<::dsa::control::v1::NotificationDismissed>(Arena*);
@@ -571,6 +599,34 @@ inline const std::string& NodeAction_Name(T enum_t_value) {
 }
 bool NodeAction_Parse(
     ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, NodeAction* value);
+enum LogBuffer : int {
+  LOG_BUFFER_UNSPECIFIED = 0,
+  LOG_BUFFER_MAIN = 1,
+  LOG_BUFFER_RADIO = 2,
+  LOG_BUFFER_EVENTS = 3,
+  LOG_BUFFER_SYSTEM = 4,
+  LOG_BUFFER_CRASH = 5,
+  LOG_BUFFER_STATS = 6,
+  LOG_BUFFER_SECURITY = 7,
+  LOG_BUFFER_KERNEL = 8,
+  LogBuffer_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
+  LogBuffer_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
+};
+bool LogBuffer_IsValid(int value);
+constexpr LogBuffer LogBuffer_MIN = LOG_BUFFER_UNSPECIFIED;
+constexpr LogBuffer LogBuffer_MAX = LOG_BUFFER_KERNEL;
+constexpr int LogBuffer_ARRAYSIZE = LogBuffer_MAX + 1;
+
+const std::string& LogBuffer_Name(LogBuffer value);
+template<typename T>
+inline const std::string& LogBuffer_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, LogBuffer>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function LogBuffer_Name.");
+  return LogBuffer_Name(static_cast<LogBuffer>(enum_t_value));
+}
+bool LogBuffer_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, LogBuffer* value);
 // ===================================================================
 
 class Hello final :
@@ -11669,6 +11725,1175 @@ class AccessibilityActionResult final :
 };
 // -------------------------------------------------------------------
 
+class LogStream final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.LogStream) */ {
+ public:
+  inline LogStream() : LogStream(nullptr) {}
+  ~LogStream() override;
+  explicit PROTOBUF_CONSTEXPR LogStream(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  LogStream(const LogStream& from);
+  LogStream(LogStream&& from) noexcept
+    : LogStream() {
+    *this = ::std::move(from);
+  }
+
+  inline LogStream& operator=(const LogStream& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline LogStream& operator=(LogStream&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const LogStream& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const LogStream* internal_default_instance() {
+    return reinterpret_cast<const LogStream*>(
+               &_LogStream_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    68;
+
+  friend void swap(LogStream& a, LogStream& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(LogStream* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(LogStream* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  LogStream* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<LogStream>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const LogStream& from);
+  void MergeFrom(const LogStream& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(LogStream* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.LogStream";
+  }
+  protected:
+  explicit LogStream(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kOnFieldNumber = 1,
+    kBuffersFieldNumber = 2,
+    kMinPriorityFieldNumber = 3,
+    kTailFieldNumber = 4,
+  };
+  // bool on = 1;
+  void clear_on();
+  bool on() const;
+  void set_on(bool value);
+  private:
+  bool _internal_on() const;
+  void _internal_set_on(bool value);
+  public:
+
+  // uint32 buffers = 2;
+  void clear_buffers();
+  uint32_t buffers() const;
+  void set_buffers(uint32_t value);
+  private:
+  uint32_t _internal_buffers() const;
+  void _internal_set_buffers(uint32_t value);
+  public:
+
+  // uint32 min_priority = 3;
+  void clear_min_priority();
+  uint32_t min_priority() const;
+  void set_min_priority(uint32_t value);
+  private:
+  uint32_t _internal_min_priority() const;
+  void _internal_set_min_priority(uint32_t value);
+  public:
+
+  // uint32 tail = 4;
+  void clear_tail();
+  uint32_t tail() const;
+  void set_tail(uint32_t value);
+  private:
+  uint32_t _internal_tail() const;
+  void _internal_set_tail(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.LogStream)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    bool on_;
+    uint32_t buffers_;
+    uint32_t min_priority_;
+    uint32_t tail_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class LogDump final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.LogDump) */ {
+ public:
+  inline LogDump() : LogDump(nullptr) {}
+  ~LogDump() override;
+  explicit PROTOBUF_CONSTEXPR LogDump(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  LogDump(const LogDump& from);
+  LogDump(LogDump&& from) noexcept
+    : LogDump() {
+    *this = ::std::move(from);
+  }
+
+  inline LogDump& operator=(const LogDump& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline LogDump& operator=(LogDump&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const LogDump& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const LogDump* internal_default_instance() {
+    return reinterpret_cast<const LogDump*>(
+               &_LogDump_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    69;
+
+  friend void swap(LogDump& a, LogDump& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(LogDump* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(LogDump* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  LogDump* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<LogDump>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const LogDump& from);
+  void MergeFrom(const LogDump& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(LogDump* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.LogDump";
+  }
+  protected:
+  explicit LogDump(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kRequestIdFieldNumber = 1,
+    kBuffersFieldNumber = 2,
+    kMinPriorityFieldNumber = 3,
+  };
+  // uint32 request_id = 1;
+  void clear_request_id();
+  uint32_t request_id() const;
+  void set_request_id(uint32_t value);
+  private:
+  uint32_t _internal_request_id() const;
+  void _internal_set_request_id(uint32_t value);
+  public:
+
+  // uint32 buffers = 2;
+  void clear_buffers();
+  uint32_t buffers() const;
+  void set_buffers(uint32_t value);
+  private:
+  uint32_t _internal_buffers() const;
+  void _internal_set_buffers(uint32_t value);
+  public:
+
+  // uint32 min_priority = 3;
+  void clear_min_priority();
+  uint32_t min_priority() const;
+  void set_min_priority(uint32_t value);
+  private:
+  uint32_t _internal_min_priority() const;
+  void _internal_set_min_priority(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.LogDump)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    uint32_t request_id_;
+    uint32_t buffers_;
+    uint32_t min_priority_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class LogRecord final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.LogRecord) */ {
+ public:
+  inline LogRecord() : LogRecord(nullptr) {}
+  ~LogRecord() override;
+  explicit PROTOBUF_CONSTEXPR LogRecord(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  LogRecord(const LogRecord& from);
+  LogRecord(LogRecord&& from) noexcept
+    : LogRecord() {
+    *this = ::std::move(from);
+  }
+
+  inline LogRecord& operator=(const LogRecord& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline LogRecord& operator=(LogRecord&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const LogRecord& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const LogRecord* internal_default_instance() {
+    return reinterpret_cast<const LogRecord*>(
+               &_LogRecord_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    70;
+
+  friend void swap(LogRecord& a, LogRecord& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(LogRecord* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(LogRecord* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  LogRecord* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<LogRecord>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const LogRecord& from);
+  void MergeFrom(const LogRecord& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(LogRecord* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.LogRecord";
+  }
+  protected:
+  explicit LogRecord(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kTagFieldNumber = 7,
+    kMessageFieldNumber = 8,
+    kBufferFieldNumber = 1,
+    kPriorityFieldNumber = 2,
+    kTimeNsFieldNumber = 3,
+    kPidFieldNumber = 4,
+    kTidFieldNumber = 5,
+    kDroppedFieldNumber = 9,
+    kUidFieldNumber = 6,
+  };
+  // string tag = 7;
+  void clear_tag();
+  const std::string& tag() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_tag(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_tag();
+  PROTOBUF_NODISCARD std::string* release_tag();
+  void set_allocated_tag(std::string* tag);
+  private:
+  const std::string& _internal_tag() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_tag(const std::string& value);
+  std::string* _internal_mutable_tag();
+  public:
+
+  // string message = 8;
+  void clear_message();
+  const std::string& message() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_message(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_message();
+  PROTOBUF_NODISCARD std::string* release_message();
+  void set_allocated_message(std::string* message);
+  private:
+  const std::string& _internal_message() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_message(const std::string& value);
+  std::string* _internal_mutable_message();
+  public:
+
+  // .dsa.control.v1.LogBuffer buffer = 1;
+  void clear_buffer();
+  ::dsa::control::v1::LogBuffer buffer() const;
+  void set_buffer(::dsa::control::v1::LogBuffer value);
+  private:
+  ::dsa::control::v1::LogBuffer _internal_buffer() const;
+  void _internal_set_buffer(::dsa::control::v1::LogBuffer value);
+  public:
+
+  // uint32 priority = 2;
+  void clear_priority();
+  uint32_t priority() const;
+  void set_priority(uint32_t value);
+  private:
+  uint32_t _internal_priority() const;
+  void _internal_set_priority(uint32_t value);
+  public:
+
+  // uint64 time_ns = 3;
+  void clear_time_ns();
+  uint64_t time_ns() const;
+  void set_time_ns(uint64_t value);
+  private:
+  uint64_t _internal_time_ns() const;
+  void _internal_set_time_ns(uint64_t value);
+  public:
+
+  // int32 pid = 4;
+  void clear_pid();
+  int32_t pid() const;
+  void set_pid(int32_t value);
+  private:
+  int32_t _internal_pid() const;
+  void _internal_set_pid(int32_t value);
+  public:
+
+  // int32 tid = 5;
+  void clear_tid();
+  int32_t tid() const;
+  void set_tid(int32_t value);
+  private:
+  int32_t _internal_tid() const;
+  void _internal_set_tid(int32_t value);
+  public:
+
+  // uint64 dropped = 9;
+  void clear_dropped();
+  uint64_t dropped() const;
+  void set_dropped(uint64_t value);
+  private:
+  uint64_t _internal_dropped() const;
+  void _internal_set_dropped(uint64_t value);
+  public:
+
+  // uint32 uid = 6;
+  void clear_uid();
+  uint32_t uid() const;
+  void set_uid(uint32_t value);
+  private:
+  uint32_t _internal_uid() const;
+  void _internal_set_uid(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.LogRecord)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr tag_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr message_;
+    int buffer_;
+    uint32_t priority_;
+    uint64_t time_ns_;
+    int32_t pid_;
+    int32_t tid_;
+    uint64_t dropped_;
+    uint32_t uid_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class LogRecords final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.LogRecords) */ {
+ public:
+  inline LogRecords() : LogRecords(nullptr) {}
+  ~LogRecords() override;
+  explicit PROTOBUF_CONSTEXPR LogRecords(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  LogRecords(const LogRecords& from);
+  LogRecords(LogRecords&& from) noexcept
+    : LogRecords() {
+    *this = ::std::move(from);
+  }
+
+  inline LogRecords& operator=(const LogRecords& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline LogRecords& operator=(LogRecords&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const LogRecords& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const LogRecords* internal_default_instance() {
+    return reinterpret_cast<const LogRecords*>(
+               &_LogRecords_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    71;
+
+  friend void swap(LogRecords& a, LogRecords& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(LogRecords* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(LogRecords* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  LogRecords* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<LogRecords>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const LogRecords& from);
+  void MergeFrom(const LogRecords& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(LogRecords* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.LogRecords";
+  }
+  protected:
+  explicit LogRecords(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kRecordsFieldNumber = 2,
+    kErrorFieldNumber = 4,
+    kRequestIdFieldNumber = 1,
+    kEndFieldNumber = 3,
+  };
+  // repeated .dsa.control.v1.LogRecord records = 2;
+  int records_size() const;
+  private:
+  int _internal_records_size() const;
+  public:
+  void clear_records();
+  ::dsa::control::v1::LogRecord* mutable_records(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::LogRecord >*
+      mutable_records();
+  private:
+  const ::dsa::control::v1::LogRecord& _internal_records(int index) const;
+  ::dsa::control::v1::LogRecord* _internal_add_records();
+  public:
+  const ::dsa::control::v1::LogRecord& records(int index) const;
+  ::dsa::control::v1::LogRecord* add_records();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::LogRecord >&
+      records() const;
+
+  // string error = 4;
+  void clear_error();
+  const std::string& error() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_error(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_error();
+  PROTOBUF_NODISCARD std::string* release_error();
+  void set_allocated_error(std::string* error);
+  private:
+  const std::string& _internal_error() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_error(const std::string& value);
+  std::string* _internal_mutable_error();
+  public:
+
+  // uint32 request_id = 1;
+  void clear_request_id();
+  uint32_t request_id() const;
+  void set_request_id(uint32_t value);
+  private:
+  uint32_t _internal_request_id() const;
+  void _internal_set_request_id(uint32_t value);
+  public:
+
+  // bool end = 3;
+  void clear_end();
+  bool end() const;
+  void set_end(bool value);
+  private:
+  bool _internal_end() const;
+  void _internal_set_end(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.LogRecords)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::LogRecord > records_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr error_;
+    uint32_t request_id_;
+    bool end_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class CollectDiagnostics final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.CollectDiagnostics) */ {
+ public:
+  inline CollectDiagnostics() : CollectDiagnostics(nullptr) {}
+  ~CollectDiagnostics() override;
+  explicit PROTOBUF_CONSTEXPR CollectDiagnostics(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  CollectDiagnostics(const CollectDiagnostics& from);
+  CollectDiagnostics(CollectDiagnostics&& from) noexcept
+    : CollectDiagnostics() {
+    *this = ::std::move(from);
+  }
+
+  inline CollectDiagnostics& operator=(const CollectDiagnostics& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline CollectDiagnostics& operator=(CollectDiagnostics&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const CollectDiagnostics& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const CollectDiagnostics* internal_default_instance() {
+    return reinterpret_cast<const CollectDiagnostics*>(
+               &_CollectDiagnostics_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    72;
+
+  friend void swap(CollectDiagnostics& a, CollectDiagnostics& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(CollectDiagnostics* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(CollectDiagnostics* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  CollectDiagnostics* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<CollectDiagnostics>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const CollectDiagnostics& from);
+  void MergeFrom(const CollectDiagnostics& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(CollectDiagnostics* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.CollectDiagnostics";
+  }
+  protected:
+  explicit CollectDiagnostics(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kRequestIdFieldNumber = 1,
+  };
+  // uint32 request_id = 1;
+  void clear_request_id();
+  uint32_t request_id() const;
+  void set_request_id(uint32_t value);
+  private:
+  uint32_t _internal_request_id() const;
+  void _internal_set_request_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.CollectDiagnostics)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    uint32_t request_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class DiagnosticsFile final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.DiagnosticsFile) */ {
+ public:
+  inline DiagnosticsFile() : DiagnosticsFile(nullptr) {}
+  ~DiagnosticsFile() override;
+  explicit PROTOBUF_CONSTEXPR DiagnosticsFile(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  DiagnosticsFile(const DiagnosticsFile& from);
+  DiagnosticsFile(DiagnosticsFile&& from) noexcept
+    : DiagnosticsFile() {
+    *this = ::std::move(from);
+  }
+
+  inline DiagnosticsFile& operator=(const DiagnosticsFile& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline DiagnosticsFile& operator=(DiagnosticsFile&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const DiagnosticsFile& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const DiagnosticsFile* internal_default_instance() {
+    return reinterpret_cast<const DiagnosticsFile*>(
+               &_DiagnosticsFile_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    73;
+
+  friend void swap(DiagnosticsFile& a, DiagnosticsFile& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(DiagnosticsFile* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(DiagnosticsFile* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  DiagnosticsFile* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<DiagnosticsFile>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const DiagnosticsFile& from);
+  void MergeFrom(const DiagnosticsFile& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(DiagnosticsFile* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.DiagnosticsFile";
+  }
+  protected:
+  explicit DiagnosticsFile(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kNameFieldNumber = 2,
+    kDataFieldNumber = 3,
+    kRequestIdFieldNumber = 1,
+    kLastFieldNumber = 4,
+  };
+  // string name = 2;
+  void clear_name();
+  const std::string& name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_name();
+  PROTOBUF_NODISCARD std::string* release_name();
+  void set_allocated_name(std::string* name);
+  private:
+  const std::string& _internal_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_name(const std::string& value);
+  std::string* _internal_mutable_name();
+  public:
+
+  // bytes data = 3;
+  void clear_data();
+  const std::string& data() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_data(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_data();
+  PROTOBUF_NODISCARD std::string* release_data();
+  void set_allocated_data(std::string* data);
+  private:
+  const std::string& _internal_data() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_data(const std::string& value);
+  std::string* _internal_mutable_data();
+  public:
+
+  // uint32 request_id = 1;
+  void clear_request_id();
+  uint32_t request_id() const;
+  void set_request_id(uint32_t value);
+  private:
+  uint32_t _internal_request_id() const;
+  void _internal_set_request_id(uint32_t value);
+  public:
+
+  // bool last = 4;
+  void clear_last();
+  bool last() const;
+  void set_last(bool value);
+  private:
+  bool _internal_last() const;
+  void _internal_set_last(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.DiagnosticsFile)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr name_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr data_;
+    uint32_t request_id_;
+    bool last_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class DiagnosticsDone final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.DiagnosticsDone) */ {
+ public:
+  inline DiagnosticsDone() : DiagnosticsDone(nullptr) {}
+  ~DiagnosticsDone() override;
+  explicit PROTOBUF_CONSTEXPR DiagnosticsDone(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  DiagnosticsDone(const DiagnosticsDone& from);
+  DiagnosticsDone(DiagnosticsDone&& from) noexcept
+    : DiagnosticsDone() {
+    *this = ::std::move(from);
+  }
+
+  inline DiagnosticsDone& operator=(const DiagnosticsDone& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline DiagnosticsDone& operator=(DiagnosticsDone&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const DiagnosticsDone& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const DiagnosticsDone* internal_default_instance() {
+    return reinterpret_cast<const DiagnosticsDone*>(
+               &_DiagnosticsDone_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    74;
+
+  friend void swap(DiagnosticsDone& a, DiagnosticsDone& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(DiagnosticsDone* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(DiagnosticsDone* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  DiagnosticsDone* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<DiagnosticsDone>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const DiagnosticsDone& from);
+  void MergeFrom(const DiagnosticsDone& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(DiagnosticsDone* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.DiagnosticsDone";
+  }
+  protected:
+  explicit DiagnosticsDone(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kErrorFieldNumber = 2,
+    kRequestIdFieldNumber = 1,
+  };
+  // string error = 2;
+  void clear_error();
+  const std::string& error() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_error(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_error();
+  PROTOBUF_NODISCARD std::string* release_error();
+  void set_allocated_error(std::string* error);
+  private:
+  const std::string& _internal_error() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_error(const std::string& value);
+  std::string* _internal_mutable_error();
+  public:
+
+  // uint32 request_id = 1;
+  void clear_request_id();
+  uint32_t request_id() const;
+  void set_request_id(uint32_t value);
+  private:
+  uint32_t _internal_request_id() const;
+  void _internal_set_request_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.DiagnosticsDone)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr error_;
+    uint32_t request_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class Envelope final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.Envelope) */ {
  public:
@@ -11767,6 +12992,12 @@ class Envelope final :
     kAccessibilityTree = 81,
     kAccessibilityAction = 82,
     kAccessibilityActionResult = 83,
+    kLogStream = 130,
+    kLogDump = 131,
+    kLogRecords = 132,
+    kCollectDiagnostics = 133,
+    kDiagnosticsFile = 134,
+    kDiagnosticsDone = 135,
     BODY_NOT_SET = 0,
   };
 
@@ -11775,7 +13006,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    68;
+    75;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -11902,6 +13133,12 @@ class Envelope final :
     kAccessibilityTreeFieldNumber = 81,
     kAccessibilityActionFieldNumber = 82,
     kAccessibilityActionResultFieldNumber = 83,
+    kLogStreamFieldNumber = 130,
+    kLogDumpFieldNumber = 131,
+    kLogRecordsFieldNumber = 132,
+    kCollectDiagnosticsFieldNumber = 133,
+    kDiagnosticsFileFieldNumber = 134,
+    kDiagnosticsDoneFieldNumber = 135,
   };
   // .dsa.control.v1.Hello hello = 1;
   bool has_hello() const;
@@ -13037,6 +14274,114 @@ class Envelope final :
       ::dsa::control::v1::AccessibilityActionResult* accessibility_action_result);
   ::dsa::control::v1::AccessibilityActionResult* unsafe_arena_release_accessibility_action_result();
 
+  // .dsa.control.v1.LogStream log_stream = 130;
+  bool has_log_stream() const;
+  private:
+  bool _internal_has_log_stream() const;
+  public:
+  void clear_log_stream();
+  const ::dsa::control::v1::LogStream& log_stream() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::LogStream* release_log_stream();
+  ::dsa::control::v1::LogStream* mutable_log_stream();
+  void set_allocated_log_stream(::dsa::control::v1::LogStream* log_stream);
+  private:
+  const ::dsa::control::v1::LogStream& _internal_log_stream() const;
+  ::dsa::control::v1::LogStream* _internal_mutable_log_stream();
+  public:
+  void unsafe_arena_set_allocated_log_stream(
+      ::dsa::control::v1::LogStream* log_stream);
+  ::dsa::control::v1::LogStream* unsafe_arena_release_log_stream();
+
+  // .dsa.control.v1.LogDump log_dump = 131;
+  bool has_log_dump() const;
+  private:
+  bool _internal_has_log_dump() const;
+  public:
+  void clear_log_dump();
+  const ::dsa::control::v1::LogDump& log_dump() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::LogDump* release_log_dump();
+  ::dsa::control::v1::LogDump* mutable_log_dump();
+  void set_allocated_log_dump(::dsa::control::v1::LogDump* log_dump);
+  private:
+  const ::dsa::control::v1::LogDump& _internal_log_dump() const;
+  ::dsa::control::v1::LogDump* _internal_mutable_log_dump();
+  public:
+  void unsafe_arena_set_allocated_log_dump(
+      ::dsa::control::v1::LogDump* log_dump);
+  ::dsa::control::v1::LogDump* unsafe_arena_release_log_dump();
+
+  // .dsa.control.v1.LogRecords log_records = 132;
+  bool has_log_records() const;
+  private:
+  bool _internal_has_log_records() const;
+  public:
+  void clear_log_records();
+  const ::dsa::control::v1::LogRecords& log_records() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::LogRecords* release_log_records();
+  ::dsa::control::v1::LogRecords* mutable_log_records();
+  void set_allocated_log_records(::dsa::control::v1::LogRecords* log_records);
+  private:
+  const ::dsa::control::v1::LogRecords& _internal_log_records() const;
+  ::dsa::control::v1::LogRecords* _internal_mutable_log_records();
+  public:
+  void unsafe_arena_set_allocated_log_records(
+      ::dsa::control::v1::LogRecords* log_records);
+  ::dsa::control::v1::LogRecords* unsafe_arena_release_log_records();
+
+  // .dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;
+  bool has_collect_diagnostics() const;
+  private:
+  bool _internal_has_collect_diagnostics() const;
+  public:
+  void clear_collect_diagnostics();
+  const ::dsa::control::v1::CollectDiagnostics& collect_diagnostics() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::CollectDiagnostics* release_collect_diagnostics();
+  ::dsa::control::v1::CollectDiagnostics* mutable_collect_diagnostics();
+  void set_allocated_collect_diagnostics(::dsa::control::v1::CollectDiagnostics* collect_diagnostics);
+  private:
+  const ::dsa::control::v1::CollectDiagnostics& _internal_collect_diagnostics() const;
+  ::dsa::control::v1::CollectDiagnostics* _internal_mutable_collect_diagnostics();
+  public:
+  void unsafe_arena_set_allocated_collect_diagnostics(
+      ::dsa::control::v1::CollectDiagnostics* collect_diagnostics);
+  ::dsa::control::v1::CollectDiagnostics* unsafe_arena_release_collect_diagnostics();
+
+  // .dsa.control.v1.DiagnosticsFile diagnostics_file = 134;
+  bool has_diagnostics_file() const;
+  private:
+  bool _internal_has_diagnostics_file() const;
+  public:
+  void clear_diagnostics_file();
+  const ::dsa::control::v1::DiagnosticsFile& diagnostics_file() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::DiagnosticsFile* release_diagnostics_file();
+  ::dsa::control::v1::DiagnosticsFile* mutable_diagnostics_file();
+  void set_allocated_diagnostics_file(::dsa::control::v1::DiagnosticsFile* diagnostics_file);
+  private:
+  const ::dsa::control::v1::DiagnosticsFile& _internal_diagnostics_file() const;
+  ::dsa::control::v1::DiagnosticsFile* _internal_mutable_diagnostics_file();
+  public:
+  void unsafe_arena_set_allocated_diagnostics_file(
+      ::dsa::control::v1::DiagnosticsFile* diagnostics_file);
+  ::dsa::control::v1::DiagnosticsFile* unsafe_arena_release_diagnostics_file();
+
+  // .dsa.control.v1.DiagnosticsDone diagnostics_done = 135;
+  bool has_diagnostics_done() const;
+  private:
+  bool _internal_has_diagnostics_done() const;
+  public:
+  void clear_diagnostics_done();
+  const ::dsa::control::v1::DiagnosticsDone& diagnostics_done() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::DiagnosticsDone* release_diagnostics_done();
+  ::dsa::control::v1::DiagnosticsDone* mutable_diagnostics_done();
+  void set_allocated_diagnostics_done(::dsa::control::v1::DiagnosticsDone* diagnostics_done);
+  private:
+  const ::dsa::control::v1::DiagnosticsDone& _internal_diagnostics_done() const;
+  ::dsa::control::v1::DiagnosticsDone* _internal_mutable_diagnostics_done();
+  public:
+  void unsafe_arena_set_allocated_diagnostics_done(
+      ::dsa::control::v1::DiagnosticsDone* diagnostics_done);
+  ::dsa::control::v1::DiagnosticsDone* unsafe_arena_release_diagnostics_done();
+
   void clear_body();
   BodyCase body_case() const;
   // @@protoc_insertion_point(class_scope:dsa.control.v1.Envelope)
@@ -13105,6 +14450,12 @@ class Envelope final :
   void set_has_accessibility_tree();
   void set_has_accessibility_action();
   void set_has_accessibility_action_result();
+  void set_has_log_stream();
+  void set_has_log_dump();
+  void set_has_log_records();
+  void set_has_collect_diagnostics();
+  void set_has_diagnostics_file();
+  void set_has_diagnostics_done();
 
   inline bool has_body() const;
   inline void clear_has_body();
@@ -13179,6 +14530,12 @@ class Envelope final :
       ::dsa::control::v1::AccessibilityTree* accessibility_tree_;
       ::dsa::control::v1::AccessibilityAction* accessibility_action_;
       ::dsa::control::v1::AccessibilityActionResult* accessibility_action_result_;
+      ::dsa::control::v1::LogStream* log_stream_;
+      ::dsa::control::v1::LogDump* log_dump_;
+      ::dsa::control::v1::LogRecords* log_records_;
+      ::dsa::control::v1::CollectDiagnostics* collect_diagnostics_;
+      ::dsa::control::v1::DiagnosticsFile* diagnostics_file_;
+      ::dsa::control::v1::DiagnosticsDone* diagnostics_done_;
     } body_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -20479,6 +21836,774 @@ inline void AccessibilityActionResult::set_allocated_error(std::string* error) {
 
 // -------------------------------------------------------------------
 
+// LogStream
+
+// bool on = 1;
+inline void LogStream::clear_on() {
+  _impl_.on_ = false;
+}
+inline bool LogStream::_internal_on() const {
+  return _impl_.on_;
+}
+inline bool LogStream::on() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogStream.on)
+  return _internal_on();
+}
+inline void LogStream::_internal_set_on(bool value) {
+  
+  _impl_.on_ = value;
+}
+inline void LogStream::set_on(bool value) {
+  _internal_set_on(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogStream.on)
+}
+
+// uint32 buffers = 2;
+inline void LogStream::clear_buffers() {
+  _impl_.buffers_ = 0u;
+}
+inline uint32_t LogStream::_internal_buffers() const {
+  return _impl_.buffers_;
+}
+inline uint32_t LogStream::buffers() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogStream.buffers)
+  return _internal_buffers();
+}
+inline void LogStream::_internal_set_buffers(uint32_t value) {
+  
+  _impl_.buffers_ = value;
+}
+inline void LogStream::set_buffers(uint32_t value) {
+  _internal_set_buffers(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogStream.buffers)
+}
+
+// uint32 min_priority = 3;
+inline void LogStream::clear_min_priority() {
+  _impl_.min_priority_ = 0u;
+}
+inline uint32_t LogStream::_internal_min_priority() const {
+  return _impl_.min_priority_;
+}
+inline uint32_t LogStream::min_priority() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogStream.min_priority)
+  return _internal_min_priority();
+}
+inline void LogStream::_internal_set_min_priority(uint32_t value) {
+  
+  _impl_.min_priority_ = value;
+}
+inline void LogStream::set_min_priority(uint32_t value) {
+  _internal_set_min_priority(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogStream.min_priority)
+}
+
+// uint32 tail = 4;
+inline void LogStream::clear_tail() {
+  _impl_.tail_ = 0u;
+}
+inline uint32_t LogStream::_internal_tail() const {
+  return _impl_.tail_;
+}
+inline uint32_t LogStream::tail() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogStream.tail)
+  return _internal_tail();
+}
+inline void LogStream::_internal_set_tail(uint32_t value) {
+  
+  _impl_.tail_ = value;
+}
+inline void LogStream::set_tail(uint32_t value) {
+  _internal_set_tail(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogStream.tail)
+}
+
+// -------------------------------------------------------------------
+
+// LogDump
+
+// uint32 request_id = 1;
+inline void LogDump::clear_request_id() {
+  _impl_.request_id_ = 0u;
+}
+inline uint32_t LogDump::_internal_request_id() const {
+  return _impl_.request_id_;
+}
+inline uint32_t LogDump::request_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogDump.request_id)
+  return _internal_request_id();
+}
+inline void LogDump::_internal_set_request_id(uint32_t value) {
+  
+  _impl_.request_id_ = value;
+}
+inline void LogDump::set_request_id(uint32_t value) {
+  _internal_set_request_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogDump.request_id)
+}
+
+// uint32 buffers = 2;
+inline void LogDump::clear_buffers() {
+  _impl_.buffers_ = 0u;
+}
+inline uint32_t LogDump::_internal_buffers() const {
+  return _impl_.buffers_;
+}
+inline uint32_t LogDump::buffers() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogDump.buffers)
+  return _internal_buffers();
+}
+inline void LogDump::_internal_set_buffers(uint32_t value) {
+  
+  _impl_.buffers_ = value;
+}
+inline void LogDump::set_buffers(uint32_t value) {
+  _internal_set_buffers(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogDump.buffers)
+}
+
+// uint32 min_priority = 3;
+inline void LogDump::clear_min_priority() {
+  _impl_.min_priority_ = 0u;
+}
+inline uint32_t LogDump::_internal_min_priority() const {
+  return _impl_.min_priority_;
+}
+inline uint32_t LogDump::min_priority() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogDump.min_priority)
+  return _internal_min_priority();
+}
+inline void LogDump::_internal_set_min_priority(uint32_t value) {
+  
+  _impl_.min_priority_ = value;
+}
+inline void LogDump::set_min_priority(uint32_t value) {
+  _internal_set_min_priority(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogDump.min_priority)
+}
+
+// -------------------------------------------------------------------
+
+// LogRecord
+
+// .dsa.control.v1.LogBuffer buffer = 1;
+inline void LogRecord::clear_buffer() {
+  _impl_.buffer_ = 0;
+}
+inline ::dsa::control::v1::LogBuffer LogRecord::_internal_buffer() const {
+  return static_cast< ::dsa::control::v1::LogBuffer >(_impl_.buffer_);
+}
+inline ::dsa::control::v1::LogBuffer LogRecord::buffer() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogRecord.buffer)
+  return _internal_buffer();
+}
+inline void LogRecord::_internal_set_buffer(::dsa::control::v1::LogBuffer value) {
+  
+  _impl_.buffer_ = value;
+}
+inline void LogRecord::set_buffer(::dsa::control::v1::LogBuffer value) {
+  _internal_set_buffer(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogRecord.buffer)
+}
+
+// uint32 priority = 2;
+inline void LogRecord::clear_priority() {
+  _impl_.priority_ = 0u;
+}
+inline uint32_t LogRecord::_internal_priority() const {
+  return _impl_.priority_;
+}
+inline uint32_t LogRecord::priority() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogRecord.priority)
+  return _internal_priority();
+}
+inline void LogRecord::_internal_set_priority(uint32_t value) {
+  
+  _impl_.priority_ = value;
+}
+inline void LogRecord::set_priority(uint32_t value) {
+  _internal_set_priority(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogRecord.priority)
+}
+
+// uint64 time_ns = 3;
+inline void LogRecord::clear_time_ns() {
+  _impl_.time_ns_ = uint64_t{0u};
+}
+inline uint64_t LogRecord::_internal_time_ns() const {
+  return _impl_.time_ns_;
+}
+inline uint64_t LogRecord::time_ns() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogRecord.time_ns)
+  return _internal_time_ns();
+}
+inline void LogRecord::_internal_set_time_ns(uint64_t value) {
+  
+  _impl_.time_ns_ = value;
+}
+inline void LogRecord::set_time_ns(uint64_t value) {
+  _internal_set_time_ns(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogRecord.time_ns)
+}
+
+// int32 pid = 4;
+inline void LogRecord::clear_pid() {
+  _impl_.pid_ = 0;
+}
+inline int32_t LogRecord::_internal_pid() const {
+  return _impl_.pid_;
+}
+inline int32_t LogRecord::pid() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogRecord.pid)
+  return _internal_pid();
+}
+inline void LogRecord::_internal_set_pid(int32_t value) {
+  
+  _impl_.pid_ = value;
+}
+inline void LogRecord::set_pid(int32_t value) {
+  _internal_set_pid(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogRecord.pid)
+}
+
+// int32 tid = 5;
+inline void LogRecord::clear_tid() {
+  _impl_.tid_ = 0;
+}
+inline int32_t LogRecord::_internal_tid() const {
+  return _impl_.tid_;
+}
+inline int32_t LogRecord::tid() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogRecord.tid)
+  return _internal_tid();
+}
+inline void LogRecord::_internal_set_tid(int32_t value) {
+  
+  _impl_.tid_ = value;
+}
+inline void LogRecord::set_tid(int32_t value) {
+  _internal_set_tid(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogRecord.tid)
+}
+
+// uint32 uid = 6;
+inline void LogRecord::clear_uid() {
+  _impl_.uid_ = 0u;
+}
+inline uint32_t LogRecord::_internal_uid() const {
+  return _impl_.uid_;
+}
+inline uint32_t LogRecord::uid() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogRecord.uid)
+  return _internal_uid();
+}
+inline void LogRecord::_internal_set_uid(uint32_t value) {
+  
+  _impl_.uid_ = value;
+}
+inline void LogRecord::set_uid(uint32_t value) {
+  _internal_set_uid(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogRecord.uid)
+}
+
+// string tag = 7;
+inline void LogRecord::clear_tag() {
+  _impl_.tag_.ClearToEmpty();
+}
+inline const std::string& LogRecord::tag() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogRecord.tag)
+  return _internal_tag();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void LogRecord::set_tag(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.tag_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogRecord.tag)
+}
+inline std::string* LogRecord::mutable_tag() {
+  std::string* _s = _internal_mutable_tag();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.LogRecord.tag)
+  return _s;
+}
+inline const std::string& LogRecord::_internal_tag() const {
+  return _impl_.tag_.Get();
+}
+inline void LogRecord::_internal_set_tag(const std::string& value) {
+  
+  _impl_.tag_.Set(value, GetArenaForAllocation());
+}
+inline std::string* LogRecord::_internal_mutable_tag() {
+  
+  return _impl_.tag_.Mutable(GetArenaForAllocation());
+}
+inline std::string* LogRecord::release_tag() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.LogRecord.tag)
+  return _impl_.tag_.Release();
+}
+inline void LogRecord::set_allocated_tag(std::string* tag) {
+  if (tag != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.tag_.SetAllocated(tag, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.tag_.IsDefault()) {
+    _impl_.tag_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.LogRecord.tag)
+}
+
+// string message = 8;
+inline void LogRecord::clear_message() {
+  _impl_.message_.ClearToEmpty();
+}
+inline const std::string& LogRecord::message() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogRecord.message)
+  return _internal_message();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void LogRecord::set_message(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.message_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogRecord.message)
+}
+inline std::string* LogRecord::mutable_message() {
+  std::string* _s = _internal_mutable_message();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.LogRecord.message)
+  return _s;
+}
+inline const std::string& LogRecord::_internal_message() const {
+  return _impl_.message_.Get();
+}
+inline void LogRecord::_internal_set_message(const std::string& value) {
+  
+  _impl_.message_.Set(value, GetArenaForAllocation());
+}
+inline std::string* LogRecord::_internal_mutable_message() {
+  
+  return _impl_.message_.Mutable(GetArenaForAllocation());
+}
+inline std::string* LogRecord::release_message() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.LogRecord.message)
+  return _impl_.message_.Release();
+}
+inline void LogRecord::set_allocated_message(std::string* message) {
+  if (message != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.message_.SetAllocated(message, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.message_.IsDefault()) {
+    _impl_.message_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.LogRecord.message)
+}
+
+// uint64 dropped = 9;
+inline void LogRecord::clear_dropped() {
+  _impl_.dropped_ = uint64_t{0u};
+}
+inline uint64_t LogRecord::_internal_dropped() const {
+  return _impl_.dropped_;
+}
+inline uint64_t LogRecord::dropped() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogRecord.dropped)
+  return _internal_dropped();
+}
+inline void LogRecord::_internal_set_dropped(uint64_t value) {
+  
+  _impl_.dropped_ = value;
+}
+inline void LogRecord::set_dropped(uint64_t value) {
+  _internal_set_dropped(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogRecord.dropped)
+}
+
+// -------------------------------------------------------------------
+
+// LogRecords
+
+// uint32 request_id = 1;
+inline void LogRecords::clear_request_id() {
+  _impl_.request_id_ = 0u;
+}
+inline uint32_t LogRecords::_internal_request_id() const {
+  return _impl_.request_id_;
+}
+inline uint32_t LogRecords::request_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogRecords.request_id)
+  return _internal_request_id();
+}
+inline void LogRecords::_internal_set_request_id(uint32_t value) {
+  
+  _impl_.request_id_ = value;
+}
+inline void LogRecords::set_request_id(uint32_t value) {
+  _internal_set_request_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogRecords.request_id)
+}
+
+// repeated .dsa.control.v1.LogRecord records = 2;
+inline int LogRecords::_internal_records_size() const {
+  return _impl_.records_.size();
+}
+inline int LogRecords::records_size() const {
+  return _internal_records_size();
+}
+inline void LogRecords::clear_records() {
+  _impl_.records_.Clear();
+}
+inline ::dsa::control::v1::LogRecord* LogRecords::mutable_records(int index) {
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.LogRecords.records)
+  return _impl_.records_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::LogRecord >*
+LogRecords::mutable_records() {
+  // @@protoc_insertion_point(field_mutable_list:dsa.control.v1.LogRecords.records)
+  return &_impl_.records_;
+}
+inline const ::dsa::control::v1::LogRecord& LogRecords::_internal_records(int index) const {
+  return _impl_.records_.Get(index);
+}
+inline const ::dsa::control::v1::LogRecord& LogRecords::records(int index) const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogRecords.records)
+  return _internal_records(index);
+}
+inline ::dsa::control::v1::LogRecord* LogRecords::_internal_add_records() {
+  return _impl_.records_.Add();
+}
+inline ::dsa::control::v1::LogRecord* LogRecords::add_records() {
+  ::dsa::control::v1::LogRecord* _add = _internal_add_records();
+  // @@protoc_insertion_point(field_add:dsa.control.v1.LogRecords.records)
+  return _add;
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::LogRecord >&
+LogRecords::records() const {
+  // @@protoc_insertion_point(field_list:dsa.control.v1.LogRecords.records)
+  return _impl_.records_;
+}
+
+// bool end = 3;
+inline void LogRecords::clear_end() {
+  _impl_.end_ = false;
+}
+inline bool LogRecords::_internal_end() const {
+  return _impl_.end_;
+}
+inline bool LogRecords::end() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogRecords.end)
+  return _internal_end();
+}
+inline void LogRecords::_internal_set_end(bool value) {
+  
+  _impl_.end_ = value;
+}
+inline void LogRecords::set_end(bool value) {
+  _internal_set_end(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogRecords.end)
+}
+
+// string error = 4;
+inline void LogRecords::clear_error() {
+  _impl_.error_.ClearToEmpty();
+}
+inline const std::string& LogRecords::error() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.LogRecords.error)
+  return _internal_error();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void LogRecords::set_error(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.error_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.LogRecords.error)
+}
+inline std::string* LogRecords::mutable_error() {
+  std::string* _s = _internal_mutable_error();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.LogRecords.error)
+  return _s;
+}
+inline const std::string& LogRecords::_internal_error() const {
+  return _impl_.error_.Get();
+}
+inline void LogRecords::_internal_set_error(const std::string& value) {
+  
+  _impl_.error_.Set(value, GetArenaForAllocation());
+}
+inline std::string* LogRecords::_internal_mutable_error() {
+  
+  return _impl_.error_.Mutable(GetArenaForAllocation());
+}
+inline std::string* LogRecords::release_error() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.LogRecords.error)
+  return _impl_.error_.Release();
+}
+inline void LogRecords::set_allocated_error(std::string* error) {
+  if (error != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.error_.SetAllocated(error, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.error_.IsDefault()) {
+    _impl_.error_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.LogRecords.error)
+}
+
+// -------------------------------------------------------------------
+
+// CollectDiagnostics
+
+// uint32 request_id = 1;
+inline void CollectDiagnostics::clear_request_id() {
+  _impl_.request_id_ = 0u;
+}
+inline uint32_t CollectDiagnostics::_internal_request_id() const {
+  return _impl_.request_id_;
+}
+inline uint32_t CollectDiagnostics::request_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.CollectDiagnostics.request_id)
+  return _internal_request_id();
+}
+inline void CollectDiagnostics::_internal_set_request_id(uint32_t value) {
+  
+  _impl_.request_id_ = value;
+}
+inline void CollectDiagnostics::set_request_id(uint32_t value) {
+  _internal_set_request_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.CollectDiagnostics.request_id)
+}
+
+// -------------------------------------------------------------------
+
+// DiagnosticsFile
+
+// uint32 request_id = 1;
+inline void DiagnosticsFile::clear_request_id() {
+  _impl_.request_id_ = 0u;
+}
+inline uint32_t DiagnosticsFile::_internal_request_id() const {
+  return _impl_.request_id_;
+}
+inline uint32_t DiagnosticsFile::request_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.DiagnosticsFile.request_id)
+  return _internal_request_id();
+}
+inline void DiagnosticsFile::_internal_set_request_id(uint32_t value) {
+  
+  _impl_.request_id_ = value;
+}
+inline void DiagnosticsFile::set_request_id(uint32_t value) {
+  _internal_set_request_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.DiagnosticsFile.request_id)
+}
+
+// string name = 2;
+inline void DiagnosticsFile::clear_name() {
+  _impl_.name_.ClearToEmpty();
+}
+inline const std::string& DiagnosticsFile::name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.DiagnosticsFile.name)
+  return _internal_name();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void DiagnosticsFile::set_name(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.DiagnosticsFile.name)
+}
+inline std::string* DiagnosticsFile::mutable_name() {
+  std::string* _s = _internal_mutable_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.DiagnosticsFile.name)
+  return _s;
+}
+inline const std::string& DiagnosticsFile::_internal_name() const {
+  return _impl_.name_.Get();
+}
+inline void DiagnosticsFile::_internal_set_name(const std::string& value) {
+  
+  _impl_.name_.Set(value, GetArenaForAllocation());
+}
+inline std::string* DiagnosticsFile::_internal_mutable_name() {
+  
+  return _impl_.name_.Mutable(GetArenaForAllocation());
+}
+inline std::string* DiagnosticsFile::release_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.DiagnosticsFile.name)
+  return _impl_.name_.Release();
+}
+inline void DiagnosticsFile::set_allocated_name(std::string* name) {
+  if (name != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.name_.SetAllocated(name, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.name_.IsDefault()) {
+    _impl_.name_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.DiagnosticsFile.name)
+}
+
+// bytes data = 3;
+inline void DiagnosticsFile::clear_data() {
+  _impl_.data_.ClearToEmpty();
+}
+inline const std::string& DiagnosticsFile::data() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.DiagnosticsFile.data)
+  return _internal_data();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void DiagnosticsFile::set_data(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.data_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.DiagnosticsFile.data)
+}
+inline std::string* DiagnosticsFile::mutable_data() {
+  std::string* _s = _internal_mutable_data();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.DiagnosticsFile.data)
+  return _s;
+}
+inline const std::string& DiagnosticsFile::_internal_data() const {
+  return _impl_.data_.Get();
+}
+inline void DiagnosticsFile::_internal_set_data(const std::string& value) {
+  
+  _impl_.data_.Set(value, GetArenaForAllocation());
+}
+inline std::string* DiagnosticsFile::_internal_mutable_data() {
+  
+  return _impl_.data_.Mutable(GetArenaForAllocation());
+}
+inline std::string* DiagnosticsFile::release_data() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.DiagnosticsFile.data)
+  return _impl_.data_.Release();
+}
+inline void DiagnosticsFile::set_allocated_data(std::string* data) {
+  if (data != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.data_.SetAllocated(data, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.data_.IsDefault()) {
+    _impl_.data_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.DiagnosticsFile.data)
+}
+
+// bool last = 4;
+inline void DiagnosticsFile::clear_last() {
+  _impl_.last_ = false;
+}
+inline bool DiagnosticsFile::_internal_last() const {
+  return _impl_.last_;
+}
+inline bool DiagnosticsFile::last() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.DiagnosticsFile.last)
+  return _internal_last();
+}
+inline void DiagnosticsFile::_internal_set_last(bool value) {
+  
+  _impl_.last_ = value;
+}
+inline void DiagnosticsFile::set_last(bool value) {
+  _internal_set_last(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.DiagnosticsFile.last)
+}
+
+// -------------------------------------------------------------------
+
+// DiagnosticsDone
+
+// uint32 request_id = 1;
+inline void DiagnosticsDone::clear_request_id() {
+  _impl_.request_id_ = 0u;
+}
+inline uint32_t DiagnosticsDone::_internal_request_id() const {
+  return _impl_.request_id_;
+}
+inline uint32_t DiagnosticsDone::request_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.DiagnosticsDone.request_id)
+  return _internal_request_id();
+}
+inline void DiagnosticsDone::_internal_set_request_id(uint32_t value) {
+  
+  _impl_.request_id_ = value;
+}
+inline void DiagnosticsDone::set_request_id(uint32_t value) {
+  _internal_set_request_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.DiagnosticsDone.request_id)
+}
+
+// string error = 2;
+inline void DiagnosticsDone::clear_error() {
+  _impl_.error_.ClearToEmpty();
+}
+inline const std::string& DiagnosticsDone::error() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.DiagnosticsDone.error)
+  return _internal_error();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void DiagnosticsDone::set_error(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.error_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.DiagnosticsDone.error)
+}
+inline std::string* DiagnosticsDone::mutable_error() {
+  std::string* _s = _internal_mutable_error();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.DiagnosticsDone.error)
+  return _s;
+}
+inline const std::string& DiagnosticsDone::_internal_error() const {
+  return _impl_.error_.Get();
+}
+inline void DiagnosticsDone::_internal_set_error(const std::string& value) {
+  
+  _impl_.error_.Set(value, GetArenaForAllocation());
+}
+inline std::string* DiagnosticsDone::_internal_mutable_error() {
+  
+  return _impl_.error_.Mutable(GetArenaForAllocation());
+}
+inline std::string* DiagnosticsDone::release_error() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.DiagnosticsDone.error)
+  return _impl_.error_.Release();
+}
+inline void DiagnosticsDone::set_allocated_error(std::string* error) {
+  if (error != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.error_.SetAllocated(error, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.error_.IsDefault()) {
+    _impl_.error_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.DiagnosticsDone.error)
+}
+
+// -------------------------------------------------------------------
+
 // Envelope
 
 // .dsa.control.v1.Hello hello = 1;
@@ -25143,6 +27268,450 @@ inline ::dsa::control::v1::AccessibilityActionResult* Envelope::mutable_accessib
   return _msg;
 }
 
+// .dsa.control.v1.LogStream log_stream = 130;
+inline bool Envelope::_internal_has_log_stream() const {
+  return body_case() == kLogStream;
+}
+inline bool Envelope::has_log_stream() const {
+  return _internal_has_log_stream();
+}
+inline void Envelope::set_has_log_stream() {
+  _impl_._oneof_case_[0] = kLogStream;
+}
+inline void Envelope::clear_log_stream() {
+  if (_internal_has_log_stream()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.log_stream_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::LogStream* Envelope::release_log_stream() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.log_stream)
+  if (_internal_has_log_stream()) {
+    clear_has_body();
+    ::dsa::control::v1::LogStream* temp = _impl_.body_.log_stream_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.log_stream_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::LogStream& Envelope::_internal_log_stream() const {
+  return _internal_has_log_stream()
+      ? *_impl_.body_.log_stream_
+      : reinterpret_cast< ::dsa::control::v1::LogStream&>(::dsa::control::v1::_LogStream_default_instance_);
+}
+inline const ::dsa::control::v1::LogStream& Envelope::log_stream() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.log_stream)
+  return _internal_log_stream();
+}
+inline ::dsa::control::v1::LogStream* Envelope::unsafe_arena_release_log_stream() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.log_stream)
+  if (_internal_has_log_stream()) {
+    clear_has_body();
+    ::dsa::control::v1::LogStream* temp = _impl_.body_.log_stream_;
+    _impl_.body_.log_stream_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_log_stream(::dsa::control::v1::LogStream* log_stream) {
+  clear_body();
+  if (log_stream) {
+    set_has_log_stream();
+    _impl_.body_.log_stream_ = log_stream;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.log_stream)
+}
+inline ::dsa::control::v1::LogStream* Envelope::_internal_mutable_log_stream() {
+  if (!_internal_has_log_stream()) {
+    clear_body();
+    set_has_log_stream();
+    _impl_.body_.log_stream_ = CreateMaybeMessage< ::dsa::control::v1::LogStream >(GetArenaForAllocation());
+  }
+  return _impl_.body_.log_stream_;
+}
+inline ::dsa::control::v1::LogStream* Envelope::mutable_log_stream() {
+  ::dsa::control::v1::LogStream* _msg = _internal_mutable_log_stream();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.log_stream)
+  return _msg;
+}
+
+// .dsa.control.v1.LogDump log_dump = 131;
+inline bool Envelope::_internal_has_log_dump() const {
+  return body_case() == kLogDump;
+}
+inline bool Envelope::has_log_dump() const {
+  return _internal_has_log_dump();
+}
+inline void Envelope::set_has_log_dump() {
+  _impl_._oneof_case_[0] = kLogDump;
+}
+inline void Envelope::clear_log_dump() {
+  if (_internal_has_log_dump()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.log_dump_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::LogDump* Envelope::release_log_dump() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.log_dump)
+  if (_internal_has_log_dump()) {
+    clear_has_body();
+    ::dsa::control::v1::LogDump* temp = _impl_.body_.log_dump_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.log_dump_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::LogDump& Envelope::_internal_log_dump() const {
+  return _internal_has_log_dump()
+      ? *_impl_.body_.log_dump_
+      : reinterpret_cast< ::dsa::control::v1::LogDump&>(::dsa::control::v1::_LogDump_default_instance_);
+}
+inline const ::dsa::control::v1::LogDump& Envelope::log_dump() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.log_dump)
+  return _internal_log_dump();
+}
+inline ::dsa::control::v1::LogDump* Envelope::unsafe_arena_release_log_dump() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.log_dump)
+  if (_internal_has_log_dump()) {
+    clear_has_body();
+    ::dsa::control::v1::LogDump* temp = _impl_.body_.log_dump_;
+    _impl_.body_.log_dump_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_log_dump(::dsa::control::v1::LogDump* log_dump) {
+  clear_body();
+  if (log_dump) {
+    set_has_log_dump();
+    _impl_.body_.log_dump_ = log_dump;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.log_dump)
+}
+inline ::dsa::control::v1::LogDump* Envelope::_internal_mutable_log_dump() {
+  if (!_internal_has_log_dump()) {
+    clear_body();
+    set_has_log_dump();
+    _impl_.body_.log_dump_ = CreateMaybeMessage< ::dsa::control::v1::LogDump >(GetArenaForAllocation());
+  }
+  return _impl_.body_.log_dump_;
+}
+inline ::dsa::control::v1::LogDump* Envelope::mutable_log_dump() {
+  ::dsa::control::v1::LogDump* _msg = _internal_mutable_log_dump();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.log_dump)
+  return _msg;
+}
+
+// .dsa.control.v1.LogRecords log_records = 132;
+inline bool Envelope::_internal_has_log_records() const {
+  return body_case() == kLogRecords;
+}
+inline bool Envelope::has_log_records() const {
+  return _internal_has_log_records();
+}
+inline void Envelope::set_has_log_records() {
+  _impl_._oneof_case_[0] = kLogRecords;
+}
+inline void Envelope::clear_log_records() {
+  if (_internal_has_log_records()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.log_records_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::LogRecords* Envelope::release_log_records() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.log_records)
+  if (_internal_has_log_records()) {
+    clear_has_body();
+    ::dsa::control::v1::LogRecords* temp = _impl_.body_.log_records_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.log_records_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::LogRecords& Envelope::_internal_log_records() const {
+  return _internal_has_log_records()
+      ? *_impl_.body_.log_records_
+      : reinterpret_cast< ::dsa::control::v1::LogRecords&>(::dsa::control::v1::_LogRecords_default_instance_);
+}
+inline const ::dsa::control::v1::LogRecords& Envelope::log_records() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.log_records)
+  return _internal_log_records();
+}
+inline ::dsa::control::v1::LogRecords* Envelope::unsafe_arena_release_log_records() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.log_records)
+  if (_internal_has_log_records()) {
+    clear_has_body();
+    ::dsa::control::v1::LogRecords* temp = _impl_.body_.log_records_;
+    _impl_.body_.log_records_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_log_records(::dsa::control::v1::LogRecords* log_records) {
+  clear_body();
+  if (log_records) {
+    set_has_log_records();
+    _impl_.body_.log_records_ = log_records;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.log_records)
+}
+inline ::dsa::control::v1::LogRecords* Envelope::_internal_mutable_log_records() {
+  if (!_internal_has_log_records()) {
+    clear_body();
+    set_has_log_records();
+    _impl_.body_.log_records_ = CreateMaybeMessage< ::dsa::control::v1::LogRecords >(GetArenaForAllocation());
+  }
+  return _impl_.body_.log_records_;
+}
+inline ::dsa::control::v1::LogRecords* Envelope::mutable_log_records() {
+  ::dsa::control::v1::LogRecords* _msg = _internal_mutable_log_records();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.log_records)
+  return _msg;
+}
+
+// .dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;
+inline bool Envelope::_internal_has_collect_diagnostics() const {
+  return body_case() == kCollectDiagnostics;
+}
+inline bool Envelope::has_collect_diagnostics() const {
+  return _internal_has_collect_diagnostics();
+}
+inline void Envelope::set_has_collect_diagnostics() {
+  _impl_._oneof_case_[0] = kCollectDiagnostics;
+}
+inline void Envelope::clear_collect_diagnostics() {
+  if (_internal_has_collect_diagnostics()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.collect_diagnostics_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::CollectDiagnostics* Envelope::release_collect_diagnostics() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.collect_diagnostics)
+  if (_internal_has_collect_diagnostics()) {
+    clear_has_body();
+    ::dsa::control::v1::CollectDiagnostics* temp = _impl_.body_.collect_diagnostics_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.collect_diagnostics_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::CollectDiagnostics& Envelope::_internal_collect_diagnostics() const {
+  return _internal_has_collect_diagnostics()
+      ? *_impl_.body_.collect_diagnostics_
+      : reinterpret_cast< ::dsa::control::v1::CollectDiagnostics&>(::dsa::control::v1::_CollectDiagnostics_default_instance_);
+}
+inline const ::dsa::control::v1::CollectDiagnostics& Envelope::collect_diagnostics() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.collect_diagnostics)
+  return _internal_collect_diagnostics();
+}
+inline ::dsa::control::v1::CollectDiagnostics* Envelope::unsafe_arena_release_collect_diagnostics() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.collect_diagnostics)
+  if (_internal_has_collect_diagnostics()) {
+    clear_has_body();
+    ::dsa::control::v1::CollectDiagnostics* temp = _impl_.body_.collect_diagnostics_;
+    _impl_.body_.collect_diagnostics_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_collect_diagnostics(::dsa::control::v1::CollectDiagnostics* collect_diagnostics) {
+  clear_body();
+  if (collect_diagnostics) {
+    set_has_collect_diagnostics();
+    _impl_.body_.collect_diagnostics_ = collect_diagnostics;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.collect_diagnostics)
+}
+inline ::dsa::control::v1::CollectDiagnostics* Envelope::_internal_mutable_collect_diagnostics() {
+  if (!_internal_has_collect_diagnostics()) {
+    clear_body();
+    set_has_collect_diagnostics();
+    _impl_.body_.collect_diagnostics_ = CreateMaybeMessage< ::dsa::control::v1::CollectDiagnostics >(GetArenaForAllocation());
+  }
+  return _impl_.body_.collect_diagnostics_;
+}
+inline ::dsa::control::v1::CollectDiagnostics* Envelope::mutable_collect_diagnostics() {
+  ::dsa::control::v1::CollectDiagnostics* _msg = _internal_mutable_collect_diagnostics();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.collect_diagnostics)
+  return _msg;
+}
+
+// .dsa.control.v1.DiagnosticsFile diagnostics_file = 134;
+inline bool Envelope::_internal_has_diagnostics_file() const {
+  return body_case() == kDiagnosticsFile;
+}
+inline bool Envelope::has_diagnostics_file() const {
+  return _internal_has_diagnostics_file();
+}
+inline void Envelope::set_has_diagnostics_file() {
+  _impl_._oneof_case_[0] = kDiagnosticsFile;
+}
+inline void Envelope::clear_diagnostics_file() {
+  if (_internal_has_diagnostics_file()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.diagnostics_file_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::DiagnosticsFile* Envelope::release_diagnostics_file() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.diagnostics_file)
+  if (_internal_has_diagnostics_file()) {
+    clear_has_body();
+    ::dsa::control::v1::DiagnosticsFile* temp = _impl_.body_.diagnostics_file_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.diagnostics_file_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::DiagnosticsFile& Envelope::_internal_diagnostics_file() const {
+  return _internal_has_diagnostics_file()
+      ? *_impl_.body_.diagnostics_file_
+      : reinterpret_cast< ::dsa::control::v1::DiagnosticsFile&>(::dsa::control::v1::_DiagnosticsFile_default_instance_);
+}
+inline const ::dsa::control::v1::DiagnosticsFile& Envelope::diagnostics_file() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.diagnostics_file)
+  return _internal_diagnostics_file();
+}
+inline ::dsa::control::v1::DiagnosticsFile* Envelope::unsafe_arena_release_diagnostics_file() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.diagnostics_file)
+  if (_internal_has_diagnostics_file()) {
+    clear_has_body();
+    ::dsa::control::v1::DiagnosticsFile* temp = _impl_.body_.diagnostics_file_;
+    _impl_.body_.diagnostics_file_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_diagnostics_file(::dsa::control::v1::DiagnosticsFile* diagnostics_file) {
+  clear_body();
+  if (diagnostics_file) {
+    set_has_diagnostics_file();
+    _impl_.body_.diagnostics_file_ = diagnostics_file;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.diagnostics_file)
+}
+inline ::dsa::control::v1::DiagnosticsFile* Envelope::_internal_mutable_diagnostics_file() {
+  if (!_internal_has_diagnostics_file()) {
+    clear_body();
+    set_has_diagnostics_file();
+    _impl_.body_.diagnostics_file_ = CreateMaybeMessage< ::dsa::control::v1::DiagnosticsFile >(GetArenaForAllocation());
+  }
+  return _impl_.body_.diagnostics_file_;
+}
+inline ::dsa::control::v1::DiagnosticsFile* Envelope::mutable_diagnostics_file() {
+  ::dsa::control::v1::DiagnosticsFile* _msg = _internal_mutable_diagnostics_file();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.diagnostics_file)
+  return _msg;
+}
+
+// .dsa.control.v1.DiagnosticsDone diagnostics_done = 135;
+inline bool Envelope::_internal_has_diagnostics_done() const {
+  return body_case() == kDiagnosticsDone;
+}
+inline bool Envelope::has_diagnostics_done() const {
+  return _internal_has_diagnostics_done();
+}
+inline void Envelope::set_has_diagnostics_done() {
+  _impl_._oneof_case_[0] = kDiagnosticsDone;
+}
+inline void Envelope::clear_diagnostics_done() {
+  if (_internal_has_diagnostics_done()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.diagnostics_done_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::DiagnosticsDone* Envelope::release_diagnostics_done() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.diagnostics_done)
+  if (_internal_has_diagnostics_done()) {
+    clear_has_body();
+    ::dsa::control::v1::DiagnosticsDone* temp = _impl_.body_.diagnostics_done_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.diagnostics_done_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::DiagnosticsDone& Envelope::_internal_diagnostics_done() const {
+  return _internal_has_diagnostics_done()
+      ? *_impl_.body_.diagnostics_done_
+      : reinterpret_cast< ::dsa::control::v1::DiagnosticsDone&>(::dsa::control::v1::_DiagnosticsDone_default_instance_);
+}
+inline const ::dsa::control::v1::DiagnosticsDone& Envelope::diagnostics_done() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.diagnostics_done)
+  return _internal_diagnostics_done();
+}
+inline ::dsa::control::v1::DiagnosticsDone* Envelope::unsafe_arena_release_diagnostics_done() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.diagnostics_done)
+  if (_internal_has_diagnostics_done()) {
+    clear_has_body();
+    ::dsa::control::v1::DiagnosticsDone* temp = _impl_.body_.diagnostics_done_;
+    _impl_.body_.diagnostics_done_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_diagnostics_done(::dsa::control::v1::DiagnosticsDone* diagnostics_done) {
+  clear_body();
+  if (diagnostics_done) {
+    set_has_diagnostics_done();
+    _impl_.body_.diagnostics_done_ = diagnostics_done;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.diagnostics_done)
+}
+inline ::dsa::control::v1::DiagnosticsDone* Envelope::_internal_mutable_diagnostics_done() {
+  if (!_internal_has_diagnostics_done()) {
+    clear_body();
+    set_has_diagnostics_done();
+    _impl_.body_.diagnostics_done_ = CreateMaybeMessage< ::dsa::control::v1::DiagnosticsDone >(GetArenaForAllocation());
+  }
+  return _impl_.body_.diagnostics_done_;
+}
+inline ::dsa::control::v1::DiagnosticsDone* Envelope::mutable_diagnostics_done() {
+  ::dsa::control::v1::DiagnosticsDone* _msg = _internal_mutable_diagnostics_done();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.diagnostics_done)
+  return _msg;
+}
+
 inline bool Envelope::has_body() const {
   return body_case() != BODY_NOT_SET;
 }
@@ -25155,6 +27724,20 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
@@ -25310,6 +27893,7 @@ template <> struct is_proto_enum< ::dsa::control::v1::PowerHintKind> : ::std::tr
 template <> struct is_proto_enum< ::dsa::control::v1::InstallStatus> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::FileAction> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::NodeAction> : ::std::true_type {};
+template <> struct is_proto_enum< ::dsa::control::v1::LogBuffer> : ::std::true_type {};
 
 PROTOBUF_NAMESPACE_CLOSE
 

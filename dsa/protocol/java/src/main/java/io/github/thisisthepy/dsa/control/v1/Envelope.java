@@ -83,6 +83,12 @@ public  final class Envelope extends
     ACCESSIBILITY_TREE(81),
     ACCESSIBILITY_ACTION(82),
     ACCESSIBILITY_ACTION_RESULT(83),
+    LOG_STREAM(130),
+    LOG_DUMP(131),
+    LOG_RECORDS(132),
+    COLLECT_DIAGNOSTICS(133),
+    DIAGNOSTICS_FILE(134),
+    DIAGNOSTICS_DONE(135),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -161,6 +167,12 @@ public  final class Envelope extends
         case 81: return ACCESSIBILITY_TREE;
         case 82: return ACCESSIBILITY_ACTION;
         case 83: return ACCESSIBILITY_ACTION_RESULT;
+        case 130: return LOG_STREAM;
+        case 131: return LOG_DUMP;
+        case 132: return LOG_RECORDS;
+        case 133: return COLLECT_DIAGNOSTICS;
+        case 134: return DIAGNOSTICS_FILE;
+        case 135: return DIAGNOSTICS_DONE;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -3332,6 +3344,306 @@ public  final class Envelope extends
     }
   }
 
+  public static final int LOG_STREAM_FIELD_NUMBER = 130;
+  /**
+   * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
+   */
+  @java.lang.Override
+  public boolean hasLogStream() {
+    return bodyCase_ == 130;
+  }
+  /**
+   * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.LogStream getLogStream() {
+    if (bodyCase_ == 130) {
+       return (io.github.thisisthepy.dsa.control.v1.LogStream) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.LogStream.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
+   */
+  private void setLogStream(io.github.thisisthepy.dsa.control.v1.LogStream value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 130;
+  }
+  /**
+   * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
+   */
+  private void mergeLogStream(io.github.thisisthepy.dsa.control.v1.LogStream value) {
+    value.getClass();
+  if (bodyCase_ == 130 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.LogStream.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.LogStream.newBuilder((io.github.thisisthepy.dsa.control.v1.LogStream) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 130;
+  }
+  /**
+   * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
+   */
+  private void clearLogStream() {
+    if (bodyCase_ == 130) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int LOG_DUMP_FIELD_NUMBER = 131;
+  /**
+   * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
+   */
+  @java.lang.Override
+  public boolean hasLogDump() {
+    return bodyCase_ == 131;
+  }
+  /**
+   * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.LogDump getLogDump() {
+    if (bodyCase_ == 131) {
+       return (io.github.thisisthepy.dsa.control.v1.LogDump) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.LogDump.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
+   */
+  private void setLogDump(io.github.thisisthepy.dsa.control.v1.LogDump value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 131;
+  }
+  /**
+   * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
+   */
+  private void mergeLogDump(io.github.thisisthepy.dsa.control.v1.LogDump value) {
+    value.getClass();
+  if (bodyCase_ == 131 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.LogDump.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.LogDump.newBuilder((io.github.thisisthepy.dsa.control.v1.LogDump) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 131;
+  }
+  /**
+   * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
+   */
+  private void clearLogDump() {
+    if (bodyCase_ == 131) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int LOG_RECORDS_FIELD_NUMBER = 132;
+  /**
+   * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
+   */
+  @java.lang.Override
+  public boolean hasLogRecords() {
+    return bodyCase_ == 132;
+  }
+  /**
+   * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.LogRecords getLogRecords() {
+    if (bodyCase_ == 132) {
+       return (io.github.thisisthepy.dsa.control.v1.LogRecords) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.LogRecords.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
+   */
+  private void setLogRecords(io.github.thisisthepy.dsa.control.v1.LogRecords value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 132;
+  }
+  /**
+   * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
+   */
+  private void mergeLogRecords(io.github.thisisthepy.dsa.control.v1.LogRecords value) {
+    value.getClass();
+  if (bodyCase_ == 132 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.LogRecords.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.LogRecords.newBuilder((io.github.thisisthepy.dsa.control.v1.LogRecords) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 132;
+  }
+  /**
+   * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
+   */
+  private void clearLogRecords() {
+    if (bodyCase_ == 132) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int COLLECT_DIAGNOSTICS_FIELD_NUMBER = 133;
+  /**
+   * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
+   */
+  @java.lang.Override
+  public boolean hasCollectDiagnostics() {
+    return bodyCase_ == 133;
+  }
+  /**
+   * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.CollectDiagnostics getCollectDiagnostics() {
+    if (bodyCase_ == 133) {
+       return (io.github.thisisthepy.dsa.control.v1.CollectDiagnostics) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.CollectDiagnostics.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
+   */
+  private void setCollectDiagnostics(io.github.thisisthepy.dsa.control.v1.CollectDiagnostics value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 133;
+  }
+  /**
+   * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
+   */
+  private void mergeCollectDiagnostics(io.github.thisisthepy.dsa.control.v1.CollectDiagnostics value) {
+    value.getClass();
+  if (bodyCase_ == 133 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.CollectDiagnostics.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.CollectDiagnostics.newBuilder((io.github.thisisthepy.dsa.control.v1.CollectDiagnostics) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 133;
+  }
+  /**
+   * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
+   */
+  private void clearCollectDiagnostics() {
+    if (bodyCase_ == 133) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int DIAGNOSTICS_FILE_FIELD_NUMBER = 134;
+  /**
+   * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
+   */
+  @java.lang.Override
+  public boolean hasDiagnosticsFile() {
+    return bodyCase_ == 134;
+  }
+  /**
+   * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.DiagnosticsFile getDiagnosticsFile() {
+    if (bodyCase_ == 134) {
+       return (io.github.thisisthepy.dsa.control.v1.DiagnosticsFile) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.DiagnosticsFile.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
+   */
+  private void setDiagnosticsFile(io.github.thisisthepy.dsa.control.v1.DiagnosticsFile value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 134;
+  }
+  /**
+   * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
+   */
+  private void mergeDiagnosticsFile(io.github.thisisthepy.dsa.control.v1.DiagnosticsFile value) {
+    value.getClass();
+  if (bodyCase_ == 134 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.DiagnosticsFile.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.DiagnosticsFile.newBuilder((io.github.thisisthepy.dsa.control.v1.DiagnosticsFile) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 134;
+  }
+  /**
+   * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
+   */
+  private void clearDiagnosticsFile() {
+    if (bodyCase_ == 134) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int DIAGNOSTICS_DONE_FIELD_NUMBER = 135;
+  /**
+   * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
+   */
+  @java.lang.Override
+  public boolean hasDiagnosticsDone() {
+    return bodyCase_ == 135;
+  }
+  /**
+   * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.DiagnosticsDone getDiagnosticsDone() {
+    if (bodyCase_ == 135) {
+       return (io.github.thisisthepy.dsa.control.v1.DiagnosticsDone) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.DiagnosticsDone.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
+   */
+  private void setDiagnosticsDone(io.github.thisisthepy.dsa.control.v1.DiagnosticsDone value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 135;
+  }
+  /**
+   * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
+   */
+  private void mergeDiagnosticsDone(io.github.thisisthepy.dsa.control.v1.DiagnosticsDone value) {
+    value.getClass();
+  if (bodyCase_ == 135 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.DiagnosticsDone.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.DiagnosticsDone.newBuilder((io.github.thisisthepy.dsa.control.v1.DiagnosticsDone) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 135;
+  }
+  /**
+   * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
+   */
+  private void clearDiagnosticsDone() {
+    if (bodyCase_ == 135) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.Envelope parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -6467,6 +6779,294 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
+     */
+    @java.lang.Override
+    public boolean hasLogStream() {
+      return instance.hasLogStream();
+    }
+    /**
+     * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.LogStream getLogStream() {
+      return instance.getLogStream();
+    }
+    /**
+     * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
+     */
+    public Builder setLogStream(io.github.thisisthepy.dsa.control.v1.LogStream value) {
+      copyOnWrite();
+      instance.setLogStream(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
+     */
+    public Builder setLogStream(
+        io.github.thisisthepy.dsa.control.v1.LogStream.Builder builderForValue) {
+      copyOnWrite();
+      instance.setLogStream(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
+     */
+    public Builder mergeLogStream(io.github.thisisthepy.dsa.control.v1.LogStream value) {
+      copyOnWrite();
+      instance.mergeLogStream(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
+     */
+    public Builder clearLogStream() {
+      copyOnWrite();
+      instance.clearLogStream();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
+     */
+    @java.lang.Override
+    public boolean hasLogDump() {
+      return instance.hasLogDump();
+    }
+    /**
+     * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.LogDump getLogDump() {
+      return instance.getLogDump();
+    }
+    /**
+     * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
+     */
+    public Builder setLogDump(io.github.thisisthepy.dsa.control.v1.LogDump value) {
+      copyOnWrite();
+      instance.setLogDump(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
+     */
+    public Builder setLogDump(
+        io.github.thisisthepy.dsa.control.v1.LogDump.Builder builderForValue) {
+      copyOnWrite();
+      instance.setLogDump(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
+     */
+    public Builder mergeLogDump(io.github.thisisthepy.dsa.control.v1.LogDump value) {
+      copyOnWrite();
+      instance.mergeLogDump(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
+     */
+    public Builder clearLogDump() {
+      copyOnWrite();
+      instance.clearLogDump();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
+     */
+    @java.lang.Override
+    public boolean hasLogRecords() {
+      return instance.hasLogRecords();
+    }
+    /**
+     * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.LogRecords getLogRecords() {
+      return instance.getLogRecords();
+    }
+    /**
+     * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
+     */
+    public Builder setLogRecords(io.github.thisisthepy.dsa.control.v1.LogRecords value) {
+      copyOnWrite();
+      instance.setLogRecords(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
+     */
+    public Builder setLogRecords(
+        io.github.thisisthepy.dsa.control.v1.LogRecords.Builder builderForValue) {
+      copyOnWrite();
+      instance.setLogRecords(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
+     */
+    public Builder mergeLogRecords(io.github.thisisthepy.dsa.control.v1.LogRecords value) {
+      copyOnWrite();
+      instance.mergeLogRecords(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
+     */
+    public Builder clearLogRecords() {
+      copyOnWrite();
+      instance.clearLogRecords();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
+     */
+    @java.lang.Override
+    public boolean hasCollectDiagnostics() {
+      return instance.hasCollectDiagnostics();
+    }
+    /**
+     * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.CollectDiagnostics getCollectDiagnostics() {
+      return instance.getCollectDiagnostics();
+    }
+    /**
+     * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
+     */
+    public Builder setCollectDiagnostics(io.github.thisisthepy.dsa.control.v1.CollectDiagnostics value) {
+      copyOnWrite();
+      instance.setCollectDiagnostics(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
+     */
+    public Builder setCollectDiagnostics(
+        io.github.thisisthepy.dsa.control.v1.CollectDiagnostics.Builder builderForValue) {
+      copyOnWrite();
+      instance.setCollectDiagnostics(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
+     */
+    public Builder mergeCollectDiagnostics(io.github.thisisthepy.dsa.control.v1.CollectDiagnostics value) {
+      copyOnWrite();
+      instance.mergeCollectDiagnostics(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
+     */
+    public Builder clearCollectDiagnostics() {
+      copyOnWrite();
+      instance.clearCollectDiagnostics();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
+     */
+    @java.lang.Override
+    public boolean hasDiagnosticsFile() {
+      return instance.hasDiagnosticsFile();
+    }
+    /**
+     * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.DiagnosticsFile getDiagnosticsFile() {
+      return instance.getDiagnosticsFile();
+    }
+    /**
+     * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
+     */
+    public Builder setDiagnosticsFile(io.github.thisisthepy.dsa.control.v1.DiagnosticsFile value) {
+      copyOnWrite();
+      instance.setDiagnosticsFile(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
+     */
+    public Builder setDiagnosticsFile(
+        io.github.thisisthepy.dsa.control.v1.DiagnosticsFile.Builder builderForValue) {
+      copyOnWrite();
+      instance.setDiagnosticsFile(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
+     */
+    public Builder mergeDiagnosticsFile(io.github.thisisthepy.dsa.control.v1.DiagnosticsFile value) {
+      copyOnWrite();
+      instance.mergeDiagnosticsFile(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
+     */
+    public Builder clearDiagnosticsFile() {
+      copyOnWrite();
+      instance.clearDiagnosticsFile();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
+     */
+    @java.lang.Override
+    public boolean hasDiagnosticsDone() {
+      return instance.hasDiagnosticsDone();
+    }
+    /**
+     * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.DiagnosticsDone getDiagnosticsDone() {
+      return instance.getDiagnosticsDone();
+    }
+    /**
+     * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
+     */
+    public Builder setDiagnosticsDone(io.github.thisisthepy.dsa.control.v1.DiagnosticsDone value) {
+      copyOnWrite();
+      instance.setDiagnosticsDone(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
+     */
+    public Builder setDiagnosticsDone(
+        io.github.thisisthepy.dsa.control.v1.DiagnosticsDone.Builder builderForValue) {
+      copyOnWrite();
+      instance.setDiagnosticsDone(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
+     */
+    public Builder mergeDiagnosticsDone(io.github.thisisthepy.dsa.control.v1.DiagnosticsDone value) {
+      copyOnWrite();
+      instance.mergeDiagnosticsDone(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
+     */
+    public Builder clearDiagnosticsDone() {
+      copyOnWrite();
+      instance.clearDiagnosticsDone();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -6548,17 +7148,24 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.WidgetFrame.class,
             io.github.thisisthepy.dsa.control.v1.WidgetPointer.class,
             io.github.thisisthepy.dsa.control.v1.PowerHint.class,
+            io.github.thisisthepy.dsa.control.v1.LogStream.class,
+            io.github.thisisthepy.dsa.control.v1.LogDump.class,
+            io.github.thisisthepy.dsa.control.v1.LogRecords.class,
+            io.github.thisisthepy.dsa.control.v1.CollectDiagnostics.class,
+            io.github.thisisthepy.dsa.control.v1.DiagnosticsFile.class,
+            io.github.thisisthepy.dsa.control.v1.DiagnosticsDone.class,
           };
           java.lang.String info =
-              "\u0000?\u0001\u0000\u0001n?\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<\u0000" +
-              "\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<\u0000\u000b" +
-              "<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012<\u0000\u0013" +
-              "<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000\u0019<\u0000" +
-              "\u001a<\u0000\u001b<\u0000\u001c<\u0000\u001d<\u0000(<\u0000)<\u0000*<\u0000+<\u0000" +
-              "2<\u00003<\u00004<\u00005<\u00006<\u0000<<\u0000=<\u0000><\u0000?<\u0000@<\u0000" +
-              "A<\u0000B<\u0000F<\u0000G<\u0000H<\u0000I<\u0000P<\u0000Q<\u0000R<\u0000S<\u0000" +
-              "Z<\u0000[<\u0000\\<\u0000]<\u0000^<\u0000_<\u0000`<\u0000a<\u0000b<\u0000c<\u0000" +
-              "n<\u0000";
+              "\u0000E\u0001\u0000\u0001\u0087E\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003" +
+              "<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<" +
+              "\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012" +
+              "<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000" +
+              "\u0019<\u0000\u001a<\u0000\u001b<\u0000\u001c<\u0000\u001d<\u0000(<\u0000)<\u0000" +
+              "*<\u0000+<\u00002<\u00003<\u00004<\u00005<\u00006<\u0000<<\u0000=<\u0000><\u0000" +
+              "?<\u0000@<\u0000A<\u0000B<\u0000F<\u0000G<\u0000H<\u0000I<\u0000P<\u0000Q<\u0000" +
+              "R<\u0000S<\u0000Z<\u0000[<\u0000\\<\u0000]<\u0000^<\u0000_<\u0000`<\u0000a<\u0000" +
+              "b<\u0000c<\u0000n<\u0000\u0082<\u0000\u0083<\u0000\u0084<\u0000\u0085<\u0000\u0086" +
+              "<\u0000\u0087<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through
