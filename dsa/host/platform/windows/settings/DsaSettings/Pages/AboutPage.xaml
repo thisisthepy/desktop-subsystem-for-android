@@ -32,6 +32,15 @@
                 </ui:CardControl.Header>
                 <TextBlock Text="{Binding ServiceVersion, Mode=OneWay}" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
             </ui:CardControl>
+            <ui:CardControl Margin="0,0,0,4" IsEnabled="{Binding HasAndroidVersion, Mode=OneWay}">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="{l:Text AboutAndroidVersionCard.Header}" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{l:Text AboutAndroidVersionCard.Description}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <TextBlock Text="{Binding AndroidVersion, Mode=OneWay}" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            </ui:CardControl>
             <ui:CardAction Click="OnOpenLicenses" Margin="0,0,0,4">
                 <StackPanel>
                     <TextBlock Text="{l:Text AboutLicenseCard.Header}" Style="{StaticResource CardTitle}" />

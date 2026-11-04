@@ -373,6 +373,12 @@
   <data name="AboutServiceVersionCard.Header" xml:space="preserve">
     <value>DSA service version</value>
   </data>
+  <data name="AboutAndroidVersionCard.Header" xml:space="preserve">
+    <value>Android image version</value>
+  </data>
+  <data name="AboutAndroidVersionCard.Description" xml:space="preserve">
+    <value>The Android image the next start boots. Image updates change it.</value>
+  </data>
   <data name="AboutLicenseCard.Header" xml:space="preserve">
     <value>Licences</value>
   </data>
