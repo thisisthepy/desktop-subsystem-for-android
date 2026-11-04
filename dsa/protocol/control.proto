@@ -356,6 +356,24 @@ message HostMemory {
   bool low = 1;
 }
 
+// Host to guest: the host computer is about to sleep (sleep, hibernate or modern standby) or
+// has just woken. Before it sleeps the host turns the guest's screen off (ScreenState), then
+// sends this with `asleep` set; the control daemon writes every file's pending data to disk
+// and answers with GuestSleepReady. The host waits for that answer for at most two seconds.
+// When the host wakes it sends this with `asleep` clear and its wall clock, which the agent
+// sets as the guest's time, since the guest's clock stood still or drifted while the host
+// slept. A guest frozen or not connected when the host wakes is sent it once it can hear.
+message HostSleep {
+  bool asleep = 1;
+  // On waking: the host's wall clock, in milliseconds since the Unix epoch (UTC). Zero when
+  // `asleep` is set.
+  uint64 host_unix_time_ms = 2;
+}
+
+// Guest to host, from the control daemon: the answer to HostSleep with `asleep` set, sent
+// once the guest's pending file data is on its disk.
+message GuestSleepReady {}
+
 // What a PowerHint is about.
 enum PowerHintKind {
   POWER_HINT_KIND_UNSPECIFIED = 0;
@@ -946,6 +964,8 @@ message Envelope {
     PowerHint power_hint = 110;
     DeviceIdle device_idle = 42;
     HostMemory host_memory = 43;
+    HostSleep host_sleep = 44;
+    GuestSleepReady guest_sleep_ready = 45;
     InstallApk install_apk = 60;
     ApkChunk apk_chunk = 61;
     CancelInstall cancel_install = 62;
