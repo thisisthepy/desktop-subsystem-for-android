@@ -226,7 +226,11 @@ mod tests {
         let bridge = AdbBridge::start(0, guest).unwrap();
         assert_eq!(exchange(bridge.address(), b"host:version"), b"HOST:VERSION");
         assert_eq!(exchange(bridge.address(), b"shell:ls"), b"SHELL:LS");
-        assert_eq!(opened.load(Ordering::SeqCst), 2, "one guest stream per connection");
+        assert_eq!(
+            opened.load(Ordering::SeqCst),
+            2,
+            "one guest stream per connection"
+        );
     }
 
     #[test]

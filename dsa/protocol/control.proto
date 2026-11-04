@@ -1151,7 +1151,7 @@ message Envelope {
     ScreenState screen_state = 40;
     PowerState power_state = 41;
     PowerHint power_hint = 110;
-    DeveloperMode developer_mode = 120;
+    DeveloperMode developer_mode = 140;
     DeviceIdle device_idle = 42;
     HostMemory host_memory = 43;
     HostSleep host_sleep = 44;

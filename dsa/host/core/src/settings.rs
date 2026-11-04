@@ -645,7 +645,10 @@ mod tests {
         let again = FileSettings::new(&dir);
         assert!(again.get("uid:1000").unwrap().developer_mode);
         assert_eq!(again.get("uid:1000").unwrap().adb_port, 5037);
-        assert!(!again.get("uid:1001").unwrap().developer_mode, "the user's own");
+        assert!(
+            !again.get("uid:1001").unwrap().developer_mode,
+            "the user's own"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

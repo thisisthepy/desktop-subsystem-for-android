@@ -216,7 +216,10 @@ mod daemon {
     fn switch_adb(on: bool) {
         let value = if on { "1" } else { "0" };
         match set_property("vendor.dsa.adb", value) {
-            Ok(()) => say!("developer mode is {}", if on { "on: adbd starts" } else { "off" }),
+            Ok(()) => say!(
+                "developer mode is {}",
+                if on { "on: adbd starts" } else { "off" }
+            ),
             Err(why) => say!("could not switch adbd for developer mode: {why}"),
         }
     }

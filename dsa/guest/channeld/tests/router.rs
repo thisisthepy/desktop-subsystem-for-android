@@ -506,7 +506,11 @@ fn fr20_developer_mode_reaches_the_switch_and_no_client() {
     router.subscribe(AGENT, agent.clone());
 
     router.host_connected();
-    let mode = |on| frame(Body::DeveloperMode(dsa_protocol::control::DeveloperMode { on }));
+    let mode = |on| {
+        frame(Body::DeveloperMode(dsa_protocol::control::DeveloperMode {
+            on,
+        }))
+    };
     router.from_host(&mode(true));
     router.from_host(&mode(false));
     router.from_host(&mode(true));

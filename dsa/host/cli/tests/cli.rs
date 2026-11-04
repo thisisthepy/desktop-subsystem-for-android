@@ -756,7 +756,9 @@ fn fr19_trace_switches_are_settings_dsa_reads_and_parses() {
 fn fr20_developer_mode_is_off_by_default_and_dsa_turns_it_on_with_the_adb_address() {
     use dsa_cli::Change;
     assert_eq!(
-        parse(&args("settings set developer-mode on")).unwrap().change,
+        parse(&args("settings set developer-mode on"))
+            .unwrap()
+            .change,
         Some(Change::DeveloperMode(true))
     );
     assert_eq!(

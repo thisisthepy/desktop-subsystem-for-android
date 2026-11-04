@@ -3596,12 +3596,18 @@ fn fake_adbd() -> (dsa_host_core::session::AdbConnect, Arc<Mutex<Vec<String>>>) 
 fn fr20_developer_mode_starts_adbd_and_opens_a_loopback_port_that_reaches_it() {
     use std::io::{Read, Write};
     let (session, mut agent, _launcher) = active_session();
-    assert_eq!(session.adb_address(), None, "off by default: nothing listens");
+    assert_eq!(
+        session.adb_address(),
+        None,
+        "off by default: nothing listens"
+    );
     let (connect, reached) = fake_adbd();
     session.set_adb_connect(connect);
     session.developer_mode(true, 0).unwrap();
     assert_eq!(next_body(&mut agent), developer_mode(true));
-    let address = session.adb_address().expect("a port while developer mode is on");
+    let address = session
+        .adb_address()
+        .expect("a port while developer mode is on");
     assert!(address.ip().is_loopback());
 
     let mut adb = std::net::TcpStream::connect(address).unwrap();
@@ -3621,7 +3627,10 @@ fn fr20_developer_mode_starts_adbd_and_opens_a_loopback_port_that_reaches_it() {
     session.developer_mode(false, 0).unwrap();
     assert_eq!(next_body(&mut agent), developer_mode(false));
     assert_eq!(session.adb_address(), None);
-    assert!(std::net::TcpStream::connect(address).is_err(), "the port is closed");
+    assert!(
+        std::net::TcpStream::connect(address).is_err(),
+        "the port is closed"
+    );
 }
 
 #[test]

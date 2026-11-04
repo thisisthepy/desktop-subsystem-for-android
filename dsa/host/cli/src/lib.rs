@@ -758,10 +758,7 @@ pub fn describe_settings(report: &SettingsReport) -> String {
         format!("Input trace: {}", on_off(settings.input_trace)),
         format!("Resize trace: {}", on_off(settings.resize_trace)),
         if settings.developer_mode {
-            format!(
-                "Developer mode: on (adb connect {})",
-                adb_address(settings)
-            )
+            format!("Developer mode: on (adb connect {})", adb_address(settings))
         } else {
             format!("Developer mode: off (adb port {})", settings.adb_port)
         },
