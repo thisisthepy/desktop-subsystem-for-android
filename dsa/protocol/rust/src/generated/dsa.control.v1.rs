@@ -126,6 +126,13 @@ pub struct LaunchApp {
     #[prost(string, tag = "1")]
     pub package_name: ::prost::alloc::string::String,
 }
+/// Host to guest: the user's Stop. The agent ends every process of the app, even one a
+/// placed widget or a foreground service keeps running, and the guest gives the memory back.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct StopApp {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+}
 /// Host to guest: the user resized the task's window; the task takes the window's client
 /// size, in guest display pixels. Only the latest size counts: during a live resize the host
 /// sends the size it has now, not every size it passed through. The agent keeps the task
@@ -540,6 +547,29 @@ pub struct GuestMemory {
     /// The processes with the largest proportional set size, largest first, at most 10.
     #[prost(message, repeated, tag = "14")]
     pub top_processes: ::prost::alloc::vec::Vec<ProcessMemory>,
+    /// What the kernel itself holds, from /proc/meminfo: slab it cannot free (SUnreclaim),
+    /// kernel stacks, page tables, vmalloc, per-CPU areas, and the contiguous memory area (CMA)
+    /// set aside for drivers.
+    #[prost(uint64, tag = "15")]
+    pub slab_unreclaimable_kb: u64,
+    #[prost(uint64, tag = "16")]
+    pub kernel_stack_kb: u64,
+    #[prost(uint64, tag = "17")]
+    pub page_tables_kb: u64,
+    #[prost(uint64, tag = "18")]
+    pub vmalloc_used_kb: u64,
+    #[prost(uint64, tag = "19")]
+    pub percpu_kb: u64,
+    #[prost(uint64, tag = "20")]
+    pub cma_total_kb: u64,
+    /// Huge pages reserved (HugePages_Total times Hugepagesize).
+    #[prost(uint64, tag = "21")]
+    pub hugetlb_kb: u64,
+    /// The memory the kernel was given, counted from its online memory blocks; what it gave to
+    /// MemTotal is this less what it reserved at boot (its own code, page structures, swiotlb,
+    /// pstore). 0 when the guest cannot read it.
+    #[prost(uint64, tag = "22")]
+    pub mem_online_kb: u64,
 }
 /// From the agent to the guest's control daemon, on each connection to it: the agent has
 /// subscribed and takes the host's frames. It stops at the daemon, which tells the host with
@@ -1223,7 +1253,7 @@ pub struct DiagnosticsDone {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 110, 140, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 120, 121, 122, 123, 124, 125, 126, 127, 130, 131, 132, 133, 134, 135"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 110, 140, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 120, 121, 122, 123, 124, 125, 126, 127, 130, 131, 132, 133, 134, 135, 136"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -1391,6 +1421,8 @@ pub mod envelope {
         DiagnosticsFile(super::DiagnosticsFile),
         #[prost(message, tag = "135")]
         DiagnosticsDone(super::DiagnosticsDone),
+        #[prost(message, tag = "136")]
+        StopApp(super::StopApp),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.

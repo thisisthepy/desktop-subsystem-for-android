@@ -74,6 +74,13 @@ pub struct LaunchApp {
     #[prost(string, tag = "1")]
     pub package_name: ::prost::alloc::string::String,
 }
+/// The user's Stop: asks the caller's Android to end every process of an app and give its
+/// memory back, even one a placed widget or a foreground service keeps running.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct StopApp {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+}
 /// The user resized a task's window: asks the caller's Android to give the task the
 /// window's client size, in Android display pixels. `live` is true while the user is still
 /// dragging the window's edge: the task takes the size without being reconfigured, and the
@@ -712,6 +719,24 @@ pub struct GuestMemory {
     /// How long ago Android sent this report, in seconds.
     #[prost(uint64, tag = "15")]
     pub age_seconds: u64,
+    /// What the guest's kernel itself holds, and the memory it was given, as the control
+    /// channel's GuestMemory says.
+    #[prost(uint64, tag = "16")]
+    pub slab_unreclaimable_kb: u64,
+    #[prost(uint64, tag = "17")]
+    pub kernel_stack_kb: u64,
+    #[prost(uint64, tag = "18")]
+    pub page_tables_kb: u64,
+    #[prost(uint64, tag = "19")]
+    pub vmalloc_used_kb: u64,
+    #[prost(uint64, tag = "20")]
+    pub percpu_kb: u64,
+    #[prost(uint64, tag = "21")]
+    pub cma_total_kb: u64,
+    #[prost(uint64, tag = "22")]
+    pub hugetlb_kb: u64,
+    #[prost(uint64, tag = "23")]
+    pub mem_online_kb: u64,
 }
 /// One host process that runs the caller's Android: its VM's memory process, the window
 /// manager, an app window.
@@ -927,6 +952,11 @@ pub struct Settings {
     /// summary at the end of a drag. Off by default; the same rules as input_trace.
     #[prost(bool, tag = "12")]
     pub resize_trace: bool,
+    /// The most memory the caller's Android may have, in MiB. 0, the default, is automatic: the
+    /// service's default size. It takes effect
+    /// the next time Android starts.
+    #[prost(uint32, tag = "16")]
+    pub memory_limit_mb: u32,
     /// Whether the caller's Android takes adb connections: the service then listens on
     /// 127.0.0.1:adb_port and bridges each connection to the guest's adbd. Off by default, and
     /// the caller's own. It applies at once, without restarting Android.
@@ -1075,7 +1105,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 32, 33, 34, 28, 35, 36, 70, 71"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 32, 33, 34, 28, 35, 36, 70, 71, 37"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -1153,6 +1183,8 @@ pub mod request {
         WatchLog(super::WatchLog),
         #[prost(message, tag = "71")]
         CollectDiagnostics(super::CollectDiagnostics),
+        #[prost(message, tag = "37")]
+        StopApp(super::StopApp),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
