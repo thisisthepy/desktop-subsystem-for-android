@@ -60,7 +60,7 @@ use dsa_transport::{Connection, Connector, TransportError};
 use crate::accessibility::{
     AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, TreeUpdate,
 };
-use crate::apk::{self, InstallOutcome};
+use crate::apk::{self, InstallOutcome, InstalledPackage};
 use crate::files::{self, FileAction, FileTransfer};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{InputEvent, PointerEvent};
@@ -78,6 +78,9 @@ use crate::widgets::{
     WidgetPlacements, WidgetProvider, WidgetSize,
 };
 use dsa_protocol::control;
+
+/// How long the service waits for Android to say whether a package is installed.
+const PACKAGE_QUERY_WAIT: Duration = Duration::from_secs(10);
 
 /// How long the service waits for Android to list its widgets.
 const WIDGET_LIST_WAIT: Duration = Duration::from_secs(20);
@@ -238,6 +241,14 @@ pub trait UserAndroid: Send + Sync {
             "this Android does not install APKs".into(),
         ))
     }
+    /// What this Android has installed of `package`, if anything: its version and signing
+    /// certificates.
+    fn package_state(&self, package: &str) -> Result<Option<InstalledPackage>, TaskRequestError> {
+        let _ = package;
+        Err(TaskRequestError::Failed(
+            "this Android cannot say which apps it has installed".into(),
+        ))
+    }
     /// Watches a task's accessibility tree; Android reads it while any watch of the task
     /// lasts. `None` when this Android does not export its accessibility tree.
     fn watch_accessibility(&self, task_id: i32) -> Option<AccessibilityWatch> {
@@ -378,6 +389,9 @@ impl UserAndroid for Session {
             SessionError::InstallRefused(why) => InstallError::Refused(why),
             other => InstallError::Refused(format!("the APK did not reach Android: {other}")),
         })
+    }
+    fn package_state(&self, package: &str) -> Result<Option<InstalledPackage>, TaskRequestError> {
+        Session::package_state(self, package, PACKAGE_QUERY_WAIT).map_err(request_error)
     }
     fn watch_accessibility(&self, task_id: i32) -> Option<AccessibilityWatch> {
         Some(Session::watch_accessibility(self, task_id))
@@ -1756,6 +1770,29 @@ impl HostApiService {
         }
     }
 
+    fn package_state(&self, peer: &Peer, package: &str) -> response::Body {
+        if !apk::valid_package_name(package) {
+            return error(
+                ErrorCode::UnknownRequest,
+                format!(
+                    "{:?} is not a package name, such as com.example.notes",
+                    package.chars().take(80).collect::<String>()
+                ),
+            );
+        }
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        match android.package_state(package) {
+            Ok(installed) => {
+                response::Body::PackageState(InstalledPackage::to_wire(installed.as_ref()))
+            }
+            Err(TaskRequestError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(TaskRequestError::Failed(why)) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
     fn widget_providers(&self, peer: &Peer) -> response::Body {
         let android = match self.androids.android(&peer.user) {
             Ok(android) => android,
@@ -2107,6 +2144,7 @@ impl HostApiService {
             }
             Some(request::Body::ActOnNotification(act)) => self.act_on_notification(peer, act),
             Some(request::Body::ListWidgetProviders(_)) => self.widget_providers(peer),
+            Some(request::Body::GetPackage(get)) => self.package_state(peer, &get.package_name),
             Some(request::Body::AddWidget(add)) => self.add_widget(peer, add),
             Some(request::Body::RemoveWidget(remove)) => self.remove_widget(peer, remove.widget_id),
             Some(request::Body::ListWidgets(_)) => self.list_widgets(peer),
@@ -2149,6 +2187,7 @@ impl HostApiService {
                         | request::Body::WatchNotifications(_)
                         | request::Body::ActOnNotification(_)
                         | request::Body::ListWidgetProviders(_)
+                        | request::Body::GetPackage(_)
                         | request::Body::AddWidget(_)
                         | request::Body::RemoveWidget(_)
                         | request::Body::ListWidgets(_)
@@ -2937,6 +2976,25 @@ impl HostApiClient {
             key: key.clone(),
             action: kind as i32,
         }))
+    }
+
+    /// What the caller's Android has installed of `package`, if anything. Android must be
+    /// running.
+    pub fn package_state(
+        &mut self,
+        package: &str,
+    ) -> Result<Option<InstalledPackage>, ClientError> {
+        match self.exchange(
+            request::Body::GetPackage(types::GetPackage {
+                package_name: package.to_string(),
+            }),
+            self.timeout.max(PACKAGE_QUERY_WAIT + Duration::from_secs(5)),
+        )? {
+            response::Body::PackageState(state) => Ok(InstalledPackage::from_wire(state)),
+            _ => Err(ClientError::Malformed(
+                "expected what Android has of the package".into(),
+            )),
+        }
     }
 
     /// The widgets the apps in the caller's Android offer, in label order.

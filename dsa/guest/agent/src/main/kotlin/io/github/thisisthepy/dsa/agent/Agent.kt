@@ -9,7 +9,9 @@ import io.github.thisisthepy.dsa.agent.clipboard.ClipboardSync
 import io.github.thisisthepy.dsa.agent.clipboard.GuestClipboard
 import io.github.thisisthepy.dsa.agent.input.EditorConnection
 import io.github.thisisthepy.dsa.agent.install.ApkInstaller
+import io.github.thisisthepy.dsa.agent.install.PackageInfoPort
 import io.github.thisisthepy.dsa.agent.install.PackageInstallerPort
+import io.github.thisisthepy.dsa.agent.install.PackageQueries
 import io.github.thisisthepy.dsa.agent.input.InputInjector
 import io.github.thisisthepy.dsa.agent.input.InputMethodSetup
 import io.github.thisisthepy.dsa.agent.input.KeyInput
@@ -110,6 +112,7 @@ class Agent(
     clipboard: GuestClipboard = GuestClipboard.NONE,
     notifications: NotificationSource = NotificationSource.NONE,
     packageInstaller: PackageInstallerPort = PackageInstallerPort.NONE,
+    packages: PackageInfoPort = PackageInfoPort.NONE,
     widgets: WidgetPlatform = WidgetPlatform.NONE,
     widgetStore: WidgetStore = WidgetStore.memory(),
     accessibility: AccessibilitySource = AccessibilitySource.NONE,
@@ -176,6 +179,7 @@ class Agent(
         post = { work -> scheduler.post(work) },
         onInstalled = { requestAppsRefresh() },
     )
+    private val packageQueries = PackageQueries(packages, { frame -> channel.send(frame) }, log)
     private val widgetManager = WidgetManager(
         widgets,
         widgetStore,
@@ -353,6 +357,7 @@ class Agent(
         if (clipboardSync.handle(envelope)) return true
         if (notificationForwarder.handle(envelope)) return true
         if (apkInstaller.handle(envelope)) return true
+        if (packageQueries.handle(envelope)) return true
         when (envelope.bodyCase) {
             Envelope.BodyCase.KEY_EVENT -> try {
                 keys.handle(envelope.keyEvent)

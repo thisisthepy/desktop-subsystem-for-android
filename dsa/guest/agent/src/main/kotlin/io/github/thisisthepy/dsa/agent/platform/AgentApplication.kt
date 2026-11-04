@@ -71,6 +71,7 @@ class AgentApplication : Application() {
             clipboard = AndroidClipboard(this, log),
             notifications = AndroidNotifications(this, log),
             packageInstaller = AndroidPackageInstaller(this, log),
+            packages = AndroidPackageInfo(this),
             widgets = AndroidWidgets(this, log),
             widgetStore = AndroidWidgetStore(this),
             accessibility = AndroidAccessibilitySource(this, log),
