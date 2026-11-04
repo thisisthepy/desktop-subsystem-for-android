@@ -1,0 +1,66 @@
+<Page
+    x:Class="Dsa.Settings.Pages.LogsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:l="clr-namespace:Dsa.Settings">
+    <!-- Android's log as it comes. Android sends it only while this page is shown. -->
+    <Grid Margin="36,8,36,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0">
+            <TextBlock Text="{l:Text LogsTitle.Text}" Style="{StaticResource PageTitle}" />
+            <ui:Button Content="{l:Text LogsSaveButton.Content}" HorizontalAlignment="Right" VerticalAlignment="Top"
+                       Icon="{ui:SymbolIcon Archive24}" Click="OnSaveDiagnostics"
+                       IsEnabled="{Binding CanSave, Mode=OneWay}" />
+        </Grid>
+
+        <TextBlock Grid.Row="1" Text="{l:Text LogsNote.Text}" Style="{StaticResource Note}" TextWrapping="Wrap" />
+
+        <StackPanel Grid.Row="2">
+            <ui:InfoBar Title="{l:Text LogsErrorBar.Title}" Severity="Error" IsClosable="False"
+                        IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
+            <ui:InfoBar Title="{l:Text LogsStatusBar.Title}" Severity="Informational" IsClosable="False"
+                        IsOpen="{Binding HasStatus, Mode=OneWay}" Message="{Binding Status, Mode=OneWay}" />
+        </StackPanel>
+
+        <Grid Grid.Row="3" Margin="0,8,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <ui:TextBox Grid.Column="0" PlaceholderText="{l:Text LogsFilter.PlaceholderText}"
+                        Text="{Binding Filter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        Icon="{ui:SymbolIcon Filter24}" />
+            <ComboBox x:Name="PriorityBox" Grid.Column="1" Margin="8,0,0,0" MinWidth="140"
+                      SelectionChanged="OnPriorityChanged" />
+            <ToggleButton Grid.Column="2" Margin="8,0,0,0" MinWidth="110"
+                          IsChecked="{Binding Paused, Mode=TwoWay}" Content="{l:Text LogsPause.Content}" />
+        </Grid>
+
+        <Grid Grid.Row="4">
+            <ListBox x:Name="LinesList" ItemsSource="{Binding Lines, Mode=OneWay}"
+                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                     FontFamily="Cascadia Mono, Consolas" FontSize="12">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding Text, Mode=OneTime}" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+            <Border HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,12" Padding="12,6"
+                    CornerRadius="4" Background="{DynamicResource SolidBackgroundFillColorTertiaryBrush}"
+                    Visibility="{Binding Paused, Converter={StaticResource Visible}}">
+                <TextBlock Text="{Binding PausedText, Mode=OneWay}" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            </Border>
+        </Grid>
+    </Grid>
+</Page>

@@ -14,8 +14,83 @@ public interface IDsaCli
 }
 
 /// <summary>Runs dsa.exe as a hidden child process.</summary>
-public sealed class ProcessDsaCli : IDsaCli
+public sealed class ProcessDsaCli : IDsaCli, ILogStream
 {
+    /// <summary>Runs dsa with <paramref name="args"/> and gives each line it prints as it comes,
+    /// until it ends or <paramref name="cancel"/> stops it, which ends the process.</summary>
+    public async IAsyncEnumerable<string> LinesAsync(
+        IReadOnlyList<string> args,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancel)
+    {
+        var start = new ProcessStartInfo(_path)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+        foreach (var arg in args)
+        {
+            start.ArgumentList.Add(arg);
+        }
+        using var process = new Process { StartInfo = start };
+        try
+        {
+            process.Start();
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            throw new DsaException(Problem.CliMissing, $"{_path}: {e.Message}");
+        }
+        var error = process.StandardError.ReadToEndAsync(CancellationToken.None);
+        using var stop = cancel.Register(() =>
+        {
+            try
+            {
+                process.Kill();
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        });
+        while (!cancel.IsCancellationRequested)
+        {
+            string? line;
+            try
+            {
+                line = await process.StandardOutput.ReadLineAsync(cancel).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+                yield break;
+            }
+            if (line is null)
+            {
+                break;
+            }
+            yield return line;
+        }
+        if (cancel.IsCancellationRequested)
+        {
+            yield break;
+        }
+        await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(true);
+        if (process.ExitCode != 0)
+        {
+            var detail = (await error.ConfigureAwait(true)).Trim();
+            if (detail.StartsWith("dsa: ", StringComparison.Ordinal))
+            {
+                detail = detail[5..];
+            }
+            var problem = detail.Contains("cannot reach the DSA service", StringComparison.Ordinal)
+                ? Problem.ServiceUnreachable
+                : Problem.Refused;
+            throw new DsaException(problem, detail.Length > 0 ? detail : $"dsa ended with code {process.ExitCode}");
+        }
+    }
+
     private readonly string _path;
 
     public ProcessDsaCli(string path)

@@ -7,8 +7,9 @@ namespace Dsa.Settings;
 public partial class App : Application
 {
     internal static ITextSource Text { get; } = new ResourceText();
-    internal static DsaService Service { get; } =
-        new(new ProcessDsaCli(ProcessDsaCli.Locate(AppContext.BaseDirectory)));
+    private static readonly ProcessDsaCli Cli = new(ProcessDsaCli.Locate(AppContext.BaseDirectory));
+    internal static DsaService Service { get; } = new(Cli);
+    internal static LogViewModel Logs { get; } = new(Cli, Service, Text);
     internal static GeneralViewModel General { get; } = new(Service, Text);
     internal static SettingsViewModel Settings { get; } = new(Service, Text);
     internal static MemoryViewModel Memory { get; } = new(Service, Text);
