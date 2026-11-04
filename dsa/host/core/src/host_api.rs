@@ -870,8 +870,10 @@ impl HostApiService {
         store: Arc<dyn SettingsStore>,
         facts: ServiceFacts,
     ) -> HostApiService {
+        // The resize trace setting turns on the service's per-stage lines too.
+        let detailed = store.machine().resize_trace;
         self.settings = Some((store, facts));
-        self
+        self.with_resize_trace_detail(detailed)
     }
 
     /// Accepts connections until `stop` is set, serving each on its own thread. A failed
@@ -2337,9 +2339,11 @@ impl HostApiService {
             links_in_android: wanted.links_in_android,
             program_updates: wanted.program_updates,
             image_updates: wanted.image_updates,
+            input_trace: wanted.input_trace,
+            resize_trace: wanted.resize_trace,
         };
-        // The update settings apply to every user of the machine, so only an administrator
-        // may change them; the caller's own settings are theirs to change.
+        // The update and trace settings apply to every user of the machine, so only an
+        // administrator may change them; the caller's own settings are theirs to change.
         let machine = store.machine();
         let changed: Vec<&str> = [
             (
@@ -2350,6 +2354,8 @@ impl HostApiService {
                 "image updates",
                 wanted.image_updates != machine.image_updates,
             ),
+            ("input trace", wanted.input_trace != machine.input_trace),
+            ("resize trace", wanted.resize_trace != machine.resize_trace),
         ]
         .into_iter()
         .filter_map(|(name, changed)| changed.then_some(name))
@@ -2372,16 +2378,23 @@ impl HostApiService {
                     android.share_clipboard(settings.clipboard);
                     android.links_in_android(settings.links_in_android);
                 }
+                if settings.resize_trace != machine.resize_trace {
+                    *self.resize_trace.lock().unwrap_or_else(|e| e.into_inner()) =
+                        ResizeTrace::new(settings.resize_trace, Instant::now());
+                }
                 eprintln!(
                     "local API: {} changed the settings: render GPU {}, freeze {}, clipboard \
-                     {}, links in Android {}, program updates {}, image updates {}",
+                     {}, links in Android {}, program updates {}, image updates {}, input \
+                     trace {}, resize trace {}",
                     peer.user,
                     settings.render_gpu,
                     on_off(settings.freeze),
                     on_off(settings.clipboard),
                     on_off(settings.links_in_android),
                     on_off(settings.program_updates),
-                    on_off(settings.image_updates)
+                    on_off(settings.image_updates),
+                    on_off(settings.input_trace),
+                    on_off(settings.resize_trace)
                 );
                 response::Body::Settings(settings_to_wire(&settings, facts))
             }
@@ -2406,6 +2419,8 @@ fn settings_to_wire(settings: &Settings, facts: &ServiceFacts) -> types::Setting
         program_updates: settings.program_updates,
         image_updates: settings.image_updates,
         clipboard: settings.clipboard,
+        input_trace: settings.input_trace,
+        resize_trace: settings.resize_trace,
         program_updates_available: facts.program_updates_available,
         image_updates_available: facts.image_updates_available,
         version: facts.version.clone(),
@@ -2422,6 +2437,8 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
             clipboard: settings.clipboard,
             program_updates: settings.program_updates,
             image_updates: settings.image_updates,
+            input_trace: settings.input_trace,
+            resize_trace: settings.resize_trace,
         },
         facts: ServiceFacts {
             version: settings.version,

@@ -347,6 +347,15 @@ message PowerState {
   bool power_saver = 5;
 }
 
+// Host to guest: whether the host computer is short of memory. While it is, the guest gives
+// memory back the way a phone's low memory killer would, cheapest first: the agent ends the
+// cached app processes (apps the user is not using), and the control daemon then has the
+// guest drop its clean caches, so free page reporting returns the pages to the host. Sent
+// when it changes, and once after the agent connects while the host is short.
+message HostMemory {
+  bool low = 1;
+}
+
 // What a PowerHint is about.
 enum PowerHintKind {
   POWER_HINT_KIND_UNSPECIFIED = 0;
@@ -936,6 +945,7 @@ message Envelope {
     PowerState power_state = 41;
     PowerHint power_hint = 110;
     DeviceIdle device_idle = 42;
+    HostMemory host_memory = 43;
     InstallApk install_apk = 60;
     ApkChunk apk_chunk = 61;
     CancelInstall cancel_install = 62;

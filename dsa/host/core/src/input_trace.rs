@@ -23,12 +23,9 @@ use crate::resize_trace::utc_stamp;
 /// The word every trace line starts with, to find them in a log.
 pub const TAG: &str = "input-trace";
 
-/// The environment variable that turns the host's lines on: any value but empty or `0`.
+/// The environment variable that turns the host's lines on: any value but empty or `0`. The
+/// `input_trace` setting turns them on too.
 pub const DETAIL_ENV: &str = "DSA_INPUT_TRACE";
-
-/// The name of the file whose presence turns the host's lines on, in the DSA folder the
-/// process keeps its settings in.
-pub const DETAIL_FILE: &str = "input-trace";
 
 /// One trace line. `mono` is the time on the process's monotonic clock, `wall` the time since
 /// the Unix epoch, `host` the time on the host's shared monotonic clock (the platform reads

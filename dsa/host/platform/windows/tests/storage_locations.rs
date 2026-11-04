@@ -4,7 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use dsa_host_windows::paths::{
-    clear_tmp, migrate, migrate_user_disk, unique_name, MachineRoot, Moved, UserRoot,
+    clear_tmp, migrate, migrate_user_disk, old_trace_markers, unique_name, MachineRoot, Moved,
+    OldTraceMarkers, UserRoot,
 };
 use dsa_host_windows::uninstall::{remove_machine_files, remove_user_files};
 
@@ -254,6 +255,28 @@ fn fr19_uninstalling_leaves_only_the_users_android_disk() {
     std::fs::create_dir_all(empty.logs()).unwrap();
     remove_user_files(&empty, &programs);
     assert!(!empty.dir().exists(), "a folder with no disk goes entirely");
+}
+
+#[test]
+fn fr19_old_trace_switch_files_become_settings() {
+    let dir = scratch("markers");
+    let machine = MachineRoot::at(dir.join("machine"));
+    let user = UserRoot::in_local_app_data(&dir.join("local"));
+    std::fs::create_dir_all(machine.dir()).unwrap();
+    std::fs::create_dir_all(user.dir()).unwrap();
+    let mut markers = machine.old_trace_markers().to_vec();
+    markers.extend(user.old_trace_markers());
+    assert_eq!(old_trace_markers(&markers), OldTraceMarkers::default());
+
+    std::fs::write(&user.old_trace_markers()[0], b"").unwrap();
+    let old = old_trace_markers(&markers);
+    assert!(old.input_trace && !old.resize_trace);
+    assert_eq!(old.found, vec![user.old_trace_markers()[0].clone()]);
+
+    std::fs::write(&machine.old_trace_markers()[1], b"").unwrap();
+    let old = old_trace_markers(&markers);
+    assert!(old.input_trace && old.resize_trace);
+    assert_eq!(old.found.len(), 2);
 }
 
 #[test]

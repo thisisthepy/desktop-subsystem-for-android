@@ -1732,6 +1732,49 @@ fn fr10_the_power_hub_tells_every_session_and_each_new_one() {
     assert_eq!(hub.latest(), Some(PowerState::MAINS_ONLY));
 }
 
+fn host_memory(low: bool) -> Body {
+    Body::HostMemory(dsa_protocol::control::HostMemory { low })
+}
+
+#[test]
+fn nfr2_a_host_short_of_memory_tells_the_guest_when_it_changes_and_when_the_agent_connects() {
+    let hub = PowerHub::new();
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    let session = Arc::new(session);
+    session.windows_shown(true).unwrap();
+    // Short before the guest runs: told as soon as the agent connects.
+    hub.update_memory(true);
+    hub.attach(&session);
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(next_body(&mut agent), host_memory(true));
+    // The same word again is not news; the end of the shortage is.
+    hub.update_memory(true);
+    hub.update_memory(false);
+    assert_eq!(next_body(&mut agent), host_memory(false));
+    assert!(!hub.memory_low());
+    hub.update_memory(true);
+    assert_eq!(next_body(&mut agent), host_memory(true));
+}
+
+#[test]
+fn nfr2_the_host_is_short_of_memory_below_a_tenth_free_and_recovers_above_a_fifth() {
+    use dsa_host_core::power::MemoryPressure;
+    let total = 16 * 1024 * 1024;
+    let mut pressure = MemoryPressure::new();
+    assert!(!pressure.update(total, total / 2));
+    assert!(!pressure.update(total, total * 11 / 100));
+    assert!(pressure.update(total, total * 9 / 100));
+    // Between the two lines it stays as it was, so it does not flap.
+    assert!(pressure.update(total, total * 15 / 100));
+    assert!(!pressure.update(total, total * 21 / 100));
+    assert!(!pressure.update(total, total * 15 / 100));
+    // An unknown total changes nothing.
+    assert!(!pressure.update(0, 0));
+}
+
 /// An active session in Doze whose prerequisite stalls it soon after going missing.
 fn dozing_session_that_can_stall(
     freeze_after: Option<Duration>,

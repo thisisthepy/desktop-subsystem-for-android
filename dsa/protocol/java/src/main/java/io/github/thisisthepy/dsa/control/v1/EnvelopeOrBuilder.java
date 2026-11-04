@@ -360,6 +360,17 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.DeviceIdle getDeviceIdle();
 
   /**
+   * <code>.dsa.control.v1.HostMemory host_memory = 43;</code>
+   * @return Whether the hostMemory field is set.
+   */
+  boolean hasHostMemory();
+  /**
+   * <code>.dsa.control.v1.HostMemory host_memory = 43;</code>
+   * @return The hostMemory.
+   */
+  io.github.thisisthepy.dsa.control.v1.HostMemory getHostMemory();
+
+  /**
    * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
    * @return Whether the installApk field is set.
    */
