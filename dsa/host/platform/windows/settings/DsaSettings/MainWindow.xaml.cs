@@ -124,11 +124,23 @@ public partial class MainWindow : FluentWindow
             scroller.ScrollToVerticalOffset(scroller.VerticalOffset - e.Delta / 3.0);
             e.Handled = true;
         };
-        pane.AddHandler(UIElement.GotKeyboardFocusEvent, new KeyboardFocusChangedEventHandler((_, e) =>
+        // The focus can land on an item or on a part inside it; the whole item comes into view,
+        // once the layout has placed it.
+        Navigation.AddHandler(Keyboard.GotKeyboardFocusEvent, new KeyboardFocusChangedEventHandler((_, e) =>
         {
-            if (e.NewFocus is FrameworkElement focused && focused.IsDescendantOf(scroller))
+            if (e.NewFocus is not DependencyObject focused || !scroller.IsAncestorOf(focused))
             {
-                ScrollIntoView(scroller, focused);
+                return;
+            }
+            var item = focused;
+            while (item is not null and not NavigationViewItem)
+            {
+                item = VisualTreeHelper.GetParent(item);
+            }
+            if ((item ?? focused) is FrameworkElement shown)
+            {
+                Dispatcher.BeginInvoke(() => ScrollIntoView(scroller, shown),
+                    System.Windows.Threading.DispatcherPriority.Loaded);
             }
         }), true);
     }

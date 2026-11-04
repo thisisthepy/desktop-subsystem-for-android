@@ -319,6 +319,7 @@ jobs:
               Write-Host "Tab $($i + 1): focus on '$($focused.Current.Name)'"
               $about = Find-Named $window 'About'
               $reached = Test-InView $window $about
+              if ($about) { Write-Host "  About at $($about.Current.BoundingRectangle), offscreen $($about.Current.IsOffscreen); window $($window.Current.BoundingRectangle)" }
             }
             Save-WindowScreen $window "$PWD\screens\settings-$theme-short-pane-keyboard.png"
             if (-not $reached) { throw "Tab through the navigation pane does not bring About into view" }
