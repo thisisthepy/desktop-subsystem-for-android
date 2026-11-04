@@ -618,6 +618,116 @@ fn fr3_dsa_launch_and_dsa_tasks_are_parsed() {
 }
 
 #[test]
+fn nfr4_dsa_launch_can_wait_for_the_first_frame() {
+    let launch = parse(&args("launch com.android.settings --wait-first-frame --json")).unwrap();
+    assert_eq!(launch.command, Cmd::Launch);
+    assert!(launch.wait_first_frame);
+    assert!(launch.json);
+    assert!(!parse(&args("launch com.android.settings")).unwrap().wait_first_frame);
+    assert!(
+        parse(&args("status --wait-first-frame")).is_err(),
+        "only a launch has a first frame"
+    );
+}
+
+#[test]
+fn nfr4_the_first_frame_times_count_from_the_launch_request() {
+    use dsa_cli::{describe_first_frame, first_frame_json, FirstFrame};
+    let ms = Duration::from_millis;
+    let start = ms(10_000);
+    let frame = FirstFrame::since(
+        7,
+        start,
+        start + ms(12),
+        start + Duration::from_micros(845_260),
+        Some(start + ms(861)),
+    );
+    assert_eq!(frame.request, ms(12));
+    assert_eq!(
+        describe_first_frame("com.android.settings", &frame),
+        "com.android.settings (task 7): first frame presented after 845.3 ms, shown after \
+         861.0 ms; the launch request was answered after 12.0 ms"
+    );
+    let json = first_frame_json("com.android.settings", &frame);
+    assert_eq!(json["task_id"], 7);
+    assert_eq!(json["first_frame_ms"], 845.3);
+    assert_eq!(json["first_shown_ms"], 861.0);
+    assert_eq!(json["request_ms"], 12.0);
+
+    let unshown = FirstFrame::since(7, start, start, start + ms(5), None);
+    assert!(describe_first_frame("a.b", &unshown).contains("not known to be shown"));
+    assert!(first_frame_json("a.b", &unshown)["first_shown_ms"].is_null());
+    // A clock read before the start never makes a negative time.
+    assert_eq!(
+        FirstFrame::since(1, start, start, start - ms(1), None).presented,
+        Duration::ZERO
+    );
+}
+
+#[test]
+fn fr5_dsa_tap_names_the_app_and_the_point() {
+    let tap = parse(&args("tap com.android.settings 200 300 --json")).unwrap();
+    assert_eq!(tap.command, Cmd::Tap);
+    assert_eq!(tap.package.as_deref(), Some("com.android.settings"));
+    assert_eq!(tap.point, Some((200, 300)));
+    assert!(tap.json);
+    for wrong in [
+        "tap",
+        "tap com.android.settings",
+        "tap com.android.settings 200",
+        "tap com.android.settings 200 x",
+        "tap com.android.settings 200 -3",
+        "tap com.android.settings 1 2 3",
+    ] {
+        assert!(parse(&args(wrong)).is_err(), "{wrong}");
+    }
+}
+
+#[test]
+fn fr5_dsa_tap_presses_and_releases_in_the_apps_task_through_the_local_api() {
+    use dsa_host_core::host_api_conformance::sample_task;
+    use dsa_host_core::input::{buttons, PointerAction};
+    use dsa_host_core::tasks::TaskEvent;
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    assert!(dsa(&endpoint, "start").status.success());
+    let android = androids.of(&user).unwrap();
+    android.publish(TaskEvent::Updated(sample_task(3, "Old")));
+    let mut focused = sample_task(5, "Focused");
+    focused.focused = true;
+    android.publish(TaskEvent::Updated(focused));
+    android.publish(TaskEvent::Updated(sample_task(9, "Newest")));
+
+    let output = dsa(&endpoint, "tap com.example.app 200 300");
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).starts_with("Tapped task 5 of com.example.app at (200, 300)"),
+        "{}",
+        stdout(&output)
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while android.pointers.lock().unwrap().len() < 2 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let pointers = android.pointers.lock().unwrap().clone();
+    assert_eq!(pointers.len(), 2, "{pointers:?}");
+    assert_eq!(pointers[0].task_id, 5);
+    assert_eq!(pointers[0].action, PointerAction::Down);
+    assert_eq!(pointers[0].buttons, buttons::PRIMARY);
+    assert_eq!((pointers[0].x, pointers[0].y), (200.0, 300.0));
+    assert_eq!(pointers[1].action, PointerAction::Up);
+    assert_eq!(pointers[1].buttons, 0);
+
+    let outside = dsa(&endpoint, "tap com.example.app 5000 300");
+    assert_eq!(outside.status.code(), Some(1));
+    assert!(stderr(&outside).contains("outside"), "{}", stderr(&outside));
+    let missing = dsa(&endpoint, "tap com.example.none 1 1");
+    assert_eq!(missing.status.code(), Some(1));
+    assert!(stderr(&missing).contains("no task"), "{}", stderr(&missing));
+}
+
+#[test]
 fn nfr2_dsa_stop_app_names_the_app_to_stop() {
     let stop = parse(&args("stop-app com.example.music")).unwrap();
     assert_eq!(stop.command, Cmd::StopApp);

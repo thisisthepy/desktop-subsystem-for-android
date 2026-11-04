@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
 Measures the signed-in user's Android on this PC: idle memory, memory returned after a stop,
-idle CPU, and how long an app's window takes to show.
+idle CPU, how long an app's window takes to show its first frame, and how long a click takes
+to show.
 
 .DESCRIPTION
 Run it from a PowerShell 7 prompt as the user whose Android is measured. Some numbers need
@@ -17,9 +18,20 @@ build), so they can be recorded as they are. -Json prints the same as one JSON o
                  set, the window processes and the service. The sum is compared with 800 MB.
   -Part cpu      Samples the CPU time of the VM and of the DSA processes for -CpuMinutes
                  (10) while Android is Dozing, as a percentage of one logical core.
-  -Part window   For each -Package, with Android Dozing: the time from `dsa launch` to the
-                 app's window being visible. With -Cold, it also stops Android first and
-                 measures the start to Active, then the launch.
+  -Part window   For each -Package, with Android Dozing: the time from the launch request
+                 to the app's new window presenting its first frame and to that frame being
+                 shown on the screen, as `dsa launch --wait-first-frame` reads them from the
+                 window. With -Cold, it also stops Android first and measures the start to
+                 Active, then the launch, and their sum.
+  -Part click    Opens the first -Package and presses at -TapX, -TapY (Android display
+                 pixels in its task) -Repeat times with `dsa tap`, which sends the press
+                 through the local API: the mouse never moves and no other window gets
+                 input. Then reads the input trace with scripts/input-trace.py and reports,
+                 for each press, the time to the first app frame, to the first visible change
+                 around the press point, and to the next screen. The input trace must be on
+                 (`dsa settings set input-trace on` as an administrator, then reopen the
+                 app). With -Relaunch the app is stopped and opened again before each press,
+                 so a press that opens another screen is measured from the same screen.
   -Part return   Opens each -Package, stops Android, and measures how long the VM's memory
                  takes to go back to the host, and how much came back.
   -Part open     Opens the first -Package, leaves it untouched for a minute, then reads each
@@ -32,10 +44,11 @@ build), so they can be recorded as they are. -Json prints the same as one JSON o
 .EXAMPLE
 pwsh -File measure.ps1 -Part memory
 pwsh -File measure.ps1 -Part window -Package com.android.settings -Cold
+pwsh -File measure.ps1 -Part click -Package com.android.settings -TapX 300 -TapY 400 -Repeat 10 -Relaunch
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('all', 'memory', 'cpu', 'window', 'return', 'open', 'close')]
+    [ValidateSet('all', 'memory', 'cpu', 'window', 'return', 'open', 'close', 'click')]
     [string]$Part = 'all',
     [string]$Dsa = 'dsa',
     [string[]]$Package = @('com.android.settings'),
@@ -45,6 +58,14 @@ param(
     [switch]$Cold,
     [double]$ReturnTimeoutSeconds = 120,
     [switch]$Json,
+    # Where -Part click presses, in Android display pixels from the task's top left corner.
+    [int]$TapX = 200,
+    [int]$TapY = 300,
+    # How long -Part click leaves between presses, in milliseconds.
+    [int]$TapGapMs = 2000,
+    [switch]$Relaunch,
+    # The input trace merge tool -Part click runs.
+    [string]$InputTrace = (Join-Path $PSScriptRoot '../../../../../scripts/input-trace.py'),
     # Defines the functions and returns, for the tests.
     [switch]$FunctionsOnly
 )
@@ -96,6 +117,40 @@ function Get-Median([double[]]$Values) {
     $mid = [int][math]::Floor($sorted.Count / 2)
     if ($sorted.Count % 2) { return $sorted[$mid] }
     ($sorted[$mid - 1] + $sorted[$mid]) / 2
+}
+
+# The host's monotonic clock in milliseconds, as every DSA process logs it: the performance
+# counter's ticks over its frequency.
+function ConvertTo-HostMs([long]$Ticks, [long]$Frequency) {
+    if ($Ticks -le 0 -or $Frequency -le 0) { return 0.0 }
+    [double]([decimal]$Ticks * 1000 / [decimal]$Frequency)
+}
+
+# What `dsa launch --wait-first-frame --json` printed, as one launch's numbers. The shown
+# time stands in for the first frame when it is known, since that is when the user sees it.
+function Get-FirstFrameSummary($Frame, [double]$CommandMs) {
+    [ordered]@{
+        request_ms = $Frame.request_ms
+        first_frame_ms = $Frame.first_frame_ms
+        first_shown_ms = $Frame.first_shown_ms
+        seen_ms = if ($null -ne $Frame.first_shown_ms) { $Frame.first_shown_ms } else { $Frame.first_frame_ms }
+        command_ms = [math]::Round($CommandMs)
+    }
+}
+
+# The click numbers scripts/input-trace.py --json printed: each press's three times and the
+# median and 90th percentile of each.
+function Get-ClickSummary($Trace) {
+    $pick = { param($name) if ($Trace.$name) { [ordered]@{ count = $Trace.$name.count; median_ms = $Trace.$name.median; p90_ms = $Trace.$name.p90 } } else { $null } }
+    [ordered]@{
+        presses = @($Trace.clicks).Count
+        first_frame = & $pick 'first_frame'
+        first_visible_change = & $pick 'first_visible_change'
+        next_screen = & $pick 'next_screen'
+        clicks = @($Trace.clicks | ForEach-Object {
+            [ordered]@{ first_frame_ms = $_.first_frame; first_visible_change_ms = $_.first_visible_change; next_screen_ms = $_.next_screen }
+        })
+    }
 }
 
 if ($FunctionsOnly) { return }
@@ -233,39 +288,42 @@ function Measure-IdleCpu {
     }
 }
 
+# Launches the app and waits for its new window's first frame, then closes the window.
 function Measure-WindowShow([string]$PackageName) {
     $clock = [Diagnostics.Stopwatch]::StartNew()
-    Invoke-Dsa launch $PackageName | Out-Null
-    $launched = $clock.Elapsed.TotalMilliseconds
-    while ($clock.Elapsed.TotalSeconds -lt 30) {
-        $window = Get-AppWindowProcesses $PackageName | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-        if ($window) {
-            $shown = $clock.Elapsed.TotalMilliseconds
-            $state = Get-State
-            $null = $window.CloseMainWindow()
-            return [ordered]@{ launch_ms = [math]::Round($launched); window_ms = [math]::Round($shown); state_after = $state }
-        }
-        Start-Sleep -Milliseconds 10
-    }
-    throw "no window of $PackageName was shown within 30 seconds"
+    $frame = Get-DsaJson launch $PackageName --wait-first-frame --timeout 60
+    $summary = Get-FirstFrameSummary $frame $clock.Elapsed.TotalMilliseconds
+    $summary['state_after'] = Get-State
+    foreach ($process in Get-AppWindowProcesses $PackageName) { $null = $process.CloseMainWindow() }
+    $summary
 }
 
 function Measure-Windows {
     $results = [ordered]@{}
     foreach ($name in $Package) {
         $warm = @()
+        $runs = @()
         for ($i = 0; $i -lt $Repeat; $i++) {
             Wait-Dozing
-            $warm += [double](Measure-WindowShow $name).window_ms
+            $run = Measure-WindowShow $name
+            $runs += $run
+            $warm += [double]$run.seen_ms
         }
-        $entry = [ordered]@{ from_dozing_ms = $warm; from_dozing_median_ms = Get-Median $warm }
+        $entry = [ordered]@{
+            from_dozing = $runs
+            from_dozing_first_frame_shown_ms = $warm
+            from_dozing_median_ms = Get-Median $warm
+        }
         if ($Cold) {
             Write-Host 'stopping Android for a cold start'
             Invoke-Dsa stop --wait | Out-Null
             $clock = [Diagnostics.Stopwatch]::StartNew()
             Invoke-Dsa start --wait | Out-Null
-            $entry['cold_start_to_active_ms'] = [math]::Round($clock.Elapsed.TotalMilliseconds)
-            $entry['cold_first_window_ms'] = (Measure-WindowShow $name).window_ms
+            $toActive = $clock.Elapsed.TotalMilliseconds
+            $entry['cold_start_to_active_ms'] = [math]::Round($toActive)
+            $cold = Measure-WindowShow $name
+            $entry['cold_launch'] = $cold
+            $entry['cold_start_to_first_frame_shown_ms'] = [math]::Round($toActive + $cold.seen_ms)
         }
         $results[$name] = $entry
     }
@@ -366,9 +424,43 @@ function Measure-CloseApp {
     }
 }
 
+function Measure-Click {
+    if ((Get-State) -eq 'Stopped') { Invoke-Dsa start --wait | Out-Null }
+    $settings = Get-DsaJson settings
+    $traceOn = if ($settings.PSObject.Properties['input_trace']) { $settings.input_trace } else { $settings.settings.input_trace }
+    if (-not $traceOn) {
+        throw 'the input trace is off: run `dsa settings set input-trace on` as an administrator, close the app''s windows, and measure again'
+    }
+    if (-not (Test-Path $InputTrace)) { throw "scripts/input-trace.py is not at $InputTrace; pass -InputTrace" }
+    $name = $Package[0]
+    $after = ConvertTo-HostMs ([Diagnostics.Stopwatch]::GetTimestamp()) ([Diagnostics.Stopwatch]::Frequency)
+    $traced = 0
+    for ($i = 0; $i -lt $Repeat; $i++) {
+        if ($i -eq 0 -or $Relaunch) {
+            if ($Relaunch) { Invoke-Dsa stop-app $name | Out-Null; Start-Sleep -Seconds 2 }
+            if (-not (Get-AppWindowProcesses $name | Where-Object { $_.MainWindowHandle -ne 0 })) {
+                Get-DsaJson launch $name --wait-first-frame --timeout 60 | Out-Null
+            }
+            # The app settles after its first frame before it is pressed.
+            Start-Sleep -Seconds 3
+        }
+        $tap = Get-DsaJson tap $name $TapX $TapY
+        if ($tap.traced) { $traced++ }
+        Start-Sleep -Milliseconds $TapGapMs
+    }
+    $output = & uv run $InputTrace --json --after $after.ToString([Globalization.CultureInfo]::InvariantCulture) 2>$null
+    if ($LASTEXITCODE -ne 0) { throw "input-trace.py failed: $output" }
+    $summary = Get-ClickSummary (($output | Where-Object { $_ -is [string] }) -join "`n" | ConvertFrom-Json)
+    $summary['package'] = $name
+    $summary['point'] = "$TapX,$TapY"
+    $summary['presses_traced_by_the_window'] = "$traced of $Repeat"
+    $summary
+}
+
 $report = [ordered]@{ environment = Get-Environment }
 if ($Part -eq 'open') { $report['open_app'] = Measure-OpenApp }
 if ($Part -eq 'close') { $report['close_app'] = Measure-CloseApp }
+if ($Part -eq 'click') { $report['click'] = Measure-Click }
 if ($Part -in 'all', 'memory') { $report['idle_memory'] = Measure-IdleMemory }
 if ($Part -in 'all', 'cpu') { $report['idle_cpu'] = Measure-IdleCpu }
 if ($Part -in 'all', 'window') { $report['window_show'] = Measure-Windows }

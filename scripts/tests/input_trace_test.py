@@ -181,8 +181,48 @@ class ClickLatencyTest(unittest.TestCase):
         clicks = [trace.Click(self.line("app.pointer", 0.0, task="7"), float(v), float(v) * 5)
                   for v in range(1, 11)]
         report = trace.latency_report(clicks, [])
-        self.assertIn("feedback: 10 times, median", report)
+        self.assertIn("first frame: 10 times, median", report)
         self.assertIn("next screen: 10 times", report)
+        self.assertIn("first visible change: none", report)
+
+    def visible_clicks(self):
+        return self.clicks()[:4] + [
+            self.line("app.visible_change", 1070.0, task="7", present="15", frames="3"),
+            self.line("app.shown", 1074.0, task="8", present="15"),
+            self.line("app.shown", 1078.0, task="7", present="14"),
+            self.line("app.shown", 1090.0, task="7", present="15"),
+        ]
+
+    def test_fr5_the_first_visible_change_is_timed_where_its_present_was_shown(self):
+        [click] = trace.click_latencies(self.visible_clicks(), 1500.0)
+        self.assertAlmostEqual(click.feedback, 40.0)
+        self.assertAlmostEqual(click.visible, 90.0)
+
+    def test_fr5_a_visible_change_without_its_present_shown_takes_the_next_shown_frame(self):
+        lines = self.visible_clicks()
+        lines[4].fields["present"] = "-"
+        [click] = trace.click_latencies(lines, 1500.0)
+        self.assertAlmostEqual(click.visible, 78.0)
+        [alone] = trace.click_latencies(lines[:5], 1500.0)
+        self.assertAlmostEqual(alone.visible, 70.0)
+
+    def test_fr5_the_report_gives_both_the_first_frame_and_the_first_visible_change(self):
+        clicks = trace.click_latencies(self.visible_clicks(), 1500.0)
+        report = trace.latency_report(clicks, [])
+        self.assertIn("first frame 40.0 ms  first visible change 90.0 ms", report)
+        self.assertIn("first visible change: 1 times, median 90.0 ms", report)
+        data = trace.latency_json(clicks, [])
+        self.assertEqual(data["clicks"][0]["first_visible_change"], 90.0)
+        self.assertEqual(data["clicks"][0]["first_frame"], 40.0)
+        self.assertEqual(data["first_visible_change"]["median"], 90.0)
+        self.assertIsNone(data["next_screen"])
+
+    def test_fr5_a_press_injected_by_dsa_tap_is_a_press(self):
+        line = trace.parse_line(
+            "input-trace stage=app.pointer task=7 utc=2026-11-05T01:00:00.000Z mono=1.0 "
+            "host=100.000 phase=Down source=dsa-tap x=200 y=300"
+        )
+        self.assertIs(trace.is_press(line), True)
 
 
 if __name__ == "__main__":

@@ -153,13 +153,14 @@ path writes `input-trace stage=...` lines:
 
 | Stage | Where | Placed at |
 |---|---|---|
-| `app.pointer` | the app window host, when Windows hands it the press or release | `host=` |
+| `app.pointer` | the app window host, when Windows hands it the press or release, or when `dsa tap` says a press is coming (`source=dsa-tap`) | `host=` |
 | `agent.inject` | the agent, when the framework has taken the event | guest `mono=` |
 | `app.frame` | the agent, from the app's `gfxinfo framestats`: main thread `late`, `input`, `animation`, `traversal`, `record`; render thread `sync`, `issue`, `swap`, `dequeue`, `gpu` | its intended vsync |
 | `sf.frame` | the agent, from `dumpsys SurfaceFlinger --latency` of each of the app's layers: `desired`, `ready`, `actual` | `actual`, when SurfaceFlinger presented it |
 | `hwc.frame` | the hwcomposer, when it has composed and posted the task's frame | guest `mono=` |
 | `wm.frame` | the window manager, when the window host has copied the frame out | `host=` |
 | `app.present` | the window host, after its `Present` | `host=` |
+| `app.visible_change` | the window host, for the first frame after a press that changed enough of the 64-pixel square around the press point by enough to be seen (`changed=` is the share of its pixels), compared with what the square showed when the press came | `host=` |
 | `app.shown` | the window host, from the swap chain's frame statistics: the vertical blank the present was shown at | `vblank=` |
 | `clock` | the service, once a second: the guest's clock against the host's | |
 
@@ -196,7 +197,16 @@ To take a trace:
    `dsa logcat -d -b all` saved to a file.
    For each press and release it prints the stages that follow on the same task or app,
    until the next press or release, with the time since the press and the gap to the stage
-   before.
+   before. Then, for each press, the time to the first app frame, to the first visible
+   change around the press point, and to the next screen.
+
+To click without moving the mouse, `dsa tap <package> <x> <y>` presses at a point of the app's
+task through the local API, and `measure.ps1 -Part click` in `dsa/host/platform/windows/tools`
+does the clicks and step 5 itself.
+
+Whether the trace is on or not, each task window logs when it presented its first frame and
+when that frame was shown; `dsa launch <package> --wait-first-frame` prints both, from the
+launch request.
 
 Turn the trace off again with `dsa settings set input-trace off` and by removing the kernel
 command line setting. While on,

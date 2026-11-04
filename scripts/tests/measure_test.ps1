@@ -48,6 +48,26 @@ Check 'nfr1_without_a_vm_the_figure_is_incomplete' $over.complete $false
 Check 'nfr4_the_median_of_an_odd_count_is_the_middle' (Get-Median @(900, 300, 500)) 500
 Check 'nfr4_the_median_of_an_even_count_is_the_mean_of_the_middle_two' (Get-Median @(100, 400, 200, 300)) 250
 
+# nfr4: a launch is timed to its first frame as the window says it, shown when known.
+$frame = Get-FirstFrameSummary ([pscustomobject]@{ request_ms = 12.0; first_frame_ms = 845.3; first_shown_ms = 861.0 }) 900.4
+Check 'nfr4_the_first_frame_shown_is_what_the_user_sees' $frame.seen_ms 861.0
+Check 'nfr4_the_first_frame_presented_is_kept' $frame.first_frame_ms 845.3
+Check 'nfr4_the_whole_command_is_rounded' $frame.command_ms 900
+$unshown = Get-FirstFrameSummary ([pscustomobject]@{ request_ms = 12.0; first_frame_ms = 845.3; first_shown_ms = $null }) 900
+Check 'nfr4_without_a_shown_time_the_presented_time_stands_in' $unshown.seen_ms 845.3
+
+# fr5: the host clock in ms, as the DSA processes log it.
+Check 'fr5_the_host_clock_is_ticks_over_frequency_in_ms' (ConvertTo-HostMs 25000000 10000000) 2500
+Check 'fr5_no_ticks_is_zero' (ConvertTo-HostMs 0 10000000) 0
+
+# fr5: the click numbers input-trace.py printed.
+$trace = '{"clicks":[{"task":"7","host":1000.0,"first_frame":40.0,"first_visible_change":90.0,"next_screen":null}],"first_frame":{"count":1,"median":40.0,"p90":40.0},"first_visible_change":{"count":1,"median":90.0,"p90":90.0},"next_screen":null,"displayed":null}' | ConvertFrom-Json
+$clicks = Get-ClickSummary $trace
+Check 'fr5_each_press_is_counted' $clicks.presses 1
+Check 'fr5_the_first_frame_median_is_reported' $clicks.first_frame.median_ms 40.0
+Check 'fr5_the_first_visible_change_median_is_reported' $clicks.first_visible_change.median_ms 90.0
+Check 'fr5_a_number_no_press_had_is_null' $clicks.next_screen $null
+Check 'fr5_each_press_keeps_its_visible_change' $clicks.clicks[0].first_visible_change_ms 90.0
 if ($failures) {
     Write-Host "$failures checks failed"
     exit 1

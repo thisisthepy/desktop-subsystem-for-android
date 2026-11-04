@@ -59,7 +59,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::compositor::log::{note, CompositorLogger};
-use crate::compositor::present::{Gpu, WindowPresenter};
+use crate::compositor::log::{input_trace, input_trace_on};
+use crate::compositor::present::{self, Gpu, WindowPresenter};
+use crate::compositor::window_marks;
 
 use super::accessibility::{AccessibilityWindow, ApiConnect, WM_APP_ACCESSIBILITY};
 use super::ime::ImeWindow;
@@ -90,7 +92,7 @@ const WM_APP_QUIT: u32 = WM_APP + 2;
 const TICK_TIMER: usize = 1;
 const TICK_MILLIS: u32 = 200;
 
-const TASK_CLASS: &str = "DsaAppWindow";
+const TASK_CLASS: &str = window_marks::TASK_WINDOW_CLASS;
 const MESSAGE_CLASS: &str = "DsaAppWindowMessages";
 const TASK_STYLE: WINDOW_STYLE = WS_OVERLAPPEDWINDOW;
 // Without a redirection surface, everything in the client area comes from the visual.
@@ -367,8 +369,36 @@ unsafe fn window_data<'a>(hwnd: HWND) -> Option<&'a WindowData> {
     data.as_ref()
 }
 
-unsafe extern "system" fn task_window_proc(
-    hwnd: HWND,
+/// The registered message dsa tap sends before a press it injects through the local API.
+fn trace_press_message() -> u32 {
+    thread_local! {
+        static MESSAGE: u32 = window_marks::trace_press_message();
+    }
+    MESSAGE.with(|message| *message)
+}
+
+/// A press is coming at the point in lparam, in guest pixels, for the task in wparam.
+/// While the input trace is on, the press is traced as one that came through the window, and
+/// the window watches the pixels around it. Answers 1 when the window is the task's and
+/// traces it.
+unsafe fn trace_press(hwnd: HWND, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let Some(data) = window_data(hwnd) else {
+        return 0;
+    };
+    if wparam as i32 != data.task_id || !input_trace_on() {
+        return 0;
+    }
+    let (x, y) = window_marks::unpack_point(lparam);
+    input_trace(
+        "app.pointer",
+        data.task_id,
+        &format!("phase=Down source=dsa-tap x={x} y={y}"),
+    );
+    present::pressed(data.task_id, (x as f32, y as f32));
+    1
+}
+
+unsafe extern "system" fn task_window_proc(    hwnd: HWND,
     message: u32,
     wparam: WPARAM,
     lparam: LPARAM,
@@ -383,6 +413,9 @@ unsafe extern "system" fn task_window_proc(
         if let Some(result) = data.ime.handle(hwnd, message, wparam, lparam) {
             return result;
         }
+    }
+    if message == trace_press_message() {
+        return trace_press(hwnd, wparam, lparam);
     }
     match message {
         WM_NCCREATE => {
@@ -862,6 +895,7 @@ impl Ui {
             return;
         }
         super::pointer::deliver_contacts_at_once(hwnd);
+        window_marks::mark_task(hwnd as isize, task_id);
         let client = apply_size(hwnd, size);
         let presenter = match &self.setup.gpu {
             Some(gpu) => match WindowPresenter::new(

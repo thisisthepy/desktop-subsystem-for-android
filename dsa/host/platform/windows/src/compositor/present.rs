@@ -33,10 +33,18 @@
 //! While the input trace is on, each presenter also finds out when its presents reached the
 //! screen: it notes each present's count, reads the swapchain's frame statistics at the next
 //! present and at each tick, and logs `app.shown` with the vertical blank on the host clock
-//! for every present they show to be on the screen (see `PresentWatch`).
+//! for every present they show to be on the screen (see `PresentWatch`). After a traced press
+//! ([`pressed`]) it compares a small square of each frame around the press point with what
+//! was there when the press came, and logs `app.visible_change` for the first frame that
+//! changed it enough to be seen (see `visible_change`).
+//!
+//! Whether the trace is on or not, each presenter logs when its window presented its first
+//! frame and when that frame was shown, and says both on the window (`window_marks`), where
+//! `dsa launch --wait-first-frame` reads them.
 
 use std::ffi::c_void;
-use std::sync::{Arc, Condvar, Mutex};
+use std::collections::HashMap;
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::frame_buffers::{
@@ -46,6 +54,7 @@ use dsa_host_core::compositor::frame_buffers::{
 use dsa_host_core::compositor::present_watch::{FrameStatistics, PresentWatch};
 use dsa_host_core::compositor::resize_latency::ResizeLatency;
 use dsa_host_core::compositor::resize_sync::{self, frame_action, FrameAction, ResizeSync, Step};
+use dsa_host_core::compositor::visible_change::{self, area_around, Area, PressWatch, Verdict};
 use windows::core::{Interface, BOOL, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HMODULE, HWND, LUID};
 use windows::Win32::Graphics::Direct3D::{
@@ -77,9 +86,10 @@ use windows::Win32::Graphics::Dxgi::{
 use windows_numerics::Matrix3x2;
 
 use super::log::{
-    input_trace, input_trace_on, note, qpc_frequency, trace_detailed, trace_stage, trace_summary,
-    CompositorLogger,
+    host_clock, input_trace, input_trace_on, note, qpc_frequency, trace_detailed, trace_stage,
+    trace_summary, CompositorLogger,
 };
+use super::window_marks;
 use dsa_host_core::resize_trace::millis;
 
 /// How long a present waits for the GPU to finish reading the shared texture.
@@ -372,6 +382,46 @@ struct State {
     presents: PresentWatch,
     /// The swapchain gives no frame statistics; said once in the log.
     no_statistics: bool,
+    /// The present count of the window's first frame once it is presented; 0 when the
+    /// swapchain was made again before that frame was shown, so any later present counts.
+    first_frame: Option<u32>,
+    /// Whether the first frame is known to have reached the screen.
+    first_shown: bool,
+    /// While the input trace is on: a copy of the frame last presented, on the GPU, and its
+    /// size. What a press's area showed when the press came is read from it.
+    last_frame: Option<(ID3D11Texture2D, (u32, u32))>,
+    /// Where the area around a press is read back to the CPU.
+    readback: Option<ID3D11Texture2D>,
+    /// The press being watched for its first visible change, and when it came.
+    watch: Option<(PressWatch, Duration)>,
+}
+
+/// The presses each task's window has to watch, by task: the point in guest pixels and when
+/// the press came on the host clock. Filled from the window's thread, taken by the presenter.
+fn presses() -> &'static Mutex<HashMap<i32, ((f32, f32), Duration)>> {
+    static PRESSES: OnceLock<Mutex<HashMap<i32, ((f32, f32), Duration)>>> = OnceLock::new();
+    PRESSES.get_or_init(Mutex::default)
+}
+
+/// An area of a frame as the input trace writes it: `left,top,width x height`.
+fn describe_area(area: Area) -> String {
+    format!(
+        "{},{},{}x{}",
+        area.left,
+        area.top,
+        area.width(),
+        area.height()
+    )
+}
+
+/// A traced press came at `point`, in guest pixels, in the window of task `task_id`: its next
+/// frames are compared with what was on the screen until one visibly changes the area around
+/// the point. A press that comes before the last one's change was found replaces it.
+pub fn pressed(task_id: i32, point: (f32, f32)) {
+    presses()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(task_id, (point, host_clock()));
 }
 
 /// A size the window has asked the guest for and not yet taken.
@@ -392,6 +442,8 @@ const HOLD_FORGOTTEN: Duration = Duration::from_millis(500);
 /// Shows one task's frames in its window.
 pub struct WindowPresenter {
     task_id: i32,
+    /// The window, which says when its first frame was presented and shown.
+    hwnd: isize,
     gpu: Arc<Gpu>,
     state: Mutex<State>,
     /// The size of the latest frame that arrived, apart from the state so a window can wait
@@ -436,6 +488,7 @@ impl WindowPresenter {
         drop(dcomp);
         Ok(Arc::new(WindowPresenter {
             task_id,
+            hwnd,
             gpu,
             state: Mutex::new(State {
                 target,
@@ -453,6 +506,11 @@ impl WindowPresenter {
                 sync: ResizeSync::new(),
                 presents: PresentWatch::new(),
                 no_statistics: false,
+                first_frame: None,
+                first_shown: false,
+                last_frame: None,
+                readback: None,
+                watch: None,
             }),
             shown: Mutex::new((0, 0)),
             arrived: Condvar::new(),
@@ -676,6 +734,9 @@ impl WindowPresenter {
         let shown =
             self.present_locked(&mut state, &texture.texture, texture.size, region, stage)?;
         self.trace_frame_colour(&mut state, &texture.texture, region);
+        if !stage {
+            self.watch_press(&mut state, &texture.texture, region);
+        }
         state.sync.frame_arrived(region, Instant::now());
         if let Some(hold) = state.hold.as_mut() {
             hold.staged = stage;
@@ -717,6 +778,238 @@ impl WindowPresenter {
             Ok(None) => {}
             Err(why) => note(self.logger.as_deref(), &why),
         }
+    }
+
+    /// While the input trace is on, compares the frame just presented from `texture` (of
+    /// `region` pixels) around the last traced press with what was there when the press came,
+    /// and logs `app.visible_change` for the first frame that changed it visibly, or
+    /// `app.visible_change_none` when no frame did. Reads a small square back from the GPU
+    /// for each frame after a press, and keeps a GPU copy of the last frame meanwhile, which
+    /// is why only the trace does this.
+    fn watch_press(&self, state: &mut State, texture: &ID3D11Texture2D, region: (u32, u32)) {
+        if !input_trace_on() {
+            if state.last_frame.is_some() || state.watch.is_some() {
+                state.last_frame = None;
+                state.readback = None;
+                state.watch = None;
+            }
+            return;
+        }
+        let press = presses()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.task_id);
+        // SAFETY: plain COM calls on objects this presenter owns, and the immediate context
+        // under its lock.
+        if let Err(why) = unsafe { self.watch_press_locked(state, texture, region, press) } {
+            state.watch = None;
+            note(
+                self.logger.as_deref(),
+                &format!(
+                    "task {}: the input trace cannot compare frames around a press: {why}",
+                    self.task_id
+                ),
+            );
+        }
+    }
+
+    unsafe fn watch_press_locked(
+        &self,
+        state: &mut State,
+        texture: &ID3D11Texture2D,
+        region: (u32, u32),
+        press: Option<((f32, f32), Duration)>,
+    ) -> Result<(), String> {
+        if let Some((point, at)) = press {
+            state.watch = None;
+            let last = state.last_frame.clone();
+            match (area_around(point, region, visible_change::SIDE), last) {
+                (Some(area), Some((last, size))) if size == region => {
+                    let baseline = self.read_area(state, &last, area)?;
+                    state.watch = Some((PressWatch::new(area, baseline), at));
+                }
+                (area, _) => input_trace(
+                    "app.visible_change_none",
+                    self.task_id,
+                    if area.is_none() {
+                        "reason=press-outside-frame"
+                    } else {
+                        "reason=no-frame-of-this-size-before-press"
+                    },
+                ),
+            }
+        }
+        if let Some((mut watch, at)) = state.watch.take() {
+            let area = watch.area();
+            if region.0 >= area.right && region.1 >= area.bottom {
+                let pixels = self.read_area(state, texture, area)?;
+                let present = state
+                    .swapchain
+                    .as_ref()
+                    .and_then(|swapchain| swapchain.GetLastPresentCount().ok())
+                    .map(|count| count.to_string())
+                    .unwrap_or_else(|| "-".into());
+                let since = host_clock().saturating_sub(at);
+                match watch.frame(&pixels) {
+                    Verdict::Waiting => state.watch = Some((watch, at)),
+                    Verdict::Visible { frames, fraction } => input_trace(
+                        "app.visible_change",
+                        self.task_id,
+                        &format!(
+                            "frames={frames} changed={fraction:.3} present={present} \
+                             since_press={} area={}",
+                            millis(since),
+                            describe_area(area)
+                        ),
+                    ),
+                    Verdict::GaveUp { frames, largest } => input_trace(
+                        "app.visible_change_none",
+                        self.task_id,
+                        &format!(
+                            "reason=no-visible-change frames={frames} largest={largest:.3} \
+                             area={}",
+                            describe_area(area)
+                        ),
+                    ),
+                }
+            } else {
+                input_trace(
+                    "app.visible_change_none",
+                    self.task_id,
+                    "reason=frame-smaller-than-area",
+                );
+            }
+        }
+        self.keep_last_frame(state, texture, region)
+    }
+
+    /// Copies the frame in `texture`, of `region` pixels, on the GPU, for the next press.
+    unsafe fn keep_last_frame(
+        &self,
+        state: &mut State,
+        texture: &ID3D11Texture2D,
+        (width, height): (u32, u32),
+    ) -> Result<(), String> {
+        if width == 0 || height == 0 {
+            return Ok(());
+        }
+        if state
+            .last_frame
+            .as_ref()
+            .is_none_or(|(_, size)| *size != (width, height))
+        {
+            state.last_frame = None;
+            let desc = D3D11_TEXTURE2D_DESC {
+                Width: width,
+                Height: height,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Usage: D3D11_USAGE_DEFAULT,
+                BindFlags: 0,
+                CPUAccessFlags: 0,
+                MiscFlags: 0,
+            };
+            let mut made = None;
+            self.gpu
+                .device
+                .CreateTexture2D(&desc, None, Some(&mut made))
+                .map_err(|e| failed("creating the copy of the last frame", e))?;
+            if let Some(made) = made {
+                state.last_frame = Some((made, (width, height)));
+            }
+        }
+        let Some((last, _)) = &state.last_frame else {
+            return Ok(());
+        };
+        let context = self.gpu.context.lock().unwrap_or_else(|e| e.into_inner());
+        let whole = D3D11_BOX {
+            left: 0,
+            top: 0,
+            front: 0,
+            right: width,
+            bottom: height,
+            back: 1,
+        };
+        context.CopySubresourceRegion(
+            last,
+            0,
+            0,
+            0,
+            0,
+            texture,
+            0,
+            Some(&whole as *const _),
+        );
+        Ok(())
+    }
+
+    /// The pixels of `area` of `source`, as tightly packed RGBA rows. Waits for the GPU.
+    unsafe fn read_area(
+        &self,
+        state: &mut State,
+        source: &ID3D11Texture2D,
+        area: Area,
+    ) -> Result<Vec<u8>, String> {
+        if state.readback.is_none() {
+            let desc = D3D11_TEXTURE2D_DESC {
+                Width: visible_change::SIDE,
+                Height: visible_change::SIDE,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Usage: D3D11_USAGE_STAGING,
+                BindFlags: 0,
+                CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+                MiscFlags: 0,
+            };
+            self.gpu
+                .device
+                .CreateTexture2D(&desc, None, Some(&mut state.readback))
+                .map_err(|e| failed("creating the texture a press's area is read into", e))?;
+        }
+        let Some(readback) = &state.readback else {
+            return Err("no texture to read a press's area into".into());
+        };
+        let context = self.gpu.context.lock().unwrap_or_else(|e| e.into_inner());
+        let from = D3D11_BOX {
+            left: area.left,
+            top: area.top,
+            front: 0,
+            right: area.right,
+            bottom: area.bottom,
+            back: 1,
+        };
+        context.CopySubresourceRegion(
+            readback,
+            0,
+            0,
+            0,
+            0,
+            source,
+            0,
+            Some(&from as *const _),
+        );
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        context
+            .Map(readback, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+            .map_err(|e| failed("reading a press's area", e))?;
+        let row = (area.width() * 4) as usize;
+        let mut pixels = Vec::with_capacity(area.bytes());
+        for y in 0..area.height() as usize {
+            let start = (mapped.pData as *const u8).add(y * mapped.RowPitch as usize);
+            pixels.extend_from_slice(std::slice::from_raw_parts(start, row));
+        }
+        context.Unmap(readback, 0);
+        Ok(pixels)
     }
 
     /// The colour all the sample pixels of the frame in `texture` have, if they have one. Waits
@@ -895,8 +1188,10 @@ impl WindowPresenter {
                 .map_err(|e| failed("setting the size a task window shows", e))?;
         }
         let swapchain = swapchain.clone();
-        let tracing = input_trace_on();
-        if tracing {
+        // The statistics are read while the input trace is on, and until the first frame is
+        // known to be on the screen, for the window's first frame time.
+        let watching = input_trace_on() || !state.first_shown;
+        if watching {
             // What the presents before this one did, before this one changes the statistics.
             self.trace_shown(state);
         }
@@ -907,20 +1202,74 @@ impl WindowPresenter {
             .ok()
             .map_err(|e| failed("presenting a task window's frame", e))?;
         drop(context);
-        if tracing && !state.no_statistics {
-            if let Ok(count) = swapchain.GetLastPresentCount() {
-                state.presents.presented(count);
+        let mut count = None;
+        if watching && !state.no_statistics {
+            if let Ok(last) = swapchain.GetLastPresentCount() {
+                state.presents.presented(last);
+                count = Some(last);
             }
         }
         state.frame = (width, height);
+        if state.first_frame.is_none() {
+            state.first_frame = Some(count.unwrap_or(0));
+            self.first_frame_presented((width, height), count);
+        }
         Ok(new_size)
+    }
+
+    /// The window presented its first frame, of `size` pixels: said in the log, in the input
+    /// trace, and on the window for `dsa launch --wait-first-frame`.
+    fn first_frame_presented(&self, (width, height): (u32, u32), count: Option<u32>) {
+        let at = host_clock();
+        window_marks::mark_time(self.hwnd, window_marks::FIRST_FRAME_PROPERTY, at);
+        note(
+            self.logger.as_deref(),
+            &format!(
+                "task {}: the window presented its first frame ({width}x{height}) at host={:.3}",
+                self.task_id,
+                at.as_secs_f64() * 1000.0
+            ),
+        );
+        input_trace(
+            "app.first_frame",
+            self.task_id,
+            &format!(
+                "size={width}x{height} present={}",
+                count.map(|c| c.to_string()).unwrap_or_else(|| "-".into())
+            ),
+        );
+    }
+
+    /// The window's first frame reached the screen at the vertical blank `vblank`.
+    fn first_frame_shown(&self, present: u32, vblank: Duration, exact: bool) {
+        window_marks::mark_time(self.hwnd, window_marks::FIRST_SHOWN_PROPERTY, vblank);
+        note(
+            self.logger.as_deref(),
+            &format!(
+                "task {}: the window's first frame was shown at host={:.3}",
+                self.task_id,
+                vblank.as_secs_f64() * 1000.0
+            ),
+        );
+        input_trace(
+            "app.first_shown",
+            self.task_id,
+            &format!(
+                "present={present} vblank={:.3} exact={exact}",
+                vblank.as_secs_f64() * 1000.0
+            ),
+        );
     }
 
     /// When the input trace is on, logs `app.shown` for each present the swapchain's frame
     /// statistics show to have reached the screen since the last look. A swapchain without
     /// statistics is said once, and not asked again.
+    /// Until the window's first frame is known to be on the screen, it does the same with the
+    /// trace off, to say when that frame was shown.
     fn trace_shown(&self, state: &mut State) {
-        if !input_trace_on() || state.no_statistics || state.presents.pending() == 0 {
+        let tracing = input_trace_on();
+        let done = !tracing && state.first_shown;
+        if done || state.no_statistics || state.presents.pending() == 0 {
             return;
         }
         let Some(swapchain) = state.swapchain.clone() else {
@@ -954,6 +1303,16 @@ impl WindowPresenter {
             qpc_frequency(),
         );
         for present in shown {
+            let shows_first = state
+                .first_frame
+                .is_some_and(|first| present.present >= first);
+            if shows_first && !state.first_shown {
+                state.first_shown = true;
+                self.first_frame_shown(present.present, present.vblank, present.exact);
+            }
+            if !tracing {
+                continue;
+            }
             input_trace(
                 "app.shown",
                 self.task_id,
@@ -964,6 +1323,10 @@ impl WindowPresenter {
                     present.exact
                 ),
             );
+        }
+        if !tracing && state.first_shown {
+            // Nothing more is asked of the statistics until the trace is turned on.
+            state.presents.forget();
         }
     }
 
@@ -1040,6 +1403,10 @@ impl WindowPresenter {
             if remade {
                 // The old buffers' presents are not reported any more.
                 state.presents.forget();
+                if !state.first_shown && state.first_frame.is_some() {
+                    // The first frame's present went with them: the next one shown stands in.
+                    state.first_frame = Some(0);
+                }
             }
             state.buffers = Some(texture_size);
             // How long making or resizing the swapchain took, when it happened.

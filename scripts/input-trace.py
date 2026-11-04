@@ -1,13 +1,14 @@
 """Lays out each click's input trace on the host clock.
 
-    uv run scripts/input-trace.py [--no-guest] [log files or folders ...]
+    uv run scripts/input-trace.py [--no-guest | --guest] [--after <host ms>] [--json] [log files or folders ...]
 
 With no arguments it reads the host logs (%LOCALAPPDATA%\\DSA\\logs\\*.log), the service's logs
 (the logs folder of the machine's DSA folder, %ProgramData%\\DSA\\logs\\*.log unless another data
 folder was chosen at install), and Android's log, which holds the guest's stages: it runs
 `dsa logcat -d -b all`, which prints what Android's log holds now. Android keeps its log in
 memory only, so take the trace soon after the clicks. `--no-guest` skips Android's log; a file
-saved from `dsa logcat -d` can be named like any log file.
+saved from `dsa logcat -d` can be named like any log file. With log files or folders named,
+Android's log is read only with `--guest`.
 
 The trace is a setting: `dsa settings set input-trace on`, run as an administrator, turns it on
 for every DSA process that starts afterwards (`DSA_INPUT_TRACE=1` does it for one process).
@@ -24,18 +25,27 @@ same task or app until the next press or release, at most `--window` ms, in orde
 clock, with the gap to the stage before:
 
     app.pointer, agent.inject, app.frame (main and render thread stages), sf.frame,
-    hwc.frame, wm.frame, app.present, app.shown
+    hwc.frame, wm.frame, app.present, app.visible_change, app.shown
 
-After the stages it prints each press's two numbers, and their median and 90th percentile:
+After the stages it prints each press's three numbers, and their median and 90th percentile:
 
-- feedback: from the press to the first frame SurfaceFlinger presented for the app after it
-  (`sf.frame`; an app draws a new frame only when its content changed), as shown on the host
-  (the first `app.shown` of the task at or after it, or the frame itself without one);
+- first frame: from the press to the first frame SurfaceFlinger presented for the app after
+  it (`sf.frame`; an app draws a new frame only when its content changed), as shown on the
+  host (the first `app.shown` of the task at or after it, or the frame itself without one).
+  That frame is often a ripple too faint to see;
+- first visible change: from the press to the first frame the task's window found to change
+  the square around the press point enough to be seen (`app.visible_change`), as shown: the
+  `app.shown` of that present, else the first one at or after it;
 - next screen: from the press to the first frame of a layer that was not on screen before the
   press (a new activity's window), shown the same way.
 
 ActivityTaskManager's `Displayed <activity>: +N ms` lines in the logs are summed up beside
 them; they count from the activity's launch, not from the click.
+
+`--after` leaves out presses before a time on the host clock, in milliseconds, so a run's
+own clicks can be picked from logs that hold older ones. `--json` prints the click numbers
+as one JSON object instead of the report: `clicks` (each with `task`, `host`, `first_frame`,
+`first_visible_change` and `next_screen`, in ms or null) and the summaries.
 
 Times a stage is placed at: `app.frame` at its intended vsync, `sf.frame` when SurfaceFlinger
 presented it (`actual`), `app.shown` at the vertical blank it was shown at (`vblank`), and
@@ -64,6 +74,7 @@ STAGES = [
     "hwc.frame",
     "wm.frame",
     "app.present",
+    "app.visible_change",
     "app.shown",
 ]
 
@@ -263,8 +274,11 @@ def report(evts: list[Event]) -> str:
 @dataclass
 class Click:
     pointer: Line
+    # To the first app frame after the press, as shown.
     feedback: float | None
     next_screen: float | None
+    # To the first frame that changed the area around the press visibly, as shown.
+    visible: float | None = None
 
 
 def layer_name(line: Line) -> str:
@@ -273,9 +287,10 @@ def layer_name(line: Line) -> str:
 
 
 def click_latencies(lines: list[Line], window_ms: float) -> list[Click]:
-    """For each press: the time to the first frame the app presented after it (the first visible
-    feedback) and to the first frame of a layer not seen before it (the next screen), each
-    taken where the host showed it. The release in between does not end the search."""
+    """For each press: the time to the first frame the app presented after it, to the first
+    frame the window found to visibly change the area around the press, and to the first frame
+    of a layer not seen before it (the next screen), each taken where the host showed it. The
+    release in between does not end the search."""
     placed = sorted(lines, key=lambda l: (l.host, STAGES.index(l.stage)))
     clicks = []
     for pointer in placed:
@@ -294,9 +309,22 @@ def click_latencies(lines: list[Line], window_ms: float) -> list[Click]:
                     return line.host - pointer.host
             return frame.host - pointer.host
 
+        def change_shown(change: Line | None) -> float | None:
+            if change is None:
+                return None
+            present = change.fields.get("present")
+            mine = [l for l in after if l.stage == "app.shown" and l.task == change.task]
+            same = next((l for l in mine if present and l.fields.get("present") == present), None)
+            later = next((l for l in mine if l.host >= change.host), None)
+            chosen = same or later
+            return (chosen.host if chosen else change.host) - pointer.host
+
         first = frames[0] if frames else None
         new = next((f for f in frames if layer_name(f) not in seen), None)
-        clicks.append(Click(pointer, shown(first), shown(new)))
+        change = next(
+            (l for l in after if l.stage == "app.visible_change" and l.task == pointer.task), None
+        )
+        clicks.append(Click(pointer, shown(first), shown(new), change_shown(change)))
     return clicks
 
 
@@ -315,22 +343,55 @@ def displayed_ms(texts: list[str]) -> list[float]:
     return result
 
 
+def summaries(clicks: list[Click], displayed: list[float]) -> list[tuple[str, list[float]]]:
+    """Each number's times, without the clicks that have none."""
+    named = [("first frame", [c.feedback for c in clicks]),
+             ("first visible change", [c.visible for c in clicks]),
+             ("next screen", [c.next_screen for c in clicks]),
+             ("Displayed", displayed)]
+    return [(name, [v for v in values if v is not None]) for name, values in named]
+
+
 def latency_report(clicks: list[Click], displayed: list[float]) -> str:
     out = ["click latency (from the press, on the host clock)"]
+
+    def ms(value: float | None) -> str:
+        return "-" if value is None else f"{value:.1f}"
+
     for c in clicks:
-        fb = "-" if c.feedback is None else f"{c.feedback:.1f}"
-        ns = "-" if c.next_screen is None else f"{c.next_screen:.1f}"
-        out.append(f"  task={c.pointer.task} host={c.pointer.host:.3f}  feedback {fb} ms  next screen {ns} ms")
-    for name, values in [("feedback", [c.feedback for c in clicks]),
-                         ("next screen", [c.next_screen for c in clicks]),
-                         ("Displayed", displayed)]:
-        values = [v for v in values if v is not None]
+        out.append(f"  task={c.pointer.task} host={c.pointer.host:.3f}  first frame {ms(c.feedback)} ms  "
+                   f"first visible change {ms(c.visible)} ms  next screen {ms(c.next_screen)} ms")
+    for name, values in summaries(clicks, displayed):
         if values:
             out.append(f"{name}: {len(values)} times, median {percentile(values, 0.5):.1f} ms, "
                        f"p90 {percentile(values, 0.9):.1f} ms")
         else:
             out.append(f"{name}: none")
     return "\n".join(out)
+
+
+def latency_json(clicks: list[Click], displayed: list[float]) -> dict:
+    """The click numbers as `--json` prints them."""
+    result: dict = {
+        "clicks": [
+            {
+                "task": c.pointer.task,
+                "host": c.pointer.host,
+                "first_frame": c.feedback,
+                "first_visible_change": c.visible,
+                "next_screen": c.next_screen,
+            }
+            for c in clicks
+        ]
+    }
+    for name, values in summaries(clicks, displayed):
+        key = name.lower().replace(" ", "_")
+        result[key] = (
+            {"count": len(values), "median": percentile(values, 0.5), "p90": percentile(values, 0.9)}
+            if values
+            else None
+        )
+    return result
 
 
 def machine_root() -> str:
@@ -422,6 +483,18 @@ def main(argv: list[str] | None = None) -> int:
         help="do not read Android's log with `dsa logcat -d`",
     )
     parser.add_argument(
+        "--guest",
+        action="store_true",
+        help="read Android's log with `dsa logcat -d` even when log files are named",
+    )
+    parser.add_argument(
+        "--after",
+        type=float,
+        default=None,
+        help="leave out presses before this time on the host clock, in ms",
+    )
+    parser.add_argument("--json", action="store_true", help="print the click numbers as JSON")
+    parser.add_argument(
         "--window",
         type=float,
         default=1500.0,
@@ -430,7 +503,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     files = log_files(args.paths or default_paths())
     lines = read(files)
-    if not args.paths and not args.no_guest:
+    if (args.guest or not args.paths) and not args.no_guest:
         lines += guest_lines()
     clock = Clock(lines)
     if not clock.pairings:
@@ -440,8 +513,16 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
     placed = place(lines, clock)
+    clicks = click_latencies(placed, args.window)
+    if args.after is not None:
+        clicks = [c for c in clicks if c.pointer.host >= args.after]
+    if args.json:
+        import json
+
+        print(json.dumps(latency_json(clicks, displayed_ms(DISPLAYED))))
+        return 0
     print(report(events(placed, args.window)))
-    print(latency_report(click_latencies(placed, args.window), displayed_ms(DISPLAYED)))
+    print(latency_report(clicks, displayed_ms(DISPLAYED)))
     return 0
 
 

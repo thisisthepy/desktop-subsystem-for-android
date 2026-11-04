@@ -15,8 +15,8 @@ use std::sync::mpsc::Sender;
 
 use crate::compositor::log::{input_trace, input_trace_on};
 use dsa_host_core::input::{
-    buttons, Capture, ContactPhase, InputEvent, MouseButton, PointerMapper, PointerTool,
-    WindowGeometry, WindowInput,
+    buttons, Capture, ContactPhase, InputEvent, MouseButton, PointerAction, PointerMapper,
+    PointerTool, WindowGeometry, WindowInput,
 };
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
@@ -418,6 +418,11 @@ impl PointerWindow {
             None => {}
         }
         for event in mapped.events {
+            if event.action == PointerAction::Down && input_trace_on() {
+                // The window watches the pixels around a traced press for its first visible
+                // change.
+                crate::compositor::present::pressed(self.task_id, (event.x, event.y));
+            }
             // The sender ends only when the compositor stops; input then has nowhere to go.
             let _ = self.events.send(InputEvent::Pointer(event));
         }

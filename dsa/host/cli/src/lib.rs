@@ -6,7 +6,8 @@
 //! dsa stop [--wait]
 //! dsa freeze
 //! dsa update [--wait]
-//! dsa launch <package>
+//! dsa launch <package> [--wait-first-frame]
+//! dsa tap <package> <x> <y>
 //! dsa stop-app <package>
 //! dsa install <file.apk> [--progress]
 //! dsa apk-info <file.apk>
@@ -26,6 +27,21 @@
 //!
 //! `dsa launch` starts an app in a window of its own, named by its package (such as
 //! `com.android.settings`). `dsa tasks` lists the app tasks Android shows as windows.
+//!
+//! `dsa launch --wait-first-frame` (Windows) waits until the app's new window has presented
+//! its first frame and that frame has reached the screen, and prints how long each took from
+//! the launch request, in milliseconds on the host clock. With `--json` it prints
+//! `package`, `task_id`, `request_ms` (the launch request's answer), `first_frame_ms`
+//! and `first_shown_ms` (null when the window's swapchain does not say when its frames are
+//! shown). It counts only a window opened after the command started, so close the app's
+//! window first.
+//!
+//! `dsa tap <package> <x> <y>` presses and releases the primary button at a point of the
+//! app's task (its focused task, else its newest), in Android display pixels from the task's
+//! top left corner. The press goes to Android through the local API, so it never moves the
+//! mouse or reaches another window. While the input trace is on, the app's window is told of
+//! the press first (Windows), so the trace has it and the window watches for its first
+//! visible change. With `--json` it prints `task_id`, `x`, `y` and `traced`.
 //!
 //! `dsa install` installs an APK from this computer in Android, starting Android first when it
 //! is not running, and says how it went: the app's package once it is installed, or the reason
@@ -136,11 +152,13 @@ use dsa_host_core::files::{FileAction, FileTransfer};
 use dsa_host_core::host_api::{ClientError, HostApiClient, SettingsReport, Status, TaskList};
 use dsa_host_core::memory::MemorySnapshot;
 use dsa_host_core::session::SessionState;
+use dsa_host_core::tasks::Task;
 use dsa_host_core::widgets::{Widget, WidgetEvent, WidgetProvider};
 use dsa_transport::Connector;
 use serde_json::{json, Value};
 
-pub const USAGE: &str = "usage: dsa <status | start | stop | freeze | update | launch <package> | stop-app <package> | \
+pub const USAGE: &str = "usage: dsa <status | start | stop | freeze | update | \
+     launch <package> [--wait-first-frame] | tap <package> <x> <y> | stop-app <package> | \
      install <file.apk> [--progress] | apk-info <file.apk> | open <file> | share <file> | \
      tasks | settings [set <name> <value>] | memory | gpus | \
      widgets [list | add <provider> | remove <id> | watch] | \
@@ -160,6 +178,8 @@ pub enum Command {
     Update,
     /// Start an app in a window of its own; the package is in [`Invocation::package`].
     Launch,
+    /// Press and release at [`Invocation::point`] in a task of [`Invocation::package`].
+    Tap,
     StopApp,
     /// Install an APK; the file is in [`Invocation::file`].
     Install,
@@ -344,6 +364,11 @@ pub struct Invocation {
     pub dump: bool,
     /// Where `dsa logs collect` saves the archive.
     pub output: Option<std::path::PathBuf>,
+    /// `dsa launch --wait-first-frame`: wait for the new window's first frame and say when it
+    /// came.
+    pub wait_first_frame: bool,
+    /// Where `dsa tap` presses, in Android display pixels from the task's top left corner.
+    pub point: Option<(u32, u32)>,
 }
 
 /// Whether `name` can be an Android package name: dot-separated parts of letters, digits
@@ -371,6 +396,8 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut tags = Vec::new();
     let mut dump = false;
     let mut output = None;
+    let mut wait_first_frame = false;
+    let mut coordinates: Vec<u32> = Vec::new();
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -395,7 +422,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             spec if command == Some(Command::Logcat) && !spec.starts_with('-') => {
                 tags.push(dsa_host_core::guest_log::LogFilter::parse_spec(spec)?);
             }
-            "status" | "start" | "stop" | "freeze" | "update" | "launch" | "stop-app"
+            "status" | "start" | "stop" | "freeze" | "update" | "launch" | "tap" | "stop-app"
             | "install" | "apk-info" | "open" | "share" | "tasks" | "settings" | "memory"
             | "gpus" | "widgets"
                 if command.is_none() =>
@@ -406,6 +433,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                     "freeze" => Command::Freeze,
                     "update" => Command::Update,
                     "launch" => Command::Launch,
+                    "tap" => Command::Tap,
                     "stop-app" => Command::StopApp,
                     "install" => Command::Install,
                     "apk-info" => Command::ApkInfo,
@@ -459,7 +487,18 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             }
             "--json" => json = true,
             "--progress" if command == Some(Command::Install) => progress = true,
-            name if matches!(command, Some(Command::Launch | Command::StopApp))
+            "--wait-first-frame" if command == Some(Command::Launch) => wait_first_frame = true,
+            number if command == Some(Command::Tap)
+                && package.is_some()
+                && coordinates.len() < 2
+                && !number.starts_with('-') =>
+            {
+                let value: u32 = number
+                    .parse()
+                    .map_err(|_| format!("a point is two whole numbers, not {number:?}"))?;
+                coordinates.push(value);
+            }
+            name if matches!(command, Some(Command::Launch | Command::Tap | Command::StopApp))
                 && package.is_none()
                 && !name.starts_with('-') =>
             {
@@ -544,6 +583,16 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
              {USAGE}"
         ));
     }
+    if command == Command::Tap && (package.is_none() || coordinates.len() != 2) {
+        return Err(format!(
+            "dsa tap needs the app's package and the point to press, such as \
+             dsa tap com.android.settings 200 300\n{USAGE}"
+        ));
+    }
+    let point = match coordinates[..] {
+        [x, y] if command == Command::Tap => Some((x, y)),
+        _ => None,
+    };
     Ok(Invocation {
         command,
         wait,
@@ -562,6 +611,8 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         log_filter,
         dump,
         output,
+        wait_first_frame,
+        point,
     })
 }
 
@@ -1504,6 +1555,214 @@ fn open_file(
     ))
 }
 
+/// The task of `package` that `dsa tap` presses in: its focused task, else its newest.
+pub fn tap_task<'a>(list: &'a TaskList, package: &str) -> Option<&'a Task> {
+    let mut tasks = list
+        .tasks
+        .iter()
+        .filter(|task| task.package_name == package);
+    let newest = tasks.clone().max_by_key(|task| task.task_id);
+    tasks.find(|task| task.focused).or(newest)
+}
+
+/// How long `dsa tap` holds the button down: about as long as a quick click.
+const TAP_HOLD: Duration = Duration::from_millis(60);
+
+/// Presses and releases at the invocation's point in a task of its package, through the local
+/// API. The window is told first, so the input trace has the press.
+fn tap(invocation: &Invocation, mut client: HostApiClient) -> Result<String, String> {
+    use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
+    let package = invocation.package.as_deref().unwrap_or_default();
+    let (x, y) = invocation.point.unwrap_or_default();
+    let list = client.tasks().map_err(|e| e.to_string())?;
+    let Some(task) = tap_task(&list, package) else {
+        return Err(format!(
+            "{package} has no task in Android; dsa launch {package} opens one"
+        ));
+    };
+    let (width, height) = (task.bounds.width(), task.bounds.height());
+    if width > 0 && height > 0 && (x >= width || y >= height) {
+        return Err(format!(
+            "({x}, {y}) is outside task {} of {package}, which is {width}x{height} pixels",
+            task.task_id
+        ));
+    }
+    let task_id = task.task_id;
+    let traced = trace_press(task_id, (x, y));
+    let mut stream = client.stream_input().map_err(|e| e.to_string())?;
+    let at = (x as f32, y as f32);
+    let mut down = PointerEvent::new(task_id, PointerAction::Down, PointerTool::Mouse, at);
+    down.buttons = buttons::PRIMARY;
+    down.pressure = 1.0;
+    stream.send(&down).map_err(|e| e.to_string())?;
+    thread::sleep(TAP_HOLD);
+    let up = PointerEvent::new(task_id, PointerAction::Up, PointerTool::Mouse, at);
+    stream.send(&up).map_err(|e| e.to_string())?;
+    Ok(if invocation.json {
+        json!({ "task_id": task_id, "x": x, "y": y, "traced": traced }).to_string()
+    } else {
+        format!(
+            "Tapped task {task_id} of {package} at ({x}, {y}){}",
+            if traced { ", traced" } else { "" }
+        )
+    })
+}
+
+/// Tells the task's window that a press is coming, for the input trace. Whether it took it.
+#[cfg(windows)]
+fn trace_press(task_id: i32, point: (u32, u32)) -> bool {
+    dsa_host_windows::compositor::window_marks::trace_press(task_id, point)
+}
+
+#[cfg(not(windows))]
+fn trace_press(_task_id: i32, _point: (u32, u32)) -> bool {
+    false
+}
+
+/// When a launched app's window showed its first frame, from the launch request.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FirstFrame {
+    pub task_id: i32,
+    /// From the request to the service's answer.
+    pub request: Duration,
+    /// From the request to the window presenting its first frame.
+    pub presented: Duration,
+    /// From the request to the vertical blank that frame was shown at, when known.
+    pub shown: Option<Duration>,
+}
+
+impl FirstFrame {
+    /// The times, each on the host clock, as times from the request at `start`.
+    pub fn since(
+        task_id: i32,
+        start: Duration,
+        answered: Duration,
+        presented: Duration,
+        shown: Option<Duration>,
+    ) -> FirstFrame {
+        FirstFrame {
+            task_id,
+            request: answered.saturating_sub(start),
+            presented: presented.saturating_sub(start),
+            shown: shown.map(|shown| shown.saturating_sub(start)),
+        }
+    }
+}
+
+/// A time in milliseconds, to a tenth.
+fn tenths_ms(time: Duration) -> f64 {
+    (time.as_secs_f64() * 10_000.0).round() / 10.0
+}
+
+/// What `dsa launch --wait-first-frame` prints.
+pub fn describe_first_frame(package: &str, frame: &FirstFrame) -> String {
+    let shown = match frame.shown {
+        Some(shown) => format!("shown after {:.1} ms", tenths_ms(shown)),
+        None => "not known to be shown (the window's swapchain gives no frame statistics)".into(),
+    };
+    format!(
+        "{package} (task {}): first frame presented after {:.1} ms, {shown}; the launch \
+         request was answered after {:.1} ms",
+        frame.task_id,
+        tenths_ms(frame.presented),
+        tenths_ms(frame.request)
+    )
+}
+
+/// What `dsa launch --wait-first-frame --json` prints.
+pub fn first_frame_json(package: &str, frame: &FirstFrame) -> Value {
+    json!({
+        "package": package,
+        "task_id": frame.task_id,
+        "request_ms": tenths_ms(frame.request),
+        "first_frame_ms": tenths_ms(frame.presented),
+        "first_shown_ms": frame.shown.map(tenths_ms),
+    })
+}
+
+/// How often `dsa launch --wait-first-frame` asks the service for the tasks.
+#[cfg(windows)]
+const TASK_POLL: Duration = Duration::from_millis(100);
+
+/// How long `dsa launch --wait-first-frame` waits for a presented frame to be said to be shown.
+#[cfg(windows)]
+const SHOWN_WAIT: Duration = Duration::from_secs(2);
+
+/// Launches `package` and waits until a window of it opened after this started has presented
+/// its first frame and that frame was shown.
+#[cfg(windows)]
+fn launch_and_wait_first_frame(
+    invocation: &Invocation,
+    mut client: HostApiClient,
+    package: &str,
+) -> Result<String, String> {
+    use dsa_host_windows::compositor::log::host_clock;
+    use dsa_host_windows::compositor::window_marks::{
+        read_time, task_windows, FIRST_FRAME_PROPERTY, FIRST_SHOWN_PROPERTY,
+    };
+    let before: Vec<isize> = task_windows().into_iter().map(|(hwnd, _)| hwnd).collect();
+    let start = host_clock();
+    client.launch_app(package).map_err(|e| e.to_string())?;
+    let answered = host_clock();
+    let deadline = Instant::now() + invocation.timeout;
+    let mut tasks: Vec<i32> = Vec::new();
+    let mut listed: Option<Instant> = None;
+    let mut presented_at: Option<Instant> = None;
+    loop {
+        if listed.is_none_or(|at| at.elapsed() >= TASK_POLL) {
+            tasks = client
+                .tasks()
+                .map_err(|e| e.to_string())?
+                .tasks
+                .iter()
+                .filter(|task| task.package_name == package)
+                .map(|task| task.task_id)
+                .collect();
+            listed = Some(Instant::now());
+        }
+        for (hwnd, task_id) in task_windows() {
+            if before.contains(&hwnd) || !tasks.contains(&task_id) {
+                continue;
+            }
+            let Some(presented) = read_time(hwnd, FIRST_FRAME_PROPERTY) else {
+                continue;
+            };
+            if presented < start {
+                continue;
+            }
+            let shown = read_time(hwnd, FIRST_SHOWN_PROPERTY);
+            let waited = presented_at.get_or_insert_with(Instant::now).elapsed();
+            if shown.is_some() || waited >= SHOWN_WAIT {
+                let frame = FirstFrame::since(task_id, start, answered, presented, shown);
+                return Ok(if invocation.json {
+                    first_frame_json(package, &frame).to_string()
+                } else {
+                    describe_first_frame(package, &frame)
+                });
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "no new window of {package} presented a frame within {} seconds",
+                invocation.timeout.as_secs()
+            ));
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[cfg(not(windows))]
+fn launch_and_wait_first_frame(
+    _invocation: &Invocation,
+    _client: HostApiClient,
+    package: &str,
+) -> Result<String, String> {
+    Err(format!(
+        "dsa launch {package} --wait-first-frame needs the Windows host, whose windows say \
+         when their first frame came"
+    ))
+}
+
 /// Starts this session's window manager when it is not running, as opening an app does.
 #[cfg(windows)]
 fn ensure_window_manager() -> Result<(), String> {
@@ -1567,9 +1826,13 @@ pub fn run_with_starter(
         Command::Update => return update(invocation, client, connector),
         Command::Launch => {
             let package = invocation.package.as_deref().unwrap_or_default();
+            if invocation.wait_first_frame {
+                return launch_and_wait_first_frame(invocation, client, package);
+            }
             client.launch_app(package).map_err(|e| e.to_string())?;
             return Ok(format!("Launching {package}"));
         }
+        Command::Tap => return tap(invocation, client),
         Command::StopApp => {
             let package = invocation.package.as_deref().unwrap_or_default();
             client.stop_app(package).map_err(|e| e.to_string())?;

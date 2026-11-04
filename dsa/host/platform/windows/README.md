@@ -605,11 +605,25 @@ The installer publishes it self-contained, with the .NET runtime in its folder, 
 `tools/measure.ps1` measures the signed-in user's Android on a real PC and prints the
 numbers with the environment they were taken in: the memory of a dozing Android (guest PSS,
 the VM, the window processes and the service, against 800 MB), its idle CPU as a share of
-one logical core, how long an app's window takes to show from Dozing (and, with `-Cold`,
-from Stopped), and how long the VM's memory takes to go back to the host after a stop.
+one logical core, how long an app's new window takes to present its first frame and to have
+it shown from Dozing (and, with `-Cold`, from Stopped), and how long the VM's memory takes to
+go back to the host after a stop. The window times come from the window itself, through
+`dsa launch <package> --wait-first-frame`.
 
 ```
 pwsh -File tools\measure.ps1 -Part all -Package com.android.settings -Cold
+```
+
+`-Part click` measures clicks: it presses at `-TapX`, `-TapY` in the app's task `-Repeat`
+times with `dsa tap`, which sends the press through the local API, so the mouse never moves
+and no other window gets input. It then reads the input trace with
+`scripts/input-trace.py --json` and reports the time from each press to the first app frame,
+to the first visible change around the press point, and to the next screen. The input trace
+must be on (`dsa settings set input-trace on`, as an administrator), and `-Relaunch` opens
+the app again before each press.
+
+```
+pwsh -File tools\measure.ps1 -Part click -Package com.android.settings -TapX 300 -TapY 400 -Repeat 10 -Relaunch
 ```
 
 Run it from an elevated prompt: only an administrator may read the VM process's CPU time

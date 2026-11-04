@@ -7,8 +7,9 @@
 //! shows each window, [`window_sizing`] how a window's size and scale reach its task,
 //! [`resize_sync`] says how long a dragged window waits for a frame of its new size,
 //! [`resize_latency`] measures how long a resized window waits for a frame of its new
-//! size, [`frame_buffers`] keeps a window's buffers at one size while it is resized, and
-//! [`shown_windows`] says whether any window is shown, which lets the guest sleep;
+//! size, [`frame_buffers`] keeps a window's buffers at one size while it is resized,
+//! [`shown_windows`] says whether any window is shown, which lets the guest sleep, and
+//! [`visible_change`] when a press first visibly changes a window;
 //! the platform only carries it out.
 
 pub mod frame_buffers;
@@ -17,6 +18,7 @@ pub mod resize_latency;
 pub mod resize_sync;
 pub mod shown_windows;
 pub mod task_windows;
+pub mod visible_change;
 pub mod window_hosts;
 pub mod window_sizing;
 

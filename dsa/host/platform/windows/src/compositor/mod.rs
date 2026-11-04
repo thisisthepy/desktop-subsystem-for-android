@@ -33,6 +33,7 @@ pub mod tasks;
 pub mod trim;
 pub mod widget_menu;
 pub mod widgets;
+pub mod window_marks;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
