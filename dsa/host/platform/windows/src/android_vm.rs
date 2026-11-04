@@ -24,7 +24,7 @@ use crate::guid::Guid;
 use crate::hcs::{grant_vm_access, ComputeSystem};
 use crate::vm::{
     fine_grained_memory_supported, hosting_process_name_suffix_supported, AndroidVmConfig,
-    HOSTING_PROCESS_NAME_SUFFIX,
+    GuestArch, HOSTING_PROCESS_NAME_SUFFIX,
 };
 use crate::vm_listener::VmIdSlot;
 
@@ -93,6 +93,96 @@ fn write_boot_initrd(
     std::fs::write(path, bootconfig::append(&image, &bootconfig_entry(secret)))
         .map_err(|e| format!("could not write the boot's initrd {}: {e}", path.display()))?;
     Ok(file)
+}
+
+/// A folder that is removed, with what is in it, when this is dropped.
+struct TransientDir(PathBuf);
+
+impl Drop for TransientDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// One boot's files: the initrd with the boot's secret and, on ARM64, the folder the VM's
+/// firmware boots from. Everything is removed when this is dropped.
+pub struct BootFiles {
+    // Dropped in this order: the initrd, then the folder that may hold it.
+    initrd: TransientFile,
+    folder: Option<TransientDir>,
+    kernel_copy: Option<PathBuf>,
+}
+
+impl BootFiles {
+    /// The boot's initrd.
+    pub fn initrd(&self) -> &Path {
+        &self.initrd.0
+    }
+
+    /// What the VM must be let in to before it starts.
+    pub fn vm_access(&self) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        if let Some(folder) = &self.folder {
+            paths.push(folder.0.clone());
+        }
+        paths.extend(self.kernel_copy.clone());
+        paths.push(self.initrd.0.clone());
+        paths
+    }
+}
+
+/// Writes the files of one boot of `config` into `boot_dir` and points `config` at them.
+///
+/// On x86_64 that is `<unique>.initrd`, the image's initrd with `secret` appended. On ARM64
+/// the VM's firmware reads the kernel and the initrd from one folder, and the VM can read all
+/// of that folder, so each boot gets a folder of its own, `<unique>`, holding a copy of the
+/// kernel and `initrd.img`: no other boot's secret is ever in it.
+pub fn prepare_boot(
+    arch: GuestArch,
+    config: &mut AndroidVmConfig,
+    secret: &BootSecret,
+    boot_dir: &Path,
+    unique: &str,
+) -> Result<BootFiles, String> {
+    let Some(initrd) = config.initrd.clone() else {
+        return Err(
+            "the Android VM has no initrd, which is what carries the boot's secret to \
+             the guest"
+                .into(),
+        );
+    };
+    let mut folder = None;
+    let mut kernel_copy = None;
+    let initrd_path = if arch.boots_from_a_folder() {
+        let dir = boot_dir.join(unique);
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+        folder = Some(TransientDir(dir.clone()));
+        let name = config
+            .kernel
+            .file_name()
+            .ok_or_else(|| format!("the kernel {} is not a file", config.kernel.display()))?;
+        let copy = dir.join(name);
+        std::fs::copy(&config.kernel, &copy).map_err(|e| {
+            format!(
+                "could not copy the kernel {} to {}: {e}",
+                config.kernel.display(),
+                copy.display()
+            )
+        })?;
+        config.kernel = copy.clone();
+        kernel_copy = Some(copy);
+        dir.join("initrd.img")
+    } else {
+        boot_dir.join(format!("{unique}.initrd"))
+    };
+    let written = write_boot_initrd(&initrd, secret, &initrd_path)?;
+    config.initrd = Some(initrd_path);
+    Ok(BootFiles {
+        initrd: written,
+        folder,
+        kernel_copy,
+    })
 }
 
 impl AndroidVmLauncher {
@@ -227,23 +317,15 @@ impl GuestLauncher for AndroidVmLauncher {
         *self.log_signs.lock().unwrap_or_else(|e| e.into_inner()) = ConsoleSigns::default();
         let mut config = (self.config)()?;
         self.data_disk = Some(config.data_disk.clone());
-        let Some(initrd) = config.initrd.clone() else {
-            return Err(
-                "the Android VM has no initrd, which is what carries the boot's secret to \
-                 the guest"
-                    .into(),
-            );
-        };
-        // Removed on every way out of this function: by then the VM has read it or will
+        // Removed on every way out of this function: by then the VM has read them or will
         // never run.
-        let boot_initrd = write_boot_initrd(
-            &initrd,
+        let boot = prepare_boot(
+            GuestArch::HOST,
+            &mut config,
             secret,
-            &self
-                .boot_dir
-                .join(crate::paths::unique_name(&self.id, ".initrd")),
+            &self.boot_dir,
+            &crate::paths::unique_name(&self.id, ""),
         )?;
-        config.initrd = Some(boot_initrd.0.clone());
         config.kernel_cmdline = format!("{} {}", config.kernel_cmdline, bootconfig::CMDLINE_FLAG);
         config.console_pipe = self.begin_console(&config);
         if windows_build()
@@ -261,7 +343,9 @@ impl GuestLauncher for AndroidVmLauncher {
             ComputeSystem::create(&self.id, &document, CALL_TIMEOUT).map_err(|e| e.to_string())?;
         // The VM opens its disk when it starts. A disk in the user's profile admits only the
         // user, SYSTEM and administrators, so the VM is let in to that one file first.
-        for path in [&config.data_disk, &boot_initrd.0] {
+        let mut access = vec![config.data_disk.clone()];
+        access.extend(boot.vm_access());
+        for path in &access {
             grant_vm_access(&self.id, path).map_err(|e| {
                 format!(
                     "the Android VM could not be given access to {}: {e}",

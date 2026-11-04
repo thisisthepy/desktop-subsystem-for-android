@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use dsa_host_core::session::GuestLauncher;
-use dsa_host_windows::android_vm::AndroidVmLauncher;
-use dsa_host_windows::vm::AndroidVmConfig;
+use dsa_host_windows::android_vm::{prepare_boot, AndroidVmLauncher};
+use dsa_host_windows::vm::{AndroidVmConfig, GuestArch};
 use dsa_protocol::auth::BootSecret;
 
 fn secret() -> BootSecret {
@@ -99,7 +99,69 @@ fn fr2_a_failed_start_keeps_a_console_log_and_frees_the_pipe_for_the_next_start(
         "a header per boot: {text}"
     );
     assert!(text.contains("image 17.0.0-1"), "{text}");
-    assert!(text.contains("console=ttyS0,115200"), "{text}");
+    assert!(text.contains(GuestArch::HOST.console_cmdline()), "{text}");
+}
+
+#[test]
+fn fr25_an_arm64_boot_gets_a_folder_of_its_own_with_the_kernel_and_the_initrd() {
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("android-vm-arm64-boot");
+    let _ = std::fs::remove_dir_all(&root);
+    let image = root.join("image");
+    let boot_dir = root.join("tmp");
+    std::fs::create_dir_all(&image).unwrap();
+    std::fs::create_dir_all(&boot_dir).unwrap();
+    // Another boot's file in the same tmp folder, which the VM must not be able to read.
+    let other = boot_dir.join("other.initrd");
+    std::fs::write(&other, b"another boot's secret").unwrap();
+    let mut config = missing_files();
+    config.kernel = image.join("Image");
+    std::fs::write(&config.kernel, b"MZ kernel").unwrap();
+
+    let boot = prepare_boot(GuestArch::Arm64, &mut config, &secret(), &boot_dir, "dsa-7-0")
+        .expect("the boot folder is written");
+    let folder = boot_dir.join("dsa-7-0");
+    assert_eq!(config.kernel, folder.join("Image"));
+    assert_eq!(config.initrd, Some(folder.join("initrd.img")));
+    assert_eq!(boot.initrd(), folder.join("initrd.img"));
+    assert_eq!(std::fs::read(&config.kernel).unwrap(), b"MZ kernel");
+    let initrd = std::fs::read(boot.initrd()).unwrap();
+    assert!(initrd.starts_with(b"ramdisk"));
+    let mut names: Vec<_> = std::fs::read_dir(&folder)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["Image", "initrd.img"], "only this boot's files");
+    assert_eq!(
+        boot.vm_access(),
+        [folder.clone(), folder.join("Image"), folder.join("initrd.img")]
+    );
+    // The document the launcher makes from it boots from that folder.
+    let doc = config.to_hcs_document_for(GuestArch::Arm64).unwrap();
+    assert_eq!(
+        doc["VirtualMachine"]["Chipset"]["Uefi"]["BootThis"]["VmbFsRootPath"],
+        folder.display().to_string()
+    );
+
+    drop(boot);
+    assert!(!folder.exists(), "removed with the boot");
+    assert!(other.exists());
+}
+
+#[test]
+fn fr25_an_x86_64_boot_keeps_its_initrd_beside_the_others() {
+    let boot_dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("android-vm-x86-boot");
+    let _ = std::fs::remove_dir_all(&boot_dir);
+    std::fs::create_dir_all(&boot_dir).unwrap();
+    let mut config = missing_files();
+    let kernel = config.kernel.clone();
+    let boot = prepare_boot(GuestArch::X86_64, &mut config, &secret(), &boot_dir, "dsa-7-1")
+        .expect("the initrd is written");
+    assert_eq!(config.kernel, kernel, "booted from where it is");
+    assert_eq!(boot.initrd(), boot_dir.join("dsa-7-1.initrd"));
+    assert_eq!(boot.vm_access(), [boot_dir.join("dsa-7-1.initrd")]);
+    drop(boot);
+    assert_eq!(std::fs::read_dir(&boot_dir).unwrap().count(), 0);
 }
 
 #[test]

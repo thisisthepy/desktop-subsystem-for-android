@@ -11,13 +11,16 @@
 //!   (`BackingPageSize`, `FaultClusterSizeShift`, `DirectMapFaultClusterSizeShift`). Without
 //!   them one touched guest page can commit far more than itself on the host, and a freed
 //!   128 KiB block need not free anything there;
-//! - the kernel booted directly (`LinuxKernelDirect`), straight into Android's init;
+//! - on x86_64, the kernel booted directly (`LinuxKernelDirect`), straight into Android's
+//!   init. Hyper-V on ARM64 has no direct Linux boot, so there, as WSL does, the VM's UEFI
+//!   firmware starts the kernel's EFI stub from a folder it reads over VMBus (`VmbFs`), and
+//!   the stub loads the initrd from the same folder (see [`GuestArch`]);
 //! - the system image attached read only, the user data on a disk that may stay sparse;
 //! - Hyper-V sockets limited to SYSTEM and the user the VM belongs to;
-//! - the guest's console on the first serial port, which HCS connects to a named pipe the
-//!   host serves, as WSL does for its debug console. A Linux guest prints there from the
-//!   first instruction (`earlycon`), so a boot that fails before Android's agent connects
-//!   still leaves a record of why.
+//! - the guest's console on the first serial port (COM1 on x86_64, a PL011 UART on ARM64),
+//!   which HCS connects to a named pipe the host serves, as WSL does for its debug console.
+//!   A Linux guest prints there from the first instruction (`earlycon`), so a boot that fails
+//!   before Android's agent connects still leaves a record of why.
 //!
 //! This module only builds the document, so it is tested on every platform. Creating the
 //! VM from it is `hcs` (Windows only).
@@ -43,6 +46,61 @@ pub const CONSOLE_CMDLINE: &str = "earlycon=uart8250,io,0x3f8,115200 console=tty
 pub const RAMOOPS_CMDLINE: &str = "memmap=1M$0x10000000 ramoops.mem_address=0x10000000 \
      ramoops.mem_size=0x100000 ramoops.record_size=0x20000 ramoops.console_size=0x40000 \
      ramoops.pmsg_size=0x40000 ramoops.ecc=1";
+
+/// The ARM64 kernel's console: the VM's PL011 UART, at the address Hyper-V gives it on ARM64
+/// (the one WSL's `earlycon` names), from the first instruction, then the AMBA driver's
+/// `ttyAMA0`. HCS connects that port, as COM1, to the console pipe.
+pub const ARM64_CONSOLE_CMDLINE: &str = "earlycon=pl011,0xeffec000,115200 console=ttyAMA0,115200";
+
+/// The ARM64 kernel's ramoops region, split as on x86_64 but reserved by name: `memmap=` is an
+/// x86 parameter, and an ARM64 VM's memory map comes from its firmware, so no fixed address is
+/// known to be RAM. The kernel reserves 1 MiB early in boot and ramoops finds it by name.
+pub const ARM64_RAMOOPS_CMDLINE: &str = "reserve_mem=1M:4096:dsa_ramoops \
+     ramoops.mem_name=dsa_ramoops ramoops.record_size=0x20000 ramoops.console_size=0x40000 \
+     ramoops.pmsg_size=0x40000 ramoops.ecc=1";
+
+/// The architecture of the guest, which is the host's: Hyper-V runs guests of its own
+/// architecture only. It decides how the VM boots and which console and memory parameters
+/// the kernel is given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuestArch {
+    /// `LinuxKernelDirect` boot of a `bzImage`, console on COM1.
+    X86_64,
+    /// UEFI boot of an `Image` with its EFI stub from a `VmbFs` folder, console on the PL011
+    /// UART.
+    Arm64,
+}
+
+impl GuestArch {
+    /// The architecture this host was built for.
+    pub const HOST: GuestArch = if cfg!(target_arch = "aarch64") {
+        GuestArch::Arm64
+    } else {
+        GuestArch::X86_64
+    };
+
+    /// The console parameters for the kernel command line.
+    pub fn console_cmdline(self) -> &'static str {
+        match self {
+            GuestArch::X86_64 => CONSOLE_CMDLINE,
+            GuestArch::Arm64 => ARM64_CONSOLE_CMDLINE,
+        }
+    }
+
+    /// The ramoops parameters for the kernel command line.
+    pub fn ramoops_cmdline(self) -> &'static str {
+        match self {
+            GuestArch::X86_64 => RAMOOPS_CMDLINE,
+            GuestArch::Arm64 => ARM64_RAMOOPS_CMDLINE,
+        }
+    }
+
+    /// Whether the kernel and the initrd must sit in one folder of their own: the firmware
+    /// reads both from the `VmbFs` folder, and the VM can read everything in it.
+    pub fn boots_from_a_folder(self) -> bool {
+        self == GuestArch::Arm64
+    }
+}
 
 const PIPE_PREFIX: &str = r"\\.\pipe\";
 
@@ -167,7 +225,7 @@ pub(crate) fn is_sid(text: &str) -> bool {
 
 impl AndroidVmConfig {
     /// Checks the configuration and returns the memory size HCS will be given.
-    fn validate(&self) -> Result<u32, ConfigError> {
+    fn validate(&self, arch: GuestArch) -> Result<u32, ConfigError> {
         let mut paths = vec![("kernel", &self.kernel), ("data disk", &self.data_disk)];
         if let Some(system) = &self.system_image {
             paths.push(("system image", system));
@@ -181,6 +239,19 @@ impl AndroidVmConfig {
                     "the {what} path {} must be absolute",
                     path.display()
                 )));
+            }
+        }
+        if arch.boots_from_a_folder() {
+            boot_folder(&self.kernel)?;
+            if let Some(initrd) = &self.initrd {
+                if initrd.parent() != self.kernel.parent() || initrd.file_name().is_none() {
+                    return Err(ConfigError(format!(
+                        "on ARM64 the initrd {} must be in the kernel's folder {}: the VM's \
+                         firmware reads both from there",
+                        initrd.display(),
+                        self.kernel.parent().unwrap_or(Path::new("")).display()
+                    )));
+                }
             }
         }
         let memory_mb = self.memory_mb - self.memory_mb % MEMORY_GRANULARITY_MB;
@@ -224,11 +295,19 @@ impl AndroidVmConfig {
         sddl
     }
 
-    /// The kernel command line: the settings the VM needs, then [`kernel_cmdline`](Self::kernel_cmdline).
+    /// The kernel command line on this host: the settings the VM needs, then
+    /// [`kernel_cmdline`](Self::kernel_cmdline).
     pub fn full_kernel_cmdline(&self) -> String {
+        self.full_kernel_cmdline_for(GuestArch::HOST)
+    }
+
+    /// The kernel command line for a guest of `arch`.
+    pub fn full_kernel_cmdline_for(&self, arch: GuestArch) -> String {
         let mut cmdline = format!(
-            "{CONSOLE_CMDLINE} panic=-1 page_reporting.page_reporting_order={} {RAMOOPS_CMDLINE}",
-            self.page_reporting_order
+            "{} panic=-1 page_reporting.page_reporting_order={} {}",
+            arch.console_cmdline(),
+            self.page_reporting_order,
+            arch.ramoops_cmdline()
         );
         if !self.kernel_cmdline.trim().is_empty() {
             cmdline.push(' ');
@@ -237,16 +316,51 @@ impl AndroidVmConfig {
         cmdline
     }
 
-    /// The HCS compute system document (schema 2.3) that creates the VM.
+    /// The HCS compute system document (schema 2.3) that creates the VM on this host.
     pub fn to_hcs_document(&self) -> Result<Value, ConfigError> {
-        let memory_mb = self.validate()?;
-        let mut kernel = json!({
-            "KernelFilePath": path_string(&self.kernel),
-            "KernelCmdLine": self.full_kernel_cmdline(),
-        });
-        if let Some(initrd) = &self.initrd {
-            kernel["InitRdPath"] = Value::String(path_string(initrd));
+        self.to_hcs_document_for(GuestArch::HOST)
+    }
+
+    /// The boot settings of the document's `Chipset`, as `(key, value)`.
+    fn boot_settings(&self, arch: GuestArch) -> Result<(&'static str, Value), ConfigError> {
+        let cmdline = self.full_kernel_cmdline_for(arch);
+        match arch {
+            GuestArch::X86_64 => {
+                let mut kernel = json!({
+                    "KernelFilePath": path_string(&self.kernel),
+                    "KernelCmdLine": cmdline,
+                });
+                if let Some(initrd) = &self.initrd {
+                    kernel["InitRdPath"] = Value::String(path_string(initrd));
+                }
+                Ok(("LinuxKernelDirect", kernel))
+            }
+            GuestArch::Arm64 => {
+                let (folder, kernel_name) = boot_folder(&self.kernel)?;
+                // The EFI stub takes its command line from the boot entry's load options, and
+                // loads the initrd that `initrd=` names from the folder it was started from.
+                let options = match self.initrd.as_ref().and_then(|i| i.file_name()) {
+                    Some(initrd) => format!("initrd=\\{} {cmdline}", initrd.to_string_lossy()),
+                    None => cmdline,
+                };
+                let uefi = json!({
+                    "BootThis": {
+                        "DeviceType": "VmbFs",
+                        "VmbFsRootPath": folder,
+                        "DevicePath": format!("\\{kernel_name}"),
+                        "OptionalData": options,
+                    },
+                });
+                Ok(("Uefi", uefi))
+            }
         }
+    }
+
+    /// The HCS compute system document (schema 2.3) that creates the VM for a guest of
+    /// `arch`.
+    pub fn to_hcs_document_for(&self, arch: GuestArch) -> Result<Value, ConfigError> {
+        let memory_mb = self.validate(arch)?;
+        let (boot_key, boot) = self.boot_settings(arch)?;
         let sddl = self.socket_security_descriptor();
         let data = json!({
             "Type": "VirtualDisk",
@@ -268,7 +382,8 @@ impl AndroidVmConfig {
             },
         });
         if let Some(pipe) = &self.console_pipe {
-            // Port "0" is COM1, the port CONSOLE_CMDLINE names.
+            // Port "0" is COM1 on x86_64 and the PL011 UART on ARM64: the port each
+            // architecture's console parameters name.
             devices["ComPorts"] = json!({ "0": { "NamedPipe": pipe } });
         }
         let attachments = match &self.system_image {
@@ -296,16 +411,15 @@ impl AndroidVmConfig {
         if let Some(suffix) = &self.hosting_process_name_suffix {
             memory["HostingProcessNameSuffix"] = Value::String(suffix.clone());
         }
+        let mut chipset = json!({ "UseUtc": true });
+        chipset[boot_key] = boot;
         Ok(json!({
             "Owner": self.owner,
             "SchemaVersion": { "Major": 2, "Minor": 3 },
             "ShouldTerminateOnLastHandleClosed": true,
             "VirtualMachine": {
                 "StopOnReset": true,
-                "Chipset": {
-                    "UseUtc": true,
-                    "LinuxKernelDirect": kernel,
-                },
+                "Chipset": chipset,
                 "ComputeTopology": {
                     "Memory": memory,
                     "Processor": { "Count": self.processors },
@@ -313,6 +427,19 @@ impl AndroidVmConfig {
                 "Devices": devices,
             },
         }))
+    }
+}
+
+/// The folder the ARM64 VM's firmware reads the kernel from, and the kernel's name in it.
+fn boot_folder(kernel: &Path) -> Result<(String, String), ConfigError> {
+    match (kernel.parent(), kernel.file_name()) {
+        (Some(folder), Some(name)) if !folder.as_os_str().is_empty() => {
+            Ok((path_string(folder), name.to_string_lossy().into_owned()))
+        }
+        _ => Err(ConfigError(format!(
+            "the kernel path {} must name a file in a folder",
+            kernel.display()
+        ))),
     }
 }
 

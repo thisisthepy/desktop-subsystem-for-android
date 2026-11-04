@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use dsa_host_windows::guid::Guid;
 use dsa_host_windows::vm::{
     fine_grained_memory_supported, hosting_process_name_suffix_supported,
-    runtime_id_from_properties, AndroidVmConfig, HOSTING_PROCESS_NAME_SUFFIX,
+    runtime_id_from_properties, AndroidVmConfig, GuestArch, HOSTING_PROCESS_NAME_SUFFIX,
 };
 use serde_json::Value;
 
@@ -31,7 +31,139 @@ fn config() -> AndroidVmConfig {
 }
 
 fn document(config: &AndroidVmConfig) -> Value {
-    config.to_hcs_document().expect("a valid configuration")
+    config
+        .to_hcs_document_for(GuestArch::X86_64)
+        .expect("a valid configuration")
+}
+
+const BOOT_FOLDER: &str = r"C:\ProgramData\DSA\tmp\dsa-android-7-0";
+
+/// An ARM64 VM's configuration: the kernel and the initrd in one boot folder, as the launcher
+/// lays them out.
+fn arm64_config() -> AndroidVmConfig {
+    let mut config = config();
+    let folder = PathBuf::from(BOOT_FOLDER);
+    config.kernel = folder.join("Image");
+    config.initrd = Some(folder.join("initrd.img"));
+    config
+}
+
+fn arm64_document(config: &AndroidVmConfig) -> Value {
+    config
+        .to_hcs_document_for(GuestArch::Arm64)
+        .expect("a valid ARM64 configuration")
+}
+
+#[test]
+fn fr25_the_host_architecture_picks_the_guest_architecture() {
+    let expected = if cfg!(target_arch = "aarch64") {
+        GuestArch::Arm64
+    } else {
+        GuestArch::X86_64
+    };
+    assert_eq!(GuestArch::HOST, expected);
+    let config = if GuestArch::HOST == GuestArch::Arm64 {
+        arm64_config()
+    } else {
+        config()
+    };
+    assert_eq!(
+        config.to_hcs_document().unwrap(),
+        config.to_hcs_document_for(GuestArch::HOST).unwrap()
+    );
+    assert_eq!(
+        config.full_kernel_cmdline(),
+        config.full_kernel_cmdline_for(GuestArch::HOST)
+    );
+}
+
+#[test]
+fn fr25_an_arm64_vm_boots_the_kernels_efi_stub_from_its_boot_folder() {
+    let doc = arm64_document(&arm64_config());
+    let chipset = &doc["VirtualMachine"]["Chipset"];
+    assert!(
+        chipset.get("LinuxKernelDirect").is_none(),
+        "Hyper-V on ARM64 has no direct Linux boot"
+    );
+    assert_eq!(chipset["UseUtc"], true);
+    let entry = &chipset["Uefi"]["BootThis"];
+    assert_eq!(entry["DeviceType"], "VmbFs");
+    assert_eq!(entry["VmbFsRootPath"], BOOT_FOLDER);
+    assert_eq!(entry["DevicePath"], r"\Image");
+    let options = entry["OptionalData"].as_str().unwrap();
+    assert!(
+        options.starts_with(
+            "initrd=\\initrd.img earlycon=pl011,0xeffec000,115200 console=ttyAMA0,115200 \
+             panic=-1 page_reporting.page_reporting_order=5"
+        ),
+        "{options}"
+    );
+    assert!(options.ends_with("androidboot.hardware=dsa"), "{options}");
+    assert_eq!(
+        entry.as_object().unwrap().len(),
+        4,
+        "only the fields HCS knows: {entry}"
+    );
+}
+
+#[test]
+fn fr25_an_arm64_kernel_gets_no_x86_parameters() {
+    let options = arm64_config().full_kernel_cmdline_for(GuestArch::Arm64);
+    for x86 in ["uart8250", "ttyS0", "memmap=", "ramoops.mem_address"] {
+        assert!(!options.contains(x86), "{x86} in {options}");
+    }
+    // The ramoops region is reserved by name and split as on x86_64.
+    assert!(
+        options.contains(
+            "reserve_mem=1M:4096:dsa_ramoops ramoops.mem_name=dsa_ramoops \
+             ramoops.record_size=0x20000 ramoops.console_size=0x40000 \
+             ramoops.pmsg_size=0x40000 ramoops.ecc=1"
+        ),
+        "{options}"
+    );
+    let x86 = config().full_kernel_cmdline_for(GuestArch::X86_64);
+    for arm in ["pl011", "ttyAMA0", "reserve_mem="] {
+        assert!(!x86.contains(arm), "{arm} in {x86}");
+    }
+}
+
+#[test]
+fn fr25_an_arm64_vm_keeps_the_same_devices_memory_and_console_pipe() {
+    let arm = arm64_document(&arm64_config());
+    let x86 = document(&arm64_config());
+    for key in ["ComputeTopology", "Devices"] {
+        let (arm, x86) = (&arm["VirtualMachine"][key], &x86["VirtualMachine"][key]);
+        assert_eq!(arm, x86, "{key}");
+    }
+    assert_eq!(
+        arm["VirtualMachine"]["Devices"]["ComPorts"]["0"]["NamedPipe"],
+        r"\\.\pipe\dsa-console-dsa-android-S-1-5-21-1"
+    );
+    assert_eq!(arm["VirtualMachine"]["StopOnReset"], true);
+    assert_eq!(arm["SchemaVersion"]["Minor"], 3);
+}
+
+#[test]
+fn fr25_an_arm64_vm_without_an_initrd_names_none() {
+    let mut config = arm64_config();
+    config.initrd = None;
+    let doc = arm64_document(&config);
+    let options = doc["VirtualMachine"]["Chipset"]["Uefi"]["BootThis"]["OptionalData"]
+        .as_str()
+        .unwrap();
+    assert!(options.starts_with("earlycon=pl011"), "{options}");
+}
+
+#[test]
+fn fr25_an_arm64_initrd_outside_the_kernels_folder_is_refused() {
+    // The firmware reads only the boot folder, so it could not load the initrd.
+    let error = config()
+        .to_hcs_document_for(GuestArch::Arm64)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("kernel's folder"), "{error}");
+    // x86_64 boots the files from wherever they are.
+    document(&config());
 }
 
 #[test]
@@ -191,7 +323,10 @@ fn fr2_configurations_that_cannot_make_a_vm_are_refused_with_the_reason() {
     for (expected, break_it) in cases {
         let mut broken = config();
         break_it(&mut broken);
-        let error = broken.to_hcs_document().unwrap_err().to_string();
+        let error = broken
+            .to_hcs_document_for(GuestArch::X86_64)
+            .unwrap_err()
+            .to_string();
         assert!(
             error.contains(expected),
             "expected {expected:?} in {error:?}"
@@ -266,7 +401,10 @@ fn fr2_a_console_pipe_that_is_not_a_local_pipe_is_refused() {
     ] {
         let mut broken = config();
         broken.console_pipe = Some(bad.into());
-        let error = broken.to_hcs_document().unwrap_err().to_string();
+        let error = broken
+            .to_hcs_document_for(GuestArch::X86_64)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("console pipe"), "{bad:?}: {error}");
     }
 }

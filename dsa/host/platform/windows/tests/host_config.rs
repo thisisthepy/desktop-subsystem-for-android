@@ -7,6 +7,7 @@ use dsa_host_windows::host_config::{
     expand_locations, host_sized_memory_mb, page_reporting_order_for_build, profile_disk,
     HostConfig,
 };
+use dsa_host_windows::vm::GuestArch;
 
 const MINIMAL: &str = r#"{
   "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
@@ -30,7 +31,8 @@ fn fr2_a_minimal_configuration_gets_working_defaults() {
     assert_eq!(vm.memory_mb, 3072);
     assert!([5, 9].contains(&vm.page_reporting_order));
     assert_eq!(vm.socket_sids, ["S-1-5-21-1-2-3-1001"]);
-    vm.to_hcs_document().expect("the defaults make a valid VM");
+    vm.to_hcs_document_for(GuestArch::X86_64)
+        .expect("the defaults make a valid VM");
 }
 
 #[test]
@@ -100,7 +102,7 @@ fn fr2_the_example_configuration_is_valid() {
     config
         .vm_config_with(Some("S-1-5-21-1-2-3-1001"), &profiles)
         .unwrap()
-        .to_hcs_document()
+        .to_hcs_document_for(GuestArch::X86_64)
         .expect("the example describes a valid VM");
 }
 
@@ -157,7 +159,10 @@ fn pr5_each_user_gets_their_own_vm_data_disk_and_socket_access() {
     assert_eq!(bob.config.socket_sids, ["S-1-5-21-1-2-3-1002"]);
     assert_eq!(alice.data_disk_size_gb, 64);
     assert!(!alice.disk_in_profile);
-    alice.config.to_hcs_document().expect("a valid VM");
+    alice
+        .config
+        .to_hcs_document_for(GuestArch::X86_64)
+        .expect("a valid VM");
 }
 
 #[test]
@@ -322,7 +327,7 @@ fn fr14_an_image_made_from_aosp_boots_from_one_disk_made_from_its_template() {
     vm.system_image = files.system_image;
     vm.initrd = files.initrd;
     vm.kernel_cmdline = files.kernel_cmdline;
-    let document = vm.to_hcs_document().unwrap();
+    let document = vm.to_hcs_document_for(GuestArch::X86_64).unwrap();
     let attachments = &document["VirtualMachine"]["Devices"]["Scsi"]["0"]["Attachments"];
     assert_eq!(
         attachments.as_object().unwrap().len(),
@@ -535,7 +540,7 @@ fn fr14_an_image_with_two_disks_attaches_system_image_and_data_disk() {
     vm.system_image = files.system_image;
     vm.initrd = files.initrd;
     vm.kernel_cmdline = files.kernel_cmdline;
-    let document = vm.to_hcs_document().unwrap();
+    let document = vm.to_hcs_document_for(GuestArch::X86_64).unwrap();
     let attachments = &document["VirtualMachine"]["Devices"]["Scsi"]["0"]["Attachments"];
     assert_eq!(
         attachments.as_object().unwrap().len(),
