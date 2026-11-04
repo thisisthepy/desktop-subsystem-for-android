@@ -95,8 +95,7 @@ mod session {
     }
 
     fn local_app_data() -> Option<PathBuf> {
-        crate::paths::UserRoot::current()
-            .and_then(|root| root.dir().parent().map(PathBuf::from))
+        crate::paths::UserRoot::current().and_then(|root| root.dir().parent().map(PathBuf::from))
     }
 
     /// Records this session's monitors for the service.

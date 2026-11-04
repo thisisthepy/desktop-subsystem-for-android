@@ -25,8 +25,7 @@ fn main() {
     use dsa_host_windows::compositor::{Compositor, CompositorConfig};
     use dsa_host_windows::pipe::NamedPipeConnector;
     use dsa_host_windows::render_gpu::{
-        choose, describe_outcome, describe_request, render_gpu_setting,
-        CompositorSettings,
+        choose, describe_outcome, describe_request, render_gpu_setting, CompositorSettings,
     };
 
     let log_file = default_log_file();

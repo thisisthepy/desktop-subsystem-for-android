@@ -43,7 +43,10 @@ pub const DSA: &str = "DSA";
 /// `base` with `parts` added, written as text with the separator `base` uses, so a Windows path
 /// stays one on every platform the tests run on and a test's own folder stays usable.
 fn join(base: &Path, parts: &[&str]) -> PathBuf {
-    let mut text = base.to_string_lossy().trim_end_matches(['\\', '/']).to_string();
+    let mut text = base
+        .to_string_lossy()
+        .trim_end_matches(['\\', '/'])
+        .to_string();
     let separator = if text.contains('\\') {
         '\\'
     } else {
@@ -226,7 +229,14 @@ pub fn default_local_app_data(profile: &Path) -> PathBuf {
 pub fn start_menu_programs_in_profile(profile: &Path) -> PathBuf {
     join(
         profile,
-        &["AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs"],
+        &[
+            "AppData",
+            "Roaming",
+            "Microsoft",
+            "Windows",
+            "Start Menu",
+            "Programs",
+        ],
     )
 }
 
@@ -331,7 +341,10 @@ pub fn migrate_user_disk(machine: &MachineRoot, user: &UserRoot, sid: &str) -> V
             user.android_disk().display()
         )),
     }
-    if let Moved::Left(why) = migrate(&old.with_extension("image-version"), &user.android_disk_version()) {
+    if let Moved::Left(why) = migrate(
+        &old.with_extension("image-version"),
+        &user.android_disk_version(),
+    ) {
         notes.push(why);
     }
     // The user's old folder, when nothing else is left in it.

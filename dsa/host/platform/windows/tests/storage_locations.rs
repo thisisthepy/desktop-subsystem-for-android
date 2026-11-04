@@ -105,9 +105,18 @@ fn scratch(name: &str) -> PathBuf {
 #[test]
 fn fr19_every_file_has_its_place_in_one_of_the_two_roots() {
     let machine = MachineRoot::at(r"C:\ProgramData\DSA");
-    assert_eq!(machine.images(), PathBuf::from(r"C:\ProgramData\DSA\images"));
-    assert_eq!(machine.updates(), PathBuf::from(r"C:\ProgramData\DSA\updates"));
-    assert_eq!(machine.settings(), PathBuf::from(r"C:\ProgramData\DSA\settings"));
+    assert_eq!(
+        machine.images(),
+        PathBuf::from(r"C:\ProgramData\DSA\images")
+    );
+    assert_eq!(
+        machine.updates(),
+        PathBuf::from(r"C:\ProgramData\DSA\updates")
+    );
+    assert_eq!(
+        machine.settings(),
+        PathBuf::from(r"C:\ProgramData\DSA\settings")
+    );
     assert_eq!(
         machine.service_log(),
         PathBuf::from(r"C:\ProgramData\DSA\logs\dsa-hostd.log")
@@ -167,7 +176,11 @@ fn fr19_moving_an_old_file_never_replaces_the_one_in_its_new_place() {
     std::fs::write(&old, b"another disk").unwrap();
     assert!(matches!(migrate(&old, &new), Moved::Left(_)));
     assert_eq!(std::fs::read(&new).unwrap(), b"old disk", "never replaced");
-    assert_eq!(std::fs::read(&old).unwrap(), b"another disk", "never removed");
+    assert_eq!(
+        std::fs::read(&old).unwrap(),
+        b"another disk",
+        "never removed"
+    );
 }
 
 #[test]
@@ -184,7 +197,10 @@ fn fr19_a_disk_the_first_releases_kept_for_the_machine_moves_into_the_users_root
     let notes = migrate_user_disk(&machine, &user, sid);
     assert!(notes.iter().any(|n| n.contains("moved")), "{notes:?}");
     assert_eq!(std::fs::read(user.android_disk()).unwrap(), b"disk");
-    assert_eq!(std::fs::read(user.android_disk_version()).unwrap(), b"16.0.0-1");
+    assert_eq!(
+        std::fs::read(user.android_disk_version()).unwrap(),
+        b"16.0.0-1"
+    );
     assert!(!old.parent().unwrap().exists(), "the empty old folder goes");
 
     // A disk already in the user's root wins, and the old one stays where it is.
@@ -229,7 +245,10 @@ fn fr19_uninstalling_leaves_only_the_users_android_disk() {
     left.sort();
     assert_eq!(left, vec!["android.image-version", "android.vhdx"]);
     assert!(!programs.join("Notes.lnk").exists());
-    assert!(programs.join("Other.lnk").exists(), "a shortcut DSA did not make stays");
+    assert!(
+        programs.join("Other.lnk").exists(),
+        "a shortcut DSA did not make stays"
+    );
 
     let empty = UserRoot::in_local_app_data(&dir.join("nobody"));
     std::fs::create_dir_all(empty.logs()).unwrap();

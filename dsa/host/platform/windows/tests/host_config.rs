@@ -104,7 +104,10 @@ fn fr2_the_example_configuration_is_valid() {
 fn fr19_the_example_configuration_keeps_each_users_disk_in_their_profile() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dsa-hostd.example.json");
     let config = HostConfig::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
-    assert_eq!(config.data_dir, None, "an installation keeps no disks in the machine's folder");
+    assert_eq!(
+        config.data_dir, None,
+        "an installation keeps no disks in the machine's folder"
+    );
     let alice = config
         .user_vm_with("S-1-5-21-1-2-3-1001", &profiles)
         .unwrap();
@@ -118,8 +121,14 @@ fn fr19_the_example_configuration_keeps_each_users_disk_in_their_profile() {
 fn fr19_the_machine_root_is_the_configuration_files_folder() {
     let mut config = HostConfig::parse(PROFILES).unwrap();
     config.machine_root = Some(PathBuf::from(r"D:\Data\DSA"));
-    assert_eq!(config.machine_root().tmp(), PathBuf::from(r"D:\Data\DSA\tmp"));
-    assert_eq!(config.settings_dir(), PathBuf::from(r"D:\Data\DSA\settings"));
+    assert_eq!(
+        config.machine_root().tmp(),
+        PathBuf::from(r"D:\Data\DSA\tmp")
+    );
+    assert_eq!(
+        config.settings_dir(),
+        PathBuf::from(r"D:\Data\DSA\settings")
+    );
 }
 
 const SERVICE: &str = r#"{

@@ -375,15 +375,11 @@ fn protect_folder(folder: &Path) -> Result<(), String> {
 
 /// The machine's `tmp` folder: SYSTEM and Administrators write; Hyper-V's virtual machines may
 /// only look into the folder itself, and each VM is let into the one file it boots from.
-pub const MACHINE_TMP_SDDL: &str =
-    "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;0x1200a9;;;S-1-5-83-0)";
+pub const MACHINE_TMP_SDDL: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;0x1200a9;;;S-1-5-83-0)";
 
 /// Replaces the folder's access list with `sddl`, protected from what it would inherit.
 pub fn protect_folder_as(folder: &Path, sddl: &str) -> Result<(), String> {
-    let sddl: Vec<u16> = sddl
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
+    let sddl: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
     let mut descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
     // SAFETY: a NUL-terminated SDDL string; the descriptor is freed below.
     if unsafe {
