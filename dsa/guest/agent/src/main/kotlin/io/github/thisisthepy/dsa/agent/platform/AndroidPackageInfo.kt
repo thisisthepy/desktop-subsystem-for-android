@@ -2,6 +2,7 @@ package io.github.thisisthepy.dsa.agent.platform
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.pm.Signature
 import io.github.thisisthepy.dsa.agent.install.InstalledPackage
 import io.github.thisisthepy.dsa.agent.install.PackageInfoPort
 import java.security.MessageDigest
@@ -21,10 +22,10 @@ class AndroidPackageInfo(private val context: Context) : PackageInfoPort {
         }
         val signing = info.signingInfo
         val signatures = when {
-            signing == null -> emptyArray()
+            signing == null -> emptyArray<Signature>()
             signing.hasMultipleSigners() -> signing.apkContentsSigners
             else -> signing.signingCertificateHistory
-        } ?: emptyArray()
+        } ?: emptyArray<Signature>()
         val digest = MessageDigest.getInstance("SHA-256")
         return InstalledPackage(
             versionCode = info.longVersionCode,

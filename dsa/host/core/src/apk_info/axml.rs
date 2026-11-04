@@ -223,6 +223,9 @@ pub fn parse(data: &[u8]) -> Result<Document, String> {
                 let attribute_start = usize::from(u16_at(data, ext + 8)?);
                 let attribute_size = usize::from(u16_at(data, ext + 10)?);
                 let attribute_count = usize::from(u16_at(data, ext + 12)?);
+                if attribute_size < 20 && attribute_count > 0 {
+                    return Err("an element of the binary XML is damaged".into());
+                }
                 let mut attributes = Vec::with_capacity(attribute_count);
                 for i in 0..attribute_count {
                     let a = ext + attribute_start + i * attribute_size;

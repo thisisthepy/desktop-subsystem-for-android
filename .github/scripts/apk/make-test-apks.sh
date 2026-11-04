@@ -21,7 +21,8 @@ here="$(cd "$(dirname "$0")" && pwd)"
 sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?set ANDROID_HOME}}"
 sdk="$(cd "$sdk" && pwd)"
 tools="$(ls -d "$sdk"/build-tools/* | sort -V | tail -1)"
-platform="$(ls -d "$sdk"/platforms/android-* | sort -V | tail -1)"
+# The newest released platform, not a preview.
+platform="$(ls -d "$sdk"/platforms/android-* | grep -E '/android-[0-9]+$' | sort -V | tail -1)"
 exe=""
 bat=""
 case "$(uname -s)" in
@@ -66,8 +67,15 @@ EOF
   "$zipalign" -f 4 "$work/$name-unaligned.apk" "$work/$name-aligned.apk"
   "$apksigner" sign --ks "$work/$signer.jks" --ks-pass pass:testpass --key-pass pass:testpass \
     --ks-key-alias "$signer" --out "$out/$name.apk" "$work/$name-aligned.apk"
-  "$apksigner" verify --print-certs "$out/$name.apk" \
-    | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d '\r' >"$out/$name.sha256"
+  # The current signer's line reads "Signer #1 certificate SHA-256 digest: <hex>" or, for a
+  # v3 signer limited to some Android versions, "Signer (minSdkVersion=...) certificate ...".
+  "$apksigner" verify --print-certs "$out/$name.apk" | tr -d '\r' >"$work/$name-certs.txt"
+  grep -m1 'certificate SHA-256 digest:' "$work/$name-certs.txt" | sed 's/.*digest: //' >"$out/$name.sha256" || true
+  if [ ! -s "$out/$name.sha256" ]; then
+    cat "$work/$name-certs.txt"
+    echo "apksigner printed no SHA-256 digest for $name.apk" >&2
+    exit 1
+  fi
   echo "$name.apk: $(wc -c <"$out/$name.apk") bytes, signer $(cat "$out/$name.sha256")"
 }
 

@@ -26,9 +26,7 @@ fn fr11_opening_an_apk_opens_the_install_window_with_the_install_argument() {
         "{command}"
     );
     assert!(
-        SETTINGS_APP.contains(&format!(
-            "InstallApkArgument = \"{INSTALL_APK_ARGUMENT}\""
-        )),
+        SETTINGS_APP.contains(&format!("InstallApkArgument = \"{INSTALL_APK_ARGUMENT}\"")),
         "the settings app does not take {INSTALL_APK_ARGUMENT}"
     );
     // What Explorer passes is what the window host reads.
