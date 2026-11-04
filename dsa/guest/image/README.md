@@ -68,6 +68,14 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
   the two preferences from the compiled `res/xml/sound_settings.xml` in `Settings.apk`
   (`SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH`), and prints each one it removes. Settings is
   re-signed with every other app. They come back with Bluetooth.
+- Settings' accessibility screen loses its hearing devices entry, and two methods in
+  `Settings.apk`'s dex files are edited (`SETTINGS_CODE_WITHOUT_BLUETOOTH`): SettingsLib's
+  `BluetoothUtils.isAudioSharingSupported` returns false, and
+  `AccessibilitySettings.onAttach` no longer hands the fragment manager to the hearing aid
+  controller that cannot exist. Both dereferenced the null Bluetooth adapter, and took
+  Settings down when Connected devices or Accessibility opened. Each edit keeps the method's
+  size, and the dex checksum and signature are written again. `check-image.py` fails an image
+  that still has either.
 - A static overlay (`/vendor/overlay/DsaFrameworkOverlay.apk`) sets the framework's tap
   timeout to 0. A view inside anything that scrolls, which includes every list row, waits that
   long before it shows that it is pressed, in case the touch becomes a scroll, so a mouse
