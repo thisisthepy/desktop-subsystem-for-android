@@ -371,6 +371,28 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.HostMemory getHostMemory();
 
   /**
+   * <code>.dsa.control.v1.HostSleep host_sleep = 44;</code>
+   * @return Whether the hostSleep field is set.
+   */
+  boolean hasHostSleep();
+  /**
+   * <code>.dsa.control.v1.HostSleep host_sleep = 44;</code>
+   * @return The hostSleep.
+   */
+  io.github.thisisthepy.dsa.control.v1.HostSleep getHostSleep();
+
+  /**
+   * <code>.dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;</code>
+   * @return Whether the guestSleepReady field is set.
+   */
+  boolean hasGuestSleepReady();
+  /**
+   * <code>.dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;</code>
+   * @return The guestSleepReady.
+   */
+  io.github.thisisthepy.dsa.control.v1.GuestSleepReady getGuestSleepReady();
+
+  /**
    * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
    * @return Whether the installApk field is set.
    */

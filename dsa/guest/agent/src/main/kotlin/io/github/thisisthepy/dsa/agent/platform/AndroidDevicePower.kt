@@ -111,6 +111,14 @@ class AndroidDevicePower(private val context: Context, private val log: Log) : D
     }
 
     /**
+     * Sets the guest's wall clock through the alarm manager (SET_TIME), which also moves the
+     * kernel's clock and tells apps the time changed, so their alarms are right again.
+     */
+    override fun setTime(unixTimeMillis: Long) {
+        context.getSystemService(android.app.AlarmManager::class.java).setTime(unixTimeMillis)
+    }
+
+    /**
      * Runs a system service's shell command, as `cmd <service> <args>` would, and throws with
      * what it printed when it fails.
      */

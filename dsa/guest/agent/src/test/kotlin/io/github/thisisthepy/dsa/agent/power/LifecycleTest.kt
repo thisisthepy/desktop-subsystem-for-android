@@ -12,6 +12,7 @@ import io.github.thisisthepy.dsa.agent.FakeWindowing
 import io.github.thisisthepy.dsa.agent.RecordingLog
 import io.github.thisisthepy.dsa.control.v1.Envelope
 import io.github.thisisthepy.dsa.control.v1.HostMemory
+import io.github.thisisthepy.dsa.control.v1.HostSleep
 import io.github.thisisthepy.dsa.control.v1.PowerState
 import io.github.thisisthepy.dsa.control.v1.ScreenState
 import org.junit.Assert.assertEquals
@@ -65,6 +66,12 @@ class FakePower : DevicePower {
         batteries += battery
     }
 
+    val times = mutableListOf<Long>()
+
+    override fun setTime(unixTimeMillis: Long) {
+        times += unixTimeMillis
+    }
+
     override fun setPowerSaver(on: Boolean) {
         saver = on
     }
@@ -109,6 +116,22 @@ class LifecycleTest {
         screen(false)
 
         assertEquals(1, power.killedCached)
+    }
+
+    @Test
+    fun fr10_waking_from_host_sleep_sets_the_guests_clock_to_the_hosts() {
+        val lifecycle = Lifecycle(power, { true }, log)
+        fun sleep(asleep: Boolean, ms: Long) =
+            Envelope.newBuilder().setHostSleep(HostSleep.newBuilder().setAsleep(asleep).setHostUnixTimeMs(ms)).build()
+
+        // Going to sleep changes neither the clock nor the screen: the screen has its own word.
+        assertTrue(lifecycle.handle(sleep(true, 0)))
+        assertEquals(emptyList<Long>(), power.times)
+        assertEquals(emptyList<String>(), power.calls)
+
+        assertTrue(lifecycle.handle(sleep(false, 1_700_000_000_000)))
+        assertEquals(listOf(1_700_000_000_000L), power.times)
+        assertEquals(emptyList<String>(), power.calls)
     }
 
     @Test

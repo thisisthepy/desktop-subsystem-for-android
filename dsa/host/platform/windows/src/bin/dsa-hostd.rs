@@ -262,6 +262,10 @@ mod windows_host {
             let (power, stop) = (Arc::clone(&power), Arc::clone(&power_stop));
             thread::spawn(move || dsa_host_windows::power::follow(power, stop));
         }
+        // And the computer's sleep, for as long as this runs.
+        let _sleep_watch = dsa_host_windows::power::watch_sleep(Arc::clone(&power))
+            .map_err(|why| eprintln!("Android will not hear when the computer sleeps: {why}"))
+            .ok();
 
         let events = session.events();
         thread::spawn(move || {

@@ -86,6 +86,10 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   message. `INSTALL_PACKAGES` lets the session commit without asking the user; a
   `CancelInstall`, a broken transfer or a new connection abandons the session. An installed
   app reaches the host's Start menu through the launcher apps report.
+- **Host sleep.** When the host wakes from sleep it sends `HostSleep` with its wall clock, and
+  the agent sets the guest's time to it with `AlarmManager.setTime` (the privileged
+  `SET_TIME` permission), since the guest's clock stood still or drifted while the host slept.
+  Before the host sleeps, the control daemon writes the guest's data to disk and answers.
 - **Battery.** The host sends its power (`PowerState`): AC or battery, the charge, whether
   it charges, battery saver. The agent sets the battery service to it (the `battery set`
   shell command) and battery saver with it (`PowerManager.setPowerSaveModeEnabled`). A host

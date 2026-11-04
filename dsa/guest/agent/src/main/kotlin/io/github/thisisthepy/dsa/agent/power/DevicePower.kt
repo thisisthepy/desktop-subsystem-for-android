@@ -60,6 +60,9 @@ interface DevicePower {
     /** Turns battery saver on or off. */
     fun setPowerSaver(on: Boolean)
 
+    /** Sets the device's wall clock to [unixTimeMillis], in milliseconds since the Unix epoch. */
+    fun setTime(unixTimeMillis: Long)
+
     companion object {
         /** For an agent without power controls, as in tests that do not look at power. */
         val NONE = object : DevicePower {
@@ -72,6 +75,7 @@ interface DevicePower {
             override fun listenIdle(onChange: () -> Unit) = Unit
             override fun setBattery(battery: Battery) = Unit
             override fun setPowerSaver(on: Boolean) = Unit
+            override fun setTime(unixTimeMillis: Long) = Unit
         }
     }
 }

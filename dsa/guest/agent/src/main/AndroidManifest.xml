@@ -72,6 +72,11 @@
       the guest has no screen to ask on.
     -->
     <uses-permission android:name="android.permission.BIND_APPWIDGET" />
+    <!--
+      Setting the guest's clock to the host's when the host wakes from sleep: the guest's
+      clock stands still or drifts while the host sleeps.
+    -->
+    <uses-permission android:name="android.permission.SET_TIME" />
 
     <application
         android:name=".platform.AgentApplication"

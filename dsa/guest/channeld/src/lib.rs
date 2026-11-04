@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 
 use dsa_protocol::auth::BootSecret;
 use dsa_protocol::control::envelope::Body;
-use dsa_protocol::control::{ClockAnswer, Envelope, Hello, RejectReason};
+use dsa_protocol::control::{ClockAnswer, Envelope, GuestSleepReady, Hello, RejectReason};
 use dsa_protocol::handshake::{guest_connect, HandshakeError};
 use dsa_transport::{Connection, Connector, FrameSender, TransportError};
 
@@ -90,6 +90,45 @@ pub fn clock_answer(frame: &[u8], guest_now: Duration) -> Option<Vec<u8>> {
             guest_mono_ns: guest_now.as_nanos() as u64,
         })),
     }))
+}
+
+/// Writes every file's pending data to the guest's disks.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub fn sync_disks() {
+    extern "C" {
+        fn sync();
+    }
+    // SAFETY: sync takes nothing and cannot fail.
+    unsafe { sync() };
+}
+
+/// Off Linux there are no guest disks to write.
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+pub fn sync_disks() {}
+
+/// The daemon's answer when `frame` says the host is about to sleep: `write` puts the guest's
+/// pending data on disk first, and the answer says it is done. `None` for any other frame,
+/// which goes on to the guest's clients as before; the host's word that it woke, with its
+/// clock, is one of those, for the agent to set the guest's time.
+pub fn sleep_answer(frame: &[u8], write: impl FnOnce()) -> Option<Vec<u8>> {
+    let Ok(Envelope {
+        body: Some(Body::HostSleep(sleep)),
+    }) = dsa_protocol::decode(frame)
+    else {
+        return None;
+    };
+    if !sleep.asleep {
+        return None;
+    }
+    write();
+    Some(dsa_protocol::encode(&Envelope {
+        body: Some(Body::GuestSleepReady(GuestSleepReady {})),
+    }))
+}
+
+/// What the daemon answers itself, before a frame from the host goes to the guest's clients.
+fn own_answer(frame: &[u8]) -> Option<Vec<u8>> {
+    clock_answer(frame, guest_monotonic()).or_else(|| sleep_answer(frame, sync_disks))
 }
 
 /// How the daemon paces its attempts.
@@ -266,7 +305,7 @@ fn read_until_lost(
         }
         match connection.recv(Some(POLL)) {
             Ok(frame) => {
-                if let Some(answer) = clock_answer(&frame, guest_monotonic()) {
+                if let Some(answer) = own_answer(&frame) {
                     // A failed send shows up on the sending thread's next frame.
                     let _ = sender
                         .lock()
@@ -309,7 +348,7 @@ fn pump_in_turns(
         }
         match connection.recv(Some(POLL)) {
             Ok(frame) => {
-                if let Some(answer) = clock_answer(&frame, guest_monotonic()) {
+                if let Some(answer) = own_answer(&frame) {
                     if let Err(error) = connection.send(&answer) {
                         return error;
                     }

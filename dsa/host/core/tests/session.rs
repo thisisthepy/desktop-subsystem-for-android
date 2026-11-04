@@ -1732,6 +1732,145 @@ fn fr10_the_power_hub_tells_every_session_and_each_new_one() {
     assert_eq!(hub.latest(), Some(PowerState::MAINS_ONLY));
 }
 
+fn host_sleep(asleep: bool, host_unix_time_ms: u64) -> Body {
+    Body::HostSleep(dsa_protocol::control::HostSleep {
+        asleep,
+        host_unix_time_ms,
+    })
+}
+
+fn sleep_ready() -> Body {
+    Body::GuestSleepReady(dsa_protocol::control::GuestSleepReady {})
+}
+
+/// The wall clock in a `HostSleep` the guest got on waking, checked to be within a second of
+/// `expected`.
+fn assert_clock_near(body: Body, expected: std::time::SystemTime) {
+    let Body::HostSleep(sleep) = body else {
+        panic!("expected the host's clock, got {body:?}");
+    };
+    assert!(!sleep.asleep);
+    let expected = expected
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i128;
+    let got = i128::from(sleep.host_unix_time_ms);
+    assert!((got - expected).abs() < 1000, "{got} vs {expected}");
+}
+
+#[test]
+fn fr10_an_active_guest_writes_its_data_before_the_host_sleeps_and_is_active_again_on_waking() {
+    let hub = Arc::new(PowerHub::new());
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    let session = Arc::new(session);
+    session.windows_shown(true).unwrap();
+    hub.attach(&session);
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    let sleeping = {
+        let hub = Arc::clone(&hub);
+        thread::spawn(move || hub.host_sleeping(Duration::from_secs(2)))
+    };
+    assert_eq!(next_body(&mut agent), screen(false));
+    assert_eq!(next_body(&mut agent), host_sleep(true, 0));
+    send_body(&mut agent, sleep_ready());
+    assert!(
+        sleeping.join().unwrap(),
+        "the wait ends with the guest's answer"
+    );
+
+    // A clock an hour off shows the guest is told the host's clock, not its own.
+    let host_clock = std::time::SystemTime::now() + Duration::from_secs(3600);
+    hub.host_woke(host_clock);
+    let woke = std::time::Instant::now();
+    assert_clock_near(next_body(&mut agent), host_clock);
+    assert_eq!(next_body(&mut agent), screen(true));
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert!(woke.elapsed() < Duration::from_secs(1));
+}
+
+#[test]
+fn fr10_the_wait_before_the_host_sleeps_ends_in_time_without_an_answer() {
+    let hub = Arc::new(PowerHub::new());
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    let session = Arc::new(session);
+    session.windows_shown(true).unwrap();
+    hub.attach(&session);
+    session.start();
+    let _agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    let started = std::time::Instant::now();
+    assert!(!hub.host_sleeping(Duration::from_millis(300)));
+    let waited = started.elapsed();
+    assert!(waited < Duration::from_secs(2), "waited {waited:?}");
+}
+
+#[test]
+fn fr10_a_dozing_guest_stays_dozing_when_the_host_wakes_and_has_its_clock_set() {
+    let (session, mut agent, _launcher) = lifecycle_session(None);
+    dozing(&session, &mut agent);
+    let done = session.host_sleeping();
+    // The screen is off already; only the word that the host sleeps goes.
+    assert_eq!(next_body(&mut agent), host_sleep(true, 0));
+    send_body(&mut agent, sleep_ready());
+    done.recv_timeout(WAIT).expect("the guest's answer");
+    let host_clock = std::time::SystemTime::now();
+    session.host_woke(host_clock);
+    assert_clock_near(next_body(&mut agent), host_clock);
+    thread::sleep(DOZE_DELAY * 2);
+    assert_eq!(session.state(), SessionState::Dozing);
+    assert!(
+        agent.recv(Some(Duration::from_millis(100))).is_err(),
+        "nothing else is sent"
+    );
+}
+
+#[test]
+fn fr10_a_stopped_session_does_not_hold_up_the_host_sleeping() {
+    let launcher = FakeLauncher::default();
+    let (session, _connector) = session_with(launcher, WAIT);
+    let done = session.host_sleeping();
+    assert!(done.recv_timeout(Duration::from_secs(1)).is_ok());
+    session.host_woke(std::time::SystemTime::now());
+    assert_eq!(session.state(), SessionState::Stopped);
+}
+
+#[test]
+fn fr10_an_agent_that_reconnects_after_the_host_woke_is_told_the_clock() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.windows_shown(true).unwrap();
+    session.start();
+    let mut daemon = connect_daemon(&mut connector, &launcher);
+    report_boot(&mut daemon, true, true);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    let _ = session.host_sleeping();
+    assert_eq!(next_body(&mut daemon), screen(false));
+    assert_eq!(next_body(&mut daemon), host_sleep(true, 0));
+    // The agent went away while the host slept.
+    report_boot(&mut daemon, true, false);
+    thread::sleep(Duration::from_millis(200));
+    let host_clock = std::time::SystemTime::now();
+    session.host_woke(host_clock);
+    // Nothing of the clock reaches a guest without its agent; the screen does.
+    assert_eq!(next_body(&mut daemon), screen(true));
+    assert!(daemon.recv(Some(Duration::from_millis(200))).is_err());
+    report_boot(&mut daemon, true, true);
+    loop {
+        match next_body(&mut daemon) {
+            body @ Body::HostSleep(_) => {
+                assert_clock_near(body, host_clock);
+                break;
+            }
+            _ => continue,
+        }
+    }
+}
+
 fn host_memory(low: bool) -> Body {
     Body::HostMemory(dsa_protocol::control::HostMemory { low })
 }

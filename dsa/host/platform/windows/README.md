@@ -510,6 +510,14 @@ Showing any Android window turns the screen on again at once.
 Android's battery follows the computer's: on AC power or on battery, the charge, and
 battery saver.
 
+Android also follows the computer's sleep. The service registers for Windows' suspend and
+resume notifications (`PowerRegisterSuspendResumeNotification`). Before the computer sleeps or
+hibernates, each running Android's screen goes off and its control daemon writes its pending
+data to disk; the service waits at most 2 seconds for that. When the computer wakes, each
+Android's clock is set to the computer's, and its screen comes back on if it was on, so an
+Android that was `Active` is `Active` again and one in Doze stays there. Time asleep does not
+count towards freezing.
+
 Freezing stops Android's processes altogether, which also stops its notifications,
 alarms and widget updates, so it is never done by default. `dsa freeze` freezes Android
 now. Turning on "freeze when idle" (Advanced in DSA Settings, or `dsa settings set freeze
