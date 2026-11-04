@@ -343,6 +343,26 @@ pub struct HostMemory {
     #[prost(bool, tag = "1")]
     pub low: bool,
 }
+/// Host to guest: the host computer is about to sleep (sleep, hibernate or modern standby) or
+/// has just woken. Before it sleeps the host turns the guest's screen off (ScreenState), then
+/// sends this with `asleep` set; the control daemon writes every file's pending data to disk
+/// and answers with GuestSleepReady. The host waits for that answer for at most two seconds.
+/// When the host wakes it sends this with `asleep` clear and its wall clock, which the agent
+/// sets as the guest's time, since the guest's clock stood still or drifted while the host
+/// slept. A guest frozen or not connected when the host wakes is sent it once it can hear.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct HostSleep {
+    #[prost(bool, tag = "1")]
+    pub asleep: bool,
+    /// On waking: the host's wall clock, in milliseconds since the Unix epoch (UTC). Zero when
+    /// `asleep` is set.
+    #[prost(uint64, tag = "2")]
+    pub host_unix_time_ms: u64,
+}
+/// Guest to host, from the control daemon: the answer to HostSleep with `asleep` set, sent
+/// once the guest's pending file data is on its disk.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GuestSleepReady {}
 /// Guest to host, from the guest's power HAL: the framework turned a power mode on or off, or
 /// asked for a boost. The host runs the guest's processors faster or more frugally to match.
 /// The HAL sends every mode that is on each time it subscribes to the channel, and the
@@ -1001,7 +1021,7 @@ pub struct AccessibilityActionResult {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 110, 42, 43, 60, 61, 62, 63, 64, 65, 66, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 110, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -1075,6 +1095,10 @@ pub mod envelope {
         DeviceIdle(super::DeviceIdle),
         #[prost(message, tag = "43")]
         HostMemory(super::HostMemory),
+        #[prost(message, tag = "44")]
+        HostSleep(super::HostSleep),
+        #[prost(message, tag = "45")]
+        GuestSleepReady(super::GuestSleepReady),
         #[prost(message, tag = "60")]
         InstallApk(super::InstallApk),
         #[prost(message, tag = "61")]

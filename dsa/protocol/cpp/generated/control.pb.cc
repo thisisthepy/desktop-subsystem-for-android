@@ -381,6 +381,32 @@ struct HostMemoryDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 HostMemoryDefaultTypeInternal _HostMemory_default_instance_;
+PROTOBUF_CONSTEXPR HostSleep::HostSleep(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.host_unix_time_ms_)*/uint64_t{0u}
+  , /*decltype(_impl_.asleep_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct HostSleepDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR HostSleepDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~HostSleepDefaultTypeInternal() {}
+  union {
+    HostSleep _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 HostSleepDefaultTypeInternal _HostSleep_default_instance_;
+PROTOBUF_CONSTEXPR GuestSleepReady::GuestSleepReady(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._cached_size_)*/{}} {}
+struct GuestSleepReadyDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GuestSleepReadyDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GuestSleepReadyDefaultTypeInternal() {}
+  union {
+    GuestSleepReady _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GuestSleepReadyDefaultTypeInternal _GuestSleepReady_default_instance_;
 PROTOBUF_CONSTEXPR PowerHint::PowerHint(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.kind_)*/0
@@ -7871,6 +7897,367 @@ void HostMemory::InternalSwap(HostMemory* other) {
 
 std::string HostMemory::GetTypeName() const {
   return "dsa.control.v1.HostMemory";
+}
+
+
+// ===================================================================
+
+class HostSleep::_Internal {
+ public:
+};
+
+HostSleep::HostSleep(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.HostSleep)
+}
+HostSleep::HostSleep(const HostSleep& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  HostSleep* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.host_unix_time_ms_){}
+    , decltype(_impl_.asleep_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  ::memcpy(&_impl_.host_unix_time_ms_, &from._impl_.host_unix_time_ms_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.asleep_) -
+    reinterpret_cast<char*>(&_impl_.host_unix_time_ms_)) + sizeof(_impl_.asleep_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.HostSleep)
+}
+
+inline void HostSleep::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.host_unix_time_ms_){uint64_t{0u}}
+    , decltype(_impl_.asleep_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+HostSleep::~HostSleep() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.HostSleep)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void HostSleep::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void HostSleep::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void HostSleep::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.HostSleep)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&_impl_.host_unix_time_ms_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.asleep_) -
+      reinterpret_cast<char*>(&_impl_.host_unix_time_ms_)) + sizeof(_impl_.asleep_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* HostSleep::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // bool asleep = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.asleep_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 host_unix_time_ms = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.host_unix_time_ms_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* HostSleep::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.HostSleep)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // bool asleep = 1;
+  if (this->_internal_asleep() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(1, this->_internal_asleep(), target);
+  }
+
+  // uint64 host_unix_time_ms = 2;
+  if (this->_internal_host_unix_time_ms() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_host_unix_time_ms(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.HostSleep)
+  return target;
+}
+
+size_t HostSleep::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.HostSleep)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // uint64 host_unix_time_ms = 2;
+  if (this->_internal_host_unix_time_ms() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_host_unix_time_ms());
+  }
+
+  // bool asleep = 1;
+  if (this->_internal_asleep() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void HostSleep::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const HostSleep*>(
+      &from));
+}
+
+void HostSleep::MergeFrom(const HostSleep& from) {
+  HostSleep* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.HostSleep)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_host_unix_time_ms() != 0) {
+    _this->_internal_set_host_unix_time_ms(from._internal_host_unix_time_ms());
+  }
+  if (from._internal_asleep() != 0) {
+    _this->_internal_set_asleep(from._internal_asleep());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void HostSleep::CopyFrom(const HostSleep& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.HostSleep)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool HostSleep::IsInitialized() const {
+  return true;
+}
+
+void HostSleep::InternalSwap(HostSleep* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(HostSleep, _impl_.asleep_)
+      + sizeof(HostSleep::_impl_.asleep_)
+      - PROTOBUF_FIELD_OFFSET(HostSleep, _impl_.host_unix_time_ms_)>(
+          reinterpret_cast<char*>(&_impl_.host_unix_time_ms_),
+          reinterpret_cast<char*>(&other->_impl_.host_unix_time_ms_));
+}
+
+std::string HostSleep::GetTypeName() const {
+  return "dsa.control.v1.HostSleep";
+}
+
+
+// ===================================================================
+
+class GuestSleepReady::_Internal {
+ public:
+};
+
+GuestSleepReady::GuestSleepReady(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.GuestSleepReady)
+}
+GuestSleepReady::GuestSleepReady(const GuestSleepReady& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GuestSleepReady* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.GuestSleepReady)
+}
+
+inline void GuestSleepReady::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+GuestSleepReady::~GuestSleepReady() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.GuestSleepReady)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GuestSleepReady::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void GuestSleepReady::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GuestSleepReady::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.GuestSleepReady)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GuestSleepReady::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GuestSleepReady::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.GuestSleepReady)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.GuestSleepReady)
+  return target;
+}
+
+size_t GuestSleepReady::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.GuestSleepReady)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GuestSleepReady::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GuestSleepReady*>(
+      &from));
+}
+
+void GuestSleepReady::MergeFrom(const GuestSleepReady& from) {
+  GuestSleepReady* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.GuestSleepReady)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GuestSleepReady::CopyFrom(const GuestSleepReady& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.GuestSleepReady)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GuestSleepReady::IsInitialized() const {
+  return true;
+}
+
+void GuestSleepReady::InternalSwap(GuestSleepReady* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+}
+
+std::string GuestSleepReady::GetTypeName() const {
+  return "dsa.control.v1.GuestSleepReady";
 }
 
 
@@ -20035,6 +20422,8 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::PowerHint& power_hint(const Envelope* msg);
   static const ::dsa::control::v1::DeviceIdle& device_idle(const Envelope* msg);
   static const ::dsa::control::v1::HostMemory& host_memory(const Envelope* msg);
+  static const ::dsa::control::v1::HostSleep& host_sleep(const Envelope* msg);
+  static const ::dsa::control::v1::GuestSleepReady& guest_sleep_ready(const Envelope* msg);
   static const ::dsa::control::v1::InstallApk& install_apk(const Envelope* msg);
   static const ::dsa::control::v1::ApkChunk& apk_chunk(const Envelope* msg);
   static const ::dsa::control::v1::CancelInstall& cancel_install(const Envelope* msg);
@@ -20198,6 +20587,14 @@ Envelope::_Internal::device_idle(const Envelope* msg) {
 const ::dsa::control::v1::HostMemory&
 Envelope::_Internal::host_memory(const Envelope* msg) {
   return *msg->_impl_.body_.host_memory_;
+}
+const ::dsa::control::v1::HostSleep&
+Envelope::_Internal::host_sleep(const Envelope* msg) {
+  return *msg->_impl_.body_.host_sleep_;
+}
+const ::dsa::control::v1::GuestSleepReady&
+Envelope::_Internal::guest_sleep_ready(const Envelope* msg) {
+  return *msg->_impl_.body_.guest_sleep_ready_;
 }
 const ::dsa::control::v1::InstallApk&
 Envelope::_Internal::install_apk(const Envelope* msg) {
@@ -20813,6 +21210,36 @@ void Envelope::set_allocated_host_memory(::dsa::control::v1::HostMemory* host_me
     _impl_.body_.host_memory_ = host_memory;
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.host_memory)
+}
+void Envelope::set_allocated_host_sleep(::dsa::control::v1::HostSleep* host_sleep) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (host_sleep) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(host_sleep);
+    if (message_arena != submessage_arena) {
+      host_sleep = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, host_sleep, submessage_arena);
+    }
+    set_has_host_sleep();
+    _impl_.body_.host_sleep_ = host_sleep;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.host_sleep)
+}
+void Envelope::set_allocated_guest_sleep_ready(::dsa::control::v1::GuestSleepReady* guest_sleep_ready) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (guest_sleep_ready) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(guest_sleep_ready);
+    if (message_arena != submessage_arena) {
+      guest_sleep_ready = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, guest_sleep_ready, submessage_arena);
+    }
+    set_has_guest_sleep_ready();
+    _impl_.body_.guest_sleep_ready_ = guest_sleep_ready;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.guest_sleep_ready)
 }
 void Envelope::set_allocated_install_apk(::dsa::control::v1::InstallApk* install_apk) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -21446,6 +21873,16 @@ Envelope::Envelope(const Envelope& from)
           from._internal_host_memory());
       break;
     }
+    case kHostSleep: {
+      _this->_internal_mutable_host_sleep()->::dsa::control::v1::HostSleep::MergeFrom(
+          from._internal_host_sleep());
+      break;
+    }
+    case kGuestSleepReady: {
+      _this->_internal_mutable_guest_sleep_ready()->::dsa::control::v1::GuestSleepReady::MergeFrom(
+          from._internal_guest_sleep_ready());
+      break;
+    }
     case kInstallApk: {
       _this->_internal_mutable_install_apk()->::dsa::control::v1::InstallApk::MergeFrom(
           from._internal_install_apk());
@@ -21833,6 +22270,18 @@ void Envelope::clear_body() {
     case kHostMemory: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.host_memory_;
+      }
+      break;
+    }
+    case kHostSleep: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.host_sleep_;
+      }
+      break;
+    }
+    case kGuestSleepReady: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.guest_sleep_ready_;
       }
       break;
     }
@@ -22292,6 +22741,22 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
       case 43:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 90)) {
           ptr = ctx->ParseMessage(_internal_mutable_host_memory(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.HostSleep host_sleep = 44;
+      case 44:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 98)) {
+          ptr = ctx->ParseMessage(_internal_mutable_host_sleep(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;
+      case 45:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 106)) {
+          ptr = ctx->ParseMessage(_internal_mutable_guest_sleep_ready(), ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -22797,6 +23262,20 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::host_memory(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.HostSleep host_sleep = 44;
+  if (_internal_has_host_sleep()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(44, _Internal::host_sleep(this),
+        _Internal::host_sleep(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;
+  if (_internal_has_guest_sleep_ready()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(45, _Internal::guest_sleep_ready(this),
+        _Internal::guest_sleep_ready(this).GetCachedSize(), target, stream);
+  }
+
   // .dsa.control.v1.OpenLink open_link = 50;
   if (_internal_has_open_link()) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
@@ -23262,6 +23741,20 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.host_memory_);
       break;
     }
+    // .dsa.control.v1.HostSleep host_sleep = 44;
+    case kHostSleep: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.host_sleep_);
+      break;
+    }
+    // .dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;
+    case kGuestSleepReady: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.guest_sleep_ready_);
+      break;
+    }
     // .dsa.control.v1.InstallApk install_apk = 60;
     case kInstallApk: {
       total_size += 2 +
@@ -23663,6 +24156,16 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_host_memory());
       break;
     }
+    case kHostSleep: {
+      _this->_internal_mutable_host_sleep()->::dsa::control::v1::HostSleep::MergeFrom(
+          from._internal_host_sleep());
+      break;
+    }
+    case kGuestSleepReady: {
+      _this->_internal_mutable_guest_sleep_ready()->::dsa::control::v1::GuestSleepReady::MergeFrom(
+          from._internal_guest_sleep_ready());
+      break;
+    }
     case kInstallApk: {
       _this->_internal_mutable_install_apk()->::dsa::control::v1::InstallApk::MergeFrom(
           from._internal_install_apk());
@@ -23943,6 +24446,14 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::PowerState >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::HostMemory*
 Arena::CreateMaybeMessage< ::dsa::control::v1::HostMemory >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::HostMemory >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::HostSleep*
+Arena::CreateMaybeMessage< ::dsa::control::v1::HostSleep >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::HostSleep >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::GuestSleepReady*
+Arena::CreateMaybeMessage< ::dsa::control::v1::GuestSleepReady >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::GuestSleepReady >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::PowerHint*
 Arena::CreateMaybeMessage< ::dsa::control::v1::PowerHint >(Arena* arena) {

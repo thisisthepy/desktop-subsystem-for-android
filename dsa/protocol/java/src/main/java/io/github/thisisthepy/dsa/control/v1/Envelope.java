@@ -53,6 +53,8 @@ public  final class Envelope extends
     POWER_HINT(110),
     DEVICE_IDLE(42),
     HOST_MEMORY(43),
+    HOST_SLEEP(44),
+    GUEST_SLEEP_READY(45),
     INSTALL_APK(60),
     APK_CHUNK(61),
     CANCEL_INSTALL(62),
@@ -131,6 +133,8 @@ public  final class Envelope extends
         case 110: return POWER_HINT;
         case 42: return DEVICE_IDLE;
         case 43: return HOST_MEMORY;
+        case 44: return HOST_SLEEP;
+        case 45: return GUEST_SLEEP_READY;
         case 60: return INSTALL_APK;
         case 61: return APK_CHUNK;
         case 62: return CANCEL_INSTALL;
@@ -1827,6 +1831,106 @@ public  final class Envelope extends
    */
   private void clearHostMemory() {
     if (bodyCase_ == 43) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int HOST_SLEEP_FIELD_NUMBER = 44;
+  /**
+   * <code>.dsa.control.v1.HostSleep host_sleep = 44;</code>
+   */
+  @java.lang.Override
+  public boolean hasHostSleep() {
+    return bodyCase_ == 44;
+  }
+  /**
+   * <code>.dsa.control.v1.HostSleep host_sleep = 44;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.HostSleep getHostSleep() {
+    if (bodyCase_ == 44) {
+       return (io.github.thisisthepy.dsa.control.v1.HostSleep) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.HostSleep.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.HostSleep host_sleep = 44;</code>
+   */
+  private void setHostSleep(io.github.thisisthepy.dsa.control.v1.HostSleep value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 44;
+  }
+  /**
+   * <code>.dsa.control.v1.HostSleep host_sleep = 44;</code>
+   */
+  private void mergeHostSleep(io.github.thisisthepy.dsa.control.v1.HostSleep value) {
+    value.getClass();
+  if (bodyCase_ == 44 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.HostSleep.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.HostSleep.newBuilder((io.github.thisisthepy.dsa.control.v1.HostSleep) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 44;
+  }
+  /**
+   * <code>.dsa.control.v1.HostSleep host_sleep = 44;</code>
+   */
+  private void clearHostSleep() {
+    if (bodyCase_ == 44) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int GUEST_SLEEP_READY_FIELD_NUMBER = 45;
+  /**
+   * <code>.dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;</code>
+   */
+  @java.lang.Override
+  public boolean hasGuestSleepReady() {
+    return bodyCase_ == 45;
+  }
+  /**
+   * <code>.dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.GuestSleepReady getGuestSleepReady() {
+    if (bodyCase_ == 45) {
+       return (io.github.thisisthepy.dsa.control.v1.GuestSleepReady) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.GuestSleepReady.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;</code>
+   */
+  private void setGuestSleepReady(io.github.thisisthepy.dsa.control.v1.GuestSleepReady value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 45;
+  }
+  /**
+   * <code>.dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;</code>
+   */
+  private void mergeGuestSleepReady(io.github.thisisthepy.dsa.control.v1.GuestSleepReady value) {
+    value.getClass();
+  if (bodyCase_ == 45 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.GuestSleepReady.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.GuestSleepReady.newBuilder((io.github.thisisthepy.dsa.control.v1.GuestSleepReady) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 45;
+  }
+  /**
+   * <code>.dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;</code>
+   */
+  private void clearGuestSleepReady() {
+    if (bodyCase_ == 45) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -5028,6 +5132,102 @@ public  final class Envelope extends
     }
 
     /**
+     * <code>.dsa.control.v1.HostSleep host_sleep = 44;</code>
+     */
+    @java.lang.Override
+    public boolean hasHostSleep() {
+      return instance.hasHostSleep();
+    }
+    /**
+     * <code>.dsa.control.v1.HostSleep host_sleep = 44;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.HostSleep getHostSleep() {
+      return instance.getHostSleep();
+    }
+    /**
+     * <code>.dsa.control.v1.HostSleep host_sleep = 44;</code>
+     */
+    public Builder setHostSleep(io.github.thisisthepy.dsa.control.v1.HostSleep value) {
+      copyOnWrite();
+      instance.setHostSleep(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.HostSleep host_sleep = 44;</code>
+     */
+    public Builder setHostSleep(
+        io.github.thisisthepy.dsa.control.v1.HostSleep.Builder builderForValue) {
+      copyOnWrite();
+      instance.setHostSleep(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.HostSleep host_sleep = 44;</code>
+     */
+    public Builder mergeHostSleep(io.github.thisisthepy.dsa.control.v1.HostSleep value) {
+      copyOnWrite();
+      instance.mergeHostSleep(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.HostSleep host_sleep = 44;</code>
+     */
+    public Builder clearHostSleep() {
+      copyOnWrite();
+      instance.clearHostSleep();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;</code>
+     */
+    @java.lang.Override
+    public boolean hasGuestSleepReady() {
+      return instance.hasGuestSleepReady();
+    }
+    /**
+     * <code>.dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.GuestSleepReady getGuestSleepReady() {
+      return instance.getGuestSleepReady();
+    }
+    /**
+     * <code>.dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;</code>
+     */
+    public Builder setGuestSleepReady(io.github.thisisthepy.dsa.control.v1.GuestSleepReady value) {
+      copyOnWrite();
+      instance.setGuestSleepReady(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;</code>
+     */
+    public Builder setGuestSleepReady(
+        io.github.thisisthepy.dsa.control.v1.GuestSleepReady.Builder builderForValue) {
+      copyOnWrite();
+      instance.setGuestSleepReady(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;</code>
+     */
+    public Builder mergeGuestSleepReady(io.github.thisisthepy.dsa.control.v1.GuestSleepReady value) {
+      copyOnWrite();
+      instance.mergeGuestSleepReady(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GuestSleepReady guest_sleep_ready = 45;</code>
+     */
+    public Builder clearGuestSleepReady() {
+      copyOnWrite();
+      instance.clearGuestSleepReady();
+      return this;
+    }
+
+    /**
      * <code>.dsa.control.v1.InstallApk install_apk = 60;</code>
      */
     @java.lang.Override
@@ -6517,6 +6717,8 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.PowerState.class,
             io.github.thisisthepy.dsa.control.v1.DeviceIdle.class,
             io.github.thisisthepy.dsa.control.v1.HostMemory.class,
+            io.github.thisisthepy.dsa.control.v1.HostSleep.class,
+            io.github.thisisthepy.dsa.control.v1.GuestSleepReady.class,
             io.github.thisisthepy.dsa.control.v1.OpenLink.class,
             io.github.thisisthepy.dsa.control.v1.LinkHandling.class,
             io.github.thisisthepy.dsa.control.v1.OpenFile.class,
@@ -6550,15 +6752,15 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.PowerHint.class,
           };
           java.lang.String info =
-              "\u0000?\u0001\u0000\u0001n?\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<\u0000" +
+              "\u0000A\u0001\u0000\u0001nA\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003<\u0000" +
               "\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<\u0000\u000b" +
               "<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012<\u0000\u0013" +
               "<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000\u0019<\u0000" +
               "\u001a<\u0000\u001b<\u0000\u001c<\u0000\u001d<\u0000(<\u0000)<\u0000*<\u0000+<\u0000" +
-              "2<\u00003<\u00004<\u00005<\u00006<\u0000<<\u0000=<\u0000><\u0000?<\u0000@<\u0000" +
-              "A<\u0000B<\u0000F<\u0000G<\u0000H<\u0000I<\u0000P<\u0000Q<\u0000R<\u0000S<\u0000" +
-              "Z<\u0000[<\u0000\\<\u0000]<\u0000^<\u0000_<\u0000`<\u0000a<\u0000b<\u0000c<\u0000" +
-              "n<\u0000";
+              ",<\u0000-<\u00002<\u00003<\u00004<\u00005<\u00006<\u0000<<\u0000=<\u0000><\u0000" +
+              "?<\u0000@<\u0000A<\u0000B<\u0000F<\u0000G<\u0000H<\u0000I<\u0000P<\u0000Q<\u0000" +
+              "R<\u0000S<\u0000Z<\u0000[<\u0000\\<\u0000]<\u0000^<\u0000_<\u0000`<\u0000a<\u0000" +
+              "b<\u0000c<\u0000n<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through
