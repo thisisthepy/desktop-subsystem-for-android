@@ -101,6 +101,10 @@ public  final class Envelope extends
     DIAGNOSTICS_FILE(134),
     DIAGNOSTICS_DONE(135),
     STOP_APP(136),
+    PRINT_JOB(220),
+    PRINT_JOB_CHUNK(221),
+    PRINT_JOB_CANCEL(222),
+    PRINT_JOB_RESULT(223),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -197,6 +201,10 @@ public  final class Envelope extends
         case 134: return DIAGNOSTICS_FILE;
         case 135: return DIAGNOSTICS_DONE;
         case 136: return STOP_APP;
+        case 220: return PRINT_JOB;
+        case 221: return PRINT_JOB_CHUNK;
+        case 222: return PRINT_JOB_CANCEL;
+        case 223: return PRINT_JOB_RESULT;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -4268,6 +4276,206 @@ public  final class Envelope extends
     }
   }
 
+  public static final int PRINT_JOB_FIELD_NUMBER = 220;
+  /**
+   * <code>.dsa.control.v1.PrintJob print_job = 220;</code>
+   */
+  @java.lang.Override
+  public boolean hasPrintJob() {
+    return bodyCase_ == 220;
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJob print_job = 220;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.PrintJob getPrintJob() {
+    if (bodyCase_ == 220) {
+       return (io.github.thisisthepy.dsa.control.v1.PrintJob) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.PrintJob.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJob print_job = 220;</code>
+   */
+  private void setPrintJob(io.github.thisisthepy.dsa.control.v1.PrintJob value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 220;
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJob print_job = 220;</code>
+   */
+  private void mergePrintJob(io.github.thisisthepy.dsa.control.v1.PrintJob value) {
+    value.getClass();
+  if (bodyCase_ == 220 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.PrintJob.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.PrintJob.newBuilder((io.github.thisisthepy.dsa.control.v1.PrintJob) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 220;
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJob print_job = 220;</code>
+   */
+  private void clearPrintJob() {
+    if (bodyCase_ == 220) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int PRINT_JOB_CHUNK_FIELD_NUMBER = 221;
+  /**
+   * <code>.dsa.control.v1.PrintJobChunk print_job_chunk = 221;</code>
+   */
+  @java.lang.Override
+  public boolean hasPrintJobChunk() {
+    return bodyCase_ == 221;
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJobChunk print_job_chunk = 221;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.PrintJobChunk getPrintJobChunk() {
+    if (bodyCase_ == 221) {
+       return (io.github.thisisthepy.dsa.control.v1.PrintJobChunk) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.PrintJobChunk.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJobChunk print_job_chunk = 221;</code>
+   */
+  private void setPrintJobChunk(io.github.thisisthepy.dsa.control.v1.PrintJobChunk value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 221;
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJobChunk print_job_chunk = 221;</code>
+   */
+  private void mergePrintJobChunk(io.github.thisisthepy.dsa.control.v1.PrintJobChunk value) {
+    value.getClass();
+  if (bodyCase_ == 221 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.PrintJobChunk.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.PrintJobChunk.newBuilder((io.github.thisisthepy.dsa.control.v1.PrintJobChunk) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 221;
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJobChunk print_job_chunk = 221;</code>
+   */
+  private void clearPrintJobChunk() {
+    if (bodyCase_ == 221) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int PRINT_JOB_CANCEL_FIELD_NUMBER = 222;
+  /**
+   * <code>.dsa.control.v1.PrintJobCancel print_job_cancel = 222;</code>
+   */
+  @java.lang.Override
+  public boolean hasPrintJobCancel() {
+    return bodyCase_ == 222;
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJobCancel print_job_cancel = 222;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.PrintJobCancel getPrintJobCancel() {
+    if (bodyCase_ == 222) {
+       return (io.github.thisisthepy.dsa.control.v1.PrintJobCancel) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.PrintJobCancel.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJobCancel print_job_cancel = 222;</code>
+   */
+  private void setPrintJobCancel(io.github.thisisthepy.dsa.control.v1.PrintJobCancel value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 222;
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJobCancel print_job_cancel = 222;</code>
+   */
+  private void mergePrintJobCancel(io.github.thisisthepy.dsa.control.v1.PrintJobCancel value) {
+    value.getClass();
+  if (bodyCase_ == 222 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.PrintJobCancel.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.PrintJobCancel.newBuilder((io.github.thisisthepy.dsa.control.v1.PrintJobCancel) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 222;
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJobCancel print_job_cancel = 222;</code>
+   */
+  private void clearPrintJobCancel() {
+    if (bodyCase_ == 222) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int PRINT_JOB_RESULT_FIELD_NUMBER = 223;
+  /**
+   * <code>.dsa.control.v1.PrintJobResult print_job_result = 223;</code>
+   */
+  @java.lang.Override
+  public boolean hasPrintJobResult() {
+    return bodyCase_ == 223;
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJobResult print_job_result = 223;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.PrintJobResult getPrintJobResult() {
+    if (bodyCase_ == 223) {
+       return (io.github.thisisthepy.dsa.control.v1.PrintJobResult) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.PrintJobResult.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJobResult print_job_result = 223;</code>
+   */
+  private void setPrintJobResult(io.github.thisisthepy.dsa.control.v1.PrintJobResult value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 223;
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJobResult print_job_result = 223;</code>
+   */
+  private void mergePrintJobResult(io.github.thisisthepy.dsa.control.v1.PrintJobResult value) {
+    value.getClass();
+  if (bodyCase_ == 223 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.PrintJobResult.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.PrintJobResult.newBuilder((io.github.thisisthepy.dsa.control.v1.PrintJobResult) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 223;
+  }
+  /**
+   * <code>.dsa.control.v1.PrintJobResult print_job_result = 223;</code>
+   */
+  private void clearPrintJobResult() {
+    if (bodyCase_ == 223) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.Envelope parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -8267,6 +8475,198 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.PrintJob print_job = 220;</code>
+     */
+    @java.lang.Override
+    public boolean hasPrintJob() {
+      return instance.hasPrintJob();
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJob print_job = 220;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.PrintJob getPrintJob() {
+      return instance.getPrintJob();
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJob print_job = 220;</code>
+     */
+    public Builder setPrintJob(io.github.thisisthepy.dsa.control.v1.PrintJob value) {
+      copyOnWrite();
+      instance.setPrintJob(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJob print_job = 220;</code>
+     */
+    public Builder setPrintJob(
+        io.github.thisisthepy.dsa.control.v1.PrintJob.Builder builderForValue) {
+      copyOnWrite();
+      instance.setPrintJob(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJob print_job = 220;</code>
+     */
+    public Builder mergePrintJob(io.github.thisisthepy.dsa.control.v1.PrintJob value) {
+      copyOnWrite();
+      instance.mergePrintJob(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJob print_job = 220;</code>
+     */
+    public Builder clearPrintJob() {
+      copyOnWrite();
+      instance.clearPrintJob();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.PrintJobChunk print_job_chunk = 221;</code>
+     */
+    @java.lang.Override
+    public boolean hasPrintJobChunk() {
+      return instance.hasPrintJobChunk();
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobChunk print_job_chunk = 221;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.PrintJobChunk getPrintJobChunk() {
+      return instance.getPrintJobChunk();
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobChunk print_job_chunk = 221;</code>
+     */
+    public Builder setPrintJobChunk(io.github.thisisthepy.dsa.control.v1.PrintJobChunk value) {
+      copyOnWrite();
+      instance.setPrintJobChunk(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobChunk print_job_chunk = 221;</code>
+     */
+    public Builder setPrintJobChunk(
+        io.github.thisisthepy.dsa.control.v1.PrintJobChunk.Builder builderForValue) {
+      copyOnWrite();
+      instance.setPrintJobChunk(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobChunk print_job_chunk = 221;</code>
+     */
+    public Builder mergePrintJobChunk(io.github.thisisthepy.dsa.control.v1.PrintJobChunk value) {
+      copyOnWrite();
+      instance.mergePrintJobChunk(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobChunk print_job_chunk = 221;</code>
+     */
+    public Builder clearPrintJobChunk() {
+      copyOnWrite();
+      instance.clearPrintJobChunk();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.PrintJobCancel print_job_cancel = 222;</code>
+     */
+    @java.lang.Override
+    public boolean hasPrintJobCancel() {
+      return instance.hasPrintJobCancel();
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobCancel print_job_cancel = 222;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.PrintJobCancel getPrintJobCancel() {
+      return instance.getPrintJobCancel();
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobCancel print_job_cancel = 222;</code>
+     */
+    public Builder setPrintJobCancel(io.github.thisisthepy.dsa.control.v1.PrintJobCancel value) {
+      copyOnWrite();
+      instance.setPrintJobCancel(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobCancel print_job_cancel = 222;</code>
+     */
+    public Builder setPrintJobCancel(
+        io.github.thisisthepy.dsa.control.v1.PrintJobCancel.Builder builderForValue) {
+      copyOnWrite();
+      instance.setPrintJobCancel(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobCancel print_job_cancel = 222;</code>
+     */
+    public Builder mergePrintJobCancel(io.github.thisisthepy.dsa.control.v1.PrintJobCancel value) {
+      copyOnWrite();
+      instance.mergePrintJobCancel(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobCancel print_job_cancel = 222;</code>
+     */
+    public Builder clearPrintJobCancel() {
+      copyOnWrite();
+      instance.clearPrintJobCancel();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.PrintJobResult print_job_result = 223;</code>
+     */
+    @java.lang.Override
+    public boolean hasPrintJobResult() {
+      return instance.hasPrintJobResult();
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobResult print_job_result = 223;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.PrintJobResult getPrintJobResult() {
+      return instance.getPrintJobResult();
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobResult print_job_result = 223;</code>
+     */
+    public Builder setPrintJobResult(io.github.thisisthepy.dsa.control.v1.PrintJobResult value) {
+      copyOnWrite();
+      instance.setPrintJobResult(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobResult print_job_result = 223;</code>
+     */
+    public Builder setPrintJobResult(
+        io.github.thisisthepy.dsa.control.v1.PrintJobResult.Builder builderForValue) {
+      copyOnWrite();
+      instance.setPrintJobResult(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobResult print_job_result = 223;</code>
+     */
+    public Builder mergePrintJobResult(io.github.thisisthepy.dsa.control.v1.PrintJobResult value) {
+      copyOnWrite();
+      instance.mergePrintJobResult(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.PrintJobResult print_job_result = 223;</code>
+     */
+    public Builder clearPrintJobResult() {
+      copyOnWrite();
+      instance.clearPrintJobResult();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -8366,9 +8766,13 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.DiagnosticsDone.class,
             io.github.thisisthepy.dsa.control.v1.StopApp.class,
             io.github.thisisthepy.dsa.control.v1.DeveloperMode.class,
+            io.github.thisisthepy.dsa.control.v1.PrintJob.class,
+            io.github.thisisthepy.dsa.control.v1.PrintJobChunk.class,
+            io.github.thisisthepy.dsa.control.v1.PrintJobCancel.class,
+            io.github.thisisthepy.dsa.control.v1.PrintJobResult.class,
           };
           java.lang.String info =
-              "\u0000Q\u0001\u0000\u0001\u008cQ\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003" +
+              "\u0000U\u0001\u0000\u0001\u00dfU\u0000\u0000\u0000\u0001<\u0000\u0002<\u0000\u0003" +
               "<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000\t<\u0000\n<" +
               "\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011<\u0000\u0012" +
               "<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000\u0018<\u0000" +
@@ -8378,7 +8782,8 @@ public  final class Envelope extends
               "P<\u0000Q<\u0000R<\u0000S<\u0000Z<\u0000[<\u0000\\<\u0000]<\u0000^<\u0000_<\u0000" +
               "`<\u0000a<\u0000b<\u0000c<\u0000n<\u0000x<\u0000y<\u0000z<\u0000{<\u0000|<\u0000" +
               "}<\u0000~<\u0000<\u0000\u0082<\u0000\u0083<\u0000\u0084<\u0000\u0085<\u0000\u0086" +
-              "<\u0000\u0087<\u0000\u0088<\u0000\u008c<\u0000";
+              "<\u0000\u0087<\u0000\u0088<\u0000\u008c<\u0000\u00dc<\u0000\u00dd<\u0000\u00de<\u0000" +
+              "\u00df<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

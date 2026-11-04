@@ -1251,12 +1251,78 @@ pub struct DiagnosticsDone {
     #[prost(string, tag = "2")]
     pub error: ::prost::alloc::string::String,
 }
+/// Guest to host, from the agent's print service: a print job an app queued, whose document
+/// follows as PrintJobChunk pieces in order. The document is a PDF of `size` bytes, at most
+/// 128 MiB. The host shows its print dialog once the whole document has arrived, and answers
+/// with PrintJobResult. The settings are what the user chose in Android's print dialog.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PrintJob {
+    /// The agent's number for the job, unique while the agent's connection lasts.
+    #[prost(uint32, tag = "1")]
+    pub job_id: u32,
+    /// The app that printed, and its name as the guest shows it; empty when unknown.
+    #[prost(string, tag = "2")]
+    pub package_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub app_label: ::prost::alloc::string::String,
+    /// The document's name, as the app gave it.
+    #[prost(string, tag = "4")]
+    pub document_name: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "5")]
+    pub size: u64,
+    /// The document's pages; 0 when the app did not say.
+    #[prost(uint32, tag = "6")]
+    pub page_count: u32,
+    #[prost(uint32, tag = "7")]
+    pub copies: u32,
+    #[prost(bool, tag = "8")]
+    pub color: bool,
+    #[prost(bool, tag = "9")]
+    pub duplex: bool,
+    #[prost(bool, tag = "10")]
+    pub landscape: bool,
+    /// The paper's size, in thousandths of an inch; 0 when unknown.
+    #[prost(uint32, tag = "11")]
+    pub media_width_mils: u32,
+    #[prost(uint32, tag = "12")]
+    pub media_height_mils: u32,
+}
+/// Guest to host: one piece of a print job's document. Pieces come in order, each at most
+/// 256 KiB, and the one that reaches the job's size ends it.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PrintJobChunk {
+    #[prost(uint32, tag = "1")]
+    pub job_id: u32,
+    #[prost(uint64, tag = "2")]
+    pub offset: u64,
+    #[prost(bytes = "vec", tag = "3")]
+    pub data: ::prost::alloc::vec::Vec<u8>,
+}
+/// Guest to host: the job was canceled in Android, by the app or the user, before the host
+/// answered it. The host drops it, or leaves it unprinted if its dialog is already open, and
+/// sends no result for it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PrintJobCancel {
+    #[prost(uint32, tag = "1")]
+    pub job_id: u32,
+}
+/// Host to guest: what became of a print job. The agent ends the job in Android's print
+/// spooler the same way: completed, canceled, or failed with the message.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PrintJobResult {
+    #[prost(uint32, tag = "1")]
+    pub job_id: u32,
+    #[prost(enumeration = "PrintOutcome", tag = "2")]
+    pub outcome: i32,
+    #[prost(string, tag = "3")]
+    pub message: ::prost::alloc::string::String,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 110, 140, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 120, 121, 122, 123, 124, 125, 126, 127, 130, 131, 132, 133, 134, 135, 136"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 110, 140, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 50, 51, 52, 53, 54, 70, 71, 72, 73, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 120, 121, 122, 123, 124, 125, 126, 127, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -1426,6 +1492,14 @@ pub mod envelope {
         DiagnosticsDone(super::DiagnosticsDone),
         #[prost(message, tag = "136")]
         StopApp(super::StopApp),
+        #[prost(message, tag = "220")]
+        PrintJob(super::PrintJob),
+        #[prost(message, tag = "221")]
+        PrintJobChunk(super::PrintJobChunk),
+        #[prost(message, tag = "222")]
+        PrintJobCancel(super::PrintJobCancel),
+        #[prost(message, tag = "223")]
+        PrintJobResult(super::PrintJobResult),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -1918,6 +1992,42 @@ impl LogBuffer {
             "LOG_BUFFER_STATS" => Some(Self::Stats),
             "LOG_BUFFER_SECURITY" => Some(Self::Security),
             "LOG_BUFFER_KERNEL" => Some(Self::Kernel),
+            _ => None,
+        }
+    }
+}
+/// What became of a print job the guest handed the host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum PrintOutcome {
+    Unspecified = 0,
+    /// The host sent it to the printer the user picked.
+    Printed = 1,
+    /// The user canceled the host's print dialog, or the job was withdrawn before it printed.
+    Canceled = 2,
+    /// It could not be printed; the message says why.
+    Failed = 3,
+}
+impl PrintOutcome {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "PRINT_OUTCOME_UNSPECIFIED",
+            Self::Printed => "PRINT_OUTCOME_PRINTED",
+            Self::Canceled => "PRINT_OUTCOME_CANCELED",
+            Self::Failed => "PRINT_OUTCOME_FAILED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "PRINT_OUTCOME_UNSPECIFIED" => Some(Self::Unspecified),
+            "PRINT_OUTCOME_PRINTED" => Some(Self::Printed),
+            "PRINT_OUTCOME_CANCELED" => Some(Self::Canceled),
+            "PRINT_OUTCOME_FAILED" => Some(Self::Failed),
             _ => None,
         }
     }

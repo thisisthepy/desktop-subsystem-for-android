@@ -225,6 +225,18 @@ extern PowerHintDefaultTypeInternal _PowerHint_default_instance_;
 class PowerState;
 struct PowerStateDefaultTypeInternal;
 extern PowerStateDefaultTypeInternal _PowerState_default_instance_;
+class PrintJob;
+struct PrintJobDefaultTypeInternal;
+extern PrintJobDefaultTypeInternal _PrintJob_default_instance_;
+class PrintJobCancel;
+struct PrintJobCancelDefaultTypeInternal;
+extern PrintJobCancelDefaultTypeInternal _PrintJobCancel_default_instance_;
+class PrintJobChunk;
+struct PrintJobChunkDefaultTypeInternal;
+extern PrintJobChunkDefaultTypeInternal _PrintJobChunk_default_instance_;
+class PrintJobResult;
+struct PrintJobResultDefaultTypeInternal;
+extern PrintJobResultDefaultTypeInternal _PrintJobResult_default_instance_;
 class ProcessMemory;
 struct ProcessMemoryDefaultTypeInternal;
 extern ProcessMemoryDefaultTypeInternal _ProcessMemory_default_instance_;
@@ -376,6 +388,10 @@ template<> ::dsa::control::v1::PackageState* Arena::CreateMaybeMessage<::dsa::co
 template<> ::dsa::control::v1::PointerEvent* Arena::CreateMaybeMessage<::dsa::control::v1::PointerEvent>(Arena*);
 template<> ::dsa::control::v1::PowerHint* Arena::CreateMaybeMessage<::dsa::control::v1::PowerHint>(Arena*);
 template<> ::dsa::control::v1::PowerState* Arena::CreateMaybeMessage<::dsa::control::v1::PowerState>(Arena*);
+template<> ::dsa::control::v1::PrintJob* Arena::CreateMaybeMessage<::dsa::control::v1::PrintJob>(Arena*);
+template<> ::dsa::control::v1::PrintJobCancel* Arena::CreateMaybeMessage<::dsa::control::v1::PrintJobCancel>(Arena*);
+template<> ::dsa::control::v1::PrintJobChunk* Arena::CreateMaybeMessage<::dsa::control::v1::PrintJobChunk>(Arena*);
+template<> ::dsa::control::v1::PrintJobResult* Arena::CreateMaybeMessage<::dsa::control::v1::PrintJobResult>(Arena*);
 template<> ::dsa::control::v1::ProcessMemory* Arena::CreateMaybeMessage<::dsa::control::v1::ProcessMemory>(Arena*);
 template<> ::dsa::control::v1::QueryPackage* Arena::CreateMaybeMessage<::dsa::control::v1::QueryPackage>(Arena*);
 template<> ::dsa::control::v1::Rect* Arena::CreateMaybeMessage<::dsa::control::v1::Rect>(Arena*);
@@ -704,6 +720,29 @@ inline const std::string& LogBuffer_Name(T enum_t_value) {
 }
 bool LogBuffer_Parse(
     ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, LogBuffer* value);
+enum PrintOutcome : int {
+  PRINT_OUTCOME_UNSPECIFIED = 0,
+  PRINT_OUTCOME_PRINTED = 1,
+  PRINT_OUTCOME_CANCELED = 2,
+  PRINT_OUTCOME_FAILED = 3,
+  PrintOutcome_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
+  PrintOutcome_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
+};
+bool PrintOutcome_IsValid(int value);
+constexpr PrintOutcome PrintOutcome_MIN = PRINT_OUTCOME_UNSPECIFIED;
+constexpr PrintOutcome PrintOutcome_MAX = PRINT_OUTCOME_FAILED;
+constexpr int PrintOutcome_ARRAYSIZE = PrintOutcome_MAX + 1;
+
+const std::string& PrintOutcome_Name(PrintOutcome value);
+template<typename T>
+inline const std::string& PrintOutcome_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, PrintOutcome>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function PrintOutcome_Name.");
+  return PrintOutcome_Name(static_cast<PrintOutcome>(enum_t_value));
+}
+bool PrintOutcome_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, PrintOutcome* value);
 // ===================================================================
 
 class Hello final :
@@ -14936,6 +14975,716 @@ class DiagnosticsDone final :
 };
 // -------------------------------------------------------------------
 
+class PrintJob final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.PrintJob) */ {
+ public:
+  inline PrintJob() : PrintJob(nullptr) {}
+  ~PrintJob() override;
+  explicit PROTOBUF_CONSTEXPR PrintJob(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  PrintJob(const PrintJob& from);
+  PrintJob(PrintJob&& from) noexcept
+    : PrintJob() {
+    *this = ::std::move(from);
+  }
+
+  inline PrintJob& operator=(const PrintJob& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline PrintJob& operator=(PrintJob&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const PrintJob& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const PrintJob* internal_default_instance() {
+    return reinterpret_cast<const PrintJob*>(
+               &_PrintJob_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    88;
+
+  friend void swap(PrintJob& a, PrintJob& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(PrintJob* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(PrintJob* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  PrintJob* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<PrintJob>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const PrintJob& from);
+  void MergeFrom(const PrintJob& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(PrintJob* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.PrintJob";
+  }
+  protected:
+  explicit PrintJob(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kPackageNameFieldNumber = 2,
+    kAppLabelFieldNumber = 3,
+    kDocumentNameFieldNumber = 4,
+    kJobIdFieldNumber = 1,
+    kPageCountFieldNumber = 6,
+    kSizeFieldNumber = 5,
+    kCopiesFieldNumber = 7,
+    kColorFieldNumber = 8,
+    kDuplexFieldNumber = 9,
+    kLandscapeFieldNumber = 10,
+    kMediaWidthMilsFieldNumber = 11,
+    kMediaHeightMilsFieldNumber = 12,
+  };
+  // string package_name = 2;
+  void clear_package_name();
+  const std::string& package_name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_package_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_package_name();
+  PROTOBUF_NODISCARD std::string* release_package_name();
+  void set_allocated_package_name(std::string* package_name);
+  private:
+  const std::string& _internal_package_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_package_name(const std::string& value);
+  std::string* _internal_mutable_package_name();
+  public:
+
+  // string app_label = 3;
+  void clear_app_label();
+  const std::string& app_label() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_app_label(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_app_label();
+  PROTOBUF_NODISCARD std::string* release_app_label();
+  void set_allocated_app_label(std::string* app_label);
+  private:
+  const std::string& _internal_app_label() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_app_label(const std::string& value);
+  std::string* _internal_mutable_app_label();
+  public:
+
+  // string document_name = 4;
+  void clear_document_name();
+  const std::string& document_name() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_document_name(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_document_name();
+  PROTOBUF_NODISCARD std::string* release_document_name();
+  void set_allocated_document_name(std::string* document_name);
+  private:
+  const std::string& _internal_document_name() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_document_name(const std::string& value);
+  std::string* _internal_mutable_document_name();
+  public:
+
+  // uint32 job_id = 1;
+  void clear_job_id();
+  uint32_t job_id() const;
+  void set_job_id(uint32_t value);
+  private:
+  uint32_t _internal_job_id() const;
+  void _internal_set_job_id(uint32_t value);
+  public:
+
+  // uint32 page_count = 6;
+  void clear_page_count();
+  uint32_t page_count() const;
+  void set_page_count(uint32_t value);
+  private:
+  uint32_t _internal_page_count() const;
+  void _internal_set_page_count(uint32_t value);
+  public:
+
+  // uint64 size = 5;
+  void clear_size();
+  uint64_t size() const;
+  void set_size(uint64_t value);
+  private:
+  uint64_t _internal_size() const;
+  void _internal_set_size(uint64_t value);
+  public:
+
+  // uint32 copies = 7;
+  void clear_copies();
+  uint32_t copies() const;
+  void set_copies(uint32_t value);
+  private:
+  uint32_t _internal_copies() const;
+  void _internal_set_copies(uint32_t value);
+  public:
+
+  // bool color = 8;
+  void clear_color();
+  bool color() const;
+  void set_color(bool value);
+  private:
+  bool _internal_color() const;
+  void _internal_set_color(bool value);
+  public:
+
+  // bool duplex = 9;
+  void clear_duplex();
+  bool duplex() const;
+  void set_duplex(bool value);
+  private:
+  bool _internal_duplex() const;
+  void _internal_set_duplex(bool value);
+  public:
+
+  // bool landscape = 10;
+  void clear_landscape();
+  bool landscape() const;
+  void set_landscape(bool value);
+  private:
+  bool _internal_landscape() const;
+  void _internal_set_landscape(bool value);
+  public:
+
+  // uint32 media_width_mils = 11;
+  void clear_media_width_mils();
+  uint32_t media_width_mils() const;
+  void set_media_width_mils(uint32_t value);
+  private:
+  uint32_t _internal_media_width_mils() const;
+  void _internal_set_media_width_mils(uint32_t value);
+  public:
+
+  // uint32 media_height_mils = 12;
+  void clear_media_height_mils();
+  uint32_t media_height_mils() const;
+  void set_media_height_mils(uint32_t value);
+  private:
+  uint32_t _internal_media_height_mils() const;
+  void _internal_set_media_height_mils(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.PrintJob)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr package_name_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr app_label_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr document_name_;
+    uint32_t job_id_;
+    uint32_t page_count_;
+    uint64_t size_;
+    uint32_t copies_;
+    bool color_;
+    bool duplex_;
+    bool landscape_;
+    uint32_t media_width_mils_;
+    uint32_t media_height_mils_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class PrintJobChunk final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.PrintJobChunk) */ {
+ public:
+  inline PrintJobChunk() : PrintJobChunk(nullptr) {}
+  ~PrintJobChunk() override;
+  explicit PROTOBUF_CONSTEXPR PrintJobChunk(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  PrintJobChunk(const PrintJobChunk& from);
+  PrintJobChunk(PrintJobChunk&& from) noexcept
+    : PrintJobChunk() {
+    *this = ::std::move(from);
+  }
+
+  inline PrintJobChunk& operator=(const PrintJobChunk& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline PrintJobChunk& operator=(PrintJobChunk&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const PrintJobChunk& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const PrintJobChunk* internal_default_instance() {
+    return reinterpret_cast<const PrintJobChunk*>(
+               &_PrintJobChunk_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    89;
+
+  friend void swap(PrintJobChunk& a, PrintJobChunk& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(PrintJobChunk* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(PrintJobChunk* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  PrintJobChunk* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<PrintJobChunk>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const PrintJobChunk& from);
+  void MergeFrom(const PrintJobChunk& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(PrintJobChunk* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.PrintJobChunk";
+  }
+  protected:
+  explicit PrintJobChunk(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kDataFieldNumber = 3,
+    kOffsetFieldNumber = 2,
+    kJobIdFieldNumber = 1,
+  };
+  // bytes data = 3;
+  void clear_data();
+  const std::string& data() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_data(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_data();
+  PROTOBUF_NODISCARD std::string* release_data();
+  void set_allocated_data(std::string* data);
+  private:
+  const std::string& _internal_data() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_data(const std::string& value);
+  std::string* _internal_mutable_data();
+  public:
+
+  // uint64 offset = 2;
+  void clear_offset();
+  uint64_t offset() const;
+  void set_offset(uint64_t value);
+  private:
+  uint64_t _internal_offset() const;
+  void _internal_set_offset(uint64_t value);
+  public:
+
+  // uint32 job_id = 1;
+  void clear_job_id();
+  uint32_t job_id() const;
+  void set_job_id(uint32_t value);
+  private:
+  uint32_t _internal_job_id() const;
+  void _internal_set_job_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.PrintJobChunk)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr data_;
+    uint64_t offset_;
+    uint32_t job_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class PrintJobCancel final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.PrintJobCancel) */ {
+ public:
+  inline PrintJobCancel() : PrintJobCancel(nullptr) {}
+  ~PrintJobCancel() override;
+  explicit PROTOBUF_CONSTEXPR PrintJobCancel(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  PrintJobCancel(const PrintJobCancel& from);
+  PrintJobCancel(PrintJobCancel&& from) noexcept
+    : PrintJobCancel() {
+    *this = ::std::move(from);
+  }
+
+  inline PrintJobCancel& operator=(const PrintJobCancel& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline PrintJobCancel& operator=(PrintJobCancel&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const PrintJobCancel& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const PrintJobCancel* internal_default_instance() {
+    return reinterpret_cast<const PrintJobCancel*>(
+               &_PrintJobCancel_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    90;
+
+  friend void swap(PrintJobCancel& a, PrintJobCancel& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(PrintJobCancel* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(PrintJobCancel* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  PrintJobCancel* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<PrintJobCancel>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const PrintJobCancel& from);
+  void MergeFrom(const PrintJobCancel& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(PrintJobCancel* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.PrintJobCancel";
+  }
+  protected:
+  explicit PrintJobCancel(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kJobIdFieldNumber = 1,
+  };
+  // uint32 job_id = 1;
+  void clear_job_id();
+  uint32_t job_id() const;
+  void set_job_id(uint32_t value);
+  private:
+  uint32_t _internal_job_id() const;
+  void _internal_set_job_id(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.PrintJobCancel)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    uint32_t job_id_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
+class PrintJobResult final :
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.PrintJobResult) */ {
+ public:
+  inline PrintJobResult() : PrintJobResult(nullptr) {}
+  ~PrintJobResult() override;
+  explicit PROTOBUF_CONSTEXPR PrintJobResult(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  PrintJobResult(const PrintJobResult& from);
+  PrintJobResult(PrintJobResult&& from) noexcept
+    : PrintJobResult() {
+    *this = ::std::move(from);
+  }
+
+  inline PrintJobResult& operator=(const PrintJobResult& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline PrintJobResult& operator=(PrintJobResult&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const PrintJobResult& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const PrintJobResult* internal_default_instance() {
+    return reinterpret_cast<const PrintJobResult*>(
+               &_PrintJobResult_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    91;
+
+  friend void swap(PrintJobResult& a, PrintJobResult& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(PrintJobResult* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(PrintJobResult* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  PrintJobResult* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<PrintJobResult>(arena);
+  }
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const PrintJobResult& from);
+  void MergeFrom(const PrintJobResult& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(PrintJobResult* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "dsa.control.v1.PrintJobResult";
+  }
+  protected:
+  explicit PrintJobResult(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  std::string GetTypeName() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kMessageFieldNumber = 3,
+    kJobIdFieldNumber = 1,
+    kOutcomeFieldNumber = 2,
+  };
+  // string message = 3;
+  void clear_message();
+  const std::string& message() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_message(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_message();
+  PROTOBUF_NODISCARD std::string* release_message();
+  void set_allocated_message(std::string* message);
+  private:
+  const std::string& _internal_message() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_message(const std::string& value);
+  std::string* _internal_mutable_message();
+  public:
+
+  // uint32 job_id = 1;
+  void clear_job_id();
+  uint32_t job_id() const;
+  void set_job_id(uint32_t value);
+  private:
+  uint32_t _internal_job_id() const;
+  void _internal_set_job_id(uint32_t value);
+  public:
+
+  // .dsa.control.v1.PrintOutcome outcome = 2;
+  void clear_outcome();
+  ::dsa::control::v1::PrintOutcome outcome() const;
+  void set_outcome(::dsa::control::v1::PrintOutcome value);
+  private:
+  ::dsa::control::v1::PrintOutcome _internal_outcome() const;
+  void _internal_set_outcome(::dsa::control::v1::PrintOutcome value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:dsa.control.v1.PrintJobResult)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr message_;
+    uint32_t job_id_;
+    int outcome_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_control_2eproto;
+};
+// -------------------------------------------------------------------
+
 class Envelope final :
     public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:dsa.control.v1.Envelope) */ {
  public:
@@ -15052,6 +15801,10 @@ class Envelope final :
     kDiagnosticsFile = 134,
     kDiagnosticsDone = 135,
     kStopApp = 136,
+    kPrintJob = 220,
+    kPrintJobChunk = 221,
+    kPrintJobCancel = 222,
+    kPrintJobResult = 223,
     BODY_NOT_SET = 0,
   };
 
@@ -15060,7 +15813,7 @@ class Envelope final :
                &_Envelope_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    88;
+    92;
 
   friend void swap(Envelope& a, Envelope& b) {
     a.Swap(&b);
@@ -15205,6 +15958,10 @@ class Envelope final :
     kDiagnosticsFileFieldNumber = 134,
     kDiagnosticsDoneFieldNumber = 135,
     kStopAppFieldNumber = 136,
+    kPrintJobFieldNumber = 220,
+    kPrintJobChunkFieldNumber = 221,
+    kPrintJobCancelFieldNumber = 222,
+    kPrintJobResultFieldNumber = 223,
   };
   // .dsa.control.v1.Hello hello = 1;
   bool has_hello() const;
@@ -16664,6 +17421,78 @@ class Envelope final :
       ::dsa::control::v1::StopApp* stop_app);
   ::dsa::control::v1::StopApp* unsafe_arena_release_stop_app();
 
+  // .dsa.control.v1.PrintJob print_job = 220;
+  bool has_print_job() const;
+  private:
+  bool _internal_has_print_job() const;
+  public:
+  void clear_print_job();
+  const ::dsa::control::v1::PrintJob& print_job() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::PrintJob* release_print_job();
+  ::dsa::control::v1::PrintJob* mutable_print_job();
+  void set_allocated_print_job(::dsa::control::v1::PrintJob* print_job);
+  private:
+  const ::dsa::control::v1::PrintJob& _internal_print_job() const;
+  ::dsa::control::v1::PrintJob* _internal_mutable_print_job();
+  public:
+  void unsafe_arena_set_allocated_print_job(
+      ::dsa::control::v1::PrintJob* print_job);
+  ::dsa::control::v1::PrintJob* unsafe_arena_release_print_job();
+
+  // .dsa.control.v1.PrintJobChunk print_job_chunk = 221;
+  bool has_print_job_chunk() const;
+  private:
+  bool _internal_has_print_job_chunk() const;
+  public:
+  void clear_print_job_chunk();
+  const ::dsa::control::v1::PrintJobChunk& print_job_chunk() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::PrintJobChunk* release_print_job_chunk();
+  ::dsa::control::v1::PrintJobChunk* mutable_print_job_chunk();
+  void set_allocated_print_job_chunk(::dsa::control::v1::PrintJobChunk* print_job_chunk);
+  private:
+  const ::dsa::control::v1::PrintJobChunk& _internal_print_job_chunk() const;
+  ::dsa::control::v1::PrintJobChunk* _internal_mutable_print_job_chunk();
+  public:
+  void unsafe_arena_set_allocated_print_job_chunk(
+      ::dsa::control::v1::PrintJobChunk* print_job_chunk);
+  ::dsa::control::v1::PrintJobChunk* unsafe_arena_release_print_job_chunk();
+
+  // .dsa.control.v1.PrintJobCancel print_job_cancel = 222;
+  bool has_print_job_cancel() const;
+  private:
+  bool _internal_has_print_job_cancel() const;
+  public:
+  void clear_print_job_cancel();
+  const ::dsa::control::v1::PrintJobCancel& print_job_cancel() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::PrintJobCancel* release_print_job_cancel();
+  ::dsa::control::v1::PrintJobCancel* mutable_print_job_cancel();
+  void set_allocated_print_job_cancel(::dsa::control::v1::PrintJobCancel* print_job_cancel);
+  private:
+  const ::dsa::control::v1::PrintJobCancel& _internal_print_job_cancel() const;
+  ::dsa::control::v1::PrintJobCancel* _internal_mutable_print_job_cancel();
+  public:
+  void unsafe_arena_set_allocated_print_job_cancel(
+      ::dsa::control::v1::PrintJobCancel* print_job_cancel);
+  ::dsa::control::v1::PrintJobCancel* unsafe_arena_release_print_job_cancel();
+
+  // .dsa.control.v1.PrintJobResult print_job_result = 223;
+  bool has_print_job_result() const;
+  private:
+  bool _internal_has_print_job_result() const;
+  public:
+  void clear_print_job_result();
+  const ::dsa::control::v1::PrintJobResult& print_job_result() const;
+  PROTOBUF_NODISCARD ::dsa::control::v1::PrintJobResult* release_print_job_result();
+  ::dsa::control::v1::PrintJobResult* mutable_print_job_result();
+  void set_allocated_print_job_result(::dsa::control::v1::PrintJobResult* print_job_result);
+  private:
+  const ::dsa::control::v1::PrintJobResult& _internal_print_job_result() const;
+  ::dsa::control::v1::PrintJobResult* _internal_mutable_print_job_result();
+  public:
+  void unsafe_arena_set_allocated_print_job_result(
+      ::dsa::control::v1::PrintJobResult* print_job_result);
+  ::dsa::control::v1::PrintJobResult* unsafe_arena_release_print_job_result();
+
   void clear_body();
   BodyCase body_case() const;
   // @@protoc_insertion_point(class_scope:dsa.control.v1.Envelope)
@@ -16750,6 +17579,10 @@ class Envelope final :
   void set_has_diagnostics_file();
   void set_has_diagnostics_done();
   void set_has_stop_app();
+  void set_has_print_job();
+  void set_has_print_job_chunk();
+  void set_has_print_job_cancel();
+  void set_has_print_job_result();
 
   inline bool has_body() const;
   inline void clear_has_body();
@@ -16842,6 +17675,10 @@ class Envelope final :
       ::dsa::control::v1::DiagnosticsFile* diagnostics_file_;
       ::dsa::control::v1::DiagnosticsDone* diagnostics_done_;
       ::dsa::control::v1::StopApp* stop_app_;
+      ::dsa::control::v1::PrintJob* print_job_;
+      ::dsa::control::v1::PrintJobChunk* print_job_chunk_;
+      ::dsa::control::v1::PrintJobCancel* print_job_cancel_;
+      ::dsa::control::v1::PrintJobResult* print_job_result_;
     } body_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -25862,6 +26699,552 @@ inline void DiagnosticsDone::set_allocated_error(std::string* error) {
 
 // -------------------------------------------------------------------
 
+// PrintJob
+
+// uint32 job_id = 1;
+inline void PrintJob::clear_job_id() {
+  _impl_.job_id_ = 0u;
+}
+inline uint32_t PrintJob::_internal_job_id() const {
+  return _impl_.job_id_;
+}
+inline uint32_t PrintJob::job_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJob.job_id)
+  return _internal_job_id();
+}
+inline void PrintJob::_internal_set_job_id(uint32_t value) {
+  
+  _impl_.job_id_ = value;
+}
+inline void PrintJob::set_job_id(uint32_t value) {
+  _internal_set_job_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJob.job_id)
+}
+
+// string package_name = 2;
+inline void PrintJob::clear_package_name() {
+  _impl_.package_name_.ClearToEmpty();
+}
+inline const std::string& PrintJob::package_name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJob.package_name)
+  return _internal_package_name();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void PrintJob::set_package_name(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.package_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJob.package_name)
+}
+inline std::string* PrintJob::mutable_package_name() {
+  std::string* _s = _internal_mutable_package_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.PrintJob.package_name)
+  return _s;
+}
+inline const std::string& PrintJob::_internal_package_name() const {
+  return _impl_.package_name_.Get();
+}
+inline void PrintJob::_internal_set_package_name(const std::string& value) {
+  
+  _impl_.package_name_.Set(value, GetArenaForAllocation());
+}
+inline std::string* PrintJob::_internal_mutable_package_name() {
+  
+  return _impl_.package_name_.Mutable(GetArenaForAllocation());
+}
+inline std::string* PrintJob::release_package_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.PrintJob.package_name)
+  return _impl_.package_name_.Release();
+}
+inline void PrintJob::set_allocated_package_name(std::string* package_name) {
+  if (package_name != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.package_name_.SetAllocated(package_name, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.package_name_.IsDefault()) {
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.PrintJob.package_name)
+}
+
+// string app_label = 3;
+inline void PrintJob::clear_app_label() {
+  _impl_.app_label_.ClearToEmpty();
+}
+inline const std::string& PrintJob::app_label() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJob.app_label)
+  return _internal_app_label();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void PrintJob::set_app_label(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.app_label_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJob.app_label)
+}
+inline std::string* PrintJob::mutable_app_label() {
+  std::string* _s = _internal_mutable_app_label();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.PrintJob.app_label)
+  return _s;
+}
+inline const std::string& PrintJob::_internal_app_label() const {
+  return _impl_.app_label_.Get();
+}
+inline void PrintJob::_internal_set_app_label(const std::string& value) {
+  
+  _impl_.app_label_.Set(value, GetArenaForAllocation());
+}
+inline std::string* PrintJob::_internal_mutable_app_label() {
+  
+  return _impl_.app_label_.Mutable(GetArenaForAllocation());
+}
+inline std::string* PrintJob::release_app_label() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.PrintJob.app_label)
+  return _impl_.app_label_.Release();
+}
+inline void PrintJob::set_allocated_app_label(std::string* app_label) {
+  if (app_label != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.app_label_.SetAllocated(app_label, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.app_label_.IsDefault()) {
+    _impl_.app_label_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.PrintJob.app_label)
+}
+
+// string document_name = 4;
+inline void PrintJob::clear_document_name() {
+  _impl_.document_name_.ClearToEmpty();
+}
+inline const std::string& PrintJob::document_name() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJob.document_name)
+  return _internal_document_name();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void PrintJob::set_document_name(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.document_name_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJob.document_name)
+}
+inline std::string* PrintJob::mutable_document_name() {
+  std::string* _s = _internal_mutable_document_name();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.PrintJob.document_name)
+  return _s;
+}
+inline const std::string& PrintJob::_internal_document_name() const {
+  return _impl_.document_name_.Get();
+}
+inline void PrintJob::_internal_set_document_name(const std::string& value) {
+  
+  _impl_.document_name_.Set(value, GetArenaForAllocation());
+}
+inline std::string* PrintJob::_internal_mutable_document_name() {
+  
+  return _impl_.document_name_.Mutable(GetArenaForAllocation());
+}
+inline std::string* PrintJob::release_document_name() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.PrintJob.document_name)
+  return _impl_.document_name_.Release();
+}
+inline void PrintJob::set_allocated_document_name(std::string* document_name) {
+  if (document_name != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.document_name_.SetAllocated(document_name, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.document_name_.IsDefault()) {
+    _impl_.document_name_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.PrintJob.document_name)
+}
+
+// uint64 size = 5;
+inline void PrintJob::clear_size() {
+  _impl_.size_ = uint64_t{0u};
+}
+inline uint64_t PrintJob::_internal_size() const {
+  return _impl_.size_;
+}
+inline uint64_t PrintJob::size() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJob.size)
+  return _internal_size();
+}
+inline void PrintJob::_internal_set_size(uint64_t value) {
+  
+  _impl_.size_ = value;
+}
+inline void PrintJob::set_size(uint64_t value) {
+  _internal_set_size(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJob.size)
+}
+
+// uint32 page_count = 6;
+inline void PrintJob::clear_page_count() {
+  _impl_.page_count_ = 0u;
+}
+inline uint32_t PrintJob::_internal_page_count() const {
+  return _impl_.page_count_;
+}
+inline uint32_t PrintJob::page_count() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJob.page_count)
+  return _internal_page_count();
+}
+inline void PrintJob::_internal_set_page_count(uint32_t value) {
+  
+  _impl_.page_count_ = value;
+}
+inline void PrintJob::set_page_count(uint32_t value) {
+  _internal_set_page_count(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJob.page_count)
+}
+
+// uint32 copies = 7;
+inline void PrintJob::clear_copies() {
+  _impl_.copies_ = 0u;
+}
+inline uint32_t PrintJob::_internal_copies() const {
+  return _impl_.copies_;
+}
+inline uint32_t PrintJob::copies() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJob.copies)
+  return _internal_copies();
+}
+inline void PrintJob::_internal_set_copies(uint32_t value) {
+  
+  _impl_.copies_ = value;
+}
+inline void PrintJob::set_copies(uint32_t value) {
+  _internal_set_copies(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJob.copies)
+}
+
+// bool color = 8;
+inline void PrintJob::clear_color() {
+  _impl_.color_ = false;
+}
+inline bool PrintJob::_internal_color() const {
+  return _impl_.color_;
+}
+inline bool PrintJob::color() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJob.color)
+  return _internal_color();
+}
+inline void PrintJob::_internal_set_color(bool value) {
+  
+  _impl_.color_ = value;
+}
+inline void PrintJob::set_color(bool value) {
+  _internal_set_color(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJob.color)
+}
+
+// bool duplex = 9;
+inline void PrintJob::clear_duplex() {
+  _impl_.duplex_ = false;
+}
+inline bool PrintJob::_internal_duplex() const {
+  return _impl_.duplex_;
+}
+inline bool PrintJob::duplex() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJob.duplex)
+  return _internal_duplex();
+}
+inline void PrintJob::_internal_set_duplex(bool value) {
+  
+  _impl_.duplex_ = value;
+}
+inline void PrintJob::set_duplex(bool value) {
+  _internal_set_duplex(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJob.duplex)
+}
+
+// bool landscape = 10;
+inline void PrintJob::clear_landscape() {
+  _impl_.landscape_ = false;
+}
+inline bool PrintJob::_internal_landscape() const {
+  return _impl_.landscape_;
+}
+inline bool PrintJob::landscape() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJob.landscape)
+  return _internal_landscape();
+}
+inline void PrintJob::_internal_set_landscape(bool value) {
+  
+  _impl_.landscape_ = value;
+}
+inline void PrintJob::set_landscape(bool value) {
+  _internal_set_landscape(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJob.landscape)
+}
+
+// uint32 media_width_mils = 11;
+inline void PrintJob::clear_media_width_mils() {
+  _impl_.media_width_mils_ = 0u;
+}
+inline uint32_t PrintJob::_internal_media_width_mils() const {
+  return _impl_.media_width_mils_;
+}
+inline uint32_t PrintJob::media_width_mils() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJob.media_width_mils)
+  return _internal_media_width_mils();
+}
+inline void PrintJob::_internal_set_media_width_mils(uint32_t value) {
+  
+  _impl_.media_width_mils_ = value;
+}
+inline void PrintJob::set_media_width_mils(uint32_t value) {
+  _internal_set_media_width_mils(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJob.media_width_mils)
+}
+
+// uint32 media_height_mils = 12;
+inline void PrintJob::clear_media_height_mils() {
+  _impl_.media_height_mils_ = 0u;
+}
+inline uint32_t PrintJob::_internal_media_height_mils() const {
+  return _impl_.media_height_mils_;
+}
+inline uint32_t PrintJob::media_height_mils() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJob.media_height_mils)
+  return _internal_media_height_mils();
+}
+inline void PrintJob::_internal_set_media_height_mils(uint32_t value) {
+  
+  _impl_.media_height_mils_ = value;
+}
+inline void PrintJob::set_media_height_mils(uint32_t value) {
+  _internal_set_media_height_mils(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJob.media_height_mils)
+}
+
+// -------------------------------------------------------------------
+
+// PrintJobChunk
+
+// uint32 job_id = 1;
+inline void PrintJobChunk::clear_job_id() {
+  _impl_.job_id_ = 0u;
+}
+inline uint32_t PrintJobChunk::_internal_job_id() const {
+  return _impl_.job_id_;
+}
+inline uint32_t PrintJobChunk::job_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJobChunk.job_id)
+  return _internal_job_id();
+}
+inline void PrintJobChunk::_internal_set_job_id(uint32_t value) {
+  
+  _impl_.job_id_ = value;
+}
+inline void PrintJobChunk::set_job_id(uint32_t value) {
+  _internal_set_job_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJobChunk.job_id)
+}
+
+// uint64 offset = 2;
+inline void PrintJobChunk::clear_offset() {
+  _impl_.offset_ = uint64_t{0u};
+}
+inline uint64_t PrintJobChunk::_internal_offset() const {
+  return _impl_.offset_;
+}
+inline uint64_t PrintJobChunk::offset() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJobChunk.offset)
+  return _internal_offset();
+}
+inline void PrintJobChunk::_internal_set_offset(uint64_t value) {
+  
+  _impl_.offset_ = value;
+}
+inline void PrintJobChunk::set_offset(uint64_t value) {
+  _internal_set_offset(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJobChunk.offset)
+}
+
+// bytes data = 3;
+inline void PrintJobChunk::clear_data() {
+  _impl_.data_.ClearToEmpty();
+}
+inline const std::string& PrintJobChunk::data() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJobChunk.data)
+  return _internal_data();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void PrintJobChunk::set_data(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.data_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJobChunk.data)
+}
+inline std::string* PrintJobChunk::mutable_data() {
+  std::string* _s = _internal_mutable_data();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.PrintJobChunk.data)
+  return _s;
+}
+inline const std::string& PrintJobChunk::_internal_data() const {
+  return _impl_.data_.Get();
+}
+inline void PrintJobChunk::_internal_set_data(const std::string& value) {
+  
+  _impl_.data_.Set(value, GetArenaForAllocation());
+}
+inline std::string* PrintJobChunk::_internal_mutable_data() {
+  
+  return _impl_.data_.Mutable(GetArenaForAllocation());
+}
+inline std::string* PrintJobChunk::release_data() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.PrintJobChunk.data)
+  return _impl_.data_.Release();
+}
+inline void PrintJobChunk::set_allocated_data(std::string* data) {
+  if (data != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.data_.SetAllocated(data, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.data_.IsDefault()) {
+    _impl_.data_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.PrintJobChunk.data)
+}
+
+// -------------------------------------------------------------------
+
+// PrintJobCancel
+
+// uint32 job_id = 1;
+inline void PrintJobCancel::clear_job_id() {
+  _impl_.job_id_ = 0u;
+}
+inline uint32_t PrintJobCancel::_internal_job_id() const {
+  return _impl_.job_id_;
+}
+inline uint32_t PrintJobCancel::job_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJobCancel.job_id)
+  return _internal_job_id();
+}
+inline void PrintJobCancel::_internal_set_job_id(uint32_t value) {
+  
+  _impl_.job_id_ = value;
+}
+inline void PrintJobCancel::set_job_id(uint32_t value) {
+  _internal_set_job_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJobCancel.job_id)
+}
+
+// -------------------------------------------------------------------
+
+// PrintJobResult
+
+// uint32 job_id = 1;
+inline void PrintJobResult::clear_job_id() {
+  _impl_.job_id_ = 0u;
+}
+inline uint32_t PrintJobResult::_internal_job_id() const {
+  return _impl_.job_id_;
+}
+inline uint32_t PrintJobResult::job_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJobResult.job_id)
+  return _internal_job_id();
+}
+inline void PrintJobResult::_internal_set_job_id(uint32_t value) {
+  
+  _impl_.job_id_ = value;
+}
+inline void PrintJobResult::set_job_id(uint32_t value) {
+  _internal_set_job_id(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJobResult.job_id)
+}
+
+// .dsa.control.v1.PrintOutcome outcome = 2;
+inline void PrintJobResult::clear_outcome() {
+  _impl_.outcome_ = 0;
+}
+inline ::dsa::control::v1::PrintOutcome PrintJobResult::_internal_outcome() const {
+  return static_cast< ::dsa::control::v1::PrintOutcome >(_impl_.outcome_);
+}
+inline ::dsa::control::v1::PrintOutcome PrintJobResult::outcome() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJobResult.outcome)
+  return _internal_outcome();
+}
+inline void PrintJobResult::_internal_set_outcome(::dsa::control::v1::PrintOutcome value) {
+  
+  _impl_.outcome_ = value;
+}
+inline void PrintJobResult::set_outcome(::dsa::control::v1::PrintOutcome value) {
+  _internal_set_outcome(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJobResult.outcome)
+}
+
+// string message = 3;
+inline void PrintJobResult::clear_message() {
+  _impl_.message_.ClearToEmpty();
+}
+inline const std::string& PrintJobResult::message() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.PrintJobResult.message)
+  return _internal_message();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void PrintJobResult::set_message(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.message_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.PrintJobResult.message)
+}
+inline std::string* PrintJobResult::mutable_message() {
+  std::string* _s = _internal_mutable_message();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.PrintJobResult.message)
+  return _s;
+}
+inline const std::string& PrintJobResult::_internal_message() const {
+  return _impl_.message_.Get();
+}
+inline void PrintJobResult::_internal_set_message(const std::string& value) {
+  
+  _impl_.message_.Set(value, GetArenaForAllocation());
+}
+inline std::string* PrintJobResult::_internal_mutable_message() {
+  
+  return _impl_.message_.Mutable(GetArenaForAllocation());
+}
+inline std::string* PrintJobResult::release_message() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.PrintJobResult.message)
+  return _impl_.message_.Release();
+}
+inline void PrintJobResult::set_allocated_message(std::string* message) {
+  if (message != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.message_.SetAllocated(message, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.message_.IsDefault()) {
+    _impl_.message_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.PrintJobResult.message)
+}
+
+// -------------------------------------------------------------------
+
 // Envelope
 
 // .dsa.control.v1.Hello hello = 1;
@@ -31858,6 +33241,302 @@ inline ::dsa::control::v1::StopApp* Envelope::mutable_stop_app() {
   return _msg;
 }
 
+// .dsa.control.v1.PrintJob print_job = 220;
+inline bool Envelope::_internal_has_print_job() const {
+  return body_case() == kPrintJob;
+}
+inline bool Envelope::has_print_job() const {
+  return _internal_has_print_job();
+}
+inline void Envelope::set_has_print_job() {
+  _impl_._oneof_case_[0] = kPrintJob;
+}
+inline void Envelope::clear_print_job() {
+  if (_internal_has_print_job()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.print_job_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::PrintJob* Envelope::release_print_job() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.print_job)
+  if (_internal_has_print_job()) {
+    clear_has_body();
+    ::dsa::control::v1::PrintJob* temp = _impl_.body_.print_job_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.print_job_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::PrintJob& Envelope::_internal_print_job() const {
+  return _internal_has_print_job()
+      ? *_impl_.body_.print_job_
+      : reinterpret_cast< ::dsa::control::v1::PrintJob&>(::dsa::control::v1::_PrintJob_default_instance_);
+}
+inline const ::dsa::control::v1::PrintJob& Envelope::print_job() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.print_job)
+  return _internal_print_job();
+}
+inline ::dsa::control::v1::PrintJob* Envelope::unsafe_arena_release_print_job() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.print_job)
+  if (_internal_has_print_job()) {
+    clear_has_body();
+    ::dsa::control::v1::PrintJob* temp = _impl_.body_.print_job_;
+    _impl_.body_.print_job_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_print_job(::dsa::control::v1::PrintJob* print_job) {
+  clear_body();
+  if (print_job) {
+    set_has_print_job();
+    _impl_.body_.print_job_ = print_job;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.print_job)
+}
+inline ::dsa::control::v1::PrintJob* Envelope::_internal_mutable_print_job() {
+  if (!_internal_has_print_job()) {
+    clear_body();
+    set_has_print_job();
+    _impl_.body_.print_job_ = CreateMaybeMessage< ::dsa::control::v1::PrintJob >(GetArenaForAllocation());
+  }
+  return _impl_.body_.print_job_;
+}
+inline ::dsa::control::v1::PrintJob* Envelope::mutable_print_job() {
+  ::dsa::control::v1::PrintJob* _msg = _internal_mutable_print_job();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.print_job)
+  return _msg;
+}
+
+// .dsa.control.v1.PrintJobChunk print_job_chunk = 221;
+inline bool Envelope::_internal_has_print_job_chunk() const {
+  return body_case() == kPrintJobChunk;
+}
+inline bool Envelope::has_print_job_chunk() const {
+  return _internal_has_print_job_chunk();
+}
+inline void Envelope::set_has_print_job_chunk() {
+  _impl_._oneof_case_[0] = kPrintJobChunk;
+}
+inline void Envelope::clear_print_job_chunk() {
+  if (_internal_has_print_job_chunk()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.print_job_chunk_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::PrintJobChunk* Envelope::release_print_job_chunk() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.print_job_chunk)
+  if (_internal_has_print_job_chunk()) {
+    clear_has_body();
+    ::dsa::control::v1::PrintJobChunk* temp = _impl_.body_.print_job_chunk_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.print_job_chunk_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::PrintJobChunk& Envelope::_internal_print_job_chunk() const {
+  return _internal_has_print_job_chunk()
+      ? *_impl_.body_.print_job_chunk_
+      : reinterpret_cast< ::dsa::control::v1::PrintJobChunk&>(::dsa::control::v1::_PrintJobChunk_default_instance_);
+}
+inline const ::dsa::control::v1::PrintJobChunk& Envelope::print_job_chunk() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.print_job_chunk)
+  return _internal_print_job_chunk();
+}
+inline ::dsa::control::v1::PrintJobChunk* Envelope::unsafe_arena_release_print_job_chunk() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.print_job_chunk)
+  if (_internal_has_print_job_chunk()) {
+    clear_has_body();
+    ::dsa::control::v1::PrintJobChunk* temp = _impl_.body_.print_job_chunk_;
+    _impl_.body_.print_job_chunk_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_print_job_chunk(::dsa::control::v1::PrintJobChunk* print_job_chunk) {
+  clear_body();
+  if (print_job_chunk) {
+    set_has_print_job_chunk();
+    _impl_.body_.print_job_chunk_ = print_job_chunk;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.print_job_chunk)
+}
+inline ::dsa::control::v1::PrintJobChunk* Envelope::_internal_mutable_print_job_chunk() {
+  if (!_internal_has_print_job_chunk()) {
+    clear_body();
+    set_has_print_job_chunk();
+    _impl_.body_.print_job_chunk_ = CreateMaybeMessage< ::dsa::control::v1::PrintJobChunk >(GetArenaForAllocation());
+  }
+  return _impl_.body_.print_job_chunk_;
+}
+inline ::dsa::control::v1::PrintJobChunk* Envelope::mutable_print_job_chunk() {
+  ::dsa::control::v1::PrintJobChunk* _msg = _internal_mutable_print_job_chunk();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.print_job_chunk)
+  return _msg;
+}
+
+// .dsa.control.v1.PrintJobCancel print_job_cancel = 222;
+inline bool Envelope::_internal_has_print_job_cancel() const {
+  return body_case() == kPrintJobCancel;
+}
+inline bool Envelope::has_print_job_cancel() const {
+  return _internal_has_print_job_cancel();
+}
+inline void Envelope::set_has_print_job_cancel() {
+  _impl_._oneof_case_[0] = kPrintJobCancel;
+}
+inline void Envelope::clear_print_job_cancel() {
+  if (_internal_has_print_job_cancel()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.print_job_cancel_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::PrintJobCancel* Envelope::release_print_job_cancel() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.print_job_cancel)
+  if (_internal_has_print_job_cancel()) {
+    clear_has_body();
+    ::dsa::control::v1::PrintJobCancel* temp = _impl_.body_.print_job_cancel_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.print_job_cancel_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::PrintJobCancel& Envelope::_internal_print_job_cancel() const {
+  return _internal_has_print_job_cancel()
+      ? *_impl_.body_.print_job_cancel_
+      : reinterpret_cast< ::dsa::control::v1::PrintJobCancel&>(::dsa::control::v1::_PrintJobCancel_default_instance_);
+}
+inline const ::dsa::control::v1::PrintJobCancel& Envelope::print_job_cancel() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.print_job_cancel)
+  return _internal_print_job_cancel();
+}
+inline ::dsa::control::v1::PrintJobCancel* Envelope::unsafe_arena_release_print_job_cancel() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.print_job_cancel)
+  if (_internal_has_print_job_cancel()) {
+    clear_has_body();
+    ::dsa::control::v1::PrintJobCancel* temp = _impl_.body_.print_job_cancel_;
+    _impl_.body_.print_job_cancel_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_print_job_cancel(::dsa::control::v1::PrintJobCancel* print_job_cancel) {
+  clear_body();
+  if (print_job_cancel) {
+    set_has_print_job_cancel();
+    _impl_.body_.print_job_cancel_ = print_job_cancel;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.print_job_cancel)
+}
+inline ::dsa::control::v1::PrintJobCancel* Envelope::_internal_mutable_print_job_cancel() {
+  if (!_internal_has_print_job_cancel()) {
+    clear_body();
+    set_has_print_job_cancel();
+    _impl_.body_.print_job_cancel_ = CreateMaybeMessage< ::dsa::control::v1::PrintJobCancel >(GetArenaForAllocation());
+  }
+  return _impl_.body_.print_job_cancel_;
+}
+inline ::dsa::control::v1::PrintJobCancel* Envelope::mutable_print_job_cancel() {
+  ::dsa::control::v1::PrintJobCancel* _msg = _internal_mutable_print_job_cancel();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.print_job_cancel)
+  return _msg;
+}
+
+// .dsa.control.v1.PrintJobResult print_job_result = 223;
+inline bool Envelope::_internal_has_print_job_result() const {
+  return body_case() == kPrintJobResult;
+}
+inline bool Envelope::has_print_job_result() const {
+  return _internal_has_print_job_result();
+}
+inline void Envelope::set_has_print_job_result() {
+  _impl_._oneof_case_[0] = kPrintJobResult;
+}
+inline void Envelope::clear_print_job_result() {
+  if (_internal_has_print_job_result()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.body_.print_job_result_;
+    }
+    clear_has_body();
+  }
+}
+inline ::dsa::control::v1::PrintJobResult* Envelope::release_print_job_result() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.Envelope.print_job_result)
+  if (_internal_has_print_job_result()) {
+    clear_has_body();
+    ::dsa::control::v1::PrintJobResult* temp = _impl_.body_.print_job_result_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.body_.print_job_result_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::dsa::control::v1::PrintJobResult& Envelope::_internal_print_job_result() const {
+  return _internal_has_print_job_result()
+      ? *_impl_.body_.print_job_result_
+      : reinterpret_cast< ::dsa::control::v1::PrintJobResult&>(::dsa::control::v1::_PrintJobResult_default_instance_);
+}
+inline const ::dsa::control::v1::PrintJobResult& Envelope::print_job_result() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.Envelope.print_job_result)
+  return _internal_print_job_result();
+}
+inline ::dsa::control::v1::PrintJobResult* Envelope::unsafe_arena_release_print_job_result() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:dsa.control.v1.Envelope.print_job_result)
+  if (_internal_has_print_job_result()) {
+    clear_has_body();
+    ::dsa::control::v1::PrintJobResult* temp = _impl_.body_.print_job_result_;
+    _impl_.body_.print_job_result_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void Envelope::unsafe_arena_set_allocated_print_job_result(::dsa::control::v1::PrintJobResult* print_job_result) {
+  clear_body();
+  if (print_job_result) {
+    set_has_print_job_result();
+    _impl_.body_.print_job_result_ = print_job_result;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:dsa.control.v1.Envelope.print_job_result)
+}
+inline ::dsa::control::v1::PrintJobResult* Envelope::_internal_mutable_print_job_result() {
+  if (!_internal_has_print_job_result()) {
+    clear_body();
+    set_has_print_job_result();
+    _impl_.body_.print_job_result_ = CreateMaybeMessage< ::dsa::control::v1::PrintJobResult >(GetArenaForAllocation());
+  }
+  return _impl_.body_.print_job_result_;
+}
+inline ::dsa::control::v1::PrintJobResult* Envelope::mutable_print_job_result() {
+  ::dsa::control::v1::PrintJobResult* _msg = _internal_mutable_print_job_result();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.Envelope.print_job_result)
+  return _msg;
+}
+
 inline bool Envelope::has_body() const {
   return body_case() != BODY_NOT_SET;
 }
@@ -31870,6 +33549,14 @@ inline Envelope::BodyCase Envelope::body_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
@@ -32067,6 +33754,7 @@ template <> struct is_proto_enum< ::dsa::control::v1::FileAction> : ::std::true_
 template <> struct is_proto_enum< ::dsa::control::v1::VideoCodec> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::NodeAction> : ::std::true_type {};
 template <> struct is_proto_enum< ::dsa::control::v1::LogBuffer> : ::std::true_type {};
+template <> struct is_proto_enum< ::dsa::control::v1::PrintOutcome> : ::std::true_type {};
 
 PROTOBUF_NAMESPACE_CLOSE
 

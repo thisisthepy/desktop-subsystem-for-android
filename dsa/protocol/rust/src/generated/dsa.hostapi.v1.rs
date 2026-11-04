@@ -225,6 +225,75 @@ pub struct ActOnNotification {
     #[prost(enumeration = "NotificationAction", tag = "2")]
     pub action: i32,
 }
+/// Turns the connection into a watch of the print jobs of the caller's Android: after the
+/// answer (Done), the service sends a PrintJobOffer for each document an app prints, followed
+/// by its PrintJobData pieces, and a PrintJobWithdrawn when a job is canceled in Android or
+/// Android stops before the job is answered. Each job goes to one watcher only. The client
+/// answers each job with ReportPrintJob, on another connection, and sends nothing on this
+/// one. The watch lasts across restarts of the Android.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WatchPrintJobs {}
+/// A print job of the caller's Android, on a connection that watches them. Its PDF document of
+/// `size` bytes follows in PrintJobData pieces, in order. The settings are what the user chose
+/// in Android's print dialog.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PrintJobOffer {
+    /// The service's number for the job, unique while the service runs.
+    #[prost(uint32, tag = "1")]
+    pub job_id: u32,
+    #[prost(string, tag = "2")]
+    pub package_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub app_label: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub document_name: ::prost::alloc::string::String,
+    #[prost(uint64, tag = "5")]
+    pub size: u64,
+    /// 0 when the app did not say.
+    #[prost(uint32, tag = "6")]
+    pub page_count: u32,
+    #[prost(uint32, tag = "7")]
+    pub copies: u32,
+    #[prost(bool, tag = "8")]
+    pub color: bool,
+    #[prost(bool, tag = "9")]
+    pub duplex: bool,
+    #[prost(bool, tag = "10")]
+    pub landscape: bool,
+    /// The paper's size, in thousandths of an inch; 0 when unknown.
+    #[prost(uint32, tag = "11")]
+    pub media_width_mils: u32,
+    #[prost(uint32, tag = "12")]
+    pub media_height_mils: u32,
+}
+/// One piece of a print job's document, at most 1 MiB. The piece that reaches the job's size
+/// ends it.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PrintJobData {
+    #[prost(uint32, tag = "1")]
+    pub job_id: u32,
+    #[prost(uint64, tag = "2")]
+    pub offset: u64,
+    #[prost(bytes = "vec", tag = "3")]
+    pub data: ::prost::alloc::vec::Vec<u8>,
+}
+/// The job is gone from Android, canceled there or ended with it; it is not to be printed.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PrintJobWithdrawn {
+    #[prost(uint32, tag = "1")]
+    pub job_id: u32,
+}
+/// Tells the caller's Android what became of one of its print jobs. Answered with Done, also
+/// for a job Android no longer has.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReportPrintJob {
+    #[prost(uint32, tag = "1")]
+    pub job_id: u32,
+    #[prost(enumeration = "PrintOutcome", tag = "2")]
+    pub outcome: i32,
+    #[prost(string, tag = "3")]
+    pub message: ::prost::alloc::string::String,
+}
 /// Asks for the widgets the apps in the caller's Android offer. The answer is WidgetProviders.
 /// Needs the caller's Android to be running.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -1108,7 +1177,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 32, 33, 34, 28, 35, 36, 70, 71, 37"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 32, 33, 34, 28, 35, 36, 70, 71, 37, 120, 121"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -1188,6 +1257,10 @@ pub mod request {
         CollectDiagnostics(super::CollectDiagnostics),
         #[prost(message, tag = "37")]
         StopApp(super::StopApp),
+        #[prost(message, tag = "120")]
+        WatchPrintJobs(super::WatchPrintJobs),
+        #[prost(message, tag = "121")]
+        ReportPrintJob(super::ReportPrintJob),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1239,7 +1312,7 @@ pub mod response {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11, 15, 16, 14, 17, 18, 19, 20, 50, 51"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 11, 15, 16, 14, 17, 18, 19, 20, 50, 51, 120, 121, 122"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -1291,6 +1364,12 @@ pub mod envelope {
         LogEntries(super::LogEntries),
         #[prost(message, tag = "51")]
         DiagnosticsData(super::DiagnosticsData),
+        #[prost(message, tag = "120")]
+        PrintJobOffer(super::PrintJobOffer),
+        #[prost(message, tag = "121")]
+        PrintJobData(super::PrintJobData),
+        #[prost(message, tag = "122")]
+        PrintJobWithdrawn(super::PrintJobWithdrawn),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -1496,6 +1575,41 @@ impl NotificationAction {
             "NOTIFICATION_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
             "NOTIFICATION_ACTION_OPEN" => Some(Self::Open),
             "NOTIFICATION_ACTION_DISMISS" => Some(Self::Dismiss),
+            _ => None,
+        }
+    }
+}
+/// What became of a print job on the host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum PrintOutcome {
+    Unspecified = 0,
+    Printed = 1,
+    /// The user canceled the print dialog.
+    Canceled = 2,
+    /// It could not be printed; the message says why.
+    Failed = 3,
+}
+impl PrintOutcome {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "PRINT_OUTCOME_UNSPECIFIED",
+            Self::Printed => "PRINT_OUTCOME_PRINTED",
+            Self::Canceled => "PRINT_OUTCOME_CANCELED",
+            Self::Failed => "PRINT_OUTCOME_FAILED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "PRINT_OUTCOME_UNSPECIFIED" => Some(Self::Unspecified),
+            "PRINT_OUTCOME_PRINTED" => Some(Self::Printed),
+            "PRINT_OUTCOME_CANCELED" => Some(Self::Canceled),
+            "PRINT_OUTCOME_FAILED" => Some(Self::Failed),
             _ => None,
         }
     }

@@ -898,5 +898,49 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.StopApp getStopApp();
 
+  /**
+   * <code>.dsa.control.v1.PrintJob print_job = 220;</code>
+   * @return Whether the printJob field is set.
+   */
+  boolean hasPrintJob();
+  /**
+   * <code>.dsa.control.v1.PrintJob print_job = 220;</code>
+   * @return The printJob.
+   */
+  io.github.thisisthepy.dsa.control.v1.PrintJob getPrintJob();
+
+  /**
+   * <code>.dsa.control.v1.PrintJobChunk print_job_chunk = 221;</code>
+   * @return Whether the printJobChunk field is set.
+   */
+  boolean hasPrintJobChunk();
+  /**
+   * <code>.dsa.control.v1.PrintJobChunk print_job_chunk = 221;</code>
+   * @return The printJobChunk.
+   */
+  io.github.thisisthepy.dsa.control.v1.PrintJobChunk getPrintJobChunk();
+
+  /**
+   * <code>.dsa.control.v1.PrintJobCancel print_job_cancel = 222;</code>
+   * @return Whether the printJobCancel field is set.
+   */
+  boolean hasPrintJobCancel();
+  /**
+   * <code>.dsa.control.v1.PrintJobCancel print_job_cancel = 222;</code>
+   * @return The printJobCancel.
+   */
+  io.github.thisisthepy.dsa.control.v1.PrintJobCancel getPrintJobCancel();
+
+  /**
+   * <code>.dsa.control.v1.PrintJobResult print_job_result = 223;</code>
+   * @return Whether the printJobResult field is set.
+   */
+  boolean hasPrintJobResult();
+  /**
+   * <code>.dsa.control.v1.PrintJobResult print_job_result = 223;</code>
+   * @return The printJobResult.
+   */
+  io.github.thisisthepy.dsa.control.v1.PrintJobResult getPrintJobResult();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

@@ -1376,6 +1376,73 @@ struct DiagnosticsDoneDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DiagnosticsDoneDefaultTypeInternal _DiagnosticsDone_default_instance_;
+PROTOBUF_CONSTEXPR PrintJob::PrintJob(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.package_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.app_label_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.document_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.job_id_)*/0u
+  , /*decltype(_impl_.page_count_)*/0u
+  , /*decltype(_impl_.size_)*/uint64_t{0u}
+  , /*decltype(_impl_.copies_)*/0u
+  , /*decltype(_impl_.color_)*/false
+  , /*decltype(_impl_.duplex_)*/false
+  , /*decltype(_impl_.landscape_)*/false
+  , /*decltype(_impl_.media_width_mils_)*/0u
+  , /*decltype(_impl_.media_height_mils_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct PrintJobDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR PrintJobDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~PrintJobDefaultTypeInternal() {}
+  union {
+    PrintJob _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 PrintJobDefaultTypeInternal _PrintJob_default_instance_;
+PROTOBUF_CONSTEXPR PrintJobChunk::PrintJobChunk(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.data_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.offset_)*/uint64_t{0u}
+  , /*decltype(_impl_.job_id_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct PrintJobChunkDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR PrintJobChunkDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~PrintJobChunkDefaultTypeInternal() {}
+  union {
+    PrintJobChunk _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 PrintJobChunkDefaultTypeInternal _PrintJobChunk_default_instance_;
+PROTOBUF_CONSTEXPR PrintJobCancel::PrintJobCancel(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.job_id_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct PrintJobCancelDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR PrintJobCancelDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~PrintJobCancelDefaultTypeInternal() {}
+  union {
+    PrintJobCancel _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 PrintJobCancelDefaultTypeInternal _PrintJobCancel_default_instance_;
+PROTOBUF_CONSTEXPR PrintJobResult::PrintJobResult(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.message_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.job_id_)*/0u
+  , /*decltype(_impl_.outcome_)*/0
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct PrintJobResultDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR PrintJobResultDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~PrintJobResultDefaultTypeInternal() {}
+  union {
+    PrintJobResult _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 PrintJobResultDefaultTypeInternal _PrintJobResult_default_instance_;
 PROTOBUF_CONSTEXPR Envelope::Envelope(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.body_)*/{}
@@ -2173,6 +2240,65 @@ bool LogBuffer_Parse(
       LogBuffer_entries, 9, name, &int_value);
   if (success) {
     *value = static_cast<LogBuffer>(int_value);
+  }
+  return success;
+}
+bool PrintOutcome_IsValid(int value) {
+  switch (value) {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> PrintOutcome_strings[4] = {};
+
+static const char PrintOutcome_names[] =
+  "PRINT_OUTCOME_CANCELED"
+  "PRINT_OUTCOME_FAILED"
+  "PRINT_OUTCOME_PRINTED"
+  "PRINT_OUTCOME_UNSPECIFIED";
+
+static const ::PROTOBUF_NAMESPACE_ID::internal::EnumEntry PrintOutcome_entries[] = {
+  { {PrintOutcome_names + 0, 22}, 2 },
+  { {PrintOutcome_names + 22, 20}, 3 },
+  { {PrintOutcome_names + 42, 21}, 1 },
+  { {PrintOutcome_names + 63, 25}, 0 },
+};
+
+static const int PrintOutcome_entries_by_number[] = {
+  3, // 0 -> PRINT_OUTCOME_UNSPECIFIED
+  2, // 1 -> PRINT_OUTCOME_PRINTED
+  0, // 2 -> PRINT_OUTCOME_CANCELED
+  1, // 3 -> PRINT_OUTCOME_FAILED
+};
+
+const std::string& PrintOutcome_Name(
+    PrintOutcome value) {
+  static const bool dummy =
+      ::PROTOBUF_NAMESPACE_ID::internal::InitializeEnumStrings(
+          PrintOutcome_entries,
+          PrintOutcome_entries_by_number,
+          4, PrintOutcome_strings);
+  (void) dummy;
+  int idx = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumName(
+      PrintOutcome_entries,
+      PrintOutcome_entries_by_number,
+      4, value);
+  return idx == -1 ? ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString() :
+                     PrintOutcome_strings[idx].get();
+}
+bool PrintOutcome_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, PrintOutcome* value) {
+  int int_value;
+  bool success = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumValue(
+      PrintOutcome_entries, 4, name, &int_value);
+  if (success) {
+    *value = static_cast<PrintOutcome>(int_value);
   }
   return success;
 }
@@ -25471,6 +25597,1247 @@ std::string DiagnosticsDone::GetTypeName() const {
 
 // ===================================================================
 
+class PrintJob::_Internal {
+ public:
+};
+
+PrintJob::PrintJob(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.PrintJob)
+}
+PrintJob::PrintJob(const PrintJob& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  PrintJob* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.package_name_){}
+    , decltype(_impl_.app_label_){}
+    , decltype(_impl_.document_name_){}
+    , decltype(_impl_.job_id_){}
+    , decltype(_impl_.page_count_){}
+    , decltype(_impl_.size_){}
+    , decltype(_impl_.copies_){}
+    , decltype(_impl_.color_){}
+    , decltype(_impl_.duplex_){}
+    , decltype(_impl_.landscape_){}
+    , decltype(_impl_.media_width_mils_){}
+    , decltype(_impl_.media_height_mils_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.package_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_package_name().empty()) {
+    _this->_impl_.package_name_.Set(from._internal_package_name(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.app_label_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.app_label_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_app_label().empty()) {
+    _this->_impl_.app_label_.Set(from._internal_app_label(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.document_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.document_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_document_name().empty()) {
+    _this->_impl_.document_name_.Set(from._internal_document_name(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.job_id_, &from._impl_.job_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.media_height_mils_) -
+    reinterpret_cast<char*>(&_impl_.job_id_)) + sizeof(_impl_.media_height_mils_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.PrintJob)
+}
+
+inline void PrintJob::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.package_name_){}
+    , decltype(_impl_.app_label_){}
+    , decltype(_impl_.document_name_){}
+    , decltype(_impl_.job_id_){0u}
+    , decltype(_impl_.page_count_){0u}
+    , decltype(_impl_.size_){uint64_t{0u}}
+    , decltype(_impl_.copies_){0u}
+    , decltype(_impl_.color_){false}
+    , decltype(_impl_.duplex_){false}
+    , decltype(_impl_.landscape_){false}
+    , decltype(_impl_.media_width_mils_){0u}
+    , decltype(_impl_.media_height_mils_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.package_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.app_label_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.app_label_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.document_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.document_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+PrintJob::~PrintJob() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.PrintJob)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void PrintJob::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.package_name_.Destroy();
+  _impl_.app_label_.Destroy();
+  _impl_.document_name_.Destroy();
+}
+
+void PrintJob::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void PrintJob::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.PrintJob)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.package_name_.ClearToEmpty();
+  _impl_.app_label_.ClearToEmpty();
+  _impl_.document_name_.ClearToEmpty();
+  ::memset(&_impl_.job_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.media_height_mils_) -
+      reinterpret_cast<char*>(&_impl_.job_id_)) + sizeof(_impl_.media_height_mils_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* PrintJob::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 job_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.job_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // string package_name = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_package_name();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // string app_label = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
+          auto str = _internal_mutable_app_label();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // string document_name = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          auto str = _internal_mutable_document_name();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 size = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 40)) {
+          _impl_.size_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 page_count = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 48)) {
+          _impl_.page_count_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 copies = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 56)) {
+          _impl_.copies_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool color = 8;
+      case 8:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 64)) {
+          _impl_.color_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool duplex = 9;
+      case 9:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 72)) {
+          _impl_.duplex_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool landscape = 10;
+      case 10:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 80)) {
+          _impl_.landscape_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 media_width_mils = 11;
+      case 11:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 88)) {
+          _impl_.media_width_mils_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 media_height_mils = 12;
+      case 12:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 96)) {
+          _impl_.media_height_mils_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* PrintJob::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.PrintJob)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 job_id = 1;
+  if (this->_internal_job_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_job_id(), target);
+  }
+
+  // string package_name = 2;
+  if (!this->_internal_package_name().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_package_name().data(), static_cast<int>(this->_internal_package_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.PrintJob.package_name");
+    target = stream->WriteStringMaybeAliased(
+        2, this->_internal_package_name(), target);
+  }
+
+  // string app_label = 3;
+  if (!this->_internal_app_label().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_app_label().data(), static_cast<int>(this->_internal_app_label().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.PrintJob.app_label");
+    target = stream->WriteStringMaybeAliased(
+        3, this->_internal_app_label(), target);
+  }
+
+  // string document_name = 4;
+  if (!this->_internal_document_name().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_document_name().data(), static_cast<int>(this->_internal_document_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.PrintJob.document_name");
+    target = stream->WriteStringMaybeAliased(
+        4, this->_internal_document_name(), target);
+  }
+
+  // uint64 size = 5;
+  if (this->_internal_size() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(5, this->_internal_size(), target);
+  }
+
+  // uint32 page_count = 6;
+  if (this->_internal_page_count() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(6, this->_internal_page_count(), target);
+  }
+
+  // uint32 copies = 7;
+  if (this->_internal_copies() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(7, this->_internal_copies(), target);
+  }
+
+  // bool color = 8;
+  if (this->_internal_color() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(8, this->_internal_color(), target);
+  }
+
+  // bool duplex = 9;
+  if (this->_internal_duplex() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(9, this->_internal_duplex(), target);
+  }
+
+  // bool landscape = 10;
+  if (this->_internal_landscape() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(10, this->_internal_landscape(), target);
+  }
+
+  // uint32 media_width_mils = 11;
+  if (this->_internal_media_width_mils() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(11, this->_internal_media_width_mils(), target);
+  }
+
+  // uint32 media_height_mils = 12;
+  if (this->_internal_media_height_mils() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(12, this->_internal_media_height_mils(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.PrintJob)
+  return target;
+}
+
+size_t PrintJob::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.PrintJob)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string package_name = 2;
+  if (!this->_internal_package_name().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_package_name());
+  }
+
+  // string app_label = 3;
+  if (!this->_internal_app_label().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_app_label());
+  }
+
+  // string document_name = 4;
+  if (!this->_internal_document_name().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_document_name());
+  }
+
+  // uint32 job_id = 1;
+  if (this->_internal_job_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_job_id());
+  }
+
+  // uint32 page_count = 6;
+  if (this->_internal_page_count() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_page_count());
+  }
+
+  // uint64 size = 5;
+  if (this->_internal_size() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_size());
+  }
+
+  // uint32 copies = 7;
+  if (this->_internal_copies() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_copies());
+  }
+
+  // bool color = 8;
+  if (this->_internal_color() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // bool duplex = 9;
+  if (this->_internal_duplex() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // bool landscape = 10;
+  if (this->_internal_landscape() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // uint32 media_width_mils = 11;
+  if (this->_internal_media_width_mils() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_media_width_mils());
+  }
+
+  // uint32 media_height_mils = 12;
+  if (this->_internal_media_height_mils() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_media_height_mils());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void PrintJob::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const PrintJob*>(
+      &from));
+}
+
+void PrintJob::MergeFrom(const PrintJob& from) {
+  PrintJob* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.PrintJob)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_package_name().empty()) {
+    _this->_internal_set_package_name(from._internal_package_name());
+  }
+  if (!from._internal_app_label().empty()) {
+    _this->_internal_set_app_label(from._internal_app_label());
+  }
+  if (!from._internal_document_name().empty()) {
+    _this->_internal_set_document_name(from._internal_document_name());
+  }
+  if (from._internal_job_id() != 0) {
+    _this->_internal_set_job_id(from._internal_job_id());
+  }
+  if (from._internal_page_count() != 0) {
+    _this->_internal_set_page_count(from._internal_page_count());
+  }
+  if (from._internal_size() != 0) {
+    _this->_internal_set_size(from._internal_size());
+  }
+  if (from._internal_copies() != 0) {
+    _this->_internal_set_copies(from._internal_copies());
+  }
+  if (from._internal_color() != 0) {
+    _this->_internal_set_color(from._internal_color());
+  }
+  if (from._internal_duplex() != 0) {
+    _this->_internal_set_duplex(from._internal_duplex());
+  }
+  if (from._internal_landscape() != 0) {
+    _this->_internal_set_landscape(from._internal_landscape());
+  }
+  if (from._internal_media_width_mils() != 0) {
+    _this->_internal_set_media_width_mils(from._internal_media_width_mils());
+  }
+  if (from._internal_media_height_mils() != 0) {
+    _this->_internal_set_media_height_mils(from._internal_media_height_mils());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void PrintJob::CopyFrom(const PrintJob& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.PrintJob)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool PrintJob::IsInitialized() const {
+  return true;
+}
+
+void PrintJob::InternalSwap(PrintJob* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.package_name_, lhs_arena,
+      &other->_impl_.package_name_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.app_label_, lhs_arena,
+      &other->_impl_.app_label_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.document_name_, lhs_arena,
+      &other->_impl_.document_name_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(PrintJob, _impl_.media_height_mils_)
+      + sizeof(PrintJob::_impl_.media_height_mils_)
+      - PROTOBUF_FIELD_OFFSET(PrintJob, _impl_.job_id_)>(
+          reinterpret_cast<char*>(&_impl_.job_id_),
+          reinterpret_cast<char*>(&other->_impl_.job_id_));
+}
+
+std::string PrintJob::GetTypeName() const {
+  return "dsa.control.v1.PrintJob";
+}
+
+
+// ===================================================================
+
+class PrintJobChunk::_Internal {
+ public:
+};
+
+PrintJobChunk::PrintJobChunk(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.PrintJobChunk)
+}
+PrintJobChunk::PrintJobChunk(const PrintJobChunk& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  PrintJobChunk* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.data_){}
+    , decltype(_impl_.offset_){}
+    , decltype(_impl_.job_id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.data_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.data_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_data().empty()) {
+    _this->_impl_.data_.Set(from._internal_data(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.offset_, &from._impl_.offset_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.job_id_) -
+    reinterpret_cast<char*>(&_impl_.offset_)) + sizeof(_impl_.job_id_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.PrintJobChunk)
+}
+
+inline void PrintJobChunk::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.data_){}
+    , decltype(_impl_.offset_){uint64_t{0u}}
+    , decltype(_impl_.job_id_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.data_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.data_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+PrintJobChunk::~PrintJobChunk() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.PrintJobChunk)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void PrintJobChunk::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.data_.Destroy();
+}
+
+void PrintJobChunk::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void PrintJobChunk::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.PrintJobChunk)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.data_.ClearToEmpty();
+  ::memset(&_impl_.offset_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.job_id_) -
+      reinterpret_cast<char*>(&_impl_.offset_)) + sizeof(_impl_.job_id_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* PrintJobChunk::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 job_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.job_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 offset = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.offset_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bytes data = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
+          auto str = _internal_mutable_data();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* PrintJobChunk::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.PrintJobChunk)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 job_id = 1;
+  if (this->_internal_job_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_job_id(), target);
+  }
+
+  // uint64 offset = 2;
+  if (this->_internal_offset() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_offset(), target);
+  }
+
+  // bytes data = 3;
+  if (!this->_internal_data().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        3, this->_internal_data(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.PrintJobChunk)
+  return target;
+}
+
+size_t PrintJobChunk::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.PrintJobChunk)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // bytes data = 3;
+  if (!this->_internal_data().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_data());
+  }
+
+  // uint64 offset = 2;
+  if (this->_internal_offset() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_offset());
+  }
+
+  // uint32 job_id = 1;
+  if (this->_internal_job_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_job_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void PrintJobChunk::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const PrintJobChunk*>(
+      &from));
+}
+
+void PrintJobChunk::MergeFrom(const PrintJobChunk& from) {
+  PrintJobChunk* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.PrintJobChunk)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_data().empty()) {
+    _this->_internal_set_data(from._internal_data());
+  }
+  if (from._internal_offset() != 0) {
+    _this->_internal_set_offset(from._internal_offset());
+  }
+  if (from._internal_job_id() != 0) {
+    _this->_internal_set_job_id(from._internal_job_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void PrintJobChunk::CopyFrom(const PrintJobChunk& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.PrintJobChunk)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool PrintJobChunk::IsInitialized() const {
+  return true;
+}
+
+void PrintJobChunk::InternalSwap(PrintJobChunk* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.data_, lhs_arena,
+      &other->_impl_.data_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(PrintJobChunk, _impl_.job_id_)
+      + sizeof(PrintJobChunk::_impl_.job_id_)
+      - PROTOBUF_FIELD_OFFSET(PrintJobChunk, _impl_.offset_)>(
+          reinterpret_cast<char*>(&_impl_.offset_),
+          reinterpret_cast<char*>(&other->_impl_.offset_));
+}
+
+std::string PrintJobChunk::GetTypeName() const {
+  return "dsa.control.v1.PrintJobChunk";
+}
+
+
+// ===================================================================
+
+class PrintJobCancel::_Internal {
+ public:
+};
+
+PrintJobCancel::PrintJobCancel(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.PrintJobCancel)
+}
+PrintJobCancel::PrintJobCancel(const PrintJobCancel& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  PrintJobCancel* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.job_id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _this->_impl_.job_id_ = from._impl_.job_id_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.PrintJobCancel)
+}
+
+inline void PrintJobCancel::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.job_id_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+PrintJobCancel::~PrintJobCancel() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.PrintJobCancel)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void PrintJobCancel::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void PrintJobCancel::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void PrintJobCancel::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.PrintJobCancel)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.job_id_ = 0u;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* PrintJobCancel::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 job_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.job_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* PrintJobCancel::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.PrintJobCancel)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 job_id = 1;
+  if (this->_internal_job_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_job_id(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.PrintJobCancel)
+  return target;
+}
+
+size_t PrintJobCancel::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.PrintJobCancel)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // uint32 job_id = 1;
+  if (this->_internal_job_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_job_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void PrintJobCancel::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const PrintJobCancel*>(
+      &from));
+}
+
+void PrintJobCancel::MergeFrom(const PrintJobCancel& from) {
+  PrintJobCancel* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.PrintJobCancel)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_job_id() != 0) {
+    _this->_internal_set_job_id(from._internal_job_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void PrintJobCancel::CopyFrom(const PrintJobCancel& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.PrintJobCancel)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool PrintJobCancel::IsInitialized() const {
+  return true;
+}
+
+void PrintJobCancel::InternalSwap(PrintJobCancel* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_.job_id_, other->_impl_.job_id_);
+}
+
+std::string PrintJobCancel::GetTypeName() const {
+  return "dsa.control.v1.PrintJobCancel";
+}
+
+
+// ===================================================================
+
+class PrintJobResult::_Internal {
+ public:
+};
+
+PrintJobResult::PrintJobResult(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.PrintJobResult)
+}
+PrintJobResult::PrintJobResult(const PrintJobResult& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  PrintJobResult* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.message_){}
+    , decltype(_impl_.job_id_){}
+    , decltype(_impl_.outcome_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.message_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.message_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_message().empty()) {
+    _this->_impl_.message_.Set(from._internal_message(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.job_id_, &from._impl_.job_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.outcome_) -
+    reinterpret_cast<char*>(&_impl_.job_id_)) + sizeof(_impl_.outcome_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.PrintJobResult)
+}
+
+inline void PrintJobResult::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.message_){}
+    , decltype(_impl_.job_id_){0u}
+    , decltype(_impl_.outcome_){0}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.message_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.message_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+PrintJobResult::~PrintJobResult() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.PrintJobResult)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void PrintJobResult::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.message_.Destroy();
+}
+
+void PrintJobResult::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void PrintJobResult::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.PrintJobResult)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.message_.ClearToEmpty();
+  ::memset(&_impl_.job_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.outcome_) -
+      reinterpret_cast<char*>(&_impl_.job_id_)) + sizeof(_impl_.outcome_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* PrintJobResult::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 job_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.job_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.PrintOutcome outcome = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          _internal_set_outcome(static_cast<::dsa::control::v1::PrintOutcome>(val));
+        } else
+          goto handle_unusual;
+        continue;
+      // string message = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
+          auto str = _internal_mutable_message();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* PrintJobResult::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.PrintJobResult)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 job_id = 1;
+  if (this->_internal_job_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_job_id(), target);
+  }
+
+  // .dsa.control.v1.PrintOutcome outcome = 2;
+  if (this->_internal_outcome() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteEnumToArray(
+      2, this->_internal_outcome(), target);
+  }
+
+  // string message = 3;
+  if (!this->_internal_message().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_message().data(), static_cast<int>(this->_internal_message().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.PrintJobResult.message");
+    target = stream->WriteStringMaybeAliased(
+        3, this->_internal_message(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.PrintJobResult)
+  return target;
+}
+
+size_t PrintJobResult::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.PrintJobResult)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string message = 3;
+  if (!this->_internal_message().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_message());
+  }
+
+  // uint32 job_id = 1;
+  if (this->_internal_job_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_job_id());
+  }
+
+  // .dsa.control.v1.PrintOutcome outcome = 2;
+  if (this->_internal_outcome() != 0) {
+    total_size += 1 +
+      ::_pbi::WireFormatLite::EnumSize(this->_internal_outcome());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void PrintJobResult::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const PrintJobResult*>(
+      &from));
+}
+
+void PrintJobResult::MergeFrom(const PrintJobResult& from) {
+  PrintJobResult* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.PrintJobResult)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_message().empty()) {
+    _this->_internal_set_message(from._internal_message());
+  }
+  if (from._internal_job_id() != 0) {
+    _this->_internal_set_job_id(from._internal_job_id());
+  }
+  if (from._internal_outcome() != 0) {
+    _this->_internal_set_outcome(from._internal_outcome());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void PrintJobResult::CopyFrom(const PrintJobResult& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.PrintJobResult)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool PrintJobResult::IsInitialized() const {
+  return true;
+}
+
+void PrintJobResult::InternalSwap(PrintJobResult* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.message_, lhs_arena,
+      &other->_impl_.message_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(PrintJobResult, _impl_.outcome_)
+      + sizeof(PrintJobResult::_impl_.outcome_)
+      - PROTOBUF_FIELD_OFFSET(PrintJobResult, _impl_.job_id_)>(
+          reinterpret_cast<char*>(&_impl_.job_id_),
+          reinterpret_cast<char*>(&other->_impl_.job_id_));
+}
+
+std::string PrintJobResult::GetTypeName() const {
+  return "dsa.control.v1.PrintJobResult";
+}
+
+
+// ===================================================================
+
 class Envelope::_Internal {
  public:
   static const ::dsa::control::v1::Hello& hello(const Envelope* msg);
@@ -25554,6 +26921,10 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::DiagnosticsFile& diagnostics_file(const Envelope* msg);
   static const ::dsa::control::v1::DiagnosticsDone& diagnostics_done(const Envelope* msg);
   static const ::dsa::control::v1::StopApp& stop_app(const Envelope* msg);
+  static const ::dsa::control::v1::PrintJob& print_job(const Envelope* msg);
+  static const ::dsa::control::v1::PrintJobChunk& print_job_chunk(const Envelope* msg);
+  static const ::dsa::control::v1::PrintJobCancel& print_job_cancel(const Envelope* msg);
+  static const ::dsa::control::v1::PrintJobResult& print_job_result(const Envelope* msg);
 };
 
 const ::dsa::control::v1::Hello&
@@ -25879,6 +27250,22 @@ Envelope::_Internal::diagnostics_done(const Envelope* msg) {
 const ::dsa::control::v1::StopApp&
 Envelope::_Internal::stop_app(const Envelope* msg) {
   return *msg->_impl_.body_.stop_app_;
+}
+const ::dsa::control::v1::PrintJob&
+Envelope::_Internal::print_job(const Envelope* msg) {
+  return *msg->_impl_.body_.print_job_;
+}
+const ::dsa::control::v1::PrintJobChunk&
+Envelope::_Internal::print_job_chunk(const Envelope* msg) {
+  return *msg->_impl_.body_.print_job_chunk_;
+}
+const ::dsa::control::v1::PrintJobCancel&
+Envelope::_Internal::print_job_cancel(const Envelope* msg) {
+  return *msg->_impl_.body_.print_job_cancel_;
+}
+const ::dsa::control::v1::PrintJobResult&
+Envelope::_Internal::print_job_result(const Envelope* msg) {
+  return *msg->_impl_.body_.print_job_result_;
 }
 void Envelope::set_allocated_hello(::dsa::control::v1::Hello* hello) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -27095,6 +28482,66 @@ void Envelope::set_allocated_stop_app(::dsa::control::v1::StopApp* stop_app) {
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.stop_app)
 }
+void Envelope::set_allocated_print_job(::dsa::control::v1::PrintJob* print_job) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (print_job) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(print_job);
+    if (message_arena != submessage_arena) {
+      print_job = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, print_job, submessage_arena);
+    }
+    set_has_print_job();
+    _impl_.body_.print_job_ = print_job;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.print_job)
+}
+void Envelope::set_allocated_print_job_chunk(::dsa::control::v1::PrintJobChunk* print_job_chunk) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (print_job_chunk) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(print_job_chunk);
+    if (message_arena != submessage_arena) {
+      print_job_chunk = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, print_job_chunk, submessage_arena);
+    }
+    set_has_print_job_chunk();
+    _impl_.body_.print_job_chunk_ = print_job_chunk;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.print_job_chunk)
+}
+void Envelope::set_allocated_print_job_cancel(::dsa::control::v1::PrintJobCancel* print_job_cancel) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (print_job_cancel) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(print_job_cancel);
+    if (message_arena != submessage_arena) {
+      print_job_cancel = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, print_job_cancel, submessage_arena);
+    }
+    set_has_print_job_cancel();
+    _impl_.body_.print_job_cancel_ = print_job_cancel;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.print_job_cancel)
+}
+void Envelope::set_allocated_print_job_result(::dsa::control::v1::PrintJobResult* print_job_result) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (print_job_result) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(print_job_result);
+    if (message_arena != submessage_arena) {
+      print_job_result = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, print_job_result, submessage_arena);
+    }
+    set_has_print_job_result();
+    _impl_.body_.print_job_result_ = print_job_result;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.print_job_result)
+}
 Envelope::Envelope(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
@@ -27515,6 +28962,26 @@ Envelope::Envelope(const Envelope& from)
     case kStopApp: {
       _this->_internal_mutable_stop_app()->::dsa::control::v1::StopApp::MergeFrom(
           from._internal_stop_app());
+      break;
+    }
+    case kPrintJob: {
+      _this->_internal_mutable_print_job()->::dsa::control::v1::PrintJob::MergeFrom(
+          from._internal_print_job());
+      break;
+    }
+    case kPrintJobChunk: {
+      _this->_internal_mutable_print_job_chunk()->::dsa::control::v1::PrintJobChunk::MergeFrom(
+          from._internal_print_job_chunk());
+      break;
+    }
+    case kPrintJobCancel: {
+      _this->_internal_mutable_print_job_cancel()->::dsa::control::v1::PrintJobCancel::MergeFrom(
+          from._internal_print_job_cancel());
+      break;
+    }
+    case kPrintJobResult: {
+      _this->_internal_mutable_print_job_result()->::dsa::control::v1::PrintJobResult::MergeFrom(
+          from._internal_print_job_result());
       break;
     }
     case BODY_NOT_SET: {
@@ -28042,6 +29509,30 @@ void Envelope::clear_body() {
     case kStopApp: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.stop_app_;
+      }
+      break;
+    }
+    case kPrintJob: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.print_job_;
+      }
+      break;
+    }
+    case kPrintJobChunk: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.print_job_chunk_;
+      }
+      break;
+    }
+    case kPrintJobCancel: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.print_job_cancel_;
+      }
+      break;
+    }
+    case kPrintJobResult: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.print_job_result_;
       }
       break;
     }
@@ -28717,6 +30208,38 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.PrintJob print_job = 220;
+      case 220:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 226)) {
+          ptr = ctx->ParseMessage(_internal_mutable_print_job(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.PrintJobChunk print_job_chunk = 221;
+      case 221:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 234)) {
+          ptr = ctx->ParseMessage(_internal_mutable_print_job_chunk(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.PrintJobCancel print_job_cancel = 222;
+      case 222:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 242)) {
+          ptr = ctx->ParseMessage(_internal_mutable_print_job_cancel(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.PrintJobResult print_job_result = 223;
+      case 223:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 250)) {
+          ptr = ctx->ParseMessage(_internal_mutable_print_job_result(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -29313,6 +30836,34 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::developer_mode(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.PrintJob print_job = 220;
+  if (_internal_has_print_job()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(220, _Internal::print_job(this),
+        _Internal::print_job(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.PrintJobChunk print_job_chunk = 221;
+  if (_internal_has_print_job_chunk()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(221, _Internal::print_job_chunk(this),
+        _Internal::print_job_chunk(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.PrintJobCancel print_job_cancel = 222;
+  if (_internal_has_print_job_cancel()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(222, _Internal::print_job_cancel(this),
+        _Internal::print_job_cancel(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.PrintJobResult print_job_result = 223;
+  if (_internal_has_print_job_result()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(223, _Internal::print_job_result(this),
+        _Internal::print_job_result(this).GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -29897,6 +31448,34 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.stop_app_);
       break;
     }
+    // .dsa.control.v1.PrintJob print_job = 220;
+    case kPrintJob: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.print_job_);
+      break;
+    }
+    // .dsa.control.v1.PrintJobChunk print_job_chunk = 221;
+    case kPrintJobChunk: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.print_job_chunk_);
+      break;
+    }
+    // .dsa.control.v1.PrintJobCancel print_job_cancel = 222;
+    case kPrintJobCancel: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.print_job_cancel_);
+      break;
+    }
+    // .dsa.control.v1.PrintJobResult print_job_result = 223;
+    case kPrintJobResult: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.print_job_result_);
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -30328,6 +31907,26 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_stop_app());
       break;
     }
+    case kPrintJob: {
+      _this->_internal_mutable_print_job()->::dsa::control::v1::PrintJob::MergeFrom(
+          from._internal_print_job());
+      break;
+    }
+    case kPrintJobChunk: {
+      _this->_internal_mutable_print_job_chunk()->::dsa::control::v1::PrintJobChunk::MergeFrom(
+          from._internal_print_job_chunk());
+      break;
+    }
+    case kPrintJobCancel: {
+      _this->_internal_mutable_print_job_cancel()->::dsa::control::v1::PrintJobCancel::MergeFrom(
+          from._internal_print_job_cancel());
+      break;
+    }
+    case kPrintJobResult: {
+      _this->_internal_mutable_print_job_result()->::dsa::control::v1::PrintJobResult::MergeFrom(
+          from._internal_print_job_result());
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -30714,6 +32313,22 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::DiagnosticsFile >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::DiagnosticsDone*
 Arena::CreateMaybeMessage< ::dsa::control::v1::DiagnosticsDone >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::DiagnosticsDone >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::PrintJob*
+Arena::CreateMaybeMessage< ::dsa::control::v1::PrintJob >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::PrintJob >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::PrintJobChunk*
+Arena::CreateMaybeMessage< ::dsa::control::v1::PrintJobChunk >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::PrintJobChunk >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::PrintJobCancel*
+Arena::CreateMaybeMessage< ::dsa::control::v1::PrintJobCancel >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::PrintJobCancel >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::PrintJobResult*
+Arena::CreateMaybeMessage< ::dsa::control::v1::PrintJobResult >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::PrintJobResult >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::Envelope*
 Arena::CreateMaybeMessage< ::dsa::control::v1::Envelope >(Arena* arena) {
