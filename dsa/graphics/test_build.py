@@ -58,7 +58,7 @@ class GraphicsBuildTests(unittest.TestCase):
         self.assertIn("-Dvulkan-drivers=gfxstream", script)
         self.assertIn('-DMESA_BUILD_DIR="$mesa_build/out"', script)
 
-    def test_fr25_the_guest_transport_builds_for_arm64_too(self):
+    def test_fr27_the_guest_transport_builds_for_arm64_too(self):
         script = BUILD_SCRIPT.read_text()
         self.assertIn('guest_arch="${DSA_GUEST_ARCH:-x86_64}"', script)
         self.assertIn("arm64) android_abi=arm64-v8a; android_triple=aarch64-linux-android", script)
@@ -67,7 +67,7 @@ class GraphicsBuildTests(unittest.TestCase):
         # Each architecture has its own Mesa build, so one never links the other's objects.
         self.assertIn('mesa_build="$scratch/build-mesa-$guest_arch"', script)
 
-    def test_fr25_sse41_helpers_are_built_and_linked_only_for_x86_64(self):
+    def test_fr27_sse41_helpers_are_built_and_linked_only_for_x86_64(self):
         script = BUILD_SCRIPT.read_text()
         self.assertIn('[[ "$guest_arch" == x86_64 ]] && mesa_sse41=src/util/libmesa_util_sse41.a', script)
         self.assertNotIn(" src/util/libmesa_util_sse41.a \\", script)

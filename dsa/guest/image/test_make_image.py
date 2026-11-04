@@ -2432,7 +2432,7 @@ class Arm64GuestTests(unittest.TestCase):
     def inputs(self):
         return json.loads((Path(make_image.__file__).parent / "inputs.json").read_text())["images"]
 
-    def test_fr25_inputs_pin_an_arm64_only_build_for_every_android_release(self):
+    def test_fr27_inputs_pin_an_arm64_only_build_for_every_android_release(self):
         images = self.inputs()
         majors = {i["android_major"] for i in images}
         for major in majors:
@@ -2449,25 +2449,25 @@ class Arm64GuestTests(unittest.TestCase):
             self.assertNotEqual(spec["version"], x86["version"])
             self.assertTrue(spec["version"].endswith("-arm64"))
 
-    def test_fr25_every_input_names_its_architecture_once_per_release(self):
+    def test_fr27_every_input_names_its_architecture_once_per_release(self):
         seen = [(i["android_major"], i["arch"]) for i in self.inputs()]
         self.assertEqual(len(seen), len(set(seen)))
         self.assertEqual({a for _, a in seen}, {"x86_64", "arm64"})
 
-    def test_fr25_an_input_without_an_architecture_is_x86_64(self):
+    def test_fr27_an_input_without_an_architecture_is_x86_64(self):
         images = [{"android_major": 17, "version": "old"}]
         self.assertEqual(make_image.image_spec(images, 17)["version"], "old")
         with self.assertRaises(ValueError):
             make_image.image_spec(images, 17, "arm64")
 
-    def test_fr25_the_arm64_kernel_is_an_image_and_the_x86_64_kernel_a_bzimage(self):
+    def test_fr27_the_arm64_kernel_is_an_image_and_the_x86_64_kernel_a_bzimage(self):
         self.assertEqual(make_image.kernel_name("arm64"), "Image")
         self.assertEqual(make_image.kernel_name("x86_64"), "bzImage")
         self.assertEqual(make_image.kernel_format(fake_kernel("arm64")), "arm64")
         self.assertEqual(make_image.kernel_format(fake_kernel("x86_64")), "x86_64")
         self.assertIsNone(make_image.kernel_format(bytes(0x1000)))
 
-    def test_fr25_apps_are_compiled_for_the_arm64_boot_image(self):
+    def test_fr27_apps_are_compiled_for_the_arm64_boot_image(self):
         make_image.use_arch("arm64")
         self.assertEqual(make_image.FRAMEWORK_ODEX, "SYSTEM/framework/oat/arm64/services.odex")
         odex, vdex = make_image.oat_files("SYSTEM/priv-app/Settings/Settings.apk")
@@ -2479,18 +2479,18 @@ class Arm64GuestTests(unittest.TestCase):
         self.assertIn("--instruction-set-variant=generic", cmd)
         self.assertNotIn("--instruction-set=x86_64", cmd)
 
-    def test_fr25_x86_64_stays_the_default(self):
+    def test_fr27_x86_64_stays_the_default(self):
         self.assertEqual(make_image.DEFAULT_ARCH, "x86_64")
         self.assertEqual(make_image.FRAMEWORK_ODEX, "SYSTEM/framework/oat/x86_64/services.odex")
         with self.assertRaises(ValueError):
             make_image.use_arch("arm")
 
-    def test_fr25_elf_machine_tells_aarch64_from_x86_64(self):
+    def test_fr27_elf_machine_tells_aarch64_from_x86_64(self):
         self.assertEqual(make_image.elf_machine(fake_elf(183)), make_image.ARCHES["arm64"]["elf_machine"])
         self.assertEqual(make_image.elf_machine(fake_elf(62)), make_image.ARCHES["x86_64"]["elf_machine"])
         self.assertIsNone(make_image.elf_machine(b"not an elf file at all"))
 
-    def test_fr25_fetch_takes_the_architecture_and_keeps_each_apart(self):
+    def test_fr27_fetch_takes_the_architecture_and_keeps_each_apart(self):
         fetch = (Path(make_image.__file__).parent / "fetch.sh").read_text()
         self.assertIn('arch="${2:-x86_64}"', fetch)
         self.assertIn("$build-$arch", fetch)
@@ -2524,30 +2524,30 @@ class Arm64GuestTests(unittest.TestCase):
             self.assertNotEqual(proc.returncode, 0)
             return proc.stdout
 
-    def test_fr25_check_image_rejects_an_x86_64_kernel_and_binaries_in_an_arm64_image(self):
+    def test_fr27_check_image_rejects_an_x86_64_kernel_and_binaries_in_an_arm64_image(self):
         out = self.check("arm64", "aosp_cf_arm64_only_phone-userdebug", ("Image", fake_kernel("x86_64")),
                          {"VENDOR/bin/dsa-channeld": fake_elf(62), "VENDOR/bin/hw/dsa-hwcomposer": fake_elf(183)})
         self.assertIn("Image is not a kernel for arm64", out)
         self.assertIn("VENDOR/bin/dsa-channeld is built for ELF machine 62, not arm64", out)
         self.assertNotIn("dsa-hwcomposer is built for ELF machine", out)
 
-    def test_fr25_check_image_accepts_an_arm64_kernel_and_rejects_a_bzimage_name(self):
+    def test_fr27_check_image_accepts_an_arm64_kernel_and_rejects_a_bzimage_name(self):
         out = self.check("arm64", "aosp_cf_arm64_only_phone-userdebug", ("Image", fake_kernel("arm64")), {})
         self.assertNotIn("is not a kernel for", out)
         out = self.check("arm64", "aosp_cf_arm64_only_phone-userdebug", ("bzImage", fake_kernel("x86_64")), {})
         self.assertIn("carries bzImage, a kernel name for another architecture", out)
 
-    def test_fr25_check_image_rejects_an_arm64_image_with_32_bit_arm(self):
+    def test_fr27_check_image_rejects_an_arm64_image_with_32_bit_arm(self):
         out = self.check("arm64", "aosp_cf_arm64_phone-userdebug", None, {})
         self.assertIn("not a 64-bit only one", out)
 
-    def test_fr25_check_image_takes_an_image_without_an_architecture_as_x86_64(self):
+    def test_fr27_check_image_takes_an_image_without_an_architecture_as_x86_64(self):
         out = self.check(None, "aosp_cf_x86_64_only_phone-userdebug", ("bzImage", fake_kernel("x86_64")),
                          {"VENDOR/bin/dsa-channeld": fake_elf(183)})
         self.assertNotIn("is not a kernel for", out)
         self.assertIn("VENDOR/bin/dsa-channeld is built for ELF machine 183, not x86_64", out)
 
-    def test_fr25_the_arm64_kernel_command_line_uses_the_pl011_console(self):
+    def test_fr27_the_arm64_kernel_command_line_uses_the_pl011_console(self):
         arm = make_image.kernel_cmdline("blkdevparts=sda:1@0(misc)", arch="arm64").split()
         self.assertIn("console=ttyAMA0", arm)
         self.assertNotIn("console=ttyS0", arm)
@@ -2558,7 +2558,7 @@ class Arm64GuestTests(unittest.TestCase):
         self.assertEqual([a for a in arm if "console=" not in a],
                          [a for a in x86 if "console=" not in a and a != "8250.nr_uarts=1"])
 
-    def test_fr25_every_dsa_guest_binary_builds_for_arm64(self):
+    def test_fr27_every_dsa_guest_binary_builds_for_arm64(self):
         guest = Path(make_image.__file__).resolve().parents[1]
         for script in ["hwcomposer/build.sh", "codec2/build.sh", "power/build.sh"]:
             text = (guest / script).read_text()
@@ -2571,7 +2571,7 @@ class Arm64GuestTests(unittest.TestCase):
         self.assertIn('grep -Fq "$machine"', channeld)
         self.assertNotIn("CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER", channeld)
 
-    def test_fr25_ci_makes_and_checks_arm64_images_beside_x86_64(self):
+    def test_fr27_ci_makes_and_checks_arm64_images_beside_x86_64(self):
         workflows = Path(make_image.__file__).resolve().parents[3] / ".github/workflows"
         for name in ["test-image.yml", "release-image.yml"]:
             text = (workflows / name).read_text()
