@@ -89,7 +89,9 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
 - **Battery.** The host sends its power (`PowerState`): AC or battery, the charge, whether
   it charges, battery saver. The agent sets the battery service to it (the `battery set`
   shell command) and battery saver with it (`PowerManager.setPowerSaveModeEnabled`). A host
-  without a battery is a full battery on AC power. Both shell commands go over binder to
+  without a battery is a full battery on AC power (`dumpsys battery`: `AC powered: true`,
+  `present: true`, `status: 5`, `level: 100`), so jobs that wait for charging, such as
+  background dexopt, run. Both shell commands go over binder to
   the service with the agent's `DEVICE_POWER` permission, which they check; they need no
   shell or debuggable build. The image's `sepolicy/agent.cil` lets system_server use the
   descriptors the call hands it.

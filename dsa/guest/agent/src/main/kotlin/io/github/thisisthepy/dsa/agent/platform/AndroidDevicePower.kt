@@ -12,6 +12,7 @@ import android.os.ResultReceiver
 import android.os.SystemClock
 import io.github.thisisthepy.dsa.agent.Log
 import io.github.thisisthepy.dsa.agent.power.Battery
+import io.github.thisisthepy.dsa.agent.power.BatteryStatus
 import io.github.thisisthepy.dsa.agent.power.DevicePower
 import java.io.FileDescriptor
 import java.io.FileInputStream
@@ -87,12 +88,12 @@ class AndroidDevicePower(private val context: Context, private val log: Log) : D
     }
 
     override fun setBattery(battery: Battery) {
-        val status = when {
-            !battery.present -> BatteryManager.BATTERY_STATUS_UNKNOWN
-            battery.charging -> BatteryManager.BATTERY_STATUS_CHARGING
-            battery.acOnline && battery.percent >= 100 -> BatteryManager.BATTERY_STATUS_FULL
-            battery.acOnline -> BatteryManager.BATTERY_STATUS_NOT_CHARGING
-            else -> BatteryManager.BATTERY_STATUS_DISCHARGING
+        val status = when (battery.status) {
+            BatteryStatus.UNKNOWN -> BatteryManager.BATTERY_STATUS_UNKNOWN
+            BatteryStatus.CHARGING -> BatteryManager.BATTERY_STATUS_CHARGING
+            BatteryStatus.DISCHARGING -> BatteryManager.BATTERY_STATUS_DISCHARGING
+            BatteryStatus.NOT_CHARGING -> BatteryManager.BATTERY_STATUS_NOT_CHARGING
+            BatteryStatus.FULL -> BatteryManager.BATTERY_STATUS_FULL
         }
         // Each `set` stops the battery service from following the device's own measurements,
         // which a VM does not have, until a `battery reset`.
