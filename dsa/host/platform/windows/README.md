@@ -506,3 +506,19 @@ dotnet publish DsaSettings/DsaSettings.csproj -c Release -r win-x64
 
 The installer publishes it self-contained, with the .NET runtime in its folder, into `C:\Program Files\DSA\settings\`, and adds the Start menu shortcut
 "DSA Settings".
+
+## Measuring on a PC
+
+`tools/measure.ps1` measures the signed-in user's Android on a real PC and prints the
+numbers with the environment they were taken in: the memory of a dozing Android (guest PSS,
+the VM, the window processes and the service, against 800 MB), its idle CPU as a share of
+one logical core, how long an app's window takes to show from Dozing (and, with `-Cold`,
+from Stopped), and how long the VM's memory takes to go back to the host after a stop.
+
+```
+pwsh -File tools\measure.ps1 -Part all -Package com.android.settings -Cold
+```
+
+Run it from an elevated prompt: only an administrator may read the VM process's CPU time
+and the service's memory. Without that, those numbers print as `null` and the figure is
+marked incomplete. `-Json` prints one JSON object.
