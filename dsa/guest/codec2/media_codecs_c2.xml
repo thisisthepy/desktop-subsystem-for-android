@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Copyright 2026 The DSA Authors
+     SPDX-License-Identifier: Apache-2.0
+
+     DSA's video decoders, which decode on the host's GPU. The framework lists a decoder only
+     when the codec HAL does, and the HAL lists only the formats the host's GPU decodes, so a
+     format the host cannot decode falls back to the guest's own decoder. Their rank puts them
+     ahead of the guest's software decoders (rank 512). -->
+<MediaCodecs>
+    <Decoders>
+        <MediaCodec name="c2.dsa.avc.decoder" type="video/avc" rank="128">
+            <Limit name="size" min="2x2" max="4096x2304" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="block-count" range="1-36864" />
+            <Limit name="blocks-per-second" range="1-1105920" />
+            <Limit name="bitrate" range="1-240000000" />
+            <Feature name="adaptive-playback" />
+            <Attribute name="hardware-accelerated" />
+        </MediaCodec>
+        <MediaCodec name="c2.dsa.hevc.decoder" type="video/hevc" rank="128">
+            <Limit name="size" min="2x2" max="4096x2304" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="8x8" />
+            <Limit name="block-count" range="1-147456" />
+            <Limit name="blocks-per-second" range="1-4423680" />
+            <Limit name="bitrate" range="1-240000000" />
+            <Feature name="adaptive-playback" />
+            <Attribute name="hardware-accelerated" />
+        </MediaCodec>
+        <MediaCodec name="c2.dsa.vp9.decoder" type="video/x-vnd.on2.vp9" rank="128">
+            <Limit name="size" min="2x2" max="4096x2304" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="block-count" range="1-36864" />
+            <Limit name="blocks-per-second" range="1-1105920" />
+            <Limit name="bitrate" range="1-120000000" />
+            <Feature name="adaptive-playback" />
+            <Attribute name="hardware-accelerated" />
+        </MediaCodec>
+        <MediaCodec name="c2.dsa.av1.decoder" type="video/av01" rank="128">
+            <Limit name="size" min="2x2" max="4096x2304" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="block-count" range="1-36864" />
+            <Limit name="blocks-per-second" range="1-1105920" />
+            <Limit name="bitrate" range="1-120000000" />
+            <Feature name="adaptive-playback" />
+            <Attribute name="hardware-accelerated" />
+        </MediaCodec>
+    </Decoders>
+</MediaCodecs>

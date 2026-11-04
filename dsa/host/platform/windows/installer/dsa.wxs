@@ -13,8 +13,8 @@
 
   The files follow one layout. The machine's folder (DATAFOLDER, %ProgramData%\DSA by
   default): dsa-hostd.json, images\, updates\, settings\, logs\, tmp\. Each user's
-  %LOCALAPPDATA%\DSA: android.vhdx, apps\, notifications\, logs\, compositor.json,
-  monitors.txt, start-menu.json, tmp\. The Windows host's paths module (src\paths.rs) is
+  %LOCALAPPDATA%\DSA: android.vhdx, android.image-version, apps\, notifications\, logs\,
+  compositor.json, monitors.txt, start-menu.json, tmp\. The Windows host's paths module (src\paths.rs) is
   the one place that builds them. The settings app (DSA Settings) goes in the program folder's
   settings folder, with a Start menu shortcut.
 
@@ -371,8 +371,10 @@
         <!-- In each user's profile the window manager made a Start menu shortcut for each
              Android app (only the ones it recorded making are removed), the files in
              %LOCALAPPDATA%\DSA (app window programs, notification icons, logs, its notes),
-             and the notification keys in the user's classes. All of it goes, for every user,
-             signed in or not; each user's Android disk (android.vhdx) stays. -->
+             and the notification keys in the user's classes (the io.github.thisisthepy.dsa-notification
+             protocol and the Thisisthepy.DSA.<package> app IDs, and the dsa-notification and
+             DSA.<package> names earlier versions used). All of it goes, for every user,
+             signed in or not; each user's Android disk (android.vhdx, android.image-version) stays. -->
         <CustomAction Id="RemoveUserData"
                       FileRef="HostdExe"
                       ExeCommand="remove-user-data"

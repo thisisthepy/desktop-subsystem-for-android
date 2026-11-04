@@ -3530,7 +3530,15 @@ impl Worker {
             | Some(Body::LogStream(_))
             | Some(Body::LogDump(_))
             | Some(Body::CollectDiagnostics(_))
-            | Some(Body::ClockProbe(_)) => {
+            | Some(Body::ClockProbe(_))
+            | Some(Body::VideoCapabilities(_))
+            | Some(Body::VideoDecoderOpen(_))
+            | Some(Body::VideoDecoderOpened(_))
+            | Some(Body::VideoPacket(_))
+            | Some(Body::VideoFrame(_))
+            | Some(Body::VideoFlush(_))
+            | Some(Body::VideoFlushed(_))
+            | Some(Body::VideoError(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
             }
             Some(Body::LogRecords(_))

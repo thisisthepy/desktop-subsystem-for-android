@@ -27,7 +27,8 @@ use dsa_protocol::control::{
 };
 use dsa_protocol::control::{
     CollectDiagnostics, DiagnosticsDone, DiagnosticsFile, LogBuffer, LogDump, LogRecord,
-    LogRecords, LogStream,
+    LogRecords, LogStream, VideoCapabilities, VideoCodec, VideoCodecSupport, VideoDecoderOpen,
+    VideoFlush, VideoFrame, VideoPacket,
 };
 use dsa_protocol::{decode, encode};
 
@@ -180,6 +181,47 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
         (
             "task_removed",
             wrap(Body::TaskRemoved(TaskRemoved { task_id: 42 })),
+        ),
+        (
+            "video_capabilities",
+            wrap(Body::VideoCapabilities(VideoCapabilities {
+                codecs: vec![VideoCodecSupport {
+                    codec: VideoCodec::H264 as i32,
+                    max_width: 4096,
+                    max_height: 2304,
+                }],
+            })),
+        ),
+        (
+            "video_decoder_open",
+            wrap(Body::VideoDecoderOpen(VideoDecoderOpen {
+                codec: VideoCodec::H264 as i32,
+                width: 1280,
+                height: 720,
+            })),
+        ),
+        ("video_flush", wrap(Body::VideoFlush(VideoFlush {}))),
+        (
+            "video_frame",
+            wrap(Body::VideoFrame(VideoFrame {
+                frame_index: 3,
+                timestamp_us: 100_000,
+                width: 2,
+                height: 2,
+                stride: 2,
+                nv12: vec![0x10, 0x10, 0x10, 0x10, 0x80, 0x80],
+                end_of_stream: false,
+            })),
+        ),
+        (
+            "video_packet",
+            wrap(Body::VideoPacket(VideoPacket {
+                frame_index: 3,
+                timestamp_us: 100_000,
+                data: vec![0, 0, 0, 1, 0x65],
+                codec_config: false,
+                end_of_stream: false,
+            })),
         ),
         (
             "task_frames",

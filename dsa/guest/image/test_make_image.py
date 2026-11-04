@@ -1029,6 +1029,50 @@ class ImageLayoutTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 make_image.modify(source, root / "modified.zip", power_hal=root)
 
+    def test_pr4_the_codec_hal_is_installed_with_its_decoders_and_policy(self):
+        # The host decodes the guest's video on its GPU: the image carries the codec HAL, the
+        # list of its decoders, its service's label, and keeps codec buffers out of pools.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            codec2 = root / "dsa-codec2"
+            codec2.write_bytes(b"\x7fELF codec2")
+            channeld = root / "dsa-channeld"
+            channeld.write_bytes(b"\x7fELF channeld")
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+                archive.writestr("VENDOR/build.prop", "ro.debuggable=1\n")
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+                archive.writestr("VENDOR/etc/selinux/vendor_file_contexts", "/vendor/bin/sh u:object_r:vendor_shell_exec:s0\n")
+                archive.writestr("VENDOR/etc/selinux/vendor_service_contexts", "")
+
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, channeld=channeld, codec2=codec2)
+
+            with zipfile.ZipFile(modified) as archive:
+                self.assertEqual(archive.read("VENDOR/bin/hw/dsa-codec2"), b"\x7fELF codec2")
+                self.assertIn("service vendor.dsa-codec2 /vendor/bin/hw/dsa-codec2",
+                              archive.read("VENDOR/etc/init/dsa-codec2.rc").decode())
+                manifest = archive.read("VENDOR/etc/vintf/manifest/dsa-codec2.xml").decode()
+                self.assertIn("<name>android.hardware.media.c2</name>", manifest)
+                self.assertIn("<fqname>IComponentStore/default</fqname>", manifest)
+                codecs = archive.read("VENDOR/etc/media_codecs_c2.xml").decode()
+                for name in ["c2.dsa.avc.decoder", "c2.dsa.hevc.decoder", "c2.dsa.vp9.decoder", "c2.dsa.av1.decoder"]:
+                    self.assertIn(f'name="{name}"', codecs)
+                fs_config = archive.read("META/vendor_filesystem_config.txt").decode()
+                self.assertIn("vendor/bin/hw/dsa-codec2 0 2000 755 capabilities=0x0", fs_config)
+                self.assertIn("vendor/etc/media_codecs_c2.xml 0 0 644 capabilities=0x0", fs_config)
+                self.assertIn("/vendor/bin/hw/dsa-codec2 u:object_r:mediacodec_exec:s0",
+                              archive.read("VENDOR/etc/selinux/vendor_file_contexts").decode())
+                self.assertIn("android.hardware.media.c2.IComponentStore/default u:object_r:hal_codec2_service:s0",
+                              archive.read("VENDOR/etc/selinux/vendor_service_contexts").decode())
+                self.assertIn("(allow mediacodec self (vsock_socket",
+                              archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode())
+                self.assertIn("debug.stagefright.c2-poolmask=262144", archive.read("VENDOR/build.prop").decode())
+
+    def test_pr4_without_the_codec_hal_codec_buffers_stay_pooled(self):
+        self.assertNotIn("debug.stagefright.c2-poolmask", make_image.edit_props("ro.debuggable=1\n"))
+
     def test_fr3_without_the_dsa_hwcomposer_the_cuttlefish_composer_stays(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1213,6 +1257,8 @@ class ImageLayoutTests(unittest.TestCase):
             # Without DSA's power and health HALs the host never hears the guest's power hints.
             self.assertIn("VENDOR/bin/hw/dsa-power is missing", proc.stdout)
             self.assertIn("VENDOR/bin/hw/dsa-health is missing", proc.stdout)
+            # Without the codec HAL every video decodes on the guest's processors.
+            self.assertIn("VENDOR/bin/hw/dsa-codec2 is missing", proc.stdout)
             self.assertIn("androidboot.dsa.display_width", proc.stdout)
 
     def test_fr3_check_image_rejects_the_wifi_trace_setup(self):
@@ -2011,6 +2057,37 @@ class TouchLatencyTests(unittest.TestCase):
                     capture_output=True, text=True,
                 ).stdout)
         for missing in ["DsaFrameworkOverlay.apk is missing", "dsa-trace.rc is missing"]:
+            self.assertIn(missing, outputs[0])
+            self.assertNotIn(missing, outputs[1])
+
+    def test_fr10_check_image_rejects_a_policy_that_leaves_wakeup_sources_unlabelled(self):
+        # The suspend service reads each wakeup source's statistics; unlabelled, every read
+        # is refused and logged, thousands of lines a boot.
+        check_script = Path(__file__).with_name("check-image.py")
+        labelled = (
+            '(genfscon sysfs "/devices/virtual/wakeup" (u object_r sysfs_wakeup ((s0) (s0))))\n'
+            '(genfscon sysfs "/class/wakeup" (u object_r sysfs_wakeup ((s0) (s0))))\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_dir = root / "image"
+            img_dir.mkdir()
+            keys_dir = root / "keys"
+            keys_dir.mkdir()
+            (img_dir / "image.json").write_text(json.dumps({"files": {}, "kernel_cmdline": ""}))
+            (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
+            outputs = []
+            for policy in ["", labelled]:
+                with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                    archive.writestr("META/apkcerts.txt", "")
+                    archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
+                    archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", policy)
+                outputs.append(subprocess.run(
+                    [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                    capture_output=True, text=True,
+                ).stdout)
+        for path in ["/devices/virtual/wakeup", "/class/wakeup"]:
+            missing = f"does not label sysfs {path} sysfs_wakeup"
             self.assertIn(missing, outputs[0])
             self.assertNotIn(missing, outputs[1])
 

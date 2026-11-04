@@ -110,6 +110,34 @@ std::map<std::string, v1::Envelope> Cases() {
   }
   cases["task_removed"].mutable_task_removed()->set_task_id(42);
   {
+    v1::VideoCodecSupport* support = cases["video_capabilities"].mutable_video_capabilities()->add_codecs();
+    support->set_codec(v1::VIDEO_CODEC_H264);
+    support->set_max_width(4096);
+    support->set_max_height(2304);
+  }
+  {
+    v1::VideoDecoderOpen* open = cases["video_decoder_open"].mutable_video_decoder_open();
+    open->set_codec(v1::VIDEO_CODEC_H264);
+    open->set_width(1280);
+    open->set_height(720);
+  }
+  cases["video_flush"].mutable_video_flush();
+  {
+    v1::VideoFrame* frame = cases["video_frame"].mutable_video_frame();
+    frame->set_frame_index(3);
+    frame->set_timestamp_us(100000);
+    frame->set_width(2);
+    frame->set_height(2);
+    frame->set_stride(2);
+    frame->set_nv12(std::string("\x10\x10\x10\x10\x80\x80", 6));
+  }
+  {
+    v1::VideoPacket* packet = cases["video_packet"].mutable_video_packet();
+    packet->set_frame_index(3);
+    packet->set_timestamp_us(100000);
+    packet->set_data(std::string("\x00\x00\x00\x01\x65", 5));
+  }
+  {
     v1::TaskFrames* frames = cases["task_frames"].mutable_task_frames();
     frames->set_task_id(42);
     frames->set_display_id(3);

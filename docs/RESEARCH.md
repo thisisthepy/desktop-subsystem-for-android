@@ -463,3 +463,24 @@ Davey는 이 로그에 2건뿐이고 둘 다 액티비티 전환이다. 리플�
 - 따라서 **앞의 값이 이긴다**. 뒤에 덧붙인 값도, bootconfig의 값도 이미지의 명령줄 값을 덮지 못한다.
 
 **결정**: 호스트는 이미지의 너비와 높이 단어를 지우고 자기 값을 넣는다(`dsa_host_core::guest_display::with_display_size`).
+
+## 게스트 로그를 채우던 두 오류: wakeup 통계와 cgroup 이동 (FR-5, FR-10)
+
+**확인 대상**: 안드로이드 16 이미지(`aosp_cf_x86_64_only_phone` 15581820), WSL 커널 `linux-msft-wsl-6.18.54.1`(`config-wsl`, `kernel/cgroup/cgroup-v1.c`, `drivers/base/power/wakeup_stats.c`). 실제 PC의 콘솔 로그(54,227줄, 2026-11-01)와 이미지의 `plat_sepolicy.cil`, `cgroups.json`, `task_profiles.json`, `init.rc`를 읽었다. 고친 커널은 이 기기에서 부팅해 보지 않았다.
+
+### `Error opening wakeupN/<stat> for wakeupN: Permission denied`
+
+- **무엇이었나**: `android.system.suspend-service`가 `/sys/class/wakeup/wakeup0`부터 `wakeup4`까지 다섯 개의 통계 파일을 열 때마다 거절당했다. 감사 로그는 모두 `scontext=u:r:system_suspend:s0 tcontext=u:object_r:sysfs:s0 tclass=file`이다(이 로그의 거절 336건 중 203건).
+- **원인**: 플랫폼 정책은 `/class/wakeup`과 `/sys/devices/virtual/wakeup`만 `sysfs_wakeup`으로 붙인다. `/sys/class/wakeup/wakeupN`은 링크이고, 장치가 가진 wakeup 소스의 실제 노드는 그 장치 아래(`<장치>/wakeup/wakeupN`)에 있다. genfscon은 실제 경로로 붙으므로 그 노드는 그냥 `sysfs`다. Cuttlefish와 goldfish는 자기 장치 경로를 vendor 정책에 나열하지만, Hyper-V 게스트의 장치는 VMBus 인스턴스 GUID와 호스트의 ACPI 표(`rtc_cmos PNP0B00:00`, `alarmtimer`, `hyperv_keyboard` 등)로 이름이 정해져 호스트 버전에 따라 바뀐다. 고정된 경로 목록으로는 붙일 수 없다.
+- **고친 것**: `dsa/kernel/patches/wakeup-sources-virtual.patch`가 wakeup 소스 장치를 부모 없이 만든다. 그러면 모든 wakeup 소스가 `/sys/devices/virtual/wakeup/wakeupN`에 생기고, 플랫폼 정책이 이미 `sysfs_wakeup`으로 붙인다. 잃는 것은 소스 노드의 `device` 링크뿐이고, 장치의 `power/wakeup` 파일은 그대로다. `check-image.py`는 정책에 두 genfscon이 없으면 이미지를 거절한다.
+- **다른 sysfs**: `/sys/power/wakeup_count`(`sysfs_power`)와 `/sys/power/suspend_stats`(`sysfs_suspend_stats`)는 플랫폼 정책에 있고 `CONFIG_PM_SLEEP=y`라 존재한다. `/sys/kernel/wakeup_reasons`는 안드로이드 공통 커널에만 있어 부팅에 한 번 "No such file"이 남는다. 반복되지 않으므로 그대로 둔다.
+
+### `libprocessgroup: Failed to add task into cgroup`
+
+- **무엇이었나**: 이 줄 바로 앞에 `AddTidToCgroup failed to write '<pid>'; path=foreground|background|top-app|; process: Permission denied`가 있다(237건). 쓰는 쪽은 system_server(`SchedulingPolicyService`, `ActivityManager`)다. SELinux 거절은 없다.
+- **원인**: 커널 설정에는 빠진 컨트롤러가 없다. `config-wsl`에 `CGROUPS`, `CPUSETS`, `CGROUP_SCHED`, `FAIR_GROUP_SCHED`, `BLK_CGROUP`, `CGROUP_FREEZER`, `MEMCG`가 있고 `UCLAMP_TASK(_GROUP)`은 DSA가 켠다. 이미지의 `cgroups.json`은 blkio, cpu, cpuset을 v1으로(`/dev/blkio`, `/dev/cpuctl`, `/dev/cpuset`), freezer와 memory를 v2(`/sys/fs/cgroup`)로 올린다. 막힌 곳은 v1의 `cgroup.procs` 쓰기 권한이다. 업스트림 `__cgroup1_procs_write`는 root이거나 대상 태스크와 같은 사용자일 때만 옮기게 한다. system_server(uid 1000)가 다른 uid의 앱을 옮기면 `EACCES`다. 안드로이드 공통 커널은 여기에 `CAP_SYS_NICE` 예외를 더한다.
+- **고친 것**: `dsa/kernel/patches/cgroup-v1-sys-nice.patch`가 같은 예외를 넣는다. 파일을 연 쪽의 자격(`file_ns_capable(of->file, ...)`)으로 확인하므로 상속된 fd로 우회할 수 없다. 앱이 foreground와 top-app의 cpu, cpuset 그룹에 들어가므로 포그라운드 앱의 스케줄링 힌트(uclamp)도 다시 적용된다. `android.config`는 위 컨트롤러를 이름으로 적어, `config-wsl`이 하나를 빼면 빌드가 실패한다.
+- **memory.reclaim**: memory 컨트롤러는 v2에 그대로 있고 이 패치는 v1 쓰기만 바꾼다. `dsa-channeld.rc`의 `/sys/fs/cgroup/memory.reclaim` 쓰기는 영향을 받지 않는다.
+- **`ServiceCapacityLow`**: `dsa-hwcomposer.rc`의 이 프로필은 cpuset `system-background`에 들어가는 것이다. `init.rc`가 이 그룹에 모든 CPU를 복사하므로 컴포저가 쓸 CPU는 줄지 않는다. AOSP의 컴포저 서비스(ranchu 등)도 같은 줄을 쓴다. init이 root로 쓰므로 이번 오류와도 관계가 없다. 그대로 둔다.
+
+**실제 PC에서 확인할 것**: 위 두 로그 줄이 사라지는지, `cat /proc/cgroups`에 cpu, cpuset, blkio, memory, freezer가 켜져 있는지, `ls -Z /sys/class/wakeup/`의 대상이 `/sys/devices/virtual/wakeup/`이고 `sysfs_wakeup`인지.

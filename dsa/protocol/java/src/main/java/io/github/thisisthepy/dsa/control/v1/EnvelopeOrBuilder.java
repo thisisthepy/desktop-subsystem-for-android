@@ -701,70 +701,92 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.AccessibilityActionResult getAccessibilityActionResult();
 
   /**
-   * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
-   * @return Whether the logStream field is set.
+   * <code>.dsa.control.v1.VideoCapabilities video_capabilities = 120;</code>
+   * @return Whether the videoCapabilities field is set.
    */
-  boolean hasLogStream();
+  boolean hasVideoCapabilities();
   /**
-   * <code>.dsa.control.v1.LogStream log_stream = 130;</code>
-   * @return The logStream.
+   * <code>.dsa.control.v1.VideoCapabilities video_capabilities = 120;</code>
+   * @return The videoCapabilities.
    */
-  io.github.thisisthepy.dsa.control.v1.LogStream getLogStream();
+  io.github.thisisthepy.dsa.control.v1.VideoCapabilities getVideoCapabilities();
 
   /**
-   * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
-   * @return Whether the logDump field is set.
+   * <code>.dsa.control.v1.VideoDecoderOpen video_decoder_open = 121;</code>
+   * @return Whether the videoDecoderOpen field is set.
    */
-  boolean hasLogDump();
+  boolean hasVideoDecoderOpen();
   /**
-   * <code>.dsa.control.v1.LogDump log_dump = 131;</code>
-   * @return The logDump.
+   * <code>.dsa.control.v1.VideoDecoderOpen video_decoder_open = 121;</code>
+   * @return The videoDecoderOpen.
    */
-  io.github.thisisthepy.dsa.control.v1.LogDump getLogDump();
+  io.github.thisisthepy.dsa.control.v1.VideoDecoderOpen getVideoDecoderOpen();
 
   /**
-   * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
-   * @return Whether the logRecords field is set.
+   * <code>.dsa.control.v1.VideoDecoderOpened video_decoder_opened = 122;</code>
+   * @return Whether the videoDecoderOpened field is set.
    */
-  boolean hasLogRecords();
+  boolean hasVideoDecoderOpened();
   /**
-   * <code>.dsa.control.v1.LogRecords log_records = 132;</code>
-   * @return The logRecords.
+   * <code>.dsa.control.v1.VideoDecoderOpened video_decoder_opened = 122;</code>
+   * @return The videoDecoderOpened.
    */
-  io.github.thisisthepy.dsa.control.v1.LogRecords getLogRecords();
+  io.github.thisisthepy.dsa.control.v1.VideoDecoderOpened getVideoDecoderOpened();
 
   /**
-   * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
-   * @return Whether the collectDiagnostics field is set.
+   * <code>.dsa.control.v1.VideoPacket video_packet = 123;</code>
+   * @return Whether the videoPacket field is set.
    */
-  boolean hasCollectDiagnostics();
+  boolean hasVideoPacket();
   /**
-   * <code>.dsa.control.v1.CollectDiagnostics collect_diagnostics = 133;</code>
-   * @return The collectDiagnostics.
+   * <code>.dsa.control.v1.VideoPacket video_packet = 123;</code>
+   * @return The videoPacket.
    */
-  io.github.thisisthepy.dsa.control.v1.CollectDiagnostics getCollectDiagnostics();
+  io.github.thisisthepy.dsa.control.v1.VideoPacket getVideoPacket();
 
   /**
-   * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
-   * @return Whether the diagnosticsFile field is set.
+   * <code>.dsa.control.v1.VideoFrame video_frame = 124;</code>
+   * @return Whether the videoFrame field is set.
    */
-  boolean hasDiagnosticsFile();
+  boolean hasVideoFrame();
   /**
-   * <code>.dsa.control.v1.DiagnosticsFile diagnostics_file = 134;</code>
-   * @return The diagnosticsFile.
+   * <code>.dsa.control.v1.VideoFrame video_frame = 124;</code>
+   * @return The videoFrame.
    */
-  io.github.thisisthepy.dsa.control.v1.DiagnosticsFile getDiagnosticsFile();
+  io.github.thisisthepy.dsa.control.v1.VideoFrame getVideoFrame();
 
   /**
-   * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
-   * @return Whether the diagnosticsDone field is set.
+   * <code>.dsa.control.v1.VideoFlush video_flush = 125;</code>
+   * @return Whether the videoFlush field is set.
    */
-  boolean hasDiagnosticsDone();
+  boolean hasVideoFlush();
   /**
-   * <code>.dsa.control.v1.DiagnosticsDone diagnostics_done = 135;</code>
-   * @return The diagnosticsDone.
+   * <code>.dsa.control.v1.VideoFlush video_flush = 125;</code>
+   * @return The videoFlush.
    */
-  io.github.thisisthepy.dsa.control.v1.DiagnosticsDone getDiagnosticsDone();
+  io.github.thisisthepy.dsa.control.v1.VideoFlush getVideoFlush();
+
+  /**
+   * <code>.dsa.control.v1.VideoFlushed video_flushed = 126;</code>
+   * @return Whether the videoFlushed field is set.
+   */
+  boolean hasVideoFlushed();
+  /**
+   * <code>.dsa.control.v1.VideoFlushed video_flushed = 126;</code>
+   * @return The videoFlushed.
+   */
+  io.github.thisisthepy.dsa.control.v1.VideoFlushed getVideoFlushed();
+
+  /**
+   * <code>.dsa.control.v1.VideoError video_error = 127;</code>
+   * @return Whether the videoError field is set.
+   */
+  boolean hasVideoError();
+  /**
+   * <code>.dsa.control.v1.VideoError video_error = 127;</code>
+   * @return The videoError.
+   */
+  io.github.thisisthepy.dsa.control.v1.VideoError getVideoError();
 
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

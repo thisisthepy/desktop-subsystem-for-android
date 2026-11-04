@@ -126,6 +126,14 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         plat_sepolicy = z.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
         if not re.search(r"\(allow\s+appdomain\s+self\s+\(\s*vsock_socket\s*\(.*connect", plat_sepolicy):
             problems.append("the SELinux policy does not allow appdomain to connect vsock_socket")
+        # The guest kernel puts every wakeup source under /sys/devices/virtual/wakeup. The
+        # suspend service may read them only there and through /sys/class/wakeup, as
+        # sysfs_wakeup; anywhere else they are plain sysfs and each read is refused.
+        for path in ["/devices/virtual/wakeup", "/class/wakeup"]:
+            if not re.search(r'\(genfscon\s+sysfs\s+"' + re.escape(path) + r'"\s+\(u\s+object_r\s+sysfs_wakeup\b',
+                             plat_sepolicy):
+                problems.append(f"the SELinux policy does not label sysfs {path} sysfs_wakeup, so the "
+                                "suspend service cannot read the wakeup sources")
 
     if "VENDOR/lib64/hw/vulkan.ranchu.so" not in names:
         problems.append("VENDOR/lib64/hw/vulkan.ranchu.so is missing from the image")
@@ -226,6 +234,21 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     for apex in ["com.android.hardware.power", "com.google.cf.health"]:
         if f"VENDOR/apex/{apex}.apex" in names:
             problems.append(f"{apex} is still in the image and would serve its HAL too")
+
+    # DSA's codec HAL: without it every video decodes on the guest's processors.
+    if "VENDOR/bin/hw/dsa-codec2" not in names:
+        problems.append("VENDOR/bin/hw/dsa-codec2 is missing from the image")
+    if "VENDOR/etc/init/dsa-codec2.rc" not in names:
+        problems.append("VENDOR/etc/init/dsa-codec2.rc is missing, so init never starts the codec HAL")
+    codec2_manifest = "VENDOR/etc/vintf/manifest/dsa-codec2.xml"
+    if codec2_manifest not in names:
+        problems.append(f"{codec2_manifest} is missing, so the codec HAL is not declared")
+    elif "<fqname>IComponentStore/default</fqname>" not in z.read(codec2_manifest).decode():
+        problems.append("dsa-codec2.xml does not declare IComponentStore/default")
+    if "VENDOR/etc/media_codecs_c2.xml" not in names:
+        problems.append("VENDOR/etc/media_codecs_c2.xml is missing, so the framework lists none of the host's decoders")
+    if "META/file_contexts.bin" in names and b"/vendor/bin/hw/dsa-codec2" not in z.read("META/file_contexts.bin"):
+        problems.append("META/file_contexts.bin does not label dsa-codec2, so init refuses to start it")
 
     if "VENDOR/etc/selinux/vendor_file_contexts" in names:
         vendor_fc = z.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
