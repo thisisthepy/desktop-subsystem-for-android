@@ -157,7 +157,10 @@ impl PowerHub {
 
     /// Whether the host was last said to be short of memory.
     pub fn memory_low(&self) -> bool {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner()).memory_low
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .memory_low
     }
 
     /// The latest state recorded.
