@@ -272,7 +272,14 @@ jobs:
 
             # The real dsa: everything comes from the file.
             $app = Open-Apk notes.apk
-            Wait-SetupControl InstallButton -Enabled -Seconds 90 | Out-Null
+            try {
+              Wait-SetupControl InstallButton -Enabled -Seconds 90 | Out-Null
+            } catch {
+              if ($app.HasExited) { Write-Host "DsaSettings.exe exited with code $($app.ExitCode)" }
+              Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = '.NET Runtime', 'Application Error' } -MaxEvents 4 -ErrorAction SilentlyContinue |
+                ForEach-Object { Write-Host $_.Message }
+              throw
+            }
             Expect-Text HeroTitle 'Notes'
             Expect-Text HeroPackage 'com.example.notes'
             Expect-Text VersionChip '*4.2*'
