@@ -26,15 +26,20 @@
             <FontFamily x:Key="DisplayFont">Segoe UI Variable Display, Segoe UI, Malgun Gothic</FontFamily>
 
             <!-- The page layout of the Windows Settings app and the WinUI Gallery: the title
-                 stays above the page while the page scrolls under it, both 36 px from the edges
-                 and at most 1000 px wide; cards 4 px apart, sections 30 px apart. -->
+                 stays above the page while the page scrolls under it, both 56 px from the edges
+                 in a wide window and 36 px in a narrow one, and at most 1000 px wide; cards 4 px
+                 apart, sections 30 px apart (the toolkit's section header margin). MainWindow
+                 swaps the margins when its width crosses 1008 px, the WinUI wide breakpoint. -->
+            <sys:Double x:Key="PageMaxWidth">1000</sys:Double>
+            <Thickness x:Key="PageHeaderMargin">36,16,36,20</Thickness>
+            <Thickness x:Key="PageContentMargin">36,0,36,24</Thickness>
             <Style x:Key="PageHeader" TargetType="Grid">
-                <Setter Property="Margin" Value="36,16,36,20" />
-                <Setter Property="MaxWidth" Value="1000" />
+                <Setter Property="Margin" Value="{DynamicResource PageHeaderMargin}" />
+                <Setter Property="MaxWidth" Value="{StaticResource PageMaxWidth}" />
             </Style>
             <Style x:Key="PageContent" TargetType="StackPanel">
-                <Setter Property="Margin" Value="36,0,36,24" />
-                <Setter Property="MaxWidth" Value="1000" />
+                <Setter Property="Margin" Value="{DynamicResource PageContentMargin}" />
+                <Setter Property="MaxWidth" Value="{StaticResource PageMaxWidth}" />
             </Style>
             <Style x:Key="PageTitle" TargetType="TextBlock">
                 <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
@@ -70,6 +75,14 @@
                 <Setter Property="TextWrapping" Value="Wrap" />
                 <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
             </Style>
+            <!-- Subtitle: 20 px Semibold, 28 px line, for a value that leads a card. -->
+            <Style x:Key="SubtitleText" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="FontSize" Value="20" />
+                <Setter Property="LineHeight" Value="28" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            </Style>
             <Style x:Key="Note" TargetType="TextBlock">
                 <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
                 <Setter Property="FontWeight" Value="Normal" />
@@ -97,6 +110,17 @@
             </Style>
             <Style TargetType="ContextMenu" BasedOn="{StaticResource {x:Type ContextMenu}}">
                 <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
+            </Style>
+
+            <!-- A WinUI button in a settings card is at least 120 px wide (the toolkit's
+                 content minimum), so a short label such as "Stop" still reads as a button. -->
+            <Style TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+                <Setter Property="MinWidth" Value="120" />
+            </Style>
+
+            <!-- The Settings app's navigation items are 40 px high. -->
+            <Style TargetType="ui:NavigationViewItem" BasedOn="{StaticResource {x:Type ui:NavigationViewItem}}">
+                <Setter Property="MinHeight" Value="40" />
             </Style>
 
             <!-- Info bars stacked on a page keep the cards' 4 px gap. -->
@@ -137,7 +161,7 @@
                                     <ContentPresenter x:Name="HeaderContentPresenter" Grid.Column="1"
                                                       VerticalAlignment="Center" Content="{TemplateBinding Header}"
                                                       TextElement.Foreground="{TemplateBinding Foreground}" />
-                                    <ContentPresenter x:Name="ContentPresenter" Grid.Column="2" Margin="24,0,0,0"
+                                    <ContentPresenter x:Name="ContentPresenter" Grid.Column="2" Margin="24,0,0,0" MinWidth="120"
                                                       HorizontalAlignment="Right" VerticalAlignment="Center"
                                                       Content="{TemplateBinding Content}"
                                                       TextElement.Foreground="{TemplateBinding Foreground}" />
@@ -153,6 +177,7 @@
                                 </Trigger>
                                 <Trigger Property="Content" Value="{x:Null}">
                                     <Setter TargetName="ContentPresenter" Property="Margin" Value="0" />
+                                    <Setter TargetName="ContentPresenter" Property="MinWidth" Value="0" />
                                 </Trigger>
                                 <Trigger Property="Icon" Value="{x:Null}">
                                     <Setter TargetName="ControlIcon" Property="Margin" Value="0" />

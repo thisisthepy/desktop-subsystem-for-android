@@ -10,7 +10,7 @@
          view from wrapping it in a scroll viewer (the library wraps a page when it is true):
          there the list would get unlimited height, stop virtualizing and lay out every one
          of its 5000 lines. -->
-    <Grid Margin="36,16,36,24">
+    <Grid Margin="{DynamicResource PageHeaderMargin}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />

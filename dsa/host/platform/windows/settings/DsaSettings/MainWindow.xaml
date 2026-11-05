@@ -26,7 +26,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <ui:TitleBar Title="{l:Text WindowTitle}" Grid.Row="0">
+        <ui:TitleBar Title="{l:Text WindowTitle}" Grid.Row="0" Height="48">
             <ui:TitleBar.Icon>
                 <ui:ImageIcon Source="pack://application:,,,/Assets/logo.png" />
             </ui:TitleBar.Icon>
@@ -34,7 +34,7 @@
 
         <!-- APK files dropped anywhere on the window are installed in Android; this bar says how
              it went. -->
-        <ui:InfoBar x:Name="InstallBar" Grid.Row="1" Margin="12,0,12,4" IsClosable="True"
+        <ui:InfoBar x:Name="InstallBar" Grid.Row="1" Margin="{DynamicResource PageHeaderMargin}" IsClosable="True"
                     Title="{Binding Title, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}"
                     IsOpen="{Binding IsOpen, Mode=TwoWay}" />
 
@@ -42,8 +42,8 @@
             x:Name="Navigation"
             Grid.Row="2"
             PaneDisplayMode="Left"
-            OpenPaneLength="260"
-            IsBackButtonVisible="Collapsed"
+            OpenPaneLength="320"
+            IsBackButtonVisible="Auto"
             IsPaneToggleVisible="True">
             <ui:NavigationView.MenuItems>
                 <ui:NavigationViewItem Content="{l:Text NavGeneral.Content}" TargetPageType="{x:Type pages:GeneralPage}"

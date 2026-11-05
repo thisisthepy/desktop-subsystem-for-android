@@ -83,8 +83,7 @@
                             <TextBlock Text="{l:Text MemoryHostTotalCard.Description}" Style="{StaticResource CardDescription}" />
                         </StackPanel>
                     </ui:CardControl.Header>
-                    <TextBlock Text="{Binding HostTotal, Mode=OneWay}" FontSize="20" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <TextBlock Text="{Binding HostTotal, Mode=OneWay}" Style="{StaticResource SubtitleText}" />
                 </ui:CardControl>
                 <ItemsControl ItemsSource="{Binding HostRows, Mode=OneWay}" ItemTemplate="{StaticResource MemoryRow}" />
                 <TextBlock Text="{l:Text MemoryHostNone.Text}" Style="{StaticResource Note}"

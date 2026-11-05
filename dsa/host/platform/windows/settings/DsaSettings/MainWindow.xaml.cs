@@ -40,6 +40,9 @@ public partial class MainWindow : FluentWindow
         // The light or the dark theme Windows uses for apps, its accent colour, and their
         // changes while the app runs.
         SystemThemeWatcher.Watch(this, WindowBackdropType.Mica, true);
+        // Pages sit 56 px from the edges in a wide window and 36 px in a narrow one, as the
+        // Settings app's do; 1008 px is WinUI's wide breakpoint.
+        SizeChanged += (_, e) => ApplyPageMargins(e.NewSize.Width);
         Loaded += (_, _) =>
         {
             // The watcher follows changes; the theme to start with is the apps' setting, which
@@ -50,6 +53,15 @@ public partial class MainWindow : FluentWindow
             MakePaneScroll();
             _ = App.Settings.LoadAsync();
         };
+    }
+
+    private const double WideWindowWidth = 1008;
+
+    private void ApplyPageMargins(double width)
+    {
+        var side = width >= WideWindowWidth ? 56 : 36;
+        System.Windows.Application.Current.Resources["PageHeaderMargin"] = new System.Windows.Thickness(side, 16, side, 20);
+        System.Windows.Application.Current.Resources["PageContentMargin"] = new System.Windows.Thickness(side, 0, side, 24);
     }
 
     private static string[]? DroppedFiles(System.Windows.DragEventArgs e) =>
