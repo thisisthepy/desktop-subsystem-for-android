@@ -1288,6 +1288,16 @@ pub struct Settings {
     /// it. Off by default: the first stop asks, and the user may tick "do not ask again".
     #[prost(bool, tag = "18")]
     pub stop_without_asking: bool,
+    /// Whether the caller's Android joins the host's LAN as a device of its own (advanced
+    /// networking), so other devices on the LAN reach it and it reaches them directly. Off by
+    /// default: Android is behind a NAT network the service makes for its VM. It applies from the
+    /// next start of Android.
+    #[prost(bool, tag = "19")]
+    pub advanced_networking: bool,
+    /// The caller's network as it stands now. Absent when the service cannot say. A client cannot
+    /// change it.
+    #[prost(message, optional, tag = "20")]
+    pub network: ::core::option::Option<NetworkStatus>,
     /// Whether the caller's Android stops once nothing uses it. RUN_MODE_AS_NEEDED, the
     /// default, stops it `stop_after_secs` after the last app window closed, while no app runs
     /// in the background and no widget is placed; RUN_MODE_CONTINUOUS keeps it running in Doze.
@@ -1303,6 +1313,28 @@ pub struct Settings {
     /// RUN_MODE_AS_NEEDED. Off by default.
     #[prost(bool, tag = "312")]
     pub keep_for_notifications: bool,
+}
+/// How the caller's Android reaches the network.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct NetworkStatus {
+    /// "nat" (behind the NAT network the service makes for the VM), "advanced" (on the host's
+    /// LAN) or "off" (Android is not running, so there is no network yet).
+    #[prost(string, tag = "1")]
+    pub mode: ::prost::alloc::string::String,
+    /// The guest's addresses, IPv4 and IPv6, as the host's network service gave them out. A host
+    /// program reaches a server in Android at any of them.
+    #[prost(string, repeated, tag = "2")]
+    pub addresses: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// The DNS servers the guest is given.
+    #[prost(string, repeated, tag = "3")]
+    pub dns_servers: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// The guest's default gateway.
+    #[prost(string, tag = "4")]
+    pub gateway: ::prost::alloc::string::String,
+    /// Why advanced networking is not in use although it is on, or another problem with the
+    /// network. Empty when there is none.
+    #[prost(string, tag = "5")]
+    pub problem: ::prost::alloc::string::String,
 }
 /// Erases the caller's Android data: the apps they installed, their accounts and every app's
 /// data. The service stops the caller's Android, waits for it to stop, and replaces their data
