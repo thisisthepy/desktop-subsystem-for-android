@@ -42,12 +42,6 @@ pub fn user_root_in(home: &Path) -> PathBuf {
     home.join("Library").join("Application Support").join("DSA")
 }
 
-/// How far the VM may grow when the user set no limit, in MiB. The framework gives the guest
-/// all of its memory size from the start, held back by the balloon, and the guest kernel
-/// keeps page records for all of it, about 1.6%; this keeps that cost near what a VM of the
-/// default size has, while leaving room to grow.
-pub const AUTOMATIC_GROWTH_CAP_MB: u64 = 8192;
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MacHostConfig {
@@ -209,8 +203,10 @@ impl MacHostConfig {
 }
 
 /// The memory a VM starts with and may grow to, in MiB: it starts at the default size (or
-/// the user's lower limit) and grows to their limit, or with none to the Mac's memory less
-/// what macOS keeps, at most [`AUTOMATIC_GROWTH_CAP_MB`].
+/// the user's lower limit) and grows to their limit, or with none to half the Mac's memory.
+/// Growth and return follow the shared policy: the guest trims its page cache to its working
+/// set all the time, and the balloon grows the VM when the guest runs short and takes memory
+/// back once it is not.
 pub fn memory_range_mb(limit_mb: u32, total_mb: Option<u64>) -> (u64, u64) {
     let start = match limit_mb {
         0 => DEFAULT_MEMORY_MB,
@@ -218,14 +214,7 @@ pub fn memory_range_mb(limit_mb: u32, total_mb: Option<u64>) -> (u64, u64) {
     };
     let start = u64::from(start);
     let max = match total_mb {
-        Some(total) => {
-            let sized = dsa_host_core::memory::vm_memory_mb(total, limit_mb);
-            if limit_mb == 0 {
-                sized.min(AUTOMATIC_GROWTH_CAP_MB)
-            } else {
-                sized
-            }
-        }
+        Some(total) => dsa_host_core::memory::half_host_vm_memory_mb(total, limit_mb),
         None if limit_mb > 0 => u64::from(limit_mb),
         None => start,
     };

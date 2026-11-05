@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use dsa_host_macos::host_config::{memory_range_mb, MacHostConfig, AUTOMATIC_GROWTH_CAP_MB};
+use dsa_host_macos::host_config::{memory_range_mb, MacHostConfig};
 use dsa_host_macos::launchd::{
     domain, install_commands, plist, plist_path, service_target, start_command, wm_plist,
     wm_plist_path, wm_service_target, LABEL, WM_LABEL,
@@ -35,15 +35,14 @@ fn pr5_the_users_files_and_socket_are_in_their_own_folder() {
 
 #[test]
 fn nfr2_memory_starts_small_and_grows_to_what_the_mac_can_spare() {
-    // No limit: the default start, growing to the Mac's memory less its reserve, capped.
-    assert_eq!(
-        memory_range_mb(0, Some(16384)),
-        (3072, AUTOMATIC_GROWTH_CAP_MB)
-    );
-    assert_eq!(memory_range_mb(0, Some(8192)).0, 3072);
-    assert!(memory_range_mb(0, Some(8192)).1 <= 8192);
+    // No limit: the default start, growing to half the Mac's memory, with no fixed cap.
+    assert_eq!(memory_range_mb(0, Some(16384)), (3072, 8192));
+    assert_eq!(memory_range_mb(0, Some(65536)), (3072, 32768));
+    assert_eq!(memory_range_mb(0, Some(8192)), (3072, 4096));
     // A limit is how far it grows; a low one is also where it starts.
     assert_eq!(memory_range_mb(6144, Some(32768)), (3072, 6144));
+    // A limit above half the Mac is honoured, within what the Mac has.
+    assert_eq!(memory_range_mb(24576, Some(32768)), (3072, 24576));
     assert_eq!(memory_range_mb(2048, Some(32768)), (2048, 2048));
     // Unknown memory: the start, fixed.
     assert_eq!(memory_range_mb(0, None), (3072, 3072));

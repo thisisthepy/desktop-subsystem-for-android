@@ -103,6 +103,20 @@ fn nfr2_the_vm_is_sized_to_the_host_less_what_the_host_keeps() {
 }
 
 #[test]
+fn nfr2_without_a_limit_the_vm_may_grow_to_half_the_host() {
+    use dsa_host_core::memory::half_host_vm_memory_mb;
+    // Half of any host, with no fixed ceiling.
+    assert_eq!(half_host_vm_memory_mb(16384, 0), 8192);
+    assert_eq!(half_host_vm_memory_mb(65536, 0), 32768);
+    assert_eq!(half_host_vm_memory_mb(131072, 0), 65536);
+    // Never less than Android needs to boot.
+    assert_eq!(half_host_vm_memory_mb(2048, 0), 2048);
+    // The user's limit wins, within what the host has.
+    assert_eq!(half_host_vm_memory_mb(32768, 24576), 24576);
+    assert_eq!(half_host_vm_memory_mb(8192, 65536), 8192);
+}
+
+#[test]
 fn nfr1_a_give_back_logs_what_the_window_manager_still_holds() {
     let before = HeldMemory {
         working_set_kb: Some(119 * MIB),

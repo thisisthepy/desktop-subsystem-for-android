@@ -511,6 +511,19 @@ pub fn vm_memory_mb(host_total_mb: u64, limit_mb: u32) -> u64 {
     }
 }
 
+/// How far the VM may grow on a host with `host_total_mb` of RAM, in MiB, for a host whose
+/// default is half its memory: the user's limit when they set one (`limit_mb` above 0), never
+/// more than the host has, else half the host's memory, with no fixed ceiling. Either way the
+/// VM starts small and holds only what [`MemoryGrowth`] gives it, so a large maximum costs
+/// the host nothing until the guest needs it.
+pub fn half_host_vm_memory_mb(host_total_mb: u64, limit_mb: u32) -> u64 {
+    if limit_mb > 0 {
+        vm_memory_mb(host_total_mb, limit_mb)
+    } else {
+        (host_total_mb / 2).max(VM_MEMORY_MIN_MB)
+    }
+}
+
 /// How much the guest has and how hard it works to find memory, as its control daemon reports
 /// it.
 #[derive(Debug, Clone, Copy, PartialEq)]
