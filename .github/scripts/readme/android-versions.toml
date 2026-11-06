@@ -1,0 +1,35 @@
+# The Android major versions DSA supports, and when.
+#
+# DSA supports the newest two Android majors. A major leaves support on the day the
+# second newer major ships. Update this file when Google ships a major or publishes its
+# date, then run:
+#
+#   uv run .github/scripts/readme/android-timeline.py
+#
+# which rewrites .github/assets/android-support.svg for the README.
+#
+# released: the stable release date from Google's schedule.
+# expected: true while the date is Google's plan or a projection, not a release.
+# dsa_start: the first DSA release that supports it; absent until one does.
+
+today = 2026-11-06
+
+[[android]]
+major = 16
+released = 2025-06-10
+dsa_start = 2026-10-17
+
+[[android]]
+major = 17
+released = 2026-06-16
+dsa_start = 2026-10-17
+
+[[android]]
+major = 18
+released = 2027-06-15
+expected = true
+
+[[android]]
+major = 19
+released = 2028-06-15
+expected = true

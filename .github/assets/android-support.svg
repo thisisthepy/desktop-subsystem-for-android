@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="238" viewBox="0 0 860 238" role="img" aria-labelledby="t">
+<title id="t">Android versions DSA supports, by date</title>
+<style>
+:root{--fg:#0b2e40;--muted:#5b7380;--grid:#d5e3e8;--band:#2fbf71;--band-x:#a8e8c4;--line:#1a5873;--today:#e5484d;--bg:#ffffff}
+@media (prefers-color-scheme: dark){:root{--fg:#e6f4ee;--muted:#8fa7b2;--grid:#24404d;--band:#45d483;--band-x:#1f5a3d;--line:#7fb3c8;--today:#ff6b6e;--bg:#0d1117}}
+text{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;fill:var(--fg)}
+.m{fill:var(--muted);font-size:12px}.v{font-size:14px;font-weight:600}
+</style>
+<rect width="860" height="238" rx="12" fill="var(--bg)"/>
+<line x1="120.0" y1="32" x2="120.0" y2="198" stroke="var(--grid)"/>
+<text x="208.7" y="26" text-anchor="middle" class="m">2025</text>
+<line x1="298.9" y1="32" x2="298.9" y2="198" stroke="var(--grid)"/>
+<text x="387.6" y="26" text-anchor="middle" class="m">2026</text>
+<line x1="477.8" y1="32" x2="477.8" y2="198" stroke="var(--grid)"/>
+<text x="566.5" y="26" text-anchor="middle" class="m">2027</text>
+<line x1="656.6" y1="32" x2="656.6" y2="198" stroke="var(--grid)"/>
+<text x="745.8" y="26" text-anchor="middle" class="m">2028</text>
+<line x1="836.0" y1="32" x2="836.0" y2="198" stroke="var(--grid)"/>
+<text x="16" y="70.0" class="v">Android 16</text>
+<line x1="198.4" y1="65.0" x2="836.0" y2="65.0" stroke="var(--grid)" stroke-width="2"/>
+<circle cx="198.4" cy="65.0" r="5" fill="var(--bg)" stroke="var(--line)" stroke-width="2"/>
+<rect x="440.5" y="56.0" width="118.1" height="18" rx="9.0" fill="var(--band)"/>
+<rect x="498.6" y="56.0" width="60.0" height="18" rx="9.0" fill="var(--band-x)"/>
+<text x="450.5" y="69.0" font-size="11" fill="#08261a" style="fill:#08261a">supported until Android 18</text>
+<text x="16" y="108.0" class="v">Android 17</text>
+<line x1="380.2" y1="103.0" x2="836.0" y2="103.0" stroke="var(--grid)" stroke-width="2"/>
+<circle cx="380.2" cy="103.0" r="5" fill="var(--bg)" stroke="var(--line)" stroke-width="2"/>
+<rect x="440.5" y="94.0" width="297.5" height="18" rx="9.0" fill="var(--band)"/>
+<rect x="678.0" y="94.0" width="60.0" height="18" rx="9.0" fill="var(--band-x)"/>
+<text x="450.5" y="107.0" font-size="11" fill="#08261a" style="fill:#08261a">supported until Android 19</text>
+<text x="16" y="146.0" class="v">Android 18</text>
+<line x1="558.6" y1="141.0" x2="836.0" y2="141.0" stroke="var(--grid)" stroke-width="2" stroke-dasharray="4 4"/>
+<circle cx="558.6" cy="141.0" r="5" fill="var(--bg)" stroke="var(--line)" stroke-width="2" stroke-dasharray="4 4"/>
+<text x="568.6" y="133.0" class="m">expected Jun 2027</text>
+<text x="16" y="184.0" class="v">Android 19</text>
+<line x1="738.0" y1="179.0" x2="836.0" y2="179.0" stroke="var(--grid)" stroke-width="2" stroke-dasharray="4 4"/>
+<circle cx="738.0" cy="179.0" r="5" fill="var(--bg)" stroke="var(--line)" stroke-width="2" stroke-dasharray="4 4"/>
+<text x="748.0" y="171.0" class="m">expected Jun 2028</text>
+<line x1="450.3" y1="32" x2="450.3" y2="204" stroke="var(--today)" stroke-width="2"/>
+<text x="450.3" y="218" text-anchor="middle" class="m" style="fill:var(--today)">today 2026-11-06</text>
+<circle cx="126" cy="222" r="5" fill="none" stroke="var(--line)" stroke-width="2"/>
+<text x="136" y="226" class="m">Android release</text>
+<rect x="250" y="216" width="28" height="12" rx="6" fill="var(--band)"/>
+<text x="284" y="226" class="m">supported by DSA</text>
+<line x1="410" y1="222" x2="438" y2="222" stroke="var(--grid)" stroke-width="2" stroke-dasharray="4 4"/>
+<text x="444" y="226" class="m">expected date</text>
+</svg>
